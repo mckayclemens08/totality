@@ -1,104 +1,83 @@
 import SwiftUI
 import TotalityCore
 
-/// The launcher. The bubble cloud is the default, and the list holds the same modules for anyone
-/// who finds it faster. Reduce Motion starts on the list, because panning is the cloud's main motion.
+/// The launcher: the most recently used module in the centre, with the others in a ring around it.
+/// The list holds the same modules for anyone who finds it faster.
 public struct HomeView: View {
     private let modules: [ModuleEntry]
+    private let center: ModuleID
     private let onOpen: (ModuleID) -> Void
-    @State private var showsList: Bool?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showsList = false
     @Environment(\.colorScheme) private var scheme
 
-    public init(modules: [ModuleEntry] = ModuleEntry.all, onOpen: @escaping (ModuleID) -> Void) {
+    public init(modules: [ModuleEntry] = ModuleEntry.all, center: ModuleID = .reader, onOpen: @escaping (ModuleID) -> Void) {
         self.modules = modules
+        self.center = center
         self.onOpen = onOpen
     }
 
-    private var listIsShown: Bool {
-        showsList ?? reduceMotion
-    }
-
     public var body: some View {
+        let arranged = ModuleEntry.arranged(modules, around: center)
         ZStack(alignment: .topTrailing) {
             Theme.current(scheme).bg.color.ignoresSafeArea()
-            if listIsShown {
-                ModuleListView(modules: modules, onOpen: onOpen)
+            if showsList {
+                ModuleListView(modules: arranged, onOpen: onOpen)
             } else {
-                BubbleCloudView(modules: modules, onOpen: onOpen)
+                FlowerView(modules: arranged, onOpen: onOpen)
             }
             Button {
-                showsList = !listIsShown
+                showsList.toggle()
             } label: {
-                Image(systemName: listIsShown ? "circle.hexagongrid" : "list.bullet")
+                Image(systemName: showsList ? "circle.hexagongrid" : "list.bullet")
                     .font(Typeface.body)
                     .foregroundStyle(Theme.current(scheme).textPrimary.color)
-                    .frame(width: 44, height: 44)
+                    .frame(width: Space.s7, height: Space.s7)
                     .neumorphic(.subtle, in: Circle())
             }
             .buttonStyle(.plain)
             .padding(Space.s4)
-            .accessibilityLabel(listIsShown ? "Show bubbles" : "Show list")
+            .accessibilityLabel(showsList ? "Show ring" : "Show list")
         }
     }
 }
 
-struct BubbleCloudView: View {
+struct FlowerView: View {
+    /// The first module is the centre.
     let modules: [ModuleEntry]
     let onOpen: (ModuleID) -> Void
-    private let layout = BubbleLayout()
-    @State private var offset = CGSize.zero
-    @State private var settled = CGSize.zero
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { proxy in
+            let layout = FlowerLayout(ringCount: max(modules.count - 1, 0), in: proxy.size)
             ZStack {
                 ForEach(Array(modules.enumerated()), id: \.element.id) { index, module in
-                    let home = layout.position(at: index)
-                    let point = CGPoint(x: home.x + offset.width, y: home.y + offset.height)
-                    let scale = layout.scale(at: point, in: proxy.size)
+                    let point = layout.position(at: index)
                     Button {
                         onOpen(module.id)
                     } label: {
-                        BubbleLabel(module: module)
+                        BubbleLabel(module: module, diameter: layout.diameter)
                     }
                     .buttonStyle(BubbleButtonStyle())
-                    .scaleEffect(scale)
                     .position(x: proxy.size.width / 2 + point.x, y: proxy.size.height / 2 + point.y)
                 }
             }
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { value in
-                        offset = layout.clampedOffset(
-                            CGSize(
-                                width: settled.width + value.translation.width,
-                                height: settled.height + value.translation.height
-                            ),
-                            count: modules.count
-                        )
-                    }
-                    .onEnded { _ in
-                        settled = offset
-                    }
-            )
+            .animation(reduceMotion ? nil : Motion.standard, value: modules)
         }
-        .clipped()
     }
 }
 
 private struct BubbleLabel: View {
     let module: ModuleEntry
+    let diameter: CGFloat
     @ScaledMetric(relativeTo: .title2) private var iconSize: CGFloat = 26
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Image(systemName: module.systemImage)
-            .font(.system(size: iconSize, weight: .regular))
+            .font(.system(size: min(iconSize, diameter / 2), weight: .regular))
             .foregroundStyle(Theme.current(scheme).textPrimary.color)
-            .frame(width: BubbleLayout.bubbleDiameter, height: BubbleLayout.bubbleDiameter)
+            .frame(width: diameter, height: diameter)
             .accessibilityLabel(module.name)
     }
 }

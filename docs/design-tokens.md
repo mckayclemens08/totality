@@ -108,10 +108,9 @@ weight more than by size — on low-contrast neumorphic surfaces, weight reads b
 | `motionInstant` | 120 ms | easeOut | press feedback, toggles |
 | `motionQuick` | 220 ms | spring(response 0.3, damping 0.8) | sheets, chips, list inserts |
 | `motionStandard` | 320 ms | spring(response 0.4, damping 0.82) | navigation, bubble open |
-| `motionDrift` | 600 ms | easeInOut | home-screen bubble-cloud settling |
 
 One motion vocabulary. `matchedGeometryEffect` for bubble → module transitions. Honour
-`accessibilityReduceMotion`: `motionDrift` becomes a crossfade, bubble panning becomes a static grid.
+`accessibilityReduceMotion`: the home flower swaps its centre module without animating.
 
 ## Icons
 

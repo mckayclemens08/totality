@@ -122,7 +122,7 @@ Name: Totality. Identity: username (the handle) + password, no email or phone (o
 Mac app. Groups are Discord-shaped; DMs are Snapchat-shaped minus the clutter. Social is ONE module
 with a Lemon8-style discovery homepage. Docs are a content type inside the Reader — there is no Docs
 module. Listen is a button inside the Reader — there is no Speechify module. Shopping is
-Amazon-*like*, never an Amazon wrapper. Home screen is an Apple Watch-style bubble cloud.
+Amazon-*like*, never an Amazon wrapper. Home screen is a flower: one ring of same-sized modules around the most recently used one (owner, 2026-10-30, replacing the panning bubble cloud).
 Federation and E2E are principles, not features. Pi self-hosting is the hosting direction.
 
 ## Decisions that are OPEN — ask, do not guess

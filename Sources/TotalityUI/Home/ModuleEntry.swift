@@ -12,8 +12,13 @@ public struct ModuleEntry: Identifiable, Sendable, Equatable {
         self.systemImage = systemImage
     }
 
-    // SF Symbols stand in until the owner decides SF Symbols vs Lucide (proposal §11-E). This
-    // order is also a placeholder: the centre bubble and default arrangement are still open.
+    /// The chosen module first, then the rest in their usual order, so the ring stays familiar.
+    public static func arranged(_ modules: [ModuleEntry], around center: ModuleID) -> [ModuleEntry] {
+        modules.filter { $0.id == center } + modules.filter { $0.id != center }
+    }
+
+    // SF Symbols stand in until the owner decides SF Symbols vs Lucide (proposal §11-E). The ring
+    // order is a placeholder too. The centre is whichever module was used last.
     public static let all: [ModuleEntry] = [
         .init(id: .messages, name: "Messages", systemImage: "bubble.left"),
         .init(id: .reader, name: "Reader", systemImage: "book"),

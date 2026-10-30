@@ -8,6 +8,8 @@ import TotalityUI
 /// after the person goes back to the home screen.
 struct RootView: View {
     @State private var open: ModuleID?
+    // Only which module was last open, on this device. It holds no content.
+    @AppStorage("home.recentModule") private var recentModule = ModuleID.reader
     @State private var reader: ReaderModel?
     @State private var readerProblem: ReaderProblem?
     @State private var account = AccountSetup.makeModel()
@@ -18,8 +20,9 @@ struct RootView: View {
         Group {
             switch open {
             case nil:
-                HomeView { module in
+                HomeView(center: recentModule) { module in
                     if module == .reader { prepareReader() }
+                    recentModule = module
                     open = module
                 }
                 .overlay(alignment: .topLeading) { accountButton }
