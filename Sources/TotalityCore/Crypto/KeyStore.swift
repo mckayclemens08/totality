@@ -3,6 +3,7 @@ import Security
 
 public enum KeyStoreError: Error, Equatable {
     case unexpectedStatus(OSStatus)
+    case keyMissing
 }
 
 /// Where a device keeps secrets. Key backup over Matrix SSSS will sit behind this same protocol.
@@ -15,12 +16,13 @@ public protocol KeyStore: Sendable {
 extension ContentRootKey {
     private static let keyStoreName = "content-root-key"
 
-    /// Only creates a key when the store says there is none. An error stops here, because a new root
-    /// would silently orphan everything sealed under the old one.
-    public static func loadOrCreate(in store: any KeyStore) throws -> ContentRootKey {
+    /// Only creates a key on a true first run. A read error, or sealed data with no key to open it,
+    /// stops here: a new root would sit beside the old data and split the person's content in two.
+    public static func loadOrCreate(in store: any KeyStore, hasSealedData: Bool) throws -> ContentRootKey {
         if let stored = try store.load(keyStoreName) {
             return try ContentRootKey(bytes: stored)
         }
+        guard !hasSealedData else { throw KeyStoreError.keyMissing }
         let key = try generate()
         try store.save(key.bytes, as: keyStoreName)
         return key

@@ -31,7 +31,9 @@ public struct ReaderHomeView: View {
         .tint(Theme.current(scheme).accent.color)
         .safeAreaInset(edge: .bottom) {
             if model.listen.current != nil {
-                ListenBar(listen: model.listen).padding(Space.s3)
+                ListenBar(listen: model.listen)
+                    .padding(Space.s3)
+                    .background(Theme.current(scheme).bg.color)
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
@@ -107,7 +109,7 @@ public struct ReaderHomeView: View {
             ReaderMessage(
                 systemImage: "book",
                 title: "Nothing here yet",
-                detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and stays on this device with no backup yet."
+                detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
             )
         case .ready:
             library
@@ -138,7 +140,7 @@ public struct ReaderHomeView: View {
                     .foregroundStyle(Theme.current(scheme).danger.color)
                     .listRowBackground(Color.clear)
             }
-            Label("Stored on this device only, with no backup yet.", systemImage: "iphone")
+            Label("Encrypted here. It can't be recovered on a new device yet.", systemImage: "iphone")
                 .font(Typeface.caption)
                 .foregroundStyle(Theme.current(scheme).textSecondary.color)
                 .listRowBackground(Color.clear)

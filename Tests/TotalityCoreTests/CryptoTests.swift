@@ -229,8 +229,8 @@ private final class FakeKeyStore: KeyStore, @unchecked Sendable {
 
     @Test func createsOnceThenKeepsTheSameKey() throws {
         let store = FakeKeyStore()
-        let first = try ContentRootKey.loadOrCreate(in: store)
-        let second = try ContentRootKey.loadOrCreate(in: store)
+        let first = try ContentRootKey.loadOrCreate(in: store, hasSealedData: false)
+        let second = try ContentRootKey.loadOrCreate(in: store, hasSealedData: false)
         #expect(first == second)
         #expect(store.saves == 1)
     }
@@ -238,19 +238,32 @@ private final class FakeKeyStore: KeyStore, @unchecked Sendable {
     @Test("A failed read never replaces the key, which would orphan every item")
     func failedReadCreatesNothing() throws {
         let store = FakeKeyStore()
-        let original = try ContentRootKey.loadOrCreate(in: store)
+        let original = try ContentRootKey.loadOrCreate(in: store, hasSealedData: false)
         store.failReads(with: .unexpectedStatus(-25308))
-        #expect(throws: KeyStoreError.unexpectedStatus(-25308)) { try ContentRootKey.loadOrCreate(in: store) }
+        #expect(throws: KeyStoreError.unexpectedStatus(-25308)) { try ContentRootKey.loadOrCreate(in: store, hasSealedData: false) }
         #expect(store.saves == 1)
         store.failReads(with: nil)
-        #expect(try ContentRootKey.loadOrCreate(in: store) == original)
+        #expect(try ContentRootKey.loadOrCreate(in: store, hasSealedData: false) == original)
+    }
+
+    @Test("An absent key with data present is refused, so no second key appears beside the data")
+    func missingKeyWithDataIsRefused() throws {
+        let store = FakeKeyStore()
+        #expect(throws: KeyStoreError.keyMissing) { try ContentRootKey.loadOrCreate(in: store, hasSealedData: true) }
+        #expect(store.saves == 0)
+    }
+
+    @Test func anExistingKeyStillOpensWhenDataIsPresent() throws {
+        let store = FakeKeyStore()
+        let original = try ContentRootKey.loadOrCreate(in: store, hasSealedData: false)
+        #expect(try ContentRootKey.loadOrCreate(in: store, hasSealedData: true) == original)
     }
 
     @Test func aDamagedKeyIsAnErrorAndIsLeftInPlace() throws {
         let store = FakeKeyStore()
-        _ = try ContentRootKey.loadOrCreate(in: store)
+        _ = try ContentRootKey.loadOrCreate(in: store, hasSealedData: false)
         store.corrupt(name)
-        #expect(throws: CryptoError.invalidKey) { try ContentRootKey.loadOrCreate(in: store) }
+        #expect(throws: CryptoError.invalidKey) { try ContentRootKey.loadOrCreate(in: store, hasSealedData: false) }
         #expect(store.saves == 1)
     }
 }

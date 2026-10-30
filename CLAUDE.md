@@ -100,7 +100,9 @@ The app target is `App/Totality.xcodeproj`, one target for iPhone and Mac. Set
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` if `xcode-select` points at Command Line Tools.
 Builds need no signing for the simulator. A real iPhone, and the Keychain on Mac, need the owner's Apple
 ID as the signing team: an ad-hoc Mac build gets `-34018`, so the Reader shows its key error by design.
-Never fall back to a weaker keychain to get around that.
+Never fall back to a weaker keychain to get around that. Setting the team is not enough on Mac: the
+project forces `CODE_SIGN_IDENTITY[sdk=macosx*]` to `-`, which must change, and the entitlements then
+need `keychain-access-groups`, pinned so a later team change cannot hide the key.
 
 ## Working discipline
 

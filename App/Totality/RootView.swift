@@ -8,7 +8,7 @@ import TotalityUI
 struct RootView: View {
     @State private var open: ModuleID?
     @State private var reader: ReaderModel?
-    @State private var readerFailed = false
+    @State private var readerProblem: ReaderProblem?
 
     var body: some View {
         Group {
@@ -22,11 +22,8 @@ struct RootView: View {
                 if let reader {
                     ReaderHomeView(model: reader) { open = nil }
                 } else {
-                    ModuleMessage(
-                        systemImage: "lock.slash",
-                        title: "Your Reader didn't open",
-                        detail: "Totality couldn't reach this device's key, and it won't replace one it can't read. Go back and try again."
-                    ) { open = nil }
+                    let problem = readerProblem ?? .keyUnavailable
+                    ModuleMessage(systemImage: "lock.slash", title: problem.title, detail: problem.detail) { open = nil }
                 }
             case .some(let module):
                 ModuleMessage(
@@ -41,7 +38,33 @@ struct RootView: View {
 
     private func prepareReader() {
         guard reader == nil else { return }
-        reader = try? ReaderSetup.makeModel()
+        do {
+            reader = try ReaderSetup.makeModel()
+        } catch KeyStoreError.keyMissing {
+            readerProblem = .keyMissing
+        } catch {
+            readerProblem = .keyUnavailable
+        }
+    }
+}
+
+private enum ReaderProblem {
+    case keyMissing, keyUnavailable
+
+    var title: String {
+        switch self {
+        case .keyMissing: "Your key isn't on this device"
+        case .keyUnavailable: "Your Reader didn't open"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .keyMissing:
+            "Your items are here, still encrypted, but the key that opens them isn't. Totality has left them untouched and won't make a new key over them."
+        case .keyUnavailable:
+            "Totality couldn't reach this device's key, and it won't replace one it can't read. Go back and try again."
+        }
     }
 }
 

@@ -62,7 +62,7 @@ import TotalityUI
             let empty = ReaderMessage(
                 systemImage: "book",
                 title: "Nothing here yet",
-                detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and stays on this device with no backup yet."
+                detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
             )
             try write(empty, scheme: scheme, name: "reader-empty-\(label).png", to: directory)
         }

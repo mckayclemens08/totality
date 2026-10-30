@@ -83,7 +83,9 @@ private struct NoteEditor: View {
         .background(theme.bg.color)
         .task {
             do {
-                let loaded = Draft(title: item.title, body: try await model.loadNote(item.id))
+                // The navigation value can be out of date, so only its ID is trusted.
+                let current = try await model.currentItem(item.id)
+                let loaded = Draft(title: current.title, body: try await model.loadNote(item.id))
                 title = loaded.title
                 text = loaded.body
                 saved = loaded
