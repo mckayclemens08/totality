@@ -37,3 +37,14 @@ Documents that stay live for several people belong in a Matrix room (proposal §
 
 A wrapped key is an anonymous sealed box, so it does not prove who shared the item. The sharer's name
 comes from the server. Any UI that shows it must not imply otherwise until shares are signed.
+
+## Profile
+
+Agreed with the owner on 2026-10-30. The account page becomes the signed-in person's profile: photo, display name, `@handle`, bio, and an edit screen. Sign-out and device status move to a settings page.
+
+- Everything on a profile is public and unencrypted, and the edit screen says so. It lives in Supabase, per proposal §4's public directory.
+- The handle is the username. The profile row is made the first time it's needed, so nobody picks a handle twice.
+- Photos are rebuilt on the device as a 512-pixel square JPEG, which drops location, time, and camera details. Files go to the public `avatars` bucket under the owner's folder, and each change gets a new name.
+- Followers, posts, and viewing other people's profiles are not here. Follows and posts wait for Phase 2, and viewing others waits for search.
+- Before showing other people's photos: treat `avatars` as hostile input. The bucket's JPEG rule checks the declared type, not the bytes, and a client can skip the device's rebuild.
+- Before adding profile visibility controls: a photo stays readable by anyone holding its URL, so a block or a move to private has to change the file's name.

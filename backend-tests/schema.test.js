@@ -20,10 +20,11 @@ test('the check catches a bad table', async () => {
   }
 })
 
-test('handles cannot be claimed until the owner sets the server name', async () => {
+test('a handle can be claimed before the server name is set, with no Matrix address yet', async () => {
   const db = await newDatabase({ configured: false })
-  const u = await newUser(db, null)
-  await assert.rejects(as(db, u, (q) => q(`select public.claim_handle('owner')`)), /matrix_server_name/)
+  const u = await newUser(db, 'early_owner')
+  const rows = await as(db, u, (q) => q('select handle, mxid from public.profiles where id = $1', [u.id]))
+  assert.deepEqual(rows, [{ handle: 'early_owner', mxid: null }])
 })
 
 test('a function added by a later migration is closed to anon by default', async () => {

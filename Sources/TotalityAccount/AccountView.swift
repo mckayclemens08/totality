@@ -1,7 +1,7 @@
 import SwiftUI
 import TotalityUI
 
-/// Sign in or create an account with a username and password. There is no email.
+/// Sign in or create an account with a username and password, and your profile once you have. There is no email.
 public struct AccountView: View {
     private let model: AccountModel
     private let onClose: () -> Void
@@ -9,6 +9,8 @@ public struct AccountView: View {
     @State private var password = ""
     @State private var confirmation = ""
     @State private var creating = false
+    @State private var editing = false
+    @State private var showingSettings = false
     @Environment(\.colorScheme) private var scheme
 
     private static let noticeID = "notice"
@@ -38,11 +40,27 @@ public struct AccountView: View {
                 #endif
             }
             .background(theme.bg.color)
-            .navigationTitle("Account")
+            .navigationTitle(isSignedIn ? "Profile" : "Account")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", action: onClose)
                 }
+                if isSignedIn {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        .accessibilityLabel("Settings")
+                    }
+                }
+            }
+            .navigationDestination(isPresented: $editing) {
+                EditProfileView(model: model) { editing = false }
+            }
+            .navigationDestination(isPresented: $showingSettings) {
+                AccountSettingsView(model: model)
             }
         }
         .tint(theme.accent.color)
@@ -50,7 +68,13 @@ public struct AccountView: View {
         .onChange(of: model.phase) {
             password = ""
             confirmation = ""
+            editing = false
+            showingSettings = false
         }
+    }
+
+    private var isSignedIn: Bool {
+        if case .signedIn = model.phase { true } else { false }
     }
 
     private var form: some View {
@@ -88,19 +112,13 @@ public struct AccountView: View {
                 model.notice = nil
             }
             .font(Typeface.callout)
-        case .signedIn(let username):
-            detail("Signed in as \(username).")
-            detail(model.deviceRegistered ? "This device is added to your account." : "This device isn't added to your account yet.")
-            detail("Your notes aren't synced yet. They stay on this device, and signing out leaves them here.")
-            primary("Sign out") { Task { await model.signOut() } }
+        case .signedIn:
+            ProfileSummary(model: model) { editing = true }
         }
     }
 
     private func detail(_ text: String) -> some View {
-        Text(text)
-            .font(Typeface.body)
-            .foregroundStyle(Theme.current(scheme).textSecondary.color)
-            .fixedSize(horizontal: false, vertical: true)
+        AccountDetail(text: text)
     }
 
     private var usernameField: some View {
@@ -145,22 +163,6 @@ public struct AccountView: View {
     }
 
     private func primary(_ title: String, action: @escaping () -> Void) -> some View {
-        let theme = Theme.current(scheme)
-        return Button(action: action) {
-            Group {
-                if model.isWorking {
-                    ProgressView().tint(theme.accentOn.color)
-                } else {
-                    Text(title)
-                }
-            }
-            .font(Typeface.callout)
-            .foregroundStyle(theme.accentOn.color)
-            .frame(maxWidth: .infinity)
-            .padding(Space.s4)
-            .background(theme.accent.color, in: RoundedRectangle(cornerRadius: Radius.md))
-        }
-        .buttonStyle(.plain)
-        .disabled(model.isWorking)
+        AccountButton(title: title, isWorking: model.isWorking, action: action)
     }
 }

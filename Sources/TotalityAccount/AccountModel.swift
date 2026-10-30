@@ -20,6 +20,9 @@ public final class AccountModel {
     public private(set) var isWorking = false
     /// False after sign-in if this device could not be added. Signing in still counts.
     public private(set) var deviceRegistered = false
+    public private(set) var profile: Profile?
+    /// True when the profile couldn't be read, so the screen can offer another try.
+    public private(set) var profileFailed = false
     public var notice: String?
 
     private let service: any AccountService
@@ -31,8 +34,9 @@ public final class AccountModel {
     public func load() async {
         if let username = await service.currentUsername() {
             phase = .signedIn(username: username)
-            await registerDevice()
+            await finishSigningIn()
         } else {
+            forgetProfile()
             phase = .signedOut
         }
     }
@@ -44,9 +48,10 @@ public final class AccountModel {
         }
         await run {
             try await service.signIn(username: name, password: password)
+            forgetProfile()
             phase = .signedIn(username: name.value)
         }
-        if case .signedIn = phase { await registerDevice() }
+        if case .signedIn = phase { await finishSigningIn() }
     }
 
     /// Passwords stay out of the model. A typo here can't be fixed later, so it's typed twice.
@@ -69,9 +74,10 @@ public final class AccountModel {
         }
         await run {
             try await service.signUp(username: name, password: password)
+            forgetProfile()
             phase = .signedIn(username: name.value)
         }
-        if case .signedIn = phase { await registerDevice() }
+        if case .signedIn = phase { await finishSigningIn() }
     }
 
     public func signOut() async {
@@ -79,10 +85,74 @@ public final class AccountModel {
             let result = try await service.signOut()
             phase = .signedOut
             deviceRegistered = false
+            forgetProfile()
             if result == .serverNotReached {
                 notice = "You're signed out on this device, but the server couldn't be reached to end the session."
             }
         }
+    }
+
+    /// The account can change while this waits, and an answer for the old one must not land.
+    public func loadProfile() async {
+        let requestedFor = phase
+        do {
+            let loaded = try await service.loadProfile()
+            guard phase == requestedFor else { return }
+            profile = loaded
+            profileFailed = false
+        } catch {
+            guard phase == requestedFor else { return }
+            profileFailed = profile == nil
+        }
+    }
+
+    /// Returns whether it saved, so the edit screen knows to close. Blank fields clear what was there.
+    public func saveProfile(displayName: String, bio: String) async -> Bool {
+        let name = Self.cleaned(displayName)
+        let about = Self.cleaned(bio)
+        guard (name?.unicodeScalars.count ?? 0) <= Profile.maximumNameLength else {
+            notice = "Use \(Profile.maximumNameLength) characters or fewer for your name."
+            return false
+        }
+        guard (about?.unicodeScalars.count ?? 0) <= Profile.maximumBioLength else {
+            notice = "Use \(Profile.maximumBioLength) characters or fewer for your bio."
+            return false
+        }
+        var saved = false
+        await run {
+            try await service.saveProfile(displayName: name, bio: about)
+            profile?.displayName = name
+            profile?.bio = about
+            saved = true
+        }
+        return saved
+    }
+
+    public func setPhoto(_ picture: Data) async {
+        guard let jpeg = await Task.detached(operation: { ProfilePhoto.prepare(picture) }).value else {
+            notice = "That picture can't be used. Try another."
+            return
+        }
+        await run { profile?.avatarURL = try await service.updatePhoto(jpeg) }
+    }
+
+    public func removePhoto() async {
+        await run { profile?.avatarURL = try await service.updatePhoto(nil) }
+    }
+
+    private func forgetProfile() {
+        profile = nil
+        profileFailed = false
+    }
+
+    private static func cleaned(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func finishSigningIn() async {
+        await registerDevice()
+        await loadProfile()
     }
 
     private func registerDevice() async {
