@@ -1,0 +1,210 @@
+import SwiftUI
+import TotalityUI
+
+/// The Reader's front screen: everything the person keeps, with search and Listen.
+public struct ReaderHomeView: View {
+    @Bindable private var model: ReaderModel
+    @State private var path: [ReaderItem] = []
+    @State private var importing = false
+    @State private var importCollection: String?
+    @Environment(\.colorScheme) private var scheme
+
+    private static let searchPause = Duration.milliseconds(250)
+
+    public init(model: ReaderModel) {
+        self.model = model
+    }
+
+    public var body: some View {
+        NavigationStack(path: $path) {
+            content
+                .background(Theme.current(scheme).bg.color)
+                .navigationTitle("Reader")
+                .navigationDestination(for: ReaderItem.self) { item in
+                    ReaderItemView(item: item, model: model)
+                }
+                .searchable(text: $model.query, prompt: "Search titles and text")
+                .toolbar { toolbar }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if model.listen.current != nil {
+                ListenBar(listen: model.listen).padding(Space.s3)
+            }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result {
+                let collection = importCollection
+                Task { await model.importFiles(urls, collection: collection) }
+            } else if case .failure = result {
+                model.notice = "Those files couldn't be opened."
+            }
+        }
+        .alert("Reader", isPresented: noticeShown) {
+            Button("OK", role: .cancel) { model.notice = nil }
+        } message: {
+            Text(model.notice ?? "")
+        }
+        .task { await model.load() }
+        .task(id: model.query) {
+            try? await Task.sleep(for: Self.searchPause)
+            guard !Task.isCancelled else { return }
+            await model.search()
+        }
+    }
+
+    private var noticeShown: Binding<Bool> {
+        Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })
+    }
+
+    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button("New note", systemImage: "square.and.pencil") { createNote() }
+                Button("Import files", systemImage: "square.and.arrow.down") { startImport(into: nil) }
+                Button("Import into \(ReaderItem.speechifyCollection)", systemImage: "books.vertical") {
+                    startImport(into: ReaderItem.speechifyCollection)
+                }
+            } label: {
+                Label("Add", systemImage: "plus")
+            }
+        }
+    }
+
+    private func createNote() {
+        Task {
+            if let item = await model.newNote() { path.append(item) }
+        }
+    }
+
+    private func startImport(into collection: String?) {
+        importCollection = collection
+        importing = true
+    }
+
+    @ViewBuilder private var content: some View {
+        switch model.phase {
+        case .loading:
+            ProgressView("Opening your Reader")
+                .font(Typeface.callout)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .failed:
+            ReaderMessage(
+                systemImage: "exclamationmark.triangle",
+                title: "Your Reader didn't open",
+                detail: "This device's storage couldn't be read. Close the Reader and try again."
+            )
+        case .ready where model.isSearching:
+            searchResults
+        case .ready where model.items.isEmpty && model.unreadable == 0:
+            ReaderMessage(
+                systemImage: "book",
+                title: "Nothing here yet",
+                detail: "Write a note, or import a PDF or text file. Everything is encrypted on this device before it's stored."
+            )
+        case .ready:
+            library
+        }
+    }
+
+    @ViewBuilder private var searchResults: some View {
+        if model.hits.isEmpty {
+            ReaderMessage(systemImage: "magnifyingglass", title: "No matches", detail: "Search looks through titles, notes, text files, and PDFs.")
+        } else {
+            List(model.hits) { hit in
+                NavigationLink(value: hit.item) {
+                    ReaderRow(item: hit.item, snippet: hit.snippet)
+                }
+                .listRowBackground(Color.clear)
+            }
+            .scrollContentBackground(.hidden)
+        }
+    }
+
+    private var library: some View {
+        List {
+            if model.unreadable > 0 {
+                Label(unreadableText, systemImage: "lock.slash")
+                    .font(Typeface.caption)
+                    .foregroundStyle(Theme.current(scheme).danger.color)
+                    .listRowBackground(Color.clear)
+            }
+            ForEach(model.sections, id: \.title) { section in
+                Section(section.title) {
+                    ForEach(section.items) { item in
+                        NavigationLink(value: item) {
+                            ReaderRow(item: item, snippet: nil)
+                        }
+                        .listRowBackground(Color.clear)
+                        .swipeActions {
+                            Button("Delete", systemImage: "trash", role: .destructive) {
+                                Task { await model.delete(item) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    private var unreadableText: String {
+        model.unreadable == 1
+            ? "1 item can't be opened on this device."
+            : "\(model.unreadable) items can't be opened on this device."
+    }
+}
+
+struct ReaderRow: View {
+    let item: ReaderItem
+    let snippet: String?
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let theme = Theme.current(scheme)
+        HStack(spacing: Space.s3) {
+            Image(systemName: item.kind == .note ? "note.text" : "doc")
+                .foregroundStyle(theme.textSecondary.color)
+                .frame(width: Space.s5)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(item.displayTitle)
+                    .font(Typeface.headline)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .lineLimit(2)
+                Text(snippet ?? item.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, Space.s1)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct ReaderMessage: View {
+    let systemImage: String
+    let title: String
+    let detail: String
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let theme = Theme.current(scheme)
+        VStack(spacing: Space.s3) {
+            Image(systemName: systemImage)
+                .font(Typeface.display)
+                .foregroundStyle(theme.textSecondary.color)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(Typeface.title)
+                .foregroundStyle(theme.textPrimary.color)
+            Text(detail)
+                .font(Typeface.body)
+                .foregroundStyle(theme.textSecondary.color)
+                .multilineTextAlignment(.center)
+        }
+        .padding(Space.s6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}

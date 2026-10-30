@@ -1,0 +1,103 @@
+import SwiftUI
+import TotalityUI
+
+/// The Listen transport. Speech is generated on this device, so text never leaves it to be read.
+struct ListenBar: View {
+    let listen: ListenController
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let theme = Theme.current(scheme)
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text(listen.current?.title ?? "")
+                .font(Typeface.callout)
+                .foregroundStyle(theme.textPrimary.color)
+                .lineLimit(1)
+            ListenProgress(value: listen.progress)
+            HStack(spacing: 0) {
+                control("gobackward", label: "Previous sentence") { listen.skip(by: -1) }
+                control(listen.isPaused ? "play.fill" : "pause.fill", label: listen.isPaused ? "Play" : "Pause") {
+                    listen.togglePause()
+                }
+                control("goforward", label: "Next sentence") { listen.skip(by: 1) }
+                Spacer(minLength: 0)
+                speedMenu
+                voiceMenu
+                control("xmark", label: "Stop listening") { listen.stop() }
+            }
+            .foregroundStyle(theme.textPrimary.color)
+        }
+        .padding(Space.s4)
+        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md))
+    }
+
+    private func control(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage).modifier(TapTarget())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private var speedMenu: some View {
+        Menu {
+            ForEach(ListenController.speeds, id: \.self) { speed in
+                Button(Self.label(forSpeed: speed)) { listen.setSpeed(speed) }
+            }
+        } label: {
+            Text(Self.label(forSpeed: listen.speed)).font(Typeface.callout).modifier(TapTarget())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Speed")
+    }
+
+    private var voiceMenu: some View {
+        Menu {
+            Button("System default") { listen.setVoice(nil) }
+            ForEach(listen.voices) { voice in
+                Button("\(voice.name) (\(voice.language))") { listen.setVoice(voice.id) }
+            }
+        } label: {
+            Image(systemName: "person.wave.2").modifier(TapTarget())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Voice")
+    }
+
+    static func label(forSpeed speed: Double) -> String {
+        "\(speed.formatted(.number.precision(.fractionLength(0...2))))×"
+    }
+}
+
+private struct TapTarget: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .frame(minWidth: Space.s7, minHeight: Space.s7)
+            .contentShape(Rectangle())
+    }
+}
+
+/// Drawn from tokens so it matches the surface it sits on.
+private struct ListenProgress: View {
+    let value: Double
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let theme = Theme.current(scheme)
+        Capsule()
+            .fill(theme.surfaceSunken.color)
+            .frame(height: Space.s1)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(theme.accent.color)
+                        .frame(width: proxy.size.width * min(max(value, 0), 1))
+                }
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Listening progress")
+            .accessibilityValue(value.formatted(.percent.precision(.fractionLength(0))))
+    }
+}
