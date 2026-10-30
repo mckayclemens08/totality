@@ -1,7 +1,10 @@
 import Auth
+import CoreGraphics
 import Foundation
+import ImageIO
 import Testing
 import TotalityCore
+import UniformTypeIdentifiers
 @testable import TotalityAccount
 
 final class MemoryKeyStore: KeyStore, @unchecked Sendable {
@@ -21,6 +24,11 @@ actor FakeAccountService: AccountService {
     var deviceError: AccountError?
     var signOutError: AccountError?
     var signOutResult = SignOutResult.complete
+    var profileError: AccountError?
+    var saveError: AccountError?
+    var photoError: AccountError?
+    private(set) var stored: Profile?
+    private(set) var photos: [Data?] = []
     private(set) var signIns: [String] = []
     private(set) var signUps: [String] = []
     private(set) var devices = 0
@@ -54,6 +62,29 @@ actor FakeAccountService: AccountService {
         return signOutResult
     }
     func setSignOutResult(_ result: SignOutResult) { signOutResult = result }
+    func failProfile(load: AccountError? = nil, save: AccountError? = nil, photo: AccountError? = nil) {
+        profileError = load
+        saveError = save
+        photoError = photo
+    }
+
+    func loadProfile() async throws -> Profile {
+        if let profileError { throw profileError }
+        if let stored { return stored }
+        let made = Profile(username: username ?? "")
+        stored = made
+        return made
+    }
+    func saveProfile(displayName: String?, bio: String?) async throws {
+        if let saveError { throw saveError }
+        stored?.displayName = displayName
+        stored?.bio = bio
+    }
+    func updatePhoto(_ jpeg: Data?) async throws -> URL? {
+        if let photoError { throw photoError }
+        photos.append(jpeg)
+        return jpeg == nil ? nil : URL(string: "https://abc.supabase.co/photo.jpg")
+    }
 }
 
 @Suite struct AccountConfigTests {
@@ -291,5 +322,181 @@ actor FakeAccountService: AccountService {
         await model.signOut()
         #expect(model.phase == .signedIn(username: "owner"))
         #expect(model.notice == AccountError.offline.message)
+    }
+
+    @Test("Signing in fetches the profile")
+    func signingInLoadsTheProfile() async {
+        let model = AccountModel(service: FakeAccountService())
+        await model.signIn(username: "owner", password: password)
+        #expect(model.profile == Profile(username: "owner"))
+        #expect(!model.profileFailed)
+    }
+
+    @Test("A profile that won't load doesn't undo the sign-in, and can be tried again")
+    func profileFailureIsRecoverable() async {
+        let service = FakeAccountService()
+        await service.failProfile(load: .offline)
+        let model = AccountModel(service: service)
+        await model.signIn(username: "owner", password: password)
+        #expect(model.phase == .signedIn(username: "owner"))
+        #expect(model.profile == nil)
+        #expect(model.profileFailed)
+        await service.failProfile()
+        await model.loadProfile()
+        #expect(model.profile != nil)
+        #expect(!model.profileFailed)
+    }
+
+    @Test("A failed refresh keeps showing the profile you already have")
+    func failedRefreshKeepsTheProfile() async {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await model.load()
+        await service.failProfile(load: .offline)
+        await model.loadProfile()
+        #expect(model.profile != nil)
+        #expect(!model.profileFailed)
+    }
+
+    @Test func savingTidiesAndBlankClears() async {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await model.load()
+        #expect(await model.saveProfile(displayName: "  McKay Clemens\n", bio: "Building Totality."))
+        #expect(model.profile?.displayName == "McKay Clemens")
+        #expect(await model.saveProfile(displayName: "   ", bio: ""))
+        #expect(model.profile?.displayName == nil)
+        #expect(model.profile?.bio == nil)
+        #expect(await service.stored?.bio == nil)
+    }
+
+    @Test(arguments: [(String(repeating: "n", count: 51), ""), ("", String(repeating: "b", count: 161))])
+    func overlongProfilesAreCaughtBeforeSending(name: String, bio: String) async {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await model.load()
+        #expect(await model.saveProfile(displayName: name, bio: bio) == false)
+        #expect(model.notice != nil)
+        #expect(model.profile?.displayName == nil)
+    }
+
+    @Test func theLongestProfileFits() async {
+        let model = AccountModel(service: FakeAccountService(username: "owner"))
+        await model.load()
+        let saved = await model.saveProfile(displayName: String(repeating: "n", count: 50), bio: String(repeating: "b", count: 160))
+        #expect(saved)
+    }
+
+    @Test("A save that fails keeps what was there and says so")
+    func failedSaveChangesNothing() async {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await model.load()
+        await service.failProfile(save: .offline)
+        #expect(await model.saveProfile(displayName: "New name", bio: "") == false)
+        #expect(model.profile?.displayName == nil)
+        #expect(model.notice == AccountError.offline.message)
+    }
+
+    @Test func aPhotoIsRebuiltBeforeItLeaves() async throws {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await model.load()
+        let original = try Picture.jpeg(width: 1200, height: 800, withMetadata: true)
+        await model.setPhoto(original)
+        let sent = try #require(await service.photos.first ?? nil)
+        #expect(sent != original)
+        #expect(model.profile?.avatarURL != nil)
+    }
+
+    @Test("Something that isn't a picture never reaches the server")
+    func nonPicturesStayHere() async {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await model.load()
+        await model.setPhoto(Data("not a picture".utf8))
+        #expect(model.notice != nil)
+        #expect(await service.photos.isEmpty)
+    }
+
+    @Test func removingAPhotoClearsIt() async throws {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await model.load()
+        await model.setPhoto(try Picture.jpeg(width: 600, height: 600))
+        await model.removePhoto()
+        #expect(model.profile?.avatarURL == nil)
+        #expect(await service.photos.last == .some(nil))
+    }
+
+    @Test func signingOutForgetsTheProfile() async {
+        let model = AccountModel(service: FakeAccountService(username: "owner"))
+        await model.load()
+        await model.signOut()
+        #expect(model.profile == nil)
+    }
+}
+
+enum Picture {
+    static func jpeg(width: Int, height: Int, withMetadata: Bool = false) throws -> Data {
+        let context = try #require(CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(red: 0.2, green: 0.4, blue: 0.7, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try #require(context.makeImage())
+        let output = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(output, UTType.jpeg.identifier as CFString, 1, nil))
+        let metadata: [CFString: Any] = [
+            kCGImagePropertyGPSDictionary: [
+                kCGImagePropertyGPSLatitude: 40.2338, kCGImagePropertyGPSLatitudeRef: "N",
+                kCGImagePropertyGPSLongitude: 111.6585, kCGImagePropertyGPSLongitudeRef: "W",
+            ],
+            kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: "2026:10:30 15:00:00"],
+            kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFMake: "Apple", kCGImagePropertyTIFFModel: "iPhone 14"],
+        ]
+        CGImageDestinationAddImage(destination, image, withMetadata ? metadata as CFDictionary : nil)
+        #expect(CGImageDestinationFinalize(destination))
+        return output as Data
+    }
+
+    static func properties(of data: Data) throws -> [CFString: Any] {
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        return try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+    }
+}
+
+@Suite struct ProfilePhotoTests {
+    @Test("Location, time, and camera details don't survive")
+    func metadataIsGone() throws {
+        let original = try Picture.jpeg(width: 1200, height: 800, withMetadata: true)
+        #expect(try Picture.properties(of: original)[kCGImagePropertyGPSDictionary] != nil)
+        let prepared = try #require(ProfilePhoto.prepare(original))
+        let properties = try Picture.properties(of: prepared)
+        #expect(properties[kCGImagePropertyGPSDictionary] == nil)
+        #expect((properties[kCGImagePropertyExifDictionary] as? [CFString: Any])?[kCGImagePropertyExifDateTimeOriginal] == nil)
+        #expect((properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any])?[kCGImagePropertyTIFFModel] == nil)
+    }
+
+    @Test(arguments: [(1200, 800), (800, 1200), (2000, 2000)])
+    func comesOutSquareAndSmall(width: Int, height: Int) throws {
+        let prepared = try #require(ProfilePhoto.prepare(try Picture.jpeg(width: width, height: height)))
+        let properties = try Picture.properties(of: prepared)
+        #expect(properties[kCGImagePropertyPixelWidth] as? Int == ProfilePhoto.side)
+        #expect(properties[kCGImagePropertyPixelHeight] as? Int == ProfilePhoto.side)
+        #expect(prepared.count < 1_048_576)
+    }
+
+    @Test func aSmallPictureIsNotBlownUp() throws {
+        let prepared = try #require(ProfilePhoto.prepare(try Picture.jpeg(width: 100, height: 60)))
+        let properties = try Picture.properties(of: prepared)
+        #expect(properties[kCGImagePropertyPixelWidth] as? Int == 60)
+        #expect(properties[kCGImagePropertyPixelHeight] as? Int == 60)
+    }
+
+    @Test func refusesWhatIsNotAPicture() {
+        #expect(ProfilePhoto.prepare(Data("<svg onload=alert(1)>".utf8)) == nil)
+        #expect(ProfilePhoto.prepare(Data()) == nil)
     }
 }

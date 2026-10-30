@@ -590,6 +590,8 @@ GitHub's docs list rulesets on private repositories only for paid plans; GitHub 
 ### L. **The domain is not free.**
 The proposal needs a domain for handles, MXIDs, and `.well-known`, and it is hard to change later. A purchased domain breaks the literal A/B no-money rule (roughly $10–15/year by rough estimate). A free subdomain is a dependency on someone else's service, which undercuts §14's portability. Recommendation: buy one, as a named exception.
 
+Profiles no longer wait for it: on 2026-10-30 the owner chose to build them first, so `profiles.mxid` stays empty until `matrix_server_name` is set. Setting the name must also fill in `mxid` on every existing row. Key backup still needs the domain, which is the real deadline.
+
 ### M. **Decision needed — the brief's editor is web-only.** §3 names TipTap + Yjs for documents.
 TipTap runs in a browser, so it has no place in SwiftUI short of hosting a web view inside the Reader. Yjs matters only for documents edited by several people, which arrive with Matrix. The Reader therefore ships plain-text notes first and treats documents as unbuilt. Options when rich documents are next: a native editor on `AttributedString` with Y-CRDT bindings (not yet evaluated), or a web view hosting TipTap. Recommendation: stay native and decide after the Figma file, because the editor's design drives the choice. Owner's call.
 

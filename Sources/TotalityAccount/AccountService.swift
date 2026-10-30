@@ -35,6 +35,10 @@ public protocol AccountService: Sendable {
     func signIn(username: Username, password: String) async throws
     func registerDevice() async throws
     func signOut() async throws -> SignOutResult
+    func loadProfile() async throws -> Profile
+    func saveProfile(displayName: String?, bio: String?) async throws
+    /// Replaces the public photo, or removes it when given nil. Returns where the new one is.
+    func updatePhoto(_ jpeg: Data?) async throws -> URL?
 }
 
 public enum SignOutResult: Equatable, Sendable {
@@ -117,6 +121,77 @@ public struct SupabaseAccountService: AccountService {
         }
     }
 
+    /// Makes the profile the first time it's needed. The handle is the username, so there's nothing
+    /// to ask. Two devices can race here, and whichever loses just reads what the other made.
+    public func loadProfile() async throws -> Profile {
+        try await mapErrors {
+            let session = try await client.auth.session
+            if let row = try await profileRow(of: session.user.id) { return try profile(from: row) }
+            guard let username = session.user.email.flatMap({ Username(address: $0) }) else { throw AccountError.failed }
+            do {
+                try await client.rpc("claim_handle", params: ["p_handle": username.value]).execute()
+            } catch let error as PostgrestError where error.code == "23505" {}
+            guard let row = try await profileRow(of: session.user.id) else { throw AccountError.failed }
+            return try profile(from: row)
+        }
+    }
+
+    public func saveProfile(displayName: String?, bio: String?) async throws {
+        try await mapErrors {
+            let owner = try await client.auth.session.user.id
+            let edit: [String: AnyJSON] = [
+                "display_name": displayName.map(AnyJSON.string) ?? .null,
+                "bio": bio.map(AnyJSON.string) ?? .null,
+            ]
+            try await client.from("profiles").update(edit).eq("id", value: owner.uuidString).execute()
+        }
+    }
+
+    /// Photos get a new name each time, so a cached old one can't show. A failed delete only leaves an
+    /// unused file behind, and the swap has already worked, so it doesn't count as failing.
+    public func updatePhoto(_ jpeg: Data?) async throws -> URL? {
+        try await mapErrors {
+            let owner = try await client.auth.session.user.id
+            let previous = try await profileRow(of: owner)?.avatar_key
+            var key: String?
+            if let jpeg {
+                let path = "\(owner.uuidString.lowercased())/\(UUID().uuidString.lowercased()).jpg"
+                _ = try await photos.upload(path, data: jpeg, options: FileOptions(contentType: "image/jpeg"))
+                key = path
+            }
+            let edit: [String: AnyJSON] = ["avatar_key": key.map(AnyJSON.string) ?? .null]
+            try await client.from("profiles").update(edit).eq("id", value: owner.uuidString).execute()
+            if let previous { _ = try? await photos.remove(paths: [previous]) }
+            return try key.map(photoURL)
+        }
+    }
+
+    private var photos: StorageFileApi { client.storage.from("avatars") }
+
+    private func photoURL(_ key: String) throws -> URL {
+        try photos.getPublicURL(path: key)
+    }
+
+    private func profileRow(of owner: UUID) async throws -> ProfileRow? {
+        let rows: [ProfileRow] = try await client.from("profiles")
+            .select("handle, display_name, bio, avatar_key")
+            .eq("id", value: owner.uuidString)
+            .execute()
+            .value
+        return rows.first
+    }
+
+    private func profile(from row: ProfileRow) throws -> Profile {
+        Profile(username: row.handle, displayName: row.display_name, bio: row.bio, avatarURL: try row.avatar_key.map(photoURL))
+    }
+
+    private struct ProfileRow: Decodable {
+        let handle: String
+        let display_name: String?
+        let bio: String?
+        let avatar_key: String?
+    }
+
     private struct Registered: Decodable {
         let id: UUID
     }
@@ -145,9 +220,9 @@ public struct SupabaseAccountService: AccountService {
         #endif
     }
 
-    private func mapErrors(_ work: () async throws -> Void) async throws {
+    private func mapErrors<Result>(_ work: () async throws -> Result) async throws -> Result {
         do {
-            try await work()
+            return try await work()
         } catch {
             throw Self.accountError(from: error)
         }
@@ -155,6 +230,8 @@ public struct SupabaseAccountService: AccountService {
 
     static func accountError(from error: any Error) -> AccountError {
         switch error {
+        case let error as AccountError:
+            return error
         case let error as URLError:
             let offline: Set<URLError.Code> = [
                 .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost, .cannotConnectToHost,
