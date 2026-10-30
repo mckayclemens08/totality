@@ -593,6 +593,12 @@ The proposal needs a domain for handles, MXIDs, and `.well-known`, and it is har
 ### M. **Decision needed — the brief's editor is web-only.** §3 names TipTap + Yjs for documents.
 TipTap runs in a browser, so it has no place in SwiftUI short of hosting a web view inside the Reader. Yjs matters only for documents edited by several people, which arrive with Matrix. The Reader therefore ships plain-text notes first and treats documents as unbuilt. Options when rich documents are next: a native editor on `AttributedString` with Y-CRDT bindings (not yet evaluated), or a web view hosting TipTap. Recommendation: stay native and decide after the Figma file, because the editor's design drives the choice. Owner's call.
 
+### N. **Before anyone but the owner signs in — sign-in has two gaps on the free plan.**
+Security review of sign-in found both. Neither reaches private content, because keys are not tied to the login, but either gives access to the account itself.
+
+1. **Another app can claim the sign-in link.** The free plan cannot change email templates, so sign-in uses the default email link and a custom URL scheme. PKCE stops another app using a link Totality requested, but an app that registers the same scheme can start its own request and catch the reply if the person taps the email. Closing this takes Universal Links (needs the $99 Apple program and a hosted file) or a typed code (needs custom email, so the template can change). Acceptable while the only devices are the owner's.
+2. **Password sign-up stays open at the server.** The app sends no password, but the sign-up endpoint accepts one with the public key, and no setting turns that off alone. An attacker could pre-register an address, and the password might survive the owner's later confirmation. That is unverified because it needs a local stack. So public sign-up is closed after the owner's first sign-in. Invites will need accounts created server-side, not reopened sign-up.
+
 ---
 
 ## 12. What I need from the owner to proceed

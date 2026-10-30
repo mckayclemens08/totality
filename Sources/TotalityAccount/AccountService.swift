@@ -5,8 +5,10 @@ import TotalityCore
 import UIKit
 #endif
 
-/// The address the email link returns to. It is not trusted on its own: PKCE means only the device
-/// that asked for the link can finish signing in, so another app claiming this scheme gets nothing.
+/// The address the email link returns to. PKCE makes a link useless to any app but the one that
+/// requested it, which stops another app using a link Totality asked for. It does not stop an app
+/// that claims this scheme from starting its own request and catching the reply, so this is a
+/// stopgap for one person's devices. See proposal §11-N before anyone else signs in.
 public enum SignInLink {
     public static let callback = URL(string: "app.totality.client://auth/callback")!
 
@@ -40,7 +42,13 @@ public protocol AccountService: Sendable {
     func requestLink(email: String) async throws
     func finishSignIn(from url: URL) async throws -> String?
     func registerDevice() async throws
-    func signOut() async throws
+    func signOut() async throws -> SignOutResult
+}
+
+public enum SignOutResult: Equatable, Sendable {
+    case complete
+    /// Signed out on this device, but the server never heard, so the session is still live there.
+    case serverNotReached
 }
 
 public struct SupabaseAccountService: AccountService {
@@ -96,8 +104,25 @@ public struct SupabaseAccountService: AccountService {
         }
     }
 
-    public func signOut() async throws {
-        try await mapErrors { try await client.auth.signOut(scope: .local) }
+    /// The SDK deletes the local session before it calls the server, so a failure there leaves the
+    /// session live on the server. Checking first means being offline changes nothing.
+    public func signOut() async throws -> SignOutResult {
+        do {
+            _ = try await client.auth.user()
+        } catch AuthError.sessionMissing {
+            return .complete
+        } catch {
+            let mapped = Self.accountError(from: error)
+            if mapped == .offline { throw mapped }
+        }
+        do {
+            try await client.auth.signOut(scope: .local)
+            return .complete
+        } catch AuthError.sessionMissing {
+            return .complete
+        } catch {
+            return .serverNotReached
+        }
     }
 
     private struct Registered: Decodable {
@@ -131,16 +156,28 @@ public struct SupabaseAccountService: AccountService {
     private func mapErrors(_ work: () async throws -> Void) async throws {
         do {
             try await work()
-        } catch let error as URLError where error.code == .notConnectedToInternet || error.code == .networkConnectionLost {
-            throw AccountError.offline
-        } catch let error as AuthError {
-            switch error.errorCode {
-            case .otpExpired, .flowStateExpired, .flowStateNotFound, .badCodeVerifier: throw AccountError.invalidLink
-            case .overEmailSendRateLimit, .overRequestRateLimit: throw AccountError.rateLimited
-            default: throw AccountError.failed
-            }
         } catch {
-            throw AccountError.failed
+            throw Self.accountError(from: error)
+        }
+    }
+
+    private static func accountError(from error: any Error) -> AccountError {
+        switch error {
+        case let error as URLError:
+            let offline: Set<URLError.Code> = [
+                .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost, .cannotConnectToHost,
+            ]
+            return offline.contains(error.code) ? .offline : .failed
+        case AuthError.pkceGrantCodeExchange:
+            return .invalidLink
+        case let error as AuthError:
+            switch error.errorCode {
+            case .otpExpired, .flowStateExpired, .flowStateNotFound, .badCodeVerifier: return .invalidLink
+            case .overEmailSendRateLimit, .overRequestRateLimit: return .rateLimited
+            default: return .failed
+            }
+        default:
+            return .failed
         }
     }
 }

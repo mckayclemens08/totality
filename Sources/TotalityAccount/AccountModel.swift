@@ -28,6 +28,8 @@ public final class AccountModel {
         if let email = await service.currentEmail() {
             phase = .signedIn(email: email)
             await registerDevice()
+        } else if case .awaitingLink = phase {
+            return
         } else {
             phase = .signedOut
         }
@@ -45,12 +47,19 @@ public final class AccountModel {
         }
     }
 
-    /// Only a link this app is waiting for counts, so one arriving out of nowhere signs nobody in.
+    /// The phase can't be relied on here: iOS may close the app while the person is in Mail. PKCE is
+    /// what decides, because only the device holding the matching secret can redeem a link.
     public func finishSignIn(from url: URL) async {
-        guard case .awaitingLink(let email) = phase, SignInLink.isCallback(url) else { return }
+        guard SignInLink.isCallback(url) else { return }
+        var requested: String?
+        switch phase {
+        case .signedIn: return
+        case .awaitingLink(let email): requested = email
+        case .loading, .signedOut: break
+        }
         await run {
             let confirmed = try await service.finishSignIn(from: url)
-            phase = .signedIn(email: confirmed ?? email)
+            phase = .signedIn(email: confirmed ?? requested ?? "your account")
         }
         if case .signedIn = phase { await registerDevice() }
     }
@@ -62,9 +71,12 @@ public final class AccountModel {
 
     public func signOut() async {
         await run {
-            try await service.signOut()
+            let result = try await service.signOut()
             phase = .signedOut
             deviceRegistered = false
+            if result == .serverNotReached {
+                notice = "You're signed out on this device, but the server couldn't be reached to end the session."
+            }
         }
     }
 

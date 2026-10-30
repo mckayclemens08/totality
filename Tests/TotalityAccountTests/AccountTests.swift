@@ -19,11 +19,13 @@ actor FakeAccountService: AccountService {
     var finishError: AccountError?
     var deviceError: AccountError?
     var signOutError: AccountError?
+    var signOutResult = SignOutResult.complete
     private(set) var requested: [String] = []
     private(set) var finished: [URL] = []
     private(set) var devices = 0
 
     init(email: String? = nil) { self.email = email }
+    func seedRequest(_ email: String) { requested.append(email) }
     func fail(request: AccountError? = nil, finish: AccountError? = nil, device: AccountError? = nil, signOut: AccountError? = nil) {
         requestError = request
         finishError = finish
@@ -46,10 +48,12 @@ actor FakeAccountService: AccountService {
         if let deviceError { throw deviceError }
         devices += 1
     }
-    func signOut() async throws {
+    func signOut() async throws -> SignOutResult {
         if let signOutError { throw signOutError }
         email = nil
+        return signOutResult
     }
+    func setSignOutResult(_ result: SignOutResult) { signOutResult = result }
 }
 
 @Suite struct AccountConfigTests {
@@ -112,13 +116,39 @@ actor FakeAccountService: AccountService {
         #expect(model.deviceRegistered)
     }
 
-    @Test("A link nobody asked for signs nobody in")
-    func unexpectedLinkIsIgnored() async {
+    @Test("A link this device can't redeem signs nobody in, and says so")
+    func unredeemableLinkFails() async {
         let service = FakeAccountService()
+        await service.fail(finish: .invalidLink)
         let model = AccountModel(service: service)
         await model.load()
         await model.finishSignIn(from: link)
         #expect(model.phase == .signedOut)
+        #expect(model.notice == AccountError.invalidLink.message)
+    }
+
+    @Test("A link still works if iOS closed the app while you were in Mail")
+    func linkWorksAfterRelaunch() async {
+        let service = FakeAccountService()
+        await service.seedRequest("owner@example.com")
+        let model = AccountModel(service: service)
+        await model.finishSignIn(from: link)
+        #expect(model.phase == .signedIn(email: "owner@example.com"))
+    }
+
+    @Test("Reopening the account screen while waiting doesn't lose your place")
+    func reloadingKeepsTheWait() async {
+        let model = AccountModel(service: FakeAccountService())
+        await model.sendLink(to: "owner@example.com")
+        await model.load()
+        #expect(model.phase == .awaitingLink(email: "owner@example.com"))
+    }
+
+    @Test func aLinkIsIgnoredOnceSignedIn() async {
+        let service = FakeAccountService(email: "owner@example.com")
+        let model = AccountModel(service: service)
+        await model.load()
+        await model.finishSignIn(from: link)
         #expect(await service.finished.isEmpty)
     }
 
@@ -190,8 +220,19 @@ actor FakeAccountService: AccountService {
         #expect(!model.deviceRegistered)
     }
 
-    @Test("A failed sign-out does not claim you're signed out")
-    func failedSignOutStaysSignedIn() async {
+    @Test("If the server can't be told, you're signed out here and the app says what's left")
+    func unrevokedSignOutIsHonest() async {
+        let service = FakeAccountService(email: "owner@example.com")
+        await service.setSignOutResult(.serverNotReached)
+        let model = AccountModel(service: service)
+        await model.load()
+        await model.signOut()
+        #expect(model.phase == .signedOut)
+        #expect(model.notice?.contains("server") == true)
+    }
+
+    @Test("Offline, nothing is signed out and the app says so")
+    func offlineSignOutStaysSignedIn() async {
         let service = FakeAccountService(email: "owner@example.com")
         await service.fail(signOut: .offline)
         let model = AccountModel(service: service)
