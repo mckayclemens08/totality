@@ -175,6 +175,30 @@ describe('contact requests', () => {
     assert.equal(row.state, 'pending_out')
     assert.deepEqual(await as(db, u1, (q) => q('select state from public.contacts')), [{ state: 'blocked' }])
   })
+  test('blocking someone stops their shares, old and new, without telling them', async () => {
+    const [u1, u2] = await trio()
+    const oldShare = await addObject(db, u2)
+    await share(u2, oldShare, u1)
+    await as(db, u1, (q) => q('select public.block_contact($1)', [u2.id]))
+    const newShare = await addObject(db, u2)
+    await share(u2, newShare, u1)
+    for (const o of [oldShare, newShare]) {
+      assert.equal(await canSee(u1, o.id), false)
+      assert.equal(await canFetchBlob(u1, o.storage_key), false)
+    }
+    assert.deepEqual(await as(db, u1, (q) => q('select id from public.content_shares')), [])
+    assert.equal((await as(db, u2, (q) => q('select id from public.content_shares'))).length, 1)
+  })
+
+  test('a blocked user cannot call a function that reveals the block', async () => {
+    const names = (await db.query(`
+      select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')
+      order by 1`)).rows.map((r) => r.proname)
+    assert.deepEqual(names, ['accept_contact', 'block_contact', 'claim_handle', 'export_my_data',
+                             'redeem_invite', 'request_contact'])
+  })
+
   test('a blocked user cannot see public content or the profile', async () => {
     const [u1, u2, u3] = await trio()
     const o = await addObject(db, u1, { visibility: 'public', key_ref: 'plain:' })

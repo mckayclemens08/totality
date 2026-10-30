@@ -25,3 +25,20 @@ test('handles cannot be claimed until the owner sets the server name', async () 
   const u = await newUser(db, null)
   await assert.rejects(as(db, u, (q) => q(`select public.claim_handle('owner')`)), /matrix_server_name/)
 })
+
+test('a function added by a later migration is closed to anon by default', async () => {
+  const db = await newDatabase()
+  await db.exec(`create function public.later_rpc() returns int language sql security definer as 'select 1'`)
+  assert.deepEqual((await db.query(`
+    select has_function_privilege('anon', 'public.later_rpc()', 'EXECUTE') as anon,
+           has_function_privilege('authenticated', 'public.later_rpc()', 'EXECUTE') as authed`)).rows,
+    [{ anon: false, authed: false }])
+})
+
+test('the check catches a function anon can call', async () => {
+  const db = await newDatabase()
+  await db.exec(`create function public.open_rpc() returns int language sql as 'select 1';
+                 grant execute on function public.open_rpc() to anon`)
+  const problems = (await db.query(check)).rows
+  assert.deepEqual(problems, [{ table_name: 'open_rpc', problem: 'anon can execute this function' }])
+})

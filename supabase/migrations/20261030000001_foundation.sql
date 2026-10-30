@@ -209,7 +209,12 @@ create trigger audit_ai_grants after insert or update or delete on public.ai_gra
 -- helpers -------------------------------------------------------------
 -- These read other users' contact rows, so they must bypass RLS. A plain subquery in a policy
 -- runs as the caller, cannot see the owner's row, and silently denies every contact.
-create function public.is_visible_contact(p_owner uuid) returns boolean
+-- They live outside public because PostgREST exposes public as RPC, and is_blocked_by would then
+-- tell a blocked user that they are blocked.
+create schema private;
+grant usage on schema private to authenticated;
+
+create function private.is_visible_contact(p_owner uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (
     select 1 from public.contacts c
@@ -218,7 +223,7 @@ language sql stable security definer set search_path = '' as $$
   );
 $$;
 
-create function public.is_blocked_by(p_owner uuid) returns boolean
+create function private.is_blocked_by(p_owner uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (
     select 1 from public.contacts c
@@ -226,15 +231,26 @@ language sql stable security definer set search_path = '' as $$
   );
 $$;
 
-create function public.has_share(p_object uuid) returns boolean
+create function private.has_blocked(p_peer uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.contacts c
+    where c.owner_id = auth.uid() and c.peer_id = p_peer and c.state = 'blocked'
+  );
+$$;
+
+-- Shares from someone you blocked are hidden on read. Refusing them on insert would tell the
+-- sender they are blocked.
+create function private.has_share(p_object uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (
     select 1 from public.content_shares s
     where s.object_id = p_object and s.grantee_id = auth.uid()
+      and not private.has_blocked(s.owner_id)
   );
 $$;
 
-create function public.owns_object(p_object uuid) returns boolean
+create function private.owns_object(p_object uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (
     select 1 from public.content_objects o
@@ -356,7 +372,8 @@ begin
   -- The other side loses access too, and is not told why.
   update public.contacts set can_see_private_posts = false
   where owner_id = p_peer and peer_id = v_me;
-  delete from public.content_shares where owner_id = v_me and grantee_id = p_peer;
+  delete from public.content_shares
+  where (owner_id = v_me and grantee_id = p_peer) or (owner_id = p_peer and grantee_id = v_me);
   perform public.write_audit('contact.block', jsonb_build_object('peer', p_peer));
 end $$;
 
@@ -395,9 +412,9 @@ create policy config_select on public.instance_config for select to authenticate
 
 create policy profiles_select on public.profiles for select to authenticated using (
   id = auth.uid()
-  or (not public.is_blocked_by(id)
+  or (not private.is_blocked_by(id)
       and (visibility = 'public'
-           or (visibility = 'contacts' and public.is_visible_contact(id))))
+           or (visibility = 'contacts' and private.is_visible_contact(id))))
 );
 create policy profiles_update on public.profiles for update to authenticated
   using (id = auth.uid()) with check (id = auth.uid());
@@ -428,11 +445,11 @@ create policy invites_delete on public.invites for delete to authenticated using
 create policy content_select_own on public.content_objects for select to authenticated
   using (owner_id = auth.uid());
 create policy content_select_shared on public.content_objects for select to authenticated
-  using (public.has_share(id));
+  using (private.has_share(id));
 create policy content_select_contacts on public.content_objects for select to authenticated
-  using (visibility = 'contacts' and public.is_visible_contact(owner_id));
+  using (visibility = 'contacts' and private.is_visible_contact(owner_id));
 create policy content_select_public on public.content_objects for select to authenticated
-  using (visibility = 'public' and not public.is_blocked_by(owner_id));
+  using (visibility = 'public' and not private.is_blocked_by(owner_id));
 create policy content_insert on public.content_objects for insert to authenticated
   with check (owner_id = auth.uid());
 create policy content_update on public.content_objects for update to authenticated
@@ -441,9 +458,9 @@ create policy content_delete on public.content_objects for delete to authenticat
   using (owner_id = auth.uid());
 
 create policy shares_select on public.content_shares for select to authenticated
-  using (owner_id = auth.uid() or grantee_id = auth.uid());
+  using (owner_id = auth.uid() or (grantee_id = auth.uid() and not private.has_blocked(owner_id)));
 create policy shares_insert on public.content_shares for insert to authenticated
-  with check (owner_id = auth.uid() and public.owns_object(object_id));
+  with check (owner_id = auth.uid() and private.owns_object(object_id));
 create policy shares_delete on public.content_shares for delete to authenticated
   using (owner_id = auth.uid());
 
@@ -472,7 +489,11 @@ create policy ai_delete on public.ai_grants for delete to authenticated using (o
 revoke all on all tables in schema public from anon, authenticated;
 revoke all on all functions in schema public from public, anon, authenticated;
 alter default privileges in schema public revoke all on tables from anon, authenticated;
-alter default privileges in schema public revoke execute on functions from public, anon, authenticated;
+alter default privileges in schema public revoke execute on functions from anon, authenticated;
+-- PUBLIC's execute default is global, so this cannot be limited to one schema. Without this line,
+-- every later function would be open to anon until someone remembered to revoke it.
+alter default privileges revoke execute on functions from public;
+revoke all on all functions in schema private from public, anon, authenticated;
 
 grant usage on schema public to authenticated;
 grant select on public.instance_config to authenticated;
@@ -502,10 +523,11 @@ grant execute on function public.request_contact(uuid) to authenticated;
 grant execute on function public.accept_contact(uuid) to authenticated;
 grant execute on function public.block_contact(uuid) to authenticated;
 grant execute on function public.export_my_data() to authenticated;
-grant execute on function public.is_visible_contact(uuid) to authenticated;
-grant execute on function public.is_blocked_by(uuid) to authenticated;
-grant execute on function public.has_share(uuid) to authenticated;
-grant execute on function public.owns_object(uuid) to authenticated;
+grant execute on function private.is_visible_contact(uuid) to authenticated;
+grant execute on function private.is_blocked_by(uuid) to authenticated;
+grant execute on function private.has_blocked(uuid) to authenticated;
+grant execute on function private.has_share(uuid) to authenticated;
+grant execute on function private.owns_object(uuid) to authenticated;
 
 -- storage -------------------------------------------------------------
 -- Objects live at <owner_id>/<uuid>. Storage RLS is separate from table RLS, and reads follow

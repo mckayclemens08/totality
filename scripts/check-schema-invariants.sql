@@ -28,4 +28,8 @@ from tables t
 join pg_attribute a on a.attrelid = t.oid and a.attnum > 0 and not a.attisdropped
 where t.relname not in (select name from allowlist)
   and a.attname in ('title', 'filename', 'file_name', 'name', 'body', 'content', 'caption', 'text')
+union all
+select p.proname, 'anon can execute this function'
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'EXECUTE')
 order by 1, 2;
