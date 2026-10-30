@@ -123,6 +123,7 @@ public struct ReaderHomeView: View {
                     ReaderRow(item: hit.item, snippet: hit.snippet)
                 }
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -141,19 +142,23 @@ public struct ReaderHomeView: View {
                 .font(Typeface.caption)
                 .foregroundStyle(Theme.current(scheme).textSecondary.color)
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             ForEach(model.sections, id: \.title) { section in
-                Section(section.title) {
+                Section {
                     ForEach(section.items) { item in
                         NavigationLink(value: item) {
                             ReaderRow(item: item, snippet: nil)
                         }
                         .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                         .swipeActions {
                             Button("Delete", systemImage: "trash", role: .destructive) {
                                 Task { await model.delete(item) }
                             }
                         }
                     }
+                } header: {
+                    if !section.title.isEmpty { Text(section.title) }
                 }
             }
         }
