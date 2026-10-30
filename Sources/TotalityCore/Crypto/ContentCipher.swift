@@ -1,0 +1,108 @@
+import CryptoKit
+import Foundation
+import Sodium
+
+public enum CryptoError: Error, Equatable {
+    case invalidKey
+    case malformedCiphertext
+    case unsupportedVersion(UInt8)
+    case authenticationFailed
+    case randomFailed
+    case invalidRecoveryKey
+    case invalidSignature
+}
+
+/// What a derived key is for. Each purpose gets its own key, so a metadata key can never open a blob.
+public enum KeyPurpose: String, Sendable {
+    case content
+    case metadata
+}
+
+/// The root of a user's private content. Lives on devices and in the key backup, never on a server.
+public struct ContentRootKey: Sendable, Equatable {
+    public static let byteCount = 32
+    let bytes: Data
+
+    public init(bytes: Data) throws {
+        guard bytes.count == Self.byteCount else { throw CryptoError.invalidKey }
+        self.bytes = bytes
+    }
+
+    public static func generate() throws -> ContentRootKey {
+        guard let random = Sodium().randomBytes.buf(length: byteCount) else { throw CryptoError.randomFailed }
+        return try ContentRootKey(bytes: Data(random))
+    }
+
+    /// The key for one object. Sharing it never reveals the root or any other object's key.
+    public func objectKey(for objectID: UUID, purpose: KeyPurpose) -> ObjectKey {
+        let info = Data("totality/\(purpose.rawValue)/v1".utf8) + objectID.data
+        return ObjectKey(unchecked: hkdf(ikm: bytes, salt: Data(), info: info, length: Self.byteCount))
+    }
+}
+
+public struct ObjectKey: Sendable, Equatable {
+    public static let byteCount = 32
+    let bytes: Data
+
+    init(unchecked bytes: Data) {
+        self.bytes = bytes
+    }
+
+    public init(bytes: Data) throws {
+        guard bytes.count == Self.byteCount else { throw CryptoError.invalidKey }
+        self.bytes = bytes
+    }
+}
+
+/// XChaCha20-Poly1305 for one blob. Layout: version (1) · nonce (24) · ciphertext and tag.
+/// The object ID is authenticated, so the server cannot swap one user's blobs between objects.
+public enum ContentCipher {
+    static let version: UInt8 = 1
+    private static let nonceCount = 24
+
+    public static func seal(_ plaintext: Data, key: ObjectKey, objectID: UUID) throws -> Data {
+        let aead = Sodium().aead.xchacha20poly1305ietf
+        let sealed: (authenticatedCipherText: Bytes, nonce: Aead.XChaCha20Poly1305Ietf.Nonce)? = aead.encrypt(
+            message: Bytes(plaintext),
+            secretKey: Bytes(key.bytes),
+            additionalData: associatedData(objectID)
+        )
+        guard let sealed else { throw CryptoError.authenticationFailed }
+        return Data([version]) + Data(sealed.nonce) + Data(sealed.authenticatedCipherText)
+    }
+
+    public static func open(_ sealed: Data, key: ObjectKey, objectID: UUID) throws -> Data {
+        guard let first = sealed.first else { throw CryptoError.malformedCiphertext }
+        guard first == version else { throw CryptoError.unsupportedVersion(first) }
+        let aead = Sodium().aead.xchacha20poly1305ietf
+        guard sealed.count >= 1 + nonceCount + aead.ABytes else { throw CryptoError.malformedCiphertext }
+        let nonce = sealed.dropFirst().prefix(nonceCount)
+        let body = sealed.dropFirst(1 + nonceCount)
+        guard let plaintext = aead.decrypt(
+            authenticatedCipherText: Bytes(body),
+            secretKey: Bytes(key.bytes),
+            nonce: Bytes(nonce),
+            additionalData: associatedData(objectID)
+        ) else { throw CryptoError.authenticationFailed }
+        return Data(plaintext)
+    }
+
+    private static func associatedData(_ objectID: UUID) -> Bytes {
+        Bytes("totality/blob/v1".utf8) + Bytes(objectID.data)
+    }
+}
+
+func hkdf(ikm: Data, salt: Data, info: Data, length: Int) -> Data {
+    HKDF<SHA256>.deriveKey(
+        inputKeyMaterial: SymmetricKey(data: ikm),
+        salt: salt,
+        info: info,
+        outputByteCount: length
+    ).withUnsafeBytes { Data($0) }
+}
+
+extension UUID {
+    var data: Data {
+        withUnsafeBytes(of: uuid) { Data($0) }
+    }
+}
