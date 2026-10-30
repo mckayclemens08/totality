@@ -38,3 +38,4 @@ supabase/.branches/
 node_modules/
 .venv/
 __pycache__/
+App/Local.xcconfig

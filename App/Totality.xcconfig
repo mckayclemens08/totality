@@ -1,0 +1,2 @@
+// Backend settings live in Local.xcconfig, which is not committed. Copy Local.xcconfig.example.
+#include? "Local.xcconfig"

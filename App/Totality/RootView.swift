@@ -1,4 +1,5 @@
 import SwiftUI
+import TotalityAccount
 import TotalityCore
 import TotalityReader
 import TotalityUI
@@ -9,6 +10,9 @@ struct RootView: View {
     @State private var open: ModuleID?
     @State private var reader: ReaderModel?
     @State private var readerProblem: ReaderProblem?
+    @State private var account = AccountSetup.makeModel()
+    @State private var showingAccount = false
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Group {
@@ -18,6 +22,7 @@ struct RootView: View {
                     if module == .reader { prepareReader() }
                     open = module
                 }
+                .overlay(alignment: .topLeading) { accountButton }
             case .reader:
                 if let reader {
                     ReaderHomeView(model: reader) { open = nil }
@@ -34,6 +39,37 @@ struct RootView: View {
             }
         }
         .animation(Motion.standard, value: open)
+        .onOpenURL { url in
+            guard let account, SignInLink.isCallback(url) else { return }
+            showingAccount = true
+            Task { await account.finishSignIn(from: url) }
+        }
+        .sheet(isPresented: $showingAccount) {
+            if let account {
+                AccountView(model: account) { showingAccount = false }
+            } else {
+                ModuleMessage(
+                    systemImage: "person.crop.circle.badge.exclamationmark",
+                    title: "Sign-in isn't set up",
+                    detail: "This build has no backend settings. Your notes aren't affected."
+                ) { showingAccount = false }
+            }
+        }
+    }
+
+    private var accountButton: some View {
+        Button {
+            showingAccount = true
+        } label: {
+            Image(systemName: "person")
+                .font(Typeface.body)
+                .foregroundStyle(Theme.current(scheme).textPrimary.color)
+                .frame(width: Space.s7, height: Space.s7)
+                .neumorphic(.subtle, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(Space.s4)
+        .accessibilityLabel("Account")
     }
 
     private func prepareReader() {

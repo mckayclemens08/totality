@@ -1,0 +1,4 @@
+// Copy to Local.xcconfig. The key is Supabase's publishable key, never the secret key.
+// The $() stops xcconfig reading the slashes as a comment.
+TOTALITY_BACKEND_URL = https:/$()/your-project.supabase.co
+TOTALITY_BACKEND_KEY = your-publishable-key

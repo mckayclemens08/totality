@@ -1,0 +1,8 @@
+# Only the settings declared here are pushed to the project.
+project_id = "totality"
+
+[auth]
+additional_redirect_urls = ["app.totality.client://auth/callback"]
+
+[auth.email]
+otp_expiry = 600

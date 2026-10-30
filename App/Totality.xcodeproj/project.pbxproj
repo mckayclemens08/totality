@@ -7,12 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1B2C3D4000000000000001A /* TotalityAccount in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000019 /* TotalityAccount */; };
 		A1B2C3D40000000000000016 /* TotalityCore in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000013 /* TotalityCore */; };
 		A1B2C3D40000000000000017 /* TotalityUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000014 /* TotalityUI */; };
 		A1B2C3D40000000000000018 /* TotalityReader in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000015 /* TotalityReader */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A1B2C3D4000000000000001B /* Totality.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Totality.xcconfig; sourceTree = "<group>"; };
 		A1B2C3D40000000000000003 /* Totality.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Totality.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D40000000000000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3D40000000000000011 /* Totality.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Totality.entitlements; sourceTree = "<group>"; };
@@ -30,6 +32,7 @@
 				A1B2C3D40000000000000016 /* TotalityCore in Frameworks */,
 				A1B2C3D40000000000000017 /* TotalityUI in Frameworks */,
 				A1B2C3D40000000000000018 /* TotalityReader in Frameworks */,
+				A1B2C3D4000000000000001A /* TotalityAccount in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -41,6 +44,7 @@
 			children = (
 				A1B2C3D4000000000000000B /* Totality */,
 				A1B2C3D40000000000000010 /* Info.plist */,
+				A1B2C3D4000000000000001B /* Totality.xcconfig */,
 				A1B2C3D40000000000000011 /* Totality.entitlements */,
 				A1B2C3D40000000000000008 /* Products */,
 			);
@@ -77,6 +81,7 @@
 				A1B2C3D40000000000000013 /* TotalityCore */,
 				A1B2C3D40000000000000014 /* TotalityUI */,
 				A1B2C3D40000000000000015 /* TotalityReader */,
+				A1B2C3D40000000000000019 /* TotalityAccount */,
 			);
 			productName = Totality;
 			productReference = A1B2C3D40000000000000003 /* Totality.app */;
@@ -181,6 +186,7 @@
 		};
 		A1B2C3D4000000000000000E /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A1B2C3D4000000000000001B /* Totality.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
 				CODE_SIGN_ENTITLEMENTS = "";
@@ -206,6 +212,7 @@
 		};
 		A1B2C3D4000000000000000F /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A1B2C3D4000000000000001B /* Totality.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
 				CODE_SIGN_ENTITLEMENTS = "";
@@ -260,6 +267,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A1B2C3D40000000000000019 /* TotalityAccount */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TotalityAccount;
+		};
 		A1B2C3D40000000000000013 /* TotalityCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TotalityCore;
