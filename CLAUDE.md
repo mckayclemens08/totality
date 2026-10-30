@@ -94,6 +94,15 @@ Stages A and B cost nothing. Free tiers, open source, hardware already owned. If
 done at $0, it waits or gets redesigned — it does not quietly start a subscription. Flag it, don't
 decide it.
 
+## Running the app
+
+The app target is `App/Totality.xcodeproj`, one target for iPhone and Mac. Set
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` if `xcode-select` points at Command Line Tools.
+The project signs with the owner's free Personal Team, and command-line builds need
+`-allowProvisioningUpdates -allowProvisioningDeviceRegistration`. An ad-hoc Mac build gets `-34018` from
+the Keychain, so the Reader shows its key error by design: never fall back to a weaker keychain to get
+around that. `keychain-access-groups` is pinned in the entitlements so a team change cannot hide the key.
+
 ## Working discipline
 
 - Work lands through pull requests; the PR is the review surface. GitHub may not enforce this on a

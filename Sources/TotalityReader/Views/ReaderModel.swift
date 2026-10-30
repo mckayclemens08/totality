@@ -72,6 +72,10 @@ public final class ReaderModel {
         }
     }
 
+    public func currentItem(_ id: UUID) async throws -> ReaderItem {
+        try await vault.item(id)
+    }
+
     public func loadNote(_ id: UUID) async throws -> String {
         String(decoding: try await vault.body(of: id), as: UTF8.self)
     }
@@ -82,9 +86,10 @@ public final class ReaderModel {
         do {
             try await vault.saveNote(id, title: title, body: body)
             await load()
+            await search()
             return true
         } catch {
-            notice = "Your latest changes aren't saved. Keep this note open and try again."
+            notice = "Your latest changes weren't saved."
             return false
         }
     }

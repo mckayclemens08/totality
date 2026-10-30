@@ -236,6 +236,18 @@ import Testing
         #expect(engine.spoken.last == "Two.")
     }
 
+    @Test("A rename shows in open search results and the item reads back current")
+    func searchResultsFollowARename() async throws {
+        let (model, _) = try model()
+        let note = try #require(await model.newNote())
+        await model.saveNote(note.id, title: "Budget", body: "Numbers")
+        model.query = "budget"
+        await model.search()
+        await model.saveNote(note.id, title: "Budget plan", body: "Numbers")
+        #expect(model.hits.map(\.item.title) == ["Budget plan"])
+        #expect(try await model.currentItem(note.id).title == "Budget plan")
+    }
+
     @Test func deletingAnItemStopsItPlaying() async throws {
         let (model, engine) = try model()
         let note = try #require(await model.newNote())

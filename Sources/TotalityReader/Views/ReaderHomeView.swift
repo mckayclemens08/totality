@@ -4,6 +4,7 @@ import TotalityUI
 /// The Reader's front screen: everything the person keeps, with search and Listen.
 public struct ReaderHomeView: View {
     @Bindable private var model: ReaderModel
+    private let onClose: (() -> Void)?
     @State private var path: [ReaderItem] = []
     @State private var importing = false
     @State private var importCollection: String?
@@ -11,8 +12,9 @@ public struct ReaderHomeView: View {
 
     private static let searchPause = Duration.milliseconds(250)
 
-    public init(model: ReaderModel) {
+    public init(model: ReaderModel, onClose: (() -> Void)? = nil) {
         self.model = model
+        self.onClose = onClose
     }
 
     public var body: some View {
@@ -26,9 +28,12 @@ public struct ReaderHomeView: View {
                 .searchable(text: $model.query, prompt: "Search titles and text")
                 .toolbar { toolbar }
         }
+        .tint(Theme.current(scheme).accent.color)
         .safeAreaInset(edge: .bottom) {
             if model.listen.current != nil {
-                ListenBar(listen: model.listen).padding(Space.s3)
+                ListenBar(listen: model.listen)
+                    .padding(Space.s3)
+                    .background(Theme.current(scheme).bg.color)
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
@@ -57,6 +62,11 @@ public struct ReaderHomeView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        if let onClose {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Home", systemImage: "circle.hexagongrid", action: onClose)
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 Button("New note", systemImage: "square.and.pencil") { createNote() }
@@ -99,7 +109,7 @@ public struct ReaderHomeView: View {
             ReaderMessage(
                 systemImage: "book",
                 title: "Nothing here yet",
-                detail: "Write a note, or import a PDF or text file. Everything is encrypted on this device before it's stored."
+                detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
             )
         case .ready:
             library
@@ -115,7 +125,9 @@ public struct ReaderHomeView: View {
                     ReaderRow(item: hit.item, snippet: hit.snippet)
                 }
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
     }
@@ -128,22 +140,31 @@ public struct ReaderHomeView: View {
                     .foregroundStyle(Theme.current(scheme).danger.color)
                     .listRowBackground(Color.clear)
             }
+            Label("Encrypted here. It can't be recovered on a new device yet.", systemImage: "iphone")
+                .font(Typeface.caption)
+                .foregroundStyle(Theme.current(scheme).textSecondary.color)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             ForEach(model.sections, id: \.title) { section in
-                Section(section.title) {
+                Section {
                     ForEach(section.items) { item in
                         NavigationLink(value: item) {
                             ReaderRow(item: item, snippet: nil)
                         }
                         .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                         .swipeActions {
                             Button("Delete", systemImage: "trash", role: .destructive) {
                                 Task { await model.delete(item) }
                             }
                         }
                     }
+                } header: {
+                    if !section.title.isEmpty { Text(section.title) }
                 }
             }
         }
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
     }
 

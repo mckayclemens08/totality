@@ -27,7 +27,7 @@ import TotalityUI
             "note.text", "doc", "book", "magnifyingglass", "exclamationmark.triangle", "lock.slash",
             "doc.questionmark", "headphones", "plus", "square.and.pencil", "square.and.arrow.down",
             "books.vertical", "gobackward", "goforward", "play.fill", "pause.fill", "xmark",
-            "person.wave.2", "trash", "text.badge.plus",
+            "person.wave.2", "trash", "text.badge.plus", "circle.hexagongrid", "iphone",
         ]
         for name in names {
             #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "\(name)")
@@ -62,7 +62,7 @@ import TotalityUI
             let empty = ReaderMessage(
                 systemImage: "book",
                 title: "Nothing here yet",
-                detail: "Write a note, or import a PDF or text file. Everything is encrypted on this device before it's stored."
+                detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
             )
             try write(empty, scheme: scheme, name: "reader-empty-\(label).png", to: directory)
         }
