@@ -52,6 +52,12 @@ public struct ObjectKey: Sendable, Equatable {
         guard bytes.count == Self.byteCount else { throw CryptoError.invalidKey }
         self.bytes = bytes
     }
+
+    /// A random key tied to no root key, for a sealed copy that is handed to someone else.
+    public static func generate() throws -> ObjectKey {
+        guard let random = Sodium().randomBytes.buf(length: byteCount) else { throw CryptoError.randomFailed }
+        return ObjectKey(unchecked: Data(random))
+    }
 }
 
 /// XChaCha20-Poly1305 for one blob. Layout: version (1) · nonce (24) · ciphertext and tag.

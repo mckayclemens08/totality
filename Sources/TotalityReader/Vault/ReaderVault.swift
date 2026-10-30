@@ -14,7 +14,8 @@ public struct ReaderSearchHit: Sendable, Equatable, Identifiable {
     public var id: UUID { item.id }
 }
 
-/// What a grantee receives. See "Sharing an item" in docs/module-contracts.md.
+/// A snapshot for one grantee, sealed under its own random key. See "Sharing an item" in
+/// docs/module-contracts.md.
 public struct ReaderShare: Sendable, Equatable {
     public struct Header: Codable, Sendable, Equatable {
         public let kind: ReaderItem.Kind
@@ -170,9 +171,11 @@ public actor ReaderVault {
         return (start > text.startIndex ? "…" : "") + excerpt + (end < text.endIndex ? "…" : "")
     }
 
+    /// Never wraps a key derived from the root: a grantee who kept it could read every later edit
+    /// and forge a body the owner would accept.
     public func share(_ id: UUID, with recipient: IdentityBundle) throws -> ReaderShare {
         let item = try item(id)
-        let key = rootKey.objectKey(for: id, purpose: .content)
+        let key = try ObjectKey.generate()
         let header = ReaderShare.Header(kind: item.kind, title: item.title, mime: item.mime)
         return ReaderShare(
             objectID: id,

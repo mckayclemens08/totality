@@ -258,6 +258,40 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         #expect(throws: CryptoError.authenticationFailed) { try ContentCipher.open(otherBody, key: key, objectID: other.id) }
     }
 
+    @Test("A share key opens the snapshot only, so ending a share protects later edits")
+    func shareKeyOpensNoLiveRevision() async throws {
+        let (owner, store, note) = try await sharedNote()
+        let user2 = try IdentityKeys.generate()
+        let share = try await owner.share(note.id, with: user2.bundle())
+        let key = try user2.open(share.wrappedKey)
+        let bodyName = "\(note.id.uuidString.lowercased()).body"
+
+        let current = try #require(try store.read(bodyName))
+        #expect(throws: CryptoError.authenticationFailed) { try ContentCipher.open(current, key: key, objectID: note.id) }
+
+        try await owner.saveNote(note.id, title: "Reading list", body: "Written after the share ended")
+        let later = try #require(try store.read(bodyName))
+        #expect(throws: CryptoError.authenticationFailed) { try ContentCipher.open(later, key: key, objectID: note.id) }
+    }
+
+    @Test("A former grantee cannot forge a body the owner would accept")
+    func shareKeyCannotForgeTheOwnersBody() async throws {
+        let (owner, store, note) = try await sharedNote()
+        let user2 = try IdentityKeys.generate()
+        let share = try await owner.share(note.id, with: user2.bundle())
+        let forged = try ContentCipher.seal(Data("Forged".utf8), key: user2.open(share.wrappedKey), objectID: note.id)
+        try store.write(forged, as: "\(note.id.uuidString.lowercased()).body")
+        await #expect(throws: CryptoError.authenticationFailed) { try await owner.body(of: note.id) }
+    }
+
+    @Test func eachShareHasItsOwnKey() async throws {
+        let (owner, _, note) = try await sharedNote()
+        let user2 = try IdentityKeys.generate()
+        let first = try await owner.share(note.id, with: user2.bundle())
+        let second = try await owner.share(note.id, with: user2.bundle())
+        #expect(try user2.open(first.wrappedKey) != user2.open(second.wrappedKey))
+    }
+
     @Test func sharingRefusesAForgedBundle() async throws {
         let (owner, _, note) = try await sharedNote()
         let genuine = try IdentityKeys.generate().bundle()
