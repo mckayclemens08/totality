@@ -79,7 +79,6 @@ public enum Motion {
     public static let instant = Animation.easeOut(duration: 0.12)
     public static let quick = Animation.spring(response: 0.3, dampingFraction: 0.8)
     public static let standard = Animation.spring(response: 0.4, dampingFraction: 0.82)
-    public static let drift = Animation.easeInOut(duration: 0.6)
 }
 
 public enum Elevation: Sendable {
