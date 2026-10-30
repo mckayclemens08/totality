@@ -1,8 +1,8 @@
 # Totality — Phase 0 Architecture Proposal
 
-**Status:** DRAFT — awaiting owner review and independent-model audit against Brief §2, §6, §11, §14, §15.
+**Status:** Building. The owner waived the independent-model audit on 2026-10-30 ("Waive it, start building"), so the design has had no second-model review. Open decisions in §12 still stand.
 **Author:** Claude Code (builder) · **Date:** 2026-10-30 · **Source spec:** `docs/founding-brief-v6.pdf` (v6, 2026-10-28)
-**Rule:** No feature code is written until this document is approved. Brief §18.
+**Rule:** Brief §18 required approval before feature code. The owner waived the independent review above.
 
 ---
 
@@ -311,6 +311,8 @@ create table audit_log (
 
 ### 5.3 RLS policy sketch
 
+The shipped schema and policies are in `supabase/migrations/`, and they replace §5.2 and this sketch where they differ. Additions: `instance_config` (the Matrix server name, unset until the domain is decided), `content_shares` (one-to-one sharing with a key sealed to the grantee, which works before Matrix exists), and `reports` (brief §6 safety hook).
+
 The pattern, applied to every table:
 
 ```sql
@@ -319,17 +321,10 @@ alter table content_objects enable row level security;
 create policy co_select_own on content_objects
   for select using (owner_id = auth.uid());
 
+-- is_visible_contact is SECURITY DEFINER. A plain subquery on contacts runs as the caller,
+-- cannot see the owner's row, and silently denies every contact. Found by the two-user tests.
 create policy co_select_contacts on content_objects
-  for select using (
-    visibility = 'contacts'
-    and exists (
-      select 1 from contacts c
-      where c.owner_id = content_objects.owner_id
-        and c.peer_id  = auth.uid()
-        and c.state    = 'accepted'
-        and c.can_see_private_posts
-    )
-  );
+  for select using (visibility = 'contacts' and is_visible_contact(owner_id));
 
 create policy co_select_public on content_objects
   for select using (visibility = 'public');
@@ -619,4 +614,4 @@ The proposal needs a domain for handles, MXIDs, and `.well-known`, and it is har
 
 ---
 
-*End of proposal. Nothing in this document is built until it is approved.*
+*End of proposal.*

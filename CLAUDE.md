@@ -7,8 +7,10 @@ Architecture: `docs/phase-0-architecture-proposal.md`. Contracts: `docs/module-c
 
 ## The gate
 
-No feature code exists until the Phase 0 proposal is approved by the owner *and* by an independent
-model review. If you are asked to build a feature and that approval has not happened, say so and stop.
+The owner waived the independent model review on 2026-10-30 ("Waive it, start building"), so Phase 0
+work may proceed against the proposal. The waiver covers that one review, nothing else: the build order,
+the two-user test, and security review of anything touching auth, keys, or user data all still apply.
+Do not start Phase 1 until Phase 0 passes the two-user test.
 
 ## Non-negotiables
 
