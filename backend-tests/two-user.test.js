@@ -221,10 +221,17 @@ describe('forgery attempts', () => {
     await redeem(u2, await invite(u1))
     await assert.rejects(as(db, u1, (q) => q(`update public.contacts set state = 'pending_in'`)), refused)
   })
-  test('you cannot mark a contact key as verified from SQL', async () => {
+  test('marking a key verified needs the key and only touches your own row', async () => {
     const [u1, u2] = await trio()
     await redeem(u2, await invite(u1))
-    await assert.rejects(as(db, u1, (q) => q(`update public.contacts set key_verified_at = now()`)), refused)
+    const key = `'\\x${'ab'.repeat(32)}'`
+    await assert.rejects(as(db, u1, (q) => q(`update public.contacts set key_verified_at = now()`)), /check constraint/)
+    await as(db, u1, (q) => q(`update public.contacts set key_verified_at = now(), verified_signing_pub = ${key}`))
+    const rows = await db.query(`select owner_id from public.contacts where key_verified_at is not null and owner_id in ($1, $2)`, [u1.id, u2.id])
+    assert.deepEqual(rows.rows, [{ owner_id: u1.id }])
+    const other = await as(db, u1, (q) => q(
+      `update public.contacts set key_verified_at = now(), verified_signing_pub = ${key} where owner_id = $1 returning id`, [u2.id]))
+    assert.equal(other.length, 0)
   })
   test('you cannot create or move a row into someone else\'s name', async () => {
     const [u1, u2] = await trio()

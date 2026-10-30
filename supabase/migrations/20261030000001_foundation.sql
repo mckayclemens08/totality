@@ -81,8 +81,11 @@ create table public.contacts (
   state                 public.contact_state_t not null default 'pending_out',
   can_see_private_posts boolean not null default false,
   key_verified_at       timestamptz,
+  -- The exact key that was verified, so a later key change shows as unverified again.
+  verified_signing_pub  bytea check (octet_length(verified_signing_pub) = 32),
   created_at            timestamptz not null default now(),
   unique (owner_id, peer_id),
+  check ((key_verified_at is null) = (verified_signing_pub is null)),
   check (peer_id is not null or peer_mxid is not null),
   check (peer_id is distinct from owner_id)
 );
@@ -477,10 +480,10 @@ grant select on public.profiles to authenticated;
 grant update (display_name, bio, avatar_key, visibility) on public.profiles to authenticated;
 grant select, insert on public.identity_keys to authenticated;
 grant select, insert (owner_id, name, platform, device_pub, mx_device_id), delete on public.devices to authenticated;
-grant update (name, mx_device_id, last_seen_at) on public.devices to authenticated;
+grant update (name, mx_device_id, last_seen_at, verified_at) on public.devices to authenticated;
 grant select, insert (owner_id, device_id, apns_token), delete on public.push_tokens to authenticated;
 grant select, delete on public.contacts to authenticated;
-grant update (can_see_private_posts) on public.contacts to authenticated;
+grant update (can_see_private_posts, key_verified_at, verified_signing_pub) on public.contacts to authenticated;
 grant select, insert (owner_id, email, expires_at), delete on public.invites to authenticated;
 grant select, insert, delete on public.content_objects to authenticated;
 grant update (visibility, storage_key, byte_size, content_hash, key_ref, meta_cipher, meta_plain, room_id)
