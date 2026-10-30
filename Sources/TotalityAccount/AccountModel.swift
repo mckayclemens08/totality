@@ -36,6 +36,7 @@ public final class AccountModel {
             phase = .signedIn(username: username)
             await finishSigningIn()
         } else {
+            forgetProfile()
             phase = .signedOut
         }
     }
@@ -47,6 +48,7 @@ public final class AccountModel {
         }
         await run {
             try await service.signIn(username: name, password: password)
+            forgetProfile()
             phase = .signedIn(username: name.value)
         }
         if case .signedIn = phase { await finishSigningIn() }
@@ -72,6 +74,7 @@ public final class AccountModel {
         }
         await run {
             try await service.signUp(username: name, password: password)
+            forgetProfile()
             phase = .signedIn(username: name.value)
         }
         if case .signedIn = phase { await finishSigningIn() }
@@ -82,19 +85,23 @@ public final class AccountModel {
             let result = try await service.signOut()
             phase = .signedOut
             deviceRegistered = false
-            profile = nil
-            profileFailed = false
+            forgetProfile()
             if result == .serverNotReached {
                 notice = "You're signed out on this device, but the server couldn't be reached to end the session."
             }
         }
     }
 
+    /// The account can change while this waits, and an answer for the old one must not land.
     public func loadProfile() async {
+        let requestedFor = phase
         do {
-            profile = try await service.loadProfile()
+            let loaded = try await service.loadProfile()
+            guard phase == requestedFor else { return }
+            profile = loaded
             profileFailed = false
         } catch {
+            guard phase == requestedFor else { return }
             profileFailed = profile == nil
         }
     }
@@ -131,6 +138,11 @@ public final class AccountModel {
 
     public func removePhoto() async {
         await run { profile?.avatarURL = try await service.updatePhoto(nil) }
+    }
+
+    private func forgetProfile() {
+        profile = nil
+        profileFailed = false
     }
 
     private static func cleaned(_ text: String) -> String? {

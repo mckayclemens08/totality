@@ -147,8 +147,9 @@ public struct SupabaseAccountService: AccountService {
         }
     }
 
-    /// Photos get a new name each time, so a cached old one can't show. A failed delete only leaves an
-    /// unused file behind, and the swap has already worked, so it doesn't count as failing.
+    /// Photos get a new name each time, so a cached old one can't show. Removing has to really remove
+    /// the file, so that goes first and a failure counts. When replacing, the swap has already worked
+    /// by then, and a failed delete only leaves an unused file behind.
     public func updatePhoto(_ jpeg: Data?) async throws -> URL? {
         try await mapErrors {
             let owner = try await client.auth.session.user.id
@@ -158,10 +159,12 @@ public struct SupabaseAccountService: AccountService {
                 let path = "\(owner.uuidString.lowercased())/\(UUID().uuidString.lowercased()).jpg"
                 _ = try await photos.upload(path, data: jpeg, options: FileOptions(contentType: "image/jpeg"))
                 key = path
+            } else if let previous {
+                _ = try await photos.remove(paths: [previous])
             }
             let edit: [String: AnyJSON] = ["avatar_key": key.map(AnyJSON.string) ?? .null]
             try await client.from("profiles").update(edit).eq("id", value: owner.uuidString).execute()
-            if let previous { _ = try? await photos.remove(paths: [previous]) }
+            if jpeg != nil, let previous { _ = try? await photos.remove(paths: [previous]) }
             return try key.map(photoURL)
         }
     }

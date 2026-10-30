@@ -131,6 +131,8 @@ describe('profiles', () => {
     await edit(user1, 'avatar_key = $2', [`${user1.id}/${randomUUID()}.jpg`])
     await assert.rejects(edit(user1, 'avatar_key = $2', [`${user2.id}/${randomUUID()}.jpg`]), /avatar/)
     await assert.rejects(edit(user1, 'avatar_key = $2', ['https://evil.example/tracker.jpg']), /avatar/)
+    await assert.rejects(edit(user1, 'avatar_key = $2', [`${user1.id}/../${user2.id}/${randomUUID()}.jpg`]), /avatar/)
+    await assert.rejects(edit(user1, 'avatar_key = $2', [`${user1.id}/photo.svg`]), /avatar/)
   })
 
   test('photos are public, JPEG only, and capped in size', async () => {

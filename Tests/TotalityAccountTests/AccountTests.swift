@@ -27,6 +27,8 @@ actor FakeAccountService: AccountService {
     var profileError: AccountError?
     var saveError: AccountError?
     var photoError: AccountError?
+    private var holding = false
+    private var heldLoad: CheckedContinuation<Void, Never>?
     private(set) var stored: Profile?
     private(set) var photos: [Data?] = []
     private(set) var signIns: [String] = []
@@ -68,7 +70,23 @@ actor FakeAccountService: AccountService {
         photoError = photo
     }
 
+    func endSession() { username = nil }
+    func holdProfile() { holding = true }
+    func waitForHeldLoad() async {
+        while heldLoad == nil { await Task.yield() }
+    }
+    func releaseProfile() {
+        holding = false
+        heldLoad?.resume()
+        heldLoad = nil
+    }
+
     func loadProfile() async throws -> Profile {
+        if holding {
+            let current = Profile(username: username ?? "")
+            await withCheckedContinuation { heldLoad = $0 }
+            return current
+        }
         if let profileError { throw profileError }
         if let stored { return stored }
         let made = Profile(username: username ?? "")
@@ -427,6 +445,44 @@ actor FakeAccountService: AccountService {
         await model.removePhoto()
         #expect(model.profile?.avatarURL == nil)
         #expect(await service.photos.last == .some(nil))
+    }
+
+    @Test("A session that's gone takes its profile with it")
+    func anEndedSessionForgetsTheProfile() async {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await model.load()
+        #expect(model.profile != nil)
+        await service.endSession()
+        await model.load()
+        #expect(model.phase == .signedOut)
+        #expect(model.profile == nil)
+    }
+
+    @Test("The next account never shows the last one's profile, even if its own won't load")
+    func nextAccountStartsClean() async {
+        let service = FakeAccountService(username: "first_user")
+        let model = AccountModel(service: service)
+        await model.load()
+        await service.failProfile(load: .offline)
+        await model.signIn(username: "second_user", password: password)
+        #expect(model.phase == .signedIn(username: "second_user"))
+        #expect(model.profile == nil)
+        #expect(model.profileFailed)
+    }
+
+    @Test("A profile that arrives after signing out is dropped")
+    func lateProfileIsDropped() async {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await service.holdProfile()
+        let loading = Task { await model.load() }
+        await service.waitForHeldLoad()
+        await model.signOut()
+        await service.releaseProfile()
+        await loading.value
+        #expect(model.phase == .signedOut)
+        #expect(model.profile == nil)
     }
 
     @Test func signingOutForgetsTheProfile() async {
