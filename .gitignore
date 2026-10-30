@@ -1,0 +1,40 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Xcode / Swift
+build/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+*.moved-aside
+.swiftpm/
+Packages/
+.build/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Secrets — nothing in this project ever lands in the repo (CLAUDE.md rule 4)
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+secrets/
+**/Secrets.swift
+supabase/.temp/
+supabase/.branches/
+
+# Tooling
+node_modules/
+.venv/
+__pycache__/
