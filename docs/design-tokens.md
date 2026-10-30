@@ -27,8 +27,8 @@ large text 3:1.** Every ratio below was computed, not estimated. The look never 
 | `textPrimary` | `#15181D` | body, titles | **15.5:1** ✓ AA/AAA |
 | `textSecondary` | `#555C68` | captions, metadata | **5.9:1** ✓ AA |
 | `textTertiary` | `#7D8592` | disabled, placeholder | 3.2:1 — large text / non-text only |
-| `accent` | `#A84A16` | the one saturated colour, used sparingly | **5.0:1** ✓ AA |
-| `accentOn` | `#FFFFFF` | text on an accent fill | **5.7:1** vs accent ✓ AA |
+| `accent` | `#1F5FBF` | the one saturated colour, used sparingly | **5.3:1** ✓ AA |
+| `accentOn` | `#FFFFFF` | text on an accent fill | **6.1:1** vs accent ✓ AA |
 | `danger` | `#B3261E` | destructive, key-loss warnings | 5.7:1 ✓ AA |
 | `success` | `#1E6F4C` | verified contact, synced | 5.3:1 ✓ AA |
 
@@ -44,14 +44,14 @@ large text 3:1.** Every ratio below was computed, not estimated. The look never 
 | `textPrimary` | `#EFF1F4` | body, titles | **13.8:1** ✓ AA/AAA |
 | `textSecondary` | `#A3ABB7` | captions, metadata | **6.7:1** ✓ AA |
 | `textTertiary` | `#737B87` | disabled, placeholder | 3.7:1 — large text / non-text only |
-| `accent` | `#E8833F` | lightened for dark surfaces | **5.8:1** ✓ AA |
-| `accentOn` | `#1A1207` | text on an accent fill | **6.8:1** vs accent ✓ AA |
+| `accent` | `#5E9EEB` | lightened for dark surfaces | **5.6:1** ✓ AA |
+| `accentOn` | `#07131F` | text on an accent fill | **6.7:1** vs accent ✓ AA |
 | `danger` | `#F2645A` | destructive | 5.0:1 ✓ AA |
 | `success` | `#4FC08D` | verified, synced | 6.9:1 ✓ AA |
 
-> **Accent is the most provisional token here.** `#A84A16` (burnt ochre) is chosen to be
-> *deliberately not* the default blue/violet every AI-built app lands on, and to sit warm against
-> cool grey. Expect the Figma file to replace it. Changing it is one line in two places.
+> **Accent is the most provisional token here.** The owner chose blue on 2026-10-30, replacing the
+> original burnt ochre. The exact shades are placeholders until the Figma file arrives. Changing them
+> is one line in two places.
 
 ## Shadow pair
 
