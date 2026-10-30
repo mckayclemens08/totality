@@ -48,9 +48,9 @@ export async function newDatabase({ configured = true } = {}) {
   return db
 }
 
-export async function newUser(db, handle) {
+export async function newUser(db, handle, username = handle ?? `u_${randomUUID().slice(0, 8)}`) {
   const id = randomUUID()
-  const email = `${handle}@example.test`
+  const email = `${username}@totality.invalid`
   await db.query('insert into auth.users (id, email) values ($1, $2)', [id, email])
   const user = { id, email, handle }
   if (handle) await as(db, user, (q) => q('select public.claim_handle($1)', [handle]))

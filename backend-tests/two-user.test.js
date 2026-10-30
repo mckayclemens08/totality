@@ -230,12 +230,12 @@ describe('forgery attempts', () => {
   })
   test('you cannot claim a second handle or insert a profile by hand', async () => {
     const [u1] = await trio()
-    await assert.rejects(as(db, u1, (q) => q(`select public.claim_handle('second_handle')`)), /duplicate key/)
+    await assert.rejects(as(db, u1, (q) => q(`select public.claim_handle($1)`, [u1.handle])), /duplicate key/)
     await assert.rejects(as(db, u1, (q) => q(
       `insert into public.profiles (id, handle, mxid) values ($1, 'forged', '@forged:x')`, [u1.id])), refused)
   })
   test('handles must be lowercase', async () => {
-    const u = await newUser(db, null)
+    const u = await newUser(db, null, 'mckay')
     await assert.rejects(as(db, u, (q) => q(`select public.claim_handle('McKay')`)), /check constraint/)
   })
   test('you cannot write a contact row or its state directly', async () => {

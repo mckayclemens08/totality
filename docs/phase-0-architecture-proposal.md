@@ -131,7 +131,7 @@ Handle + email. Phone optional, never identity, never required.
 
 ### 4.2 Credential
 
-Supabase Auth with **email magic link as primary**. Passkeys are added later. No passwords anywhere, per §11. "OAuth only" in §11 is underspecified for a first-party app that *is* the identity provider, because there is no third party to delegate to. Magic link satisfies the intent (no password ever stored or typed) without depending on Google/Apple sign-in, which would contradict §14's portability goal.
+Supabase Auth with **username and password**, decided by the owner on 2026-10-30 so Totality sends nobody an outside email. This replaces the email magic link planned here and departs from the brief's no-password rule. Each username maps to a reserved `name@totality.invalid` address, because Supabase Auth needs one. See §11-N for what this gives up. Passkeys need a domain and the paid Apple program, so they are not available yet.
 
 Passkeys are not primary because Supabase's support is an experimental beta (announced May 2026) and its Swift API is gated as experimental. Native passkeys also need Associated Domains, which could not be confirmed on a free Apple team (§11-K).
 
@@ -164,7 +164,7 @@ The user signs in once to Supabase. The client then:
 2. Exchanges it at the Matrix homeserver via JWT login. **Unverified:** the only documentation found describes statically configured keys, not a JWKS URL, so expect to configure Supabase's public signing key by hand. Spike this at step 0.4 before depending on it.
 3. (Phase 2) Signs atproto records with a device-held signing key registered to the DID; no session exchange needed because atproto auth is key-based.
 
-One sign-in, three planes, no password in any of them.
+One sign-in, three planes. The password reaches the account server and nothing else.
 
 ---
 
@@ -492,7 +492,7 @@ Phase 0 ships the registry and these contracts, with Reader and Messages as the 
 ### 9.1 Invite flow
 
 1. Owner creates an invite → row in `invites`, link `https://totality.<domain>/i/<code>`.
-2. Invitee opens it, signs up with an email magic link, picks a handle.
+2. Invitee opens it, signs up with a username and password. The username is their handle.
 3. On signup the server creates: Supabase user, Matrix account (JWT-provisioned), `profiles` row, `identity_keys` bundle (generated client-side, public halves uploaded).
 4. Invitee is shown the recovery key and must confirm it.
 5. A `contacts` row pair is created in `accepted` state on both sides (the invite *is* the consent), `key_verified_at` null.
@@ -593,7 +593,13 @@ The proposal needs a domain for handles, MXIDs, and `.well-known`, and it is har
 ### M. **Decision needed — the brief's editor is web-only.** §3 names TipTap + Yjs for documents.
 TipTap runs in a browser, so it has no place in SwiftUI short of hosting a web view inside the Reader. Yjs matters only for documents edited by several people, which arrive with Matrix. The Reader therefore ships plain-text notes first and treats documents as unbuilt. Options when rich documents are next: a native editor on `AttributedString` with Y-CRDT bindings (not yet evaluated), or a web view hosting TipTap. Recommendation: stay native and decide after the Figma file, because the editor's design drives the choice. Owner's call.
 
----
+### N. **Sign-in is a username and password, with no recovery.**
+The owner chose this on 2026-10-30. It removes the outside email, the custom URL scheme, and the pre-registered password risk that came with email links. The database refuses any account that isn't a valid username at `totality.invalid`, and refuses to change one. What it gives up:
+
+1. **A forgotten password has no self-service reset.** The owner can set a new one from the Supabase dashboard. That works for a small circle and does not scale, and at scale it means whoever runs the server can take over an account's login. Private content stays sealed either way, because keys are not tied to the login.
+2. **The server receives the password.** It travels over HTTPS and is stored as a hash, but Supabase handles it in the clear in between. So a password must never unlock or derive a content key.
+3. **Guessing is limited per IP address, not per account.** Supabase's leaked-password check needs the paid plan. The 12-character minimum is the main defence.
+4. **Public sign-up is open.** Anyone holding the app's public key can create an account. Row-level rules still keep them out of other people's data. Close it or add a captcha before the app leaves the owner's circle.
 
 ## 12. What I need from the owner to proceed
 

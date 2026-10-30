@@ -8,9 +8,11 @@ let package = Package(
         .library(name: "TotalityCore", targets: ["TotalityCore"]),
         .library(name: "TotalityUI", targets: ["TotalityUI"]),
         .library(name: "TotalityReader", targets: ["TotalityReader"]),
+        .library(name: "TotalityAccount", targets: ["TotalityAccount"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.9.1"),
+        .package(url: "https://github.com/supabase/supabase-swift.git", exact: "2.49.0"),
     ],
     targets: [
         .target(name: "TotalityCore", dependencies: [
@@ -18,8 +20,13 @@ let package = Package(
         ]),
         .target(name: "TotalityUI", dependencies: ["TotalityCore"]),
         .target(name: "TotalityReader", dependencies: ["TotalityCore", "TotalityUI"]),
+        .target(name: "TotalityAccount", dependencies: [
+            "TotalityCore", "TotalityUI",
+            .product(name: "Supabase", package: "supabase-swift"),
+        ]),
         .testTarget(name: "TotalityCoreTests", dependencies: ["TotalityCore"]),
         .testTarget(name: "TotalityUITests", dependencies: ["TotalityUI"]),
         .testTarget(name: "TotalityReaderTests", dependencies: ["TotalityReader"]),
+        .testTarget(name: "TotalityAccountTests", dependencies: ["TotalityAccount"]),
     ]
 )

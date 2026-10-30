@@ -1,0 +1,11 @@
+# Only the settings declared here are pushed to the project.
+project_id = "totality"
+
+[auth]
+additional_redirect_urls = []
+minimum_password_length = 12
+
+# Sign-in is a username and password. Accounts use a reserved address that can't receive mail, so
+# nothing can be confirmed by email and nothing is sent.
+[auth.email]
+enable_confirmations = false
