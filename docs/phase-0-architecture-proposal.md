@@ -311,7 +311,7 @@ create table audit_log (
 
 ### 5.3 RLS policy sketch
 
-The shipped policies are in `supabase/migrations/`, and they replace this sketch where the two differ.
+The shipped schema and policies are in `supabase/migrations/`, and they replace §5.2 and this sketch where they differ. Additions: `instance_config` (the Matrix server name, unset until the domain is decided), `content_shares` (one-to-one sharing with a key sealed to the grantee, which works before Matrix exists), and `reports` (brief §6 safety hook).
 
 The pattern, applied to every table:
 
