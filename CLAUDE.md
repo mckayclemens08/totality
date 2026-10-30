@@ -10,7 +10,11 @@ Architecture: `docs/phase-0-architecture-proposal.md`. Contracts: `docs/module-c
 The owner waived the independent model review on 2026-10-30 ("Waive it, start building"), so Phase 0
 work may proceed against the proposal. The waiver covers that one review, nothing else: the build order,
 the two-user test, and security review of anything touching auth, keys, or user data all still apply.
-Do not start Phase 1 until Phase 0 passes the two-user test.
+
+The owner overrode the Phase 1 gate on 2026-10-30 ("Override, start Phase 1"), so Phase 1 is being built
+before Phase 0 passes the two-user test. The override covers starting Phase 1 modules, nothing else:
+Phase 2 stays closed, the remaining Phase 0 work still has to land, and no module is done until it meets
+the definition of done below, which needs the app target, a real device, and a real backend.
 
 ## Non-negotiables
 
