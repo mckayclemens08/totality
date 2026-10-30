@@ -8,9 +8,13 @@ public final class AccountModel {
     public enum Phase: Equatable {
         case loading
         case signedOut
-        case awaitingLink(email: String)
-        case signedIn(email: String)
+        case signedIn(username: String)
     }
+
+    /// Matches `minimum_password_length` in supabase/config.toml.
+    public static let minimumPasswordLength = 12
+    /// The server's hash only reads this many bytes, and it refuses anything longer.
+    private static let maximumPasswordBytes = 72
 
     public private(set) var phase = Phase.loading
     public private(set) var isWorking = false
@@ -25,48 +29,49 @@ public final class AccountModel {
     }
 
     public func load() async {
-        if let email = await service.currentEmail() {
-            phase = .signedIn(email: email)
+        if let username = await service.currentUsername() {
+            phase = .signedIn(username: username)
             await registerDevice()
-        } else if case .awaitingLink = phase {
-            return
         } else {
             phase = .signedOut
         }
     }
 
-    public func sendLink(to email: String) async {
-        let cleaned = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard Self.looksLikeEmail(cleaned) else {
-            notice = "Enter your full email address."
+    public func signIn(username: String, password: String) async {
+        guard let name = Username(username), !password.isEmpty else {
+            notice = "Enter your username and password."
             return
         }
         await run {
-            try await service.requestLink(email: cleaned)
-            phase = .awaitingLink(email: cleaned)
-        }
-    }
-
-    /// The phase can't be relied on here: iOS may close the app while the person is in Mail. PKCE is
-    /// what decides, because only the device holding the matching secret can redeem a link.
-    public func finishSignIn(from url: URL) async {
-        guard SignInLink.isCallback(url) else { return }
-        var requested: String?
-        switch phase {
-        case .signedIn: return
-        case .awaitingLink(let email): requested = email
-        case .loading, .signedOut: break
-        }
-        await run {
-            let confirmed = try await service.finishSignIn(from: url)
-            phase = .signedIn(email: confirmed ?? requested ?? "your account")
+            try await service.signIn(username: name, password: password)
+            phase = .signedIn(username: name.value)
         }
         if case .signedIn = phase { await registerDevice() }
     }
 
-    public func startOver() {
-        phase = .signedOut
-        notice = nil
+    /// Passwords stay out of the model. A typo here can't be fixed later, so it's typed twice.
+    public func signUp(username: String, password: String, confirmation: String) async {
+        guard let name = Username(username) else {
+            notice = "Use 3 to 24 letters, numbers, or underscores for your username."
+            return
+        }
+        guard password.unicodeScalars.count >= Self.minimumPasswordLength else {
+            notice = "Use at least \(Self.minimumPasswordLength) characters for your password."
+            return
+        }
+        guard password.utf8.count <= Self.maximumPasswordBytes else {
+            notice = "That password is too long. Use \(Self.maximumPasswordBytes) characters or fewer."
+            return
+        }
+        guard password == confirmation else {
+            notice = "Those passwords don't match."
+            return
+        }
+        await run {
+            try await service.signUp(username: name, password: password)
+            phase = .signedIn(username: name.value)
+        }
+        if case .signedIn = phase { await registerDevice() }
     }
 
     public func signOut() async {
@@ -100,11 +105,5 @@ public final class AccountModel {
         } catch {
             notice = AccountError.failed.message
         }
-    }
-
-    private static func looksLikeEmail(_ text: String) -> Bool {
-        let parts = text.split(separator: "@", omittingEmptySubsequences: false)
-        return parts.count == 2 && !parts[0].isEmpty && parts[1].contains(".")
-            && !parts[1].hasPrefix(".") && !parts[1].hasSuffix(".") && !text.contains(where: \.isWhitespace)
     }
 }

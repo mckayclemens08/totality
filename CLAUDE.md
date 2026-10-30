@@ -25,7 +25,11 @@ These fail review, full stop. There is no "just for now" version of any of them.
    a table without running it. Account and infrastructure tables are on an owner-approved allowlist.
 2. **Private content is encrypted client-side before upload.** A plaintext content column on a
    private entity is an automatic rejection. Filenames and captions count as content.
-3. **No passwords, ever.** Email magic link now, passkeys later. Nothing stores or transmits a password.
+3. **Passwords sign you in and do nothing else.** The owner replaced email links with username and
+   password on 2026-10-30 ("I don't want to send them an external email ... change the sign up/sign in
+   to username/password only"). The password goes only to the account server over HTTPS, which keeps a
+   hash. The app never stores or logs it. A password must never unlock or derive a content key,
+   because the server receives it. Totality sends no sign-in email.
 4. **No secrets in the repo.** Not in code, not in tests, not in history, not in a commented-out line.
    Environment and GitHub Secrets only. Assume anything committed is permanent and public.
 5. **Encryption labels must be literally true.** "End-to-end encrypted" in the UI only where the
@@ -114,7 +118,7 @@ around that. `keychain-access-groups` is pinned in the entitlements so a team ch
 
 ## Decisions that are locked (do not relitigate)
 
-Name: Totality. Identity: handle + email, phone optional. v1 is a native iPhone app with a connected
+Name: Totality. Identity: username (the handle) + password, no email or phone (owner, 2026-10-30). v1 is a native iPhone app with a connected
 Mac app. Groups are Discord-shaped; DMs are Snapchat-shaped minus the clutter. Social is ONE module
 with a Lemon8-style discovery homepage. Docs are a content type inside the Reader — there is no Docs
 module. Listen is a button inside the Reader — there is no Speechify module. Shopping is

@@ -2,8 +2,10 @@
 project_id = "totality"
 
 [auth]
-additional_redirect_urls = ["app.totality.client://auth/callback"]
+additional_redirect_urls = []
+minimum_password_length = 12
 
+# Sign-in is a username and password. Accounts use a reserved address that can't receive mail, so
+# nothing can be confirmed by email and nothing is sent.
 [auth.email]
-otp_expiry = 600
-enable_confirmations = true
+enable_confirmations = false

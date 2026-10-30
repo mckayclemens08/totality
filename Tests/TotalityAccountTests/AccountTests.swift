@@ -1,3 +1,4 @@
+import Auth
 import Foundation
 import Testing
 import TotalityCore
@@ -14,35 +15,34 @@ final class MemoryKeyStore: KeyStore, @unchecked Sendable {
 }
 
 actor FakeAccountService: AccountService {
-    var email: String?
-    var requestError: AccountError?
-    var finishError: AccountError?
+    var username: String?
+    var signInError: AccountError?
+    var signUpError: AccountError?
     var deviceError: AccountError?
     var signOutError: AccountError?
     var signOutResult = SignOutResult.complete
-    private(set) var requested: [String] = []
-    private(set) var finished: [URL] = []
+    private(set) var signIns: [String] = []
+    private(set) var signUps: [String] = []
     private(set) var devices = 0
 
-    init(email: String? = nil) { self.email = email }
-    func seedRequest(_ email: String) { requested.append(email) }
-    func fail(request: AccountError? = nil, finish: AccountError? = nil, device: AccountError? = nil, signOut: AccountError? = nil) {
-        requestError = request
-        finishError = finish
+    init(username: String? = nil) { self.username = username }
+    func fail(signIn: AccountError? = nil, signUp: AccountError? = nil, device: AccountError? = nil, signOut: AccountError? = nil) {
+        signInError = signIn
+        signUpError = signUp
         deviceError = device
         signOutError = signOut
     }
 
-    func currentEmail() async -> String? { email }
-    func requestLink(email: String) async throws {
-        if let requestError { throw requestError }
-        requested.append(email)
+    func currentUsername() async -> String? { username }
+    func signUp(username: Username, password: String) async throws {
+        if let signUpError { throw signUpError }
+        signUps.append(username.value)
+        self.username = username.value
     }
-    func finishSignIn(from url: URL) async throws -> String? {
-        if let finishError { throw finishError }
-        finished.append(url)
-        email = requested.last
-        return email
+    func signIn(username: Username, password: String) async throws {
+        if let signInError { throw signInError }
+        signIns.append(username.value)
+        self.username = username.value
     }
     func registerDevice() async throws {
         if let deviceError { throw deviceError }
@@ -50,7 +50,7 @@ actor FakeAccountService: AccountService {
     }
     func signOut() async throws -> SignOutResult {
         if let signOutError { throw signOutError }
-        email = nil
+        username = nil
         return signOutResult
     }
     func setSignOutResult(_ result: SignOutResult) { signOutResult = result }
@@ -99,104 +99,156 @@ actor FakeAccountService: AccountService {
     }
 }
 
+@Suite struct UsernameTests {
+    @Test func tidiesWhatPeopleType() {
+        #expect(Username("  McKay_1\n")?.value == "mckay_1")
+    }
+
+    @Test(arguments: ["", "ab", String(repeating: "a", count: 25), "a b c", "a.b", "a@b", "ow-ner", "caf\u{e9}", "\u{43e}wner", "owner\u{301}"])
+    func refusesWhatTheServerWould(text: String) {
+        #expect(Username(text) == nil)
+    }
+
+    @Test func acceptsTheEdgesOfTheRule() {
+        #expect(Username("abc") != nil)
+        #expect(Username(String(repeating: "a", count: 24)) != nil)
+    }
+
+    @Test("The address can never reach a real mailbox, and maps back to the name")
+    func addressRoundTrips() throws {
+        let name = try #require(Username("owner"))
+        #expect(name.address == "owner@totality.invalid")
+        #expect(Username(address: name.address) == name)
+    }
+
+    @Test(arguments: ["owner@gmail.com", "owner", "@totality.invalid", "a b c@totality.invalid"])
+    func onlyReservedAddressesAreUsernames(address: String) {
+        #expect(Username(address: address) == nil)
+    }
+}
+
+@Suite struct AccountErrorTests {
+    private func api(_ code: ErrorCode) -> AuthError {
+        .api(
+            message: "raw server text",
+            errorCode: code,
+            underlyingData: Data(),
+            underlyingResponse: HTTPURLResponse(url: URL(string: "https://abc.supabase.co")!, statusCode: 400, httpVersion: nil, headerFields: nil)!
+        )
+    }
+
+    @Test func mapsTheServerErrorsPeopleCanAct() {
+        #expect(SupabaseAccountService.accountError(from: api(.invalidCredentials)) == .wrongPassword)
+        #expect(SupabaseAccountService.accountError(from: api(.userAlreadyExists)) == .usernameTaken)
+        #expect(SupabaseAccountService.accountError(from: api(.emailExists)) == .usernameTaken)
+        #expect(SupabaseAccountService.accountError(from: AuthError.weakPassword(message: "raw", reasons: [])) == .weakPassword)
+        #expect(SupabaseAccountService.accountError(from: api(.overRequestRateLimit)) == .rateLimited)
+        #expect(SupabaseAccountService.accountError(from: URLError(.notConnectedToInternet)) == .offline)
+    }
+
+    @Test func anythingElseIsAPlainFailure() {
+        #expect(SupabaseAccountService.accountError(from: api(.unknown)) == .failed)
+    }
+}
+
 @MainActor
 @Suite struct AccountModelTests {
-    private let link = URL(string: "app.totality.client://auth/callback?code=abc")!
+    private let password = "correct horse battery"
 
-    @Test func signsInWithALink() async {
+    @Test func signsInWithAUsernameAndPassword() async {
         let service = FakeAccountService()
         let model = AccountModel(service: service)
         await model.load()
         #expect(model.phase == .signedOut)
-        await model.sendLink(to: "  Owner@Example.COM\n")
-        #expect(model.phase == .awaitingLink(email: "owner@example.com"))
-        await model.finishSignIn(from: link)
-        #expect(model.phase == .signedIn(email: "owner@example.com"))
+        await model.signIn(username: "  Owner\n", password: password)
+        #expect(model.phase == .signedIn(username: "owner"))
+        #expect(await service.signIns == ["owner"])
         #expect(await service.devices == 1)
         #expect(model.deviceRegistered)
     }
 
-    @Test("A link this device can't redeem signs nobody in, and says so")
-    func unredeemableLinkFails() async {
+    @Test func createsAnAccount() async {
         let service = FakeAccountService()
-        await service.fail(finish: .invalidLink)
+        let model = AccountModel(service: service)
+        await model.signUp(username: "Owner", password: password, confirmation: password)
+        #expect(model.phase == .signedIn(username: "owner"))
+        #expect(await service.signUps == ["owner"])
+        #expect(await service.devices == 1)
+    }
+
+    @Test func aWrongPasswordSignsNobodyIn() async {
+        let service = FakeAccountService()
+        await service.fail(signIn: .wrongPassword)
         let model = AccountModel(service: service)
         await model.load()
-        await model.finishSignIn(from: link)
+        await model.signIn(username: "owner", password: password)
         #expect(model.phase == .signedOut)
-        #expect(model.notice == AccountError.invalidLink.message)
+        #expect(model.notice == AccountError.wrongPassword.message)
+        #expect(await service.devices == 0)
     }
 
-    @Test("A link still works if iOS closed the app while you were in Mail")
-    func linkWorksAfterRelaunch() async {
+    @Test func aTakenUsernameSaysSo() async {
         let service = FakeAccountService()
-        await service.seedRequest("owner@example.com")
-        let model = AccountModel(service: service)
-        await model.finishSignIn(from: link)
-        #expect(model.phase == .signedIn(email: "owner@example.com"))
-    }
-
-    @Test("Reopening the account screen while waiting doesn't lose your place")
-    func reloadingKeepsTheWait() async {
-        let model = AccountModel(service: FakeAccountService())
-        await model.sendLink(to: "owner@example.com")
-        await model.load()
-        #expect(model.phase == .awaitingLink(email: "owner@example.com"))
-    }
-
-    @Test func aLinkIsIgnoredOnceSignedIn() async {
-        let service = FakeAccountService(email: "owner@example.com")
+        await service.fail(signUp: .usernameTaken)
         let model = AccountModel(service: service)
         await model.load()
-        await model.finishSignIn(from: link)
-        #expect(await service.finished.isEmpty)
+        await model.signUp(username: "owner", password: password, confirmation: password)
+        #expect(model.phase == .signedOut)
+        #expect(model.notice == AccountError.usernameTaken.message)
+    }
+
+    @Test(arguments: [("", "correct horse battery"), ("owner", ""), ("no", "correct horse battery"), ("not a name", "correct horse battery")])
+    func incompleteSignInsAreCaughtBeforeSending(username: String, password: String) async {
+        let service = FakeAccountService()
+        let model = AccountModel(service: service)
+        await model.signIn(username: username, password: password)
+        #expect(model.notice != nil)
+        #expect(await service.signIns.isEmpty)
+    }
+
+    @Test("Sign-in leaves password rules to the server")
+    func signInDoesNotApplyThePasswordRule() async {
+        let service = FakeAccountService()
+        let model = AccountModel(service: service)
+        await model.signIn(username: "owner", password: "short")
+        #expect(await service.signIns == ["owner"])
     }
 
     @Test(arguments: [
-        "https://evil.example/auth/callback?code=abc",
-        "app.totality.client://evil/callback?code=abc",
-        "app.totality.client://auth/other?code=abc",
-        "other.scheme://auth/callback?code=abc",
+        ("bad name", "correct horse battery", "correct horse battery"),
+        ("owner", "elevenchars", "elevenchars"),
+        ("owner", String(repeating: "a", count: 73), String(repeating: "a", count: 73)),
+        ("owner", "correct horse battery", "correct horse batterz"),
     ])
-    func onlyTheExactCallbackCounts(address: String) async throws {
+    func badSignUpsAreCaughtBeforeSending(username: String, password: String, confirmation: String) async {
         let service = FakeAccountService()
         let model = AccountModel(service: service)
-        await model.sendLink(to: "owner@example.com")
-        await model.finishSignIn(from: try #require(URL(string: address)))
-        #expect(model.phase == .awaitingLink(email: "owner@example.com"))
-        #expect(await service.finished.isEmpty)
+        await model.signUp(username: username, password: password, confirmation: confirmation)
+        #expect(model.notice != nil)
+        #expect(await service.signUps.isEmpty)
+    }
+
+    @Test func theShortestAndLongestPasswordsPass() async {
+        let service = FakeAccountService()
+        let model = AccountModel(service: service)
+        let shortest = String(repeating: "a", count: AccountModel.minimumPasswordLength)
+        let longest = String(repeating: "a", count: 72)
+        await model.signUp(username: "first", password: shortest, confirmation: shortest)
+        await model.signUp(username: "second", password: longest, confirmation: longest)
+        #expect(await service.signUps == ["first", "second"])
     }
 
     @Test func aReturningPersonIsAlreadySignedIn() async {
-        let model = AccountModel(service: FakeAccountService(email: "owner@example.com"))
+        let model = AccountModel(service: FakeAccountService(username: "owner"))
         await model.load()
-        #expect(model.phase == .signedIn(email: "owner@example.com"))
-    }
-
-    @Test(arguments: ["", "owner", "@example.com", "owner@", "owner@example", "a b@example.com", "a@b@c.com", "owner@.com"])
-    func badEmailsAreCaughtBeforeSending(email: String) async {
-        let service = FakeAccountService()
-        let model = AccountModel(service: service)
-        await model.sendLink(to: email)
-        #expect(model.notice != nil)
-        #expect(await service.requested.isEmpty)
-    }
-
-    @Test func anExpiredLinkLetsYouAskAgain() async {
-        let service = FakeAccountService()
-        await service.fail(finish: .invalidLink)
-        let model = AccountModel(service: service)
-        await model.sendLink(to: "owner@example.com")
-        await model.finishSignIn(from: link)
-        #expect(model.phase == .awaitingLink(email: "owner@example.com"))
-        #expect(model.notice == AccountError.invalidLink.message)
+        #expect(model.phase == .signedIn(username: "owner"))
     }
 
     @Test func aRateLimitSaysSo() async {
         let service = FakeAccountService()
-        await service.fail(request: .rateLimited)
+        await service.fail(signIn: .rateLimited)
         let model = AccountModel(service: service)
-        await model.sendLink(to: "owner@example.com")
+        await model.signIn(username: "owner", password: password)
         #expect(model.phase == .loading)
         #expect(model.notice == AccountError.rateLimited.message)
     }
@@ -206,14 +258,13 @@ actor FakeAccountService: AccountService {
         let service = FakeAccountService()
         await service.fail(device: .offline)
         let model = AccountModel(service: service)
-        await model.sendLink(to: "owner@example.com")
-        await model.finishSignIn(from: link)
-        #expect(model.phase == .signedIn(email: "owner@example.com"))
+        await model.signIn(username: "owner", password: password)
+        #expect(model.phase == .signedIn(username: "owner"))
         #expect(!model.deviceRegistered)
     }
 
     @Test func signingOutReturnsToTheStart() async {
-        let model = AccountModel(service: FakeAccountService(email: "owner@example.com"))
+        let model = AccountModel(service: FakeAccountService(username: "owner"))
         await model.load()
         await model.signOut()
         #expect(model.phase == .signedOut)
@@ -222,7 +273,7 @@ actor FakeAccountService: AccountService {
 
     @Test("If the server can't be told, you're signed out here and the app says what's left")
     func unrevokedSignOutIsHonest() async {
-        let service = FakeAccountService(email: "owner@example.com")
+        let service = FakeAccountService(username: "owner")
         await service.setSignOutResult(.serverNotReached)
         let model = AccountModel(service: service)
         await model.load()
@@ -233,12 +284,12 @@ actor FakeAccountService: AccountService {
 
     @Test("Offline, nothing is signed out and the app says so")
     func offlineSignOutStaysSignedIn() async {
-        let service = FakeAccountService(email: "owner@example.com")
+        let service = FakeAccountService(username: "owner")
         await service.fail(signOut: .offline)
         let model = AccountModel(service: service)
         await model.load()
         await model.signOut()
-        #expect(model.phase == .signedIn(email: "owner@example.com"))
+        #expect(model.phase == .signedIn(username: "owner"))
         #expect(model.notice == AccountError.offline.message)
     }
 }

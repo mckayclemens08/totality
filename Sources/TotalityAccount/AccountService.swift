@@ -5,20 +5,10 @@ import TotalityCore
 import UIKit
 #endif
 
-/// The address the email link returns to. PKCE makes a link useless to any app but the one that
-/// requested it, which stops another app using a link Totality asked for. It does not stop an app
-/// that claims this scheme from starting its own request and catching the reply, so this is a
-/// stopgap for one person's devices. See proposal §11-N before anyone else signs in.
-public enum SignInLink {
-    public static let callback = URL(string: "app.totality.client://auth/callback")!
-
-    public static func isCallback(_ url: URL) -> Bool {
-        url.scheme == callback.scheme && url.host == callback.host && url.path == callback.path
-    }
-}
-
 public enum AccountError: Error, Equatable {
-    case invalidLink
+    case wrongPassword
+    case usernameTaken
+    case weakPassword
     case rateLimited
     case offline
     case failed
@@ -28,7 +18,9 @@ extension AccountError {
     /// Written for the person using the app. Raw server errors are never shown.
     public var message: String {
         switch self {
-        case .invalidLink: "That link has expired or was already used. Ask for a new one."
+        case .wrongPassword: "That username and password don't match."
+        case .usernameTaken: "That username is taken. Try another."
+        case .weakPassword: "Choose a harder password."
         case .rateLimited: "Too many tries. Wait a while, then try again."
         case .offline: "You're offline. Connect and try again."
         case .failed: "That didn't work. Try again."
@@ -38,9 +30,9 @@ extension AccountError {
 
 /// What the account screens need from a backend.
 public protocol AccountService: Sendable {
-    func currentEmail() async -> String?
-    func requestLink(email: String) async throws
-    func finishSignIn(from url: URL) async throws -> String?
+    func currentUsername() async -> String?
+    func signUp(username: Username, password: String) async throws
+    func signIn(username: Username, password: String) async throws
     func registerDevice() async throws
     func signOut() async throws -> SignOutResult
 }
@@ -63,26 +55,26 @@ public struct SupabaseAccountService: AccountService {
             options: SupabaseClientOptions(
                 auth: .init(
                     storage: SessionStorage(store: sessionStore),
-                    redirectToURL: SignInLink.callback,
-                    flowType: .pkce,
                     emitLocalSessionAsInitialSession: true
                 )
             )
         )
     }
 
-    public func currentEmail() async -> String? {
-        client.auth.currentSession?.user.email
+    public func currentUsername() async -> String? {
+        client.auth.currentSession?.user.email.flatMap { Username(address: $0)?.value }
     }
 
-    public func requestLink(email: String) async throws {
-        try await mapErrors { try await client.auth.signInWithOTP(email: email, redirectTo: SignInLink.callback) }
+    /// With confirmation off the server signs the new account straight in. No session means it didn't.
+    public func signUp(username: Username, password: String) async throws {
+        try await mapErrors {
+            let response = try await client.auth.signUp(email: username.address, password: password)
+            guard response.session != nil else { throw AccountError.failed }
+        }
     }
 
-    public func finishSignIn(from url: URL) async throws -> String? {
-        var email: String?
-        try await mapErrors { email = try await client.auth.session(from: url).user.email }
-        return email
+    public func signIn(username: Username, password: String) async throws {
+        try await mapErrors { try await client.auth.signIn(email: username.address, password: password) }
     }
 
     /// Adds this device once. The row-level rules tie it to the signed-in user.
@@ -161,19 +153,19 @@ public struct SupabaseAccountService: AccountService {
         }
     }
 
-    private static func accountError(from error: any Error) -> AccountError {
+    static func accountError(from error: any Error) -> AccountError {
         switch error {
         case let error as URLError:
             let offline: Set<URLError.Code> = [
                 .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost, .cannotConnectToHost,
             ]
             return offline.contains(error.code) ? .offline : .failed
-        case AuthError.pkceGrantCodeExchange:
-            return .invalidLink
         case let error as AuthError:
             switch error.errorCode {
-            case .otpExpired, .flowStateExpired, .flowStateNotFound, .badCodeVerifier: return .invalidLink
-            case .overEmailSendRateLimit, .overRequestRateLimit: return .rateLimited
+            case .invalidCredentials: return .wrongPassword
+            case .userAlreadyExists, .emailExists: return .usernameTaken
+            case .weakPassword: return .weakPassword
+            case .overRequestRateLimit: return .rateLimited
             default: return .failed
             }
         default:

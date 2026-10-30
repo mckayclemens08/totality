@@ -1,11 +1,14 @@
 import SwiftUI
 import TotalityUI
 
-/// Sign in with a link from your email. There are no passwords.
+/// Sign in or create an account with a username and password. There is no email.
 public struct AccountView: View {
     private let model: AccountModel
     private let onClose: () -> Void
-    @State private var email = ""
+    @State private var username = ""
+    @State private var password = ""
+    @State private var confirmation = ""
+    @State private var creating = false
     @Environment(\.colorScheme) private var scheme
 
     public init(model: AccountModel, onClose: @escaping () -> Void) {
@@ -25,6 +28,7 @@ public struct AccountView: View {
                 }
                 Spacer(minLength: 0)
             }
+            .onSubmit(submit)
             .padding(Space.s4)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(theme.bg.color)
@@ -37,6 +41,10 @@ public struct AccountView: View {
         }
         .tint(theme.accent.color)
         .task { await model.load() }
+        .onChange(of: model.phase) {
+            password = ""
+            confirmation = ""
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -45,15 +53,22 @@ public struct AccountView: View {
             ProgressView()
                 .frame(maxWidth: .infinity)
         case .signedOut:
-            detail("Enter your email and we'll send you a sign-in link. There's no password.")
-            field("you@example.com", text: $email)
-            primary("Send link") { Task { await model.sendLink(to: email) } }
-        case .awaitingLink(let email):
-            detail("We sent a link to \(email). Open it on this device to finish signing in. It can take a minute to arrive, and it expires after 10 minutes.")
-            Button("Use a different email") { model.startOver() }
-                .font(Typeface.callout)
-        case .signedIn(let email):
-            detail("Signed in as \(email).")
+            detail(creating ? "Choose a username and a password of at least \(AccountModel.minimumPasswordLength) characters." : "Sign in with your username and password.")
+            usernameField
+            passwordField("Password", text: $password)
+            if creating {
+                passwordField("Confirm password", text: $confirmation)
+                detail("Totality has no email for you, so a forgotten password can't be reset here. Keep it somewhere safe. Your username can't be changed later.")
+            }
+            primary(creating ? "Create account" : "Sign in", action: submit)
+            Button(creating ? "I already have an account" : "Create an account") {
+                creating.toggle()
+                confirmation = ""
+                model.notice = nil
+            }
+            .font(Typeface.callout)
+        case .signedIn(let username):
+            detail("Signed in as \(username).")
             detail(model.deviceRegistered ? "This device is added to your account." : "This device isn't added to your account yet.")
             detail("Your notes aren't synced yet. They stay on this device, and signing out leaves them here.")
             primary("Sign out") { Task { await model.signOut() } }
@@ -67,18 +82,44 @@ public struct AccountView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func field(_ prompt: String, text: Binding<String>) -> some View {
-        TextField(prompt, text: text)
+    private var usernameField: some View {
+        TextField("Username", text: $username)
             .font(Typeface.body)
             .textFieldStyle(.plain)
             .autocorrectionDisabled()
+            .textContentType(.username)
             #if os(iOS)
             .textInputAutocapitalization(.never)
-            .keyboardType(.emailAddress)
-            .textContentType(.emailAddress)
             #endif
             .padding(Space.s4)
             .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+    }
+
+    private func passwordField(_ prompt: String, text: Binding<String>) -> some View {
+        SecureField(prompt, text: text)
+            .font(Typeface.body)
+            .textFieldStyle(.plain)
+            #if os(iOS)
+            // iOS's strong-password fill needs Associated Domains, which the free Apple plan can't
+            // have. On a sign-up form it would cover these fields and drop what's typed, even with
+            // .password set, and .oneTimeCode is what keeps it away.
+            .textContentType(creating ? .oneTimeCode : .password)
+            #else
+            .textContentType(.password)
+            #endif
+            .padding(Space.s4)
+            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+    }
+
+    private func submit() {
+        guard !model.isWorking else { return }
+        Task {
+            if creating {
+                await model.signUp(username: username, password: password, confirmation: confirmation)
+            } else {
+                await model.signIn(username: username, password: password)
+            }
+        }
     }
 
     private func primary(_ title: String, action: @escaping () -> Void) -> some View {

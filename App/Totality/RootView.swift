@@ -39,11 +39,6 @@ struct RootView: View {
             }
         }
         .animation(Motion.standard, value: open)
-        .onOpenURL { url in
-            guard let account, SignInLink.isCallback(url) else { return }
-            showingAccount = true
-            Task { await account.finishSignIn(from: url) }
-        }
         .sheet(isPresented: $showingAccount) {
             if let account {
                 AccountView(model: account) { showingAccount = false }
