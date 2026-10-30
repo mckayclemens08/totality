@@ -32,14 +32,14 @@ public struct Theme: Sendable, Equatable {
         bg: .init(0xE8EBEF), surface: .init(0xEDEFF2), surfaceSunken: .init(0xE2E5EA),
         shadowLight: .init(0xFFFFFF, opacity: 0.9), shadowDark: .init(0xC3C9D3, opacity: 0.7),
         textPrimary: .init(0x15181D), textSecondary: .init(0x555C68), textTertiary: .init(0x7D8592),
-        accent: .init(0xA84A16), accentOn: .init(0xFFFFFF), danger: .init(0xB3261E), success: .init(0x1E6F4C)
+        accent: .init(0x1F5FBF), accentOn: .init(0xFFFFFF), danger: .init(0xB3261E), success: .init(0x1E6F4C)
     )
 
     public static let dark = Theme(
         bg: .init(0x191C21), surface: .init(0x20242A), surfaceSunken: .init(0x171A1F),
         shadowLight: .init(0x2C3138, opacity: 0.8), shadowDark: .init(0x101317, opacity: 0.8),
         textPrimary: .init(0xEFF1F4), textSecondary: .init(0xA3ABB7), textTertiary: .init(0x737B87),
-        accent: .init(0xE8833F), accentOn: .init(0x1A1207), danger: .init(0xF2645A), success: .init(0x4FC08D)
+        accent: .init(0x5E9EEB), accentOn: .init(0x07131F), danger: .init(0xF2645A), success: .init(0x4FC08D)
     )
 
     public static func current(_ scheme: ColorScheme) -> Theme {
