@@ -11,6 +11,8 @@ public struct AccountView: View {
     @State private var creating = false
     @Environment(\.colorScheme) private var scheme
 
+    private static let noticeID = "notice"
+
     public init(model: AccountModel, onClose: @escaping () -> Void) {
         self.model = model
         self.onClose = onClose
@@ -19,18 +21,22 @@ public struct AccountView: View {
     public var body: some View {
         let theme = Theme.current(scheme)
         NavigationStack {
-            VStack(alignment: .leading, spacing: Space.s4) {
-                content
-                if let notice = model.notice {
-                    Text(notice)
-                        .font(Typeface.caption)
-                        .foregroundStyle(theme.danger.color)
+            Group {
+                #if os(iOS)
+                // The keyboard leaves too little room for the form, which slid under the title
+                // when it couldn't scroll. A notice would land behind the keyboard, so it's brought up.
+                ScrollViewReader { proxy in
+                    ScrollView { form }
+                        .scrollDismissesKeyboard(.interactively)
+                        .onChange(of: model.notice) {
+                            guard model.notice != nil else { return }
+                            withAnimation(Motion.quick) { proxy.scrollTo(Self.noticeID, anchor: .bottom) }
+                        }
                 }
-                Spacer(minLength: 0)
+                #else
+                form.frame(maxHeight: .infinity, alignment: .top)
+                #endif
             }
-            .onSubmit(submit)
-            .padding(Space.s4)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(theme.bg.color)
             .navigationTitle("Account")
             .toolbar {
@@ -45,6 +51,21 @@ public struct AccountView: View {
             password = ""
             confirmation = ""
         }
+    }
+
+    private var form: some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            content
+            if let notice = model.notice {
+                Text(notice)
+                    .font(Typeface.caption)
+                    .foregroundStyle(Theme.current(scheme).danger.color)
+                    .id(Self.noticeID)
+            }
+        }
+        .onSubmit(submit)
+        .padding(Space.s4)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder private var content: some View {
@@ -87,7 +108,8 @@ public struct AccountView: View {
             .font(Typeface.body)
             .textFieldStyle(.plain)
             .autocorrectionDisabled()
-            .textContentType(.username)
+            // At sign-up iOS would offer an email address or Hide My Email, and neither is a username.
+            .textContentType(creating ? nil : .username)
             #if os(iOS)
             .textInputAutocapitalization(.never)
             #endif
