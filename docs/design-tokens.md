@@ -4,8 +4,7 @@
 overrides everything here when it arrives (Brief §16, §17). Until then these exist so that no module is
 ever written against hard-coded values.
 
-These ship as `Sources/TotalityUI/Tokens.swift` at Phase 0 step 0.5. They are documented here first
-because tokens are a first commit (Brief §8) and app code is behind the approval gate.
+These ship as `Sources/TotalityUI/Tokens.swift`, and `Tests/TotalityUITests/TokenTests.swift` checks the contrast rules on every surface in both themes.
 
 ## Principle
 
@@ -86,7 +85,7 @@ Default screen gutter is `space4` (16). Default stack gap is `space3` (12).
 
 ## Type
 
-System font (SF Pro) with Dynamic Type. A custom display face is a Figma-stage decision; shipping one
+System font (SF Pro) with Dynamic Type. The code uses system text styles, so real sizes follow Apple's scale and differ slightly from the base sizes below. A custom display face is a Figma-stage decision; shipping one
 now would be a brand decision made by the wrong person.
 
 | Token | Size / weight | Use |
