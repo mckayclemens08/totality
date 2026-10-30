@@ -14,6 +14,9 @@ struct ReaderItemView: View {
                 FileReader(item: item, model: model)
             }
         }
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Listen", systemImage: "headphones") {
@@ -40,22 +43,27 @@ private struct NoteEditor: View {
 
     private static let savePause = Duration.milliseconds(600)
 
-    @State private var draft: Draft?
+    @State private var title = ""
+    @State private var text = ""
+    /// Nil until the note has loaded, so an empty editor can never overwrite the stored note.
     @State private var saved: Draft?
     @State private var failed = false
     @Environment(\.colorScheme) private var scheme
 
+    private var draft: Draft {
+        Draft(title: title, body: text)
+    }
+
     var body: some View {
         let theme = Theme.current(scheme)
         Group {
-            // The fields wait for the load: an empty editor must never overwrite the stored note.
-            if let draft {
+            if saved != nil {
                 VStack(alignment: .leading, spacing: Space.s3) {
-                    TextField("Title", text: Binding(get: { draft.title }, set: { self.draft?.title = $0 }))
+                    TextField("Title", text: $title)
                         .font(Typeface.title)
                         .textFieldStyle(.plain)
                         .foregroundStyle(theme.textPrimary.color)
-                    TextEditor(text: Binding(get: { draft.body }, set: { self.draft?.body = $0 }))
+                    TextEditor(text: $text)
                         .font(Typeface.body)
                         .foregroundStyle(theme.textPrimary.color)
                         .scrollContentBackground(.hidden)
@@ -76,8 +84,9 @@ private struct NoteEditor: View {
         .task {
             do {
                 let loaded = Draft(title: item.title, body: try await model.loadNote(item.id))
+                title = loaded.title
+                text = loaded.body
                 saved = loaded
-                draft = loaded
             } catch {
                 failed = true
             }
@@ -93,8 +102,9 @@ private struct NoteEditor: View {
     }
 
     private func save() async {
-        guard let draft, draft != saved else { return }
-        if await model.saveNote(item.id, title: draft.title, body: draft.body) { saved = draft }
+        let current = draft
+        guard let saved, current != saved else { return }
+        if await model.saveNote(item.id, title: current.title, body: current.body) { self.saved = current }
     }
 }
 

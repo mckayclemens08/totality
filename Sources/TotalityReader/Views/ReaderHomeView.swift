@@ -4,6 +4,7 @@ import TotalityUI
 /// The Reader's front screen: everything the person keeps, with search and Listen.
 public struct ReaderHomeView: View {
     @Bindable private var model: ReaderModel
+    private let onClose: (() -> Void)?
     @State private var path: [ReaderItem] = []
     @State private var importing = false
     @State private var importCollection: String?
@@ -11,8 +12,9 @@ public struct ReaderHomeView: View {
 
     private static let searchPause = Duration.milliseconds(250)
 
-    public init(model: ReaderModel) {
+    public init(model: ReaderModel, onClose: (() -> Void)? = nil) {
         self.model = model
+        self.onClose = onClose
     }
 
     public var body: some View {
@@ -26,6 +28,7 @@ public struct ReaderHomeView: View {
                 .searchable(text: $model.query, prompt: "Search titles and text")
                 .toolbar { toolbar }
         }
+        .tint(Theme.current(scheme).accent.color)
         .safeAreaInset(edge: .bottom) {
             if model.listen.current != nil {
                 ListenBar(listen: model.listen).padding(Space.s3)
@@ -57,6 +60,11 @@ public struct ReaderHomeView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        if let onClose {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Home", systemImage: "circle.hexagongrid", action: onClose)
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 Button("New note", systemImage: "square.and.pencil") { createNote() }
@@ -99,7 +107,7 @@ public struct ReaderHomeView: View {
             ReaderMessage(
                 systemImage: "book",
                 title: "Nothing here yet",
-                detail: "Write a note, or import a PDF or text file. Everything is encrypted on this device before it's stored."
+                detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and stays on this device with no backup yet."
             )
         case .ready:
             library
@@ -116,6 +124,7 @@ public struct ReaderHomeView: View {
                 }
                 .listRowBackground(Color.clear)
             }
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
     }
@@ -128,6 +137,10 @@ public struct ReaderHomeView: View {
                     .foregroundStyle(Theme.current(scheme).danger.color)
                     .listRowBackground(Color.clear)
             }
+            Label("Stored on this device only, with no backup yet.", systemImage: "iphone")
+                .font(Typeface.caption)
+                .foregroundStyle(Theme.current(scheme).textSecondary.color)
+                .listRowBackground(Color.clear)
             ForEach(model.sections, id: \.title) { section in
                 Section(section.title) {
                     ForEach(section.items) { item in
@@ -144,6 +157,7 @@ public struct ReaderHomeView: View {
                 }
             }
         }
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
     }
 
