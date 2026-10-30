@@ -1,0 +1,7 @@
+{
+  "name": "totality-backend-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test --test-concurrency=1 *.test.js" },
+  "devDependencies": { "@electric-sql/pglite": "0.5.10" }
+}

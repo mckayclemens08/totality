@@ -311,6 +311,8 @@ create table audit_log (
 
 ### 5.3 RLS policy sketch
 
+The shipped policies are in `supabase/migrations/`, and they replace this sketch where the two differ.
+
 The pattern, applied to every table:
 
 ```sql
@@ -319,17 +321,10 @@ alter table content_objects enable row level security;
 create policy co_select_own on content_objects
   for select using (owner_id = auth.uid());
 
+-- is_visible_contact is SECURITY DEFINER. A plain subquery on contacts runs as the caller,
+-- cannot see the owner's row, and silently denies every contact. Found by the two-user tests.
 create policy co_select_contacts on content_objects
-  for select using (
-    visibility = 'contacts'
-    and exists (
-      select 1 from contacts c
-      where c.owner_id = content_objects.owner_id
-        and c.peer_id  = auth.uid()
-        and c.state    = 'accepted'
-        and c.can_see_private_posts
-    )
-  );
+  for select using (visibility = 'contacts' and is_visible_contact(owner_id));
 
 create policy co_select_public on content_objects
   for select using (visibility = 'public');
