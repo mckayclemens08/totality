@@ -1,8 +1,8 @@
 # Totality — Phase 0 Architecture Proposal
 
-**Status:** DRAFT — awaiting owner review and independent-model audit against Brief §2, §6, §11, §14, §15.
+**Status:** Building. The owner waived the independent-model audit on 2026-10-30 ("Waive it, start building"), so the design has had no second-model review. Open decisions in §12 still stand.
 **Author:** Claude Code (builder) · **Date:** 2026-10-30 · **Source spec:** `docs/founding-brief-v6.pdf` (v6, 2026-10-28)
-**Rule:** No feature code is written until this document is approved. Brief §18.
+**Rule:** Brief §18 required approval before feature code. The owner waived the independent review above.
 
 ---
 
@@ -619,4 +619,4 @@ The proposal needs a domain for handles, MXIDs, and `.well-known`, and it is har
 
 ---
 
-*End of proposal. Nothing in this document is built until it is approved.*
+*End of proposal.*
