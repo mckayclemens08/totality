@@ -12,6 +12,21 @@ public protocol KeyStore: Sendable {
     func delete(_ name: String) throws
 }
 
+extension ContentRootKey {
+    private static let keyStoreName = "content-root-key"
+
+    /// Only creates a key when the store says there is none. An error stops here, because a new root
+    /// would silently orphan everything sealed under the old one.
+    public static func loadOrCreate(in store: any KeyStore) throws -> ContentRootKey {
+        if let stored = try store.load(keyStoreName) {
+            return try ContentRootKey(bytes: stored)
+        }
+        let key = try generate()
+        try store.save(key.bytes, as: keyStoreName)
+        return key
+    }
+}
+
 /// Secrets stay on this device: they are excluded from iCloud Keychain and device backups, and
 /// need the device to be unlocked.
 public struct KeychainKeyStore: KeyStore {
