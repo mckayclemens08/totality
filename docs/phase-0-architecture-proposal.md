@@ -43,7 +43,7 @@ The right seam: **a record's transport is chosen by its visibility, not by the m
                        │ MATRIX       │ │ SUPABASE     │ │ ATPROTO PDS   │
                        │ homeserver   │ │ (Postgres,   │ │ (public       │
                        │ (Synapse/    │ │  Storage,    │ │  records,     │
-                       │  Conduit)    │ │  Auth, RT)   │ │  signed)      │
+                       │  Tuwunel)    │ │  Auth, RT)   │ │  signed)      │
                        ├──────────────┤ ├──────────────┤ ├───────────────┤
                        │ DMs          │ │ account      │ │ public posts  │
                        │ communities  │ │ handle dir   │ │ follows       │
