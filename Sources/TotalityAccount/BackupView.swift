@@ -91,7 +91,7 @@ struct BackupView: View {
             warning
         case .confirmingOwnership:
             AccountDetail(text: "This device already has encrypted content on it. Is it yours?")
-            AccountDetail(text: "Answering yes ties it to this account for good. If it's someone else's, say no and sign in with their account instead.")
+            AccountDetail(text: "If it's someone else's, say no and sign in with their account instead. It's tied to this account only when you finish setting up.")
             AccountButton(title: "Yes, it's mine", isWorking: false) { Task { await model.confirmOwnership() } }
             Button("No, it isn't") { model.declineOwnership() }
                 .font(Typeface.callout)

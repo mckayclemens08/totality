@@ -445,13 +445,13 @@ actor FakeContentKeys: ContentKeyAccess {
         #expect(await content.owner == nil)
     }
 
-    @Test("Saying it's yours claims it and carries on")
+    @Test("Saying it's yours carries on without claiming, because an answer can be wrong")
     func confirmingClaims() async throws {
         let (model, _, content) = try setUp()
         await content.setSealedContent(true)
         await model.load()
         await model.confirmOwnership()
-        #expect(await content.owner == "user-1")
+        #expect(await content.owner == nil)
         #expect(model.phase == .notSetUp)
     }
 

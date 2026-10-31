@@ -41,6 +41,8 @@ public final class BackupModel {
     private let content: any ContentKeyAccess
     private var newKey: RecoveryKey?
     private var existing: FetchedBackup?
+    /// Only for this screen. A "yes" proves nothing, so the claim waits until setup or joining succeeds.
+    private var ownershipConfirmed = false
 
     public init(service: any KeyBackupService, content: any ContentKeyAccess) {
         self.service = service
@@ -76,7 +78,7 @@ public final class BackupModel {
                     phase = .otherAccount
                     return
                 }
-            } else if try await content.hasSealedContent() {
+            } else if !ownershipConfirmed, try await content.hasSealedContent() {
                 phase = .confirmingOwnership
                 return
             }
@@ -98,15 +100,10 @@ public final class BackupModel {
         }
     }
 
-    /// The person says the content here is theirs, which ties it to this account for good.
+    /// Lets the screen carry on. Nothing is written, because an answer can be wrong.
     public func confirmOwnership() async {
-        do {
-            guard let account = await service.signedInAccountID() else { return }
-            try await content.claim(for: account)
-            await load()
-        } catch {
-            phase = .otherAccount
-        }
+        ownershipConfirmed = true
+        await load()
     }
 
     public func declineOwnership() {
