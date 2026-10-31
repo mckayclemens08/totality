@@ -1,5 +1,10 @@
 import Foundation
 
+public enum ContentKeyError: Error, Equatable {
+    /// This device's content belongs to a different account.
+    case otherAccount
+}
+
 /// One module's sealed storage, and which key purpose each kind of blob uses.
 public struct SealedArea: Sendable {
     public let store: any BlobStore
@@ -14,7 +19,7 @@ public struct SealedArea: Sendable {
 
 public struct KeyMoveReport: Sendable, Equatable {
     public let moved: Int
-    /// Blobs neither key opens. They're left untouched, and the old key is kept in case it ever helps.
+    /// Blobs neither key opens. They're left untouched.
     public let unreadable: Int
 
     public init(moved: Int, unreadable: Int) {
@@ -31,7 +36,8 @@ public struct ContentKeyRing: Sendable {
         static let current = ContentRootKey.keyStoreName
         static let incoming = "content-root-key.incoming"
         static let previous = "content-root-key.previous"
-        static let backupID = "content-key-backup-id"
+        static let backupFingerprint = "content-key-backup-fingerprint"
+        static let owner = "content-key-owner"
     }
 
     private let keys: any KeyStore
@@ -95,13 +101,28 @@ public struct ContentKeyRing: Sendable {
         return KeyMoveReport(moved: report.moved, unreadable: report.unreadable)
     }
 
-    /// Which backup this device has joined, if any. It's a random ID, so it's safe to keep beside the key.
-    public func joinedBackupID() throws -> String? {
-        try keys.load(Slot.backupID).map { String(decoding: $0, as: UTF8.self) }
+    /// The account whose key this is, once one has claimed it.
+    public func owner() throws -> String? {
+        try keys.load(Slot.owner).map { String(decoding: $0, as: UTF8.self) }
     }
 
-    public func markJoined(_ id: String) throws {
-        try keys.save(Data(id.utf8), as: Slot.backupID)
+    /// Ties this device's key to one account for good. Content isn't kept per account yet, so without
+    /// this a second person signing in here could lock the first person's key into their own backup.
+    public func claim(for account: String) throws {
+        if let owner = try owner() {
+            guard owner == account else { throw ContentKeyError.otherAccount }
+            return
+        }
+        try keys.save(Data(account.utf8), as: Slot.owner)
+    }
+
+    /// The fingerprint of the backup this device joined, if any.
+    public func joinedBackup() throws -> String? {
+        try keys.load(Slot.backupFingerprint).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    public func markJoined(_ fingerprint: String) throws {
+        try keys.save(Data(fingerprint.utf8), as: Slot.backupFingerprint)
     }
 }
 

@@ -334,6 +334,18 @@ enum Dates {
         #expect(listing.unreadable == 1)
     }
 
+    @Test("A closed vault refuses writes, so nothing lands under an old key")
+    func closedVaultRefusesWrites() async throws {
+        let blobs = MemoryBlobs()
+        let vault = try vault(blobs)
+        let event = Dates.event(Dates.date(2026, 10, 15, 9))
+        try await vault.save(event)
+        await vault.close()
+        await #expect(throws: CalendarError.closed) { try await vault.save(Dates.event(Dates.date(2026, 10, 16, 9))) }
+        await #expect(throws: CalendarError.closed) { try await vault.delete(event.id) }
+        #expect(try blobs.names().count == 1)
+    }
+
     @Test func deletesForGood() async throws {
         let blobs = MemoryBlobs()
         let vault = try vault(blobs)

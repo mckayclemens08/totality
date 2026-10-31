@@ -10,6 +10,7 @@ public struct CalendarListing: Sendable, Equatable {
 public enum CalendarError: Error, Equatable {
     case notFound
     case mismatched
+    case closed
 }
 
 /// A person's own events. Each one is a single blob, and its name holds only the object ID.
@@ -19,6 +20,7 @@ public actor CalendarVault {
 
     private let store: any BlobStore
     private let rootKey: ContentRootKey
+    private var isClosed = false
 
     public init(store: any BlobStore, rootKey: ContentRootKey) {
         self.store = store
@@ -27,7 +29,13 @@ public actor CalendarVault {
 
     private func name(_ id: UUID) -> String { "\(id.uuidString.lowercased()).event" }
 
+    /// Refuses all further writes, so nothing lands under the old key during a key move.
+    public func close() {
+        isClosed = true
+    }
+
     public func save(_ event: CalendarEvent) throws {
+        guard !isClosed else { throw CalendarError.closed }
         let key = rootKey.objectKey(for: event.id, purpose: .event)
         try store.write(try ContentCipher.seal(JSONEncoder().encode(event), key: key, objectID: event.id), as: name(event.id))
     }
@@ -55,6 +63,7 @@ public actor CalendarVault {
     }
 
     public func delete(_ id: UUID) throws {
+        guard !isClosed else { throw CalendarError.closed }
         try store.delete(name(id))
     }
 }

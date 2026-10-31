@@ -66,11 +66,19 @@ final class DeviceContentKeys: ContentKeyAccess {
         return try await Task.detached { try ring.adopt(key) }.value
     }
 
-    func joinedBackupID() async throws -> String? {
-        try ContentSetup.keyRing().joinedBackupID()
+    func keyOwner() async throws -> String? {
+        try ContentSetup.keyRing().owner()
     }
 
-    func markJoined(_ id: String) async throws {
-        try ContentSetup.keyRing().markJoined(id)
+    func claim(for account: String) async throws {
+        try ContentSetup.keyRing().claim(for: account)
+    }
+
+    func joinedBackup() async throws -> String? {
+        try ContentSetup.keyRing().joinedBackup()
+    }
+
+    func markJoined(_ fingerprint: String) async throws {
+        try ContentSetup.keyRing().markJoined(fingerprint)
     }
 }

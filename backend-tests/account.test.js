@@ -208,3 +208,32 @@ describe('key backups', () => {
       `insert into public.key_backups (owner_id, visibility, key_id, backup) values ($1, 'public', $2, '{}')`, [user1.id, id('d')]), /check constraint/)
   })
 })
+
+describe('retired handles', () => {
+  const addAccount = (name) => db.query('insert into auth.users (id, email) values ($1, $2)', [randomUUID(), `${name}@totality.invalid`])
+
+  test('a deleted name can never be registered again', async () => {
+    const user = await newUser(db, 'leaving_user')
+    await db.query('delete from auth.users where id = $1', [user.id])
+    await assert.rejects(addAccount('leaving_user'), /retired/)
+  })
+
+  test('a name that never had a profile stays free', async () => {
+    const user = await newUser(db, null, 'never_claimed')
+    await db.query('delete from auth.users where id = $1', [user.id])
+    await addAccount('never_claimed')
+  })
+
+  test('other names are unaffected', async () => {
+    const user = await newUser(db, 'other_leaver')
+    await db.query('delete from auth.users where id = $1', [user.id])
+    await addAccount('still_free_name')
+  })
+
+  test('clients cannot read or empty the list', async () => {
+    const [user1] = await pair()
+    await assert.rejects(as(db, user1, (q) => q('select * from public.retired_handles')), /permission denied/)
+    await assert.rejects(as(db, user1, (q) => q('delete from public.retired_handles')), /permission denied/)
+    await assert.rejects(as(db, null, (q) => q('select * from public.retired_handles')), /permission denied/)
+  })
+})

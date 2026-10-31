@@ -157,6 +157,24 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
     }
 }
 
+@Suite struct ReaderVaultClosingTests {
+    @Test("A closed vault refuses writes, so a running import can't land under an old key")
+    func closedVaultRefusesWrites() async throws {
+        let vault = ReaderVault(store: try FileBlobStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), rootKey: try ContentRootKey.generate())
+        let note = try await vault.createNote(title: "Before")
+        try await vault.saveNote(note.id, title: "Before", body: "original text")
+        await vault.close()
+        await #expect(throws: ReaderError.closed) { try await vault.importFile(Data("late".utf8), filename: "late.txt") }
+        await #expect(throws: ReaderError.closed) { try await vault.createNote(title: "Late") }
+        await #expect(throws: ReaderError.closed) { try await vault.saveNote(note.id, title: "Changed", body: "changed text") }
+        await #expect(throws: ReaderError.closed) { try await vault.setListenPosition(4, of: note.id) }
+        await #expect(throws: ReaderError.closed) { try await vault.delete(note.id) }
+        #expect(try await vault.item(note.id).title == "Before")
+        // The body is written first, so a refusal that only stopped the title would still damage it.
+        #expect(String(decoding: try await vault.body(of: note.id), as: UTF8.self) == "original text")
+    }
+}
+
 @Suite struct ReaderSearchTests {
     @Test func findsTitlesTextAndPDFs() async throws {
         let vault = try newVault()

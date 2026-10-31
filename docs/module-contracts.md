@@ -47,7 +47,11 @@ Spec: issue #17. A device's content key is locked by a recovery key in Matrix's 
 - A Matrix session lasts for one job and then signs out, so no Matrix token is stored on a device.
 - `key_backups` allows no client update or delete, so a stolen session can't replace or erase a backup. Replacing a recovery key will need a server-side flow.
 - `ContentKeyRing` is the only code that moves content between keys. The old key is saved, then the new key, and only then does any blob change, so a crash at any point resumes on the next launch. Each moved blob is read back before going on. A blob neither key opens is left alone, and the old key stays on the device.
-- Any new sealed module must declare its blobs in `sealedPurposes` and be added to `ContentSetup.keyRing()`, or a key move will leave it behind.
+- Any new sealed module must declare its blobs in `sealedPurposes`, be added to `ContentSetup.keyRing()`, and close its vault in the app's `willMove`, or a key move will leave it behind. A vault closes before the move lists blobs, because anything written after that under the old key would be lost.
+- A device's key belongs to the first account that claims it, in `content-key-owner`. Content isn't kept per account yet, so without this a second person signing in could lock the first person's key into their own backup. Per-account storage replaces this when sync lands.
+- A joined device remembers the backup's fingerprint, not its ID, so a server can't swap the contents behind the same ID. A backup is never written over a different one on Matrix.
+- `fetchBackup` returns nil only when both servers answer that there's nothing. An outage must never read as "no backup", because that invites a second recovery key.
+- A handle is retired for good when its profile is deleted, because Matrix finds accounts by name and the next owner would inherit the old account.
 
 ## Sharing an item
 

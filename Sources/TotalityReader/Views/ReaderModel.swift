@@ -43,8 +43,7 @@ public final class ReaderModel {
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
     public func stopForKeyChange() async {
         listen.stop()
-        await Task.yield()
-        _ = try? await vault.list()
+        await vault.close()
     }
 
     public func load() async {

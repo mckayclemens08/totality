@@ -5,14 +5,24 @@ import TotalityCore
 
 actor FakeBackupService: KeyBackupService {
     var stored: KeyBackup?
+    var account = "user-1"
+    var inSupabase = true
+    var supabaseRestores = true
     var fetchError: AccountError?
     var saveError: AccountError?
     var matrixWorks = true
     /// Stands in for another device saving first.
     var raceWinner: KeyBackup?
-    private(set) var matrixCopies = 0
+    private(set) var matrixCopies: [KeyBackup] = []
+    private(set) var supabaseRestoreCount = 0
 
-    func set(stored: KeyBackup?) { self.stored = stored }
+    func set(stored: KeyBackup?, inSupabase: Bool = true) {
+        self.stored = stored
+        self.inSupabase = inSupabase
+    }
+    func set(account: String) { self.account = account }
+    func setSupabaseRestores(_ works: Bool) { supabaseRestores = works }
+    func accountID() async throws -> String { account }
     func fail(fetch: AccountError? = nil, save: AccountError? = nil) {
         fetchError = fetch
         saveError = save
@@ -20,9 +30,9 @@ actor FakeBackupService: KeyBackupService {
     func setMatrixWorks(_ works: Bool) { matrixWorks = works }
     func setRaceWinner(_ backup: KeyBackup) { raceWinner = backup }
 
-    func fetchBackup() async throws -> KeyBackup? {
+    func fetchBackup() async throws -> FetchedBackup? {
         if let fetchError { throw fetchError }
-        return stored
+        return stored.map { FetchedBackup(backup: $0, inSupabase: inSupabase) }
     }
     func saveBackup(_ backup: KeyBackup) async throws {
         if let saveError { throw saveError }
@@ -32,8 +42,12 @@ actor FakeBackupService: KeyBackupService {
         }
         stored = backup
     }
+    func restoreSupabaseCopy(_ backup: KeyBackup) async -> Bool {
+        supabaseRestoreCount += 1
+        return supabaseRestores
+    }
     func copyBackupToMatrix(_ backup: KeyBackup) async -> Bool {
-        matrixCopies += 1
+        matrixCopies.append(backup)
         return matrixWorks
     }
 }
@@ -41,6 +55,7 @@ actor FakeBackupService: KeyBackupService {
 actor FakeContentKeys: ContentKeyAccess {
     var key: ContentRootKey
     var joined: String?
+    var owner: String?
     var adoptError: Error?
     var report = KeyMoveReport(moved: 0, unreadable: 0)
     private(set) var adopted: [ContentRootKey] = []
@@ -48,7 +63,8 @@ actor FakeContentKeys: ContentKeyAccess {
     init(key: ContentRootKey) { self.key = key }
     func failAdopting() { adoptError = CryptoError.authenticationFailed }
     func setReport(_ report: KeyMoveReport) { self.report = report }
-    func setJoined(_ id: String) { joined = id }
+    func setJoined(_ fingerprint: String) { joined = fingerprint }
+    func setOwner(_ owner: String) { self.owner = owner }
 
     func rootKey() async throws -> ContentRootKey { key }
     func adopt(_ key: ContentRootKey) async throws -> KeyMoveReport {
@@ -57,8 +73,13 @@ actor FakeContentKeys: ContentKeyAccess {
         self.key = key
         return report
     }
-    func joinedBackupID() async throws -> String? { joined }
-    func markJoined(_ id: String) async throws { joined = id }
+    func keyOwner() async throws -> String? { owner }
+    func claim(for account: String) async throws {
+        if let owner, owner != account { throw ContentKeyError.otherAccount }
+        owner = account
+    }
+    func joinedBackup() async throws -> String? { joined }
+    func markJoined(_ fingerprint: String) async throws { joined = fingerprint }
 }
 
 @MainActor
@@ -101,10 +122,10 @@ actor FakeContentKeys: ContentKeyAccess {
         let key = try shownKey(model)
         model.continueToConfirm()
         await model.confirm(key)
-        #expect(model.phase == .ready(matrixCopy: true))
+        #expect(model.phase == .ready(BackupCopies(supabase: true, matrix: true)))
         let stored = try #require(await service.stored)
         #expect(try stored.open(with: RecoveryKey(encoded: key)) == (await content.key))
-        #expect(await content.joined == stored.keyID)
+        #expect(await content.joined == stored.fingerprint)
     }
 
     @Test("A wrong key at the confirm step stores nothing and says so")
@@ -161,7 +182,7 @@ actor FakeContentKeys: ContentKeyAccess {
         #expect(model.notice == AccountError.offline.message)
         await service.fail()
         await model.confirm(key)
-        #expect(model.phase == .ready(matrixCopy: true))
+        #expect(model.phase == .ready(BackupCopies(supabase: true, matrix: true)))
     }
 
     @Test("If another device set up first, this one joins that key instead of replacing it")
@@ -189,7 +210,7 @@ actor FakeContentKeys: ContentKeyAccess {
         let key = try shownKey(model)
         model.continueToConfirm()
         await model.confirm(key)
-        #expect(model.phase == .ready(matrixCopy: false))
+        #expect(model.phase == .ready(BackupCopies(supabase: true, matrix: false)))
         #expect(await service.stored != nil)
     }
 
@@ -198,10 +219,10 @@ actor FakeContentKeys: ContentKeyAccess {
         let (model, service, content) = try setUp()
         let backup = try KeyBackup.seal(try ContentRootKey.generate(), with: try RecoveryKey.generate())
         await service.set(stored: backup)
-        await content.setJoined(backup.keyID)
+        await content.setJoined(backup.fingerprint)
         await model.load()
-        #expect(model.phase == .ready(matrixCopy: true))
-        #expect(await service.matrixCopies == 1)
+        #expect(model.phase == .ready(BackupCopies(supabase: true, matrix: true)))
+        #expect(await service.matrixCopies.count == 1)
     }
 
     @Test("A second device is asked for the key, and takes on the shared content key")
@@ -214,9 +235,9 @@ actor FakeContentKeys: ContentKeyAccess {
         await model.load()
         #expect(model.phase == .needsKey)
         await model.enter(recovery.encoded)
-        #expect(model.phase == .ready(matrixCopy: true))
+        #expect(model.phase == .ready(BackupCopies(supabase: true, matrix: true)))
         #expect(await content.adopted == [shared])
-        #expect(await content.joined == backup.keyID)
+        #expect(await content.joined == backup.fingerprint)
     }
 
     @Test("The wrong recovery key touches nothing")
@@ -278,9 +299,9 @@ actor FakeContentKeys: ContentKeyAccess {
         let (model, service, content) = try setUp()
         let backup = try KeyBackup.seal(try ContentRootKey.generate(), with: try RecoveryKey.generate())
         await service.set(stored: backup)
-        await content.setJoined(backup.keyID)
+        await content.setJoined(backup.fingerprint)
         await model.load()
-        #expect(model.phase == .ready(matrixCopy: true))
+        #expect(model.phase == .ready(BackupCopies(supabase: true, matrix: true)))
     }
 
     @Test("A device joined to an old backup is asked again, not treated as current")
@@ -290,5 +311,90 @@ actor FakeContentKeys: ContentKeyAccess {
         await content.setJoined("0123456789abcdef0123456789abcdef")
         await model.load()
         #expect(model.phase == .needsKey)
+    }
+
+    @Test("Another account can't lock this device's key into its own backup")
+    func anotherAccountCannotTakeTheKey() async throws {
+        let (model, service, content) = try setUp()
+        await content.setOwner("user-1")
+        await service.set(account: "user-2")
+        await model.load()
+        #expect(model.phase == .otherAccount)
+        model.begin()
+        model.continueToConfirm()
+        #expect(await service.stored == nil)
+    }
+
+    @Test("Even past the first check, a confirm for another account stores nothing")
+    func confirmRefusesAnotherAccount() async throws {
+        let (model, service, content) = try setUp()
+        model.begin()
+        let key = try shownKey(model)
+        model.continueToConfirm()
+        await content.setOwner("user-1")
+        await service.set(account: "user-2")
+        await model.confirm(key)
+        #expect(model.phase == .otherAccount)
+        #expect(await service.stored == nil)
+    }
+
+    @Test("Another account's recovery key can't move this device's content")
+    func anotherAccountCannotMoveContent() async throws {
+        let (model, service, content) = try setUp()
+        let recovery = try RecoveryKey.generate()
+        await service.set(stored: try KeyBackup.seal(try ContentRootKey.generate(), with: recovery))
+        await model.load()
+        await content.setOwner("user-1")
+        await service.set(account: "user-2")
+        await model.enter(recovery.encoded)
+        #expect(model.phase == .otherAccount)
+        #expect(await content.adopted.isEmpty)
+    }
+
+    @Test("Setting up ties the key to the signed-in account")
+    func setupClaimsTheKey() async throws {
+        let (model, _, content) = try setUp()
+        model.begin()
+        let key = try shownKey(model)
+        model.continueToConfirm()
+        await model.confirm(key)
+        #expect(await content.owner == "user-1")
+    }
+
+    @Test("A swapped backup with the same ID isn't treated as joined, or pushed over the good copy")
+    func swappedBackupIsNotTrusted() async throws {
+        let (model, service, content) = try setUp()
+        let recovery = try RecoveryKey.generate()
+        let good = try KeyBackup.seal(try ContentRootKey.generate(), with: recovery)
+        let other = try KeyBackup.seal(try ContentRootKey.generate(), with: recovery)
+        await content.setJoined(good.fingerprint)
+        await service.set(stored: KeyBackup(keyID: good.keyID, check: good.check, secret: other.secret))
+        await model.load()
+        #expect(model.phase == .needsKey)
+        #expect(await service.matrixCopies.isEmpty)
+    }
+
+    @Test("A backup found only on Matrix is put back in Supabase, and the screen tells the truth if not")
+    func missingSupabaseCopyIsRestored() async throws {
+        let (model, service, content) = try setUp()
+        let backup = try KeyBackup.seal(try ContentRootKey.generate(), with: try RecoveryKey.generate())
+        await service.set(stored: backup, inSupabase: false)
+        await content.setJoined(backup.fingerprint)
+        await model.load()
+        #expect(model.phase == .ready(BackupCopies(supabase: true, matrix: true)))
+        #expect(await service.supabaseRestoreCount == 1)
+
+        await service.setSupabaseRestores(false)
+        await model.load()
+        #expect(model.phase == .ready(BackupCopies(supabase: false, matrix: true)))
+    }
+
+    @Test("Leaving the screen drops an unconfirmed key")
+    func leavingForgetsTheKey() async throws {
+        let (model, _, _) = try setUp()
+        model.begin()
+        model.leave()
+        model.showKeyAgain()
+        #expect(model.phase == .checking)
     }
 }

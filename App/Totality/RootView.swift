@@ -59,6 +59,7 @@ struct RootView: View {
         .task {
             contentKeys.willMove = {
                 await reader?.stopForKeyChange()
+                await calendar?.stopForKeyChange()
                 reader = nil
                 calendar = nil
                 contentProblem = nil

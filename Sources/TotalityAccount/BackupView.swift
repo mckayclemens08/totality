@@ -7,6 +7,7 @@ struct BackupView: View {
     let model: BackupModel
     @State private var typed = ""
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         let theme = Theme.current(scheme)
@@ -29,6 +30,7 @@ struct BackupView: View {
         .interactiveDismissDisabled(model.phase == .working)
         .task { await model.load() }
         .onChange(of: model.phase) { typed = "" }
+        .onDisappear { model.leave() }
     }
 
     @ViewBuilder private var content: some View {
@@ -40,13 +42,14 @@ struct BackupView: View {
             AccountDetail(text: "Your backup couldn't be checked. You may be offline.")
             AccountButton(title: "Try again", isWorking: false) { Task { await model.load() } }
         case .notSetUp:
-            AccountDetail(text: "Your recovery key is what brings your content back if you lose your devices. Totality will show it once, and it can't be shown again.")
+            AccountDetail(text: "Your recovery key is what opens your encrypted content on a new or restored device. Totality will show it once, and it can't be shown again.")
             warning
-            AccountDetail(text: "This is the first step. It backs up the key that opens your notes and events. They themselves aren't backed up or synced until sync is finished, so for now they still stay on each device.")
+            AccountDetail(text: "This is the first step. Sync isn't finished, so today your recovery key only helps with notes and events restored from a device backup. Once sync is on, it brings everything back.")
             AccountButton(title: "Create recovery key", isWorking: false) { model.begin() }
         case .showingKey(let key):
             AccountDetail(text: "Save this now, in a password manager and on paper. Don't rely on a screenshot or your Notes.")
-            Text(key)
+            // Hidden when the app isn't active, so the app switcher's snapshot doesn't capture it.
+            Text(scenePhase == .active ? key : " ")
                 .font(Typeface.code)
                 .foregroundStyle(Theme.current(scheme).textPrimary.color)
                 .textSelection(.enabled)
@@ -73,13 +76,26 @@ struct BackupView: View {
             keyField
             AccountButton(title: "Add this device", isWorking: false) { Task { await model.enter(typed) } }
             warning
-        case .ready(let matrixCopy):
+        case .otherAccount:
+            AccountDetail(text: "The encrypted content on this device belongs to a different account, so a recovery key can't be set up here. Sign in with that account to manage it.")
+        case .ready(let copies):
             AccountDetail(text: "Your recovery key is set up, and this device has joined.")
-            AccountDetail(text: matrixCopy
-                ? "A locked copy of your content key is on your Matrix server and in Supabase. Neither can open it."
-                : "A locked copy of your content key is in Supabase, which can't open it. The copy on your Matrix server hasn't saved yet, and will be tried again next time you open this.")
-            AccountDetail(text: "Your notes and events aren't synced yet, so they still stay on each device.")
+            AccountDetail(text: copiesText(copies))
+            AccountDetail(text: "Sync isn't finished, so your notes and events aren't on any server yet.")
             warning
+        }
+    }
+
+    private func copiesText(_ copies: BackupCopies) -> String {
+        switch (copies.matrix, copies.supabase) {
+        case (true, true):
+            "A locked copy of your content key is on the Matrix server and in Supabase. Neither can open it."
+        case (false, true):
+            "A locked copy of your content key is in Supabase, which can't open it. The copy on the Matrix server hasn't saved yet, and will be tried again next time you open this."
+        case (true, false):
+            "A locked copy of your content key is on the Matrix server, which can't open it. The copy in Supabase hasn't saved yet, and will be tried again next time you open this."
+        case (false, false):
+            "Neither server has confirmed a copy of your locked key right now. This will be tried again next time you open this."
         }
     }
 

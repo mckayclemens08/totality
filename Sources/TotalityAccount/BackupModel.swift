@@ -2,8 +2,19 @@ import Foundation
 import Observation
 import TotalityCore
 
+/// Which servers hold a locked copy of the key.
+public struct BackupCopies: Equatable, Sendable {
+    public let supabase: Bool
+    public let matrix: Bool
+
+    public init(supabase: Bool, matrix: Bool) {
+        self.supabase = supabase
+        self.matrix = matrix
+    }
+}
+
 /// The recovery key ceremony and joining a device to it. A new recovery key lives only in memory here,
-/// only until it's been typed back, and is never written anywhere.
+/// only until it's been typed back, and the app never writes it anywhere.
 @MainActor
 @Observable
 public final class BackupModel {
@@ -16,8 +27,9 @@ public final class BackupModel {
         case confirmingKey
         case working
         case needsKey
-        /// `matrixCopy` is false when only Supabase holds the backup so far.
-        case ready(matrixCopy: Bool)
+        /// This device's content belongs to a different account, so nothing here can be touched.
+        case otherAccount
+        case ready(BackupCopies)
     }
 
     public private(set) var phase = Phase.checking
@@ -38,19 +50,32 @@ public final class BackupModel {
         notice = nil
         newKey = nil
         do {
-            existing = try await service.fetchBackup()
-            guard let existing else {
+            let account = try await service.accountID()
+            if let owner = try await content.keyOwner(), owner != account {
+                phase = .otherAccount
+                return
+            }
+            guard let fetched = try await service.fetchBackup() else {
+                existing = nil
                 phase = .notSetUp
                 return
             }
-            if try await content.joinedBackupID() == existing.keyID {
-                phase = .ready(matrixCopy: await service.copyBackupToMatrix(existing))
+            existing = fetched.backup
+            // The whole backup is compared, not its ID, so a swapped copy never counts as this one and
+            // never gets pushed over the good copy on the other server.
+            if try await content.joinedBackup() == fetched.backup.fingerprint {
+                phase = .ready(await copies(of: fetched))
             } else {
                 phase = .needsKey
             }
         } catch {
             phase = .unavailable
         }
+    }
+
+    private func copies(of fetched: FetchedBackup) async -> BackupCopies {
+        let supabase = fetched.inSupabase ? true : await service.restoreSupabaseCopy(fetched.backup)
+        return BackupCopies(supabase: supabase, matrix: await service.copyBackupToMatrix(fetched.backup))
     }
 
     public func begin() {
@@ -81,6 +106,14 @@ public final class BackupModel {
         phase = .notSetUp
     }
 
+    /// Leaving the screen drops a key that was never confirmed, so it isn't left in memory.
+    public func leave() {
+        guard newKey != nil else { return }
+        newKey = nil
+        notice = nil
+        phase = .checking
+    }
+
     /// Nothing is stored until the person has proved they have the key, so a mistake here can't leave
     /// a backup that nobody can open.
     public func confirm(_ typed: String) async {
@@ -91,12 +124,17 @@ public final class BackupModel {
         }
         phase = .working
         do {
+            // Claiming comes first, so another account's key can never be locked into this backup.
+            try await content.claim(for: try await service.accountID())
             let backup = try KeyBackup.seal(try await content.rootKey(), with: newKey)
             try await service.saveBackup(backup)
-            try await content.markJoined(backup.keyID)
+            try await content.markJoined(backup.fingerprint)
             self.newKey = nil
             existing = backup
-            phase = .ready(matrixCopy: await service.copyBackupToMatrix(backup))
+            phase = .ready(await copies(of: FetchedBackup(backup: backup, inSupabase: true)))
+        } catch ContentKeyError.otherAccount {
+            self.newKey = nil
+            phase = .otherAccount
         } catch AccountError.backupExists {
             // Another device finished first. Its key is the one that counts.
             await load()
@@ -106,7 +144,7 @@ public final class BackupModel {
             notice = error.message
         } catch {
             phase = .confirmingKey
-            notice = "Your backup wasn't saved. Try again."
+            notice = "Your backup may not have saved. Try again."
         }
     }
 
@@ -123,12 +161,15 @@ public final class BackupModel {
         }
         phase = .working
         do {
+            try await content.claim(for: try await service.accountID())
             let report = try await content.adopt(try existing.open(with: recovery))
-            try await content.markJoined(existing.keyID)
-            phase = .ready(matrixCopy: await service.copyBackupToMatrix(existing))
+            try await content.markJoined(existing.fingerprint)
+            phase = .ready(await copies(of: FetchedBackup(backup: existing, inSupabase: true)))
             if report.unreadable > 0 {
-                notice = "\(report.unreadable) items couldn't be moved. They're untouched, and this device kept its old key in case they can be opened later."
+                notice = "\(report.unreadable) items couldn't be opened, so they weren't moved. They're untouched."
             }
+        } catch ContentKeyError.otherAccount {
+            phase = .otherAccount
         } catch {
             phase = .needsKey
             notice = "This device didn't finish joining, but nothing was lost. Try again."

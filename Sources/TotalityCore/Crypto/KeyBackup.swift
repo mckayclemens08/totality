@@ -108,8 +108,21 @@ public struct KeyBackup: Codable, Sendable, Equatable {
 
     /// Matrix stores only the check's IV and MAC, so the test is to remake it and compare.
     public func opens(with recovery: RecoveryKey) -> Bool {
-        guard let iv = Data(base64Encoded: check.iv) else { return false }
+        guard let iv = Data(base64Encoded: check.iv), iv.count == 16 else { return false }
         return (try? LockedSecret.lock(Data(count: 32), with: recovery.bytes, name: "", iv: iv))?.mac == check.mac
+    }
+
+    /// Identifies this exact backup. A device remembers it on joining, so a server that later swaps in
+    /// something else can't pass as the same backup by reusing its ID. It leaves out the check's
+    /// ciphertext, which Matrix doesn't store.
+    public var fingerprint: String {
+        let parts = [keyID, check.iv, check.mac, secret.iv, secret.ciphertext, secret.mac]
+        return SHA256.hash(data: Data(parts.joined(separator: "\n").utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// IDs end up in URL paths, so one from a server is checked before it's used.
+    public var hasValidID: Bool {
+        keyID.count == 32 && keyID.allSatisfy { $0.isHexDigit && !$0.isUppercase }
     }
 
     public func open(with recovery: RecoveryKey) throws -> ContentRootKey {

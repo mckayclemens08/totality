@@ -30,6 +30,7 @@ public enum ReaderError: Error, Equatable {
     case tooLarge
     case passwordProtected
     case notReadable
+    case closed
 }
 
 extension ReaderError {
@@ -41,6 +42,7 @@ extension ReaderError {
         case .tooLarge: "Files can be up to 50 MB for now."
         case .passwordProtected: "This PDF is password protected, so it can be stored but not read."
         case .notReadable: "Totality can keep this file, but it can't read this format yet."
+        case .closed: "This wasn't saved because your encryption key was changing. Try again."
         }
     }
 }

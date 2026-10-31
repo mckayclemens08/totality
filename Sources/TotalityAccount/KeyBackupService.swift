@@ -2,12 +2,29 @@ import Foundation
 import Supabase
 import TotalityCore
 
+/// A backup as found on the servers, and whether Supabase's copy is in place.
+public struct FetchedBackup: Sendable, Equatable {
+    public let backup: KeyBackup
+    public let inSupabase: Bool
+
+    public init(backup: KeyBackup, inSupabase: Bool) {
+        self.backup = backup
+        self.inSupabase = inSupabase
+    }
+}
+
 /// Where the locked key is kept. Everything here is ciphertext to the servers, because only the
 /// recovery key opens it, and that never leaves the person's hands.
 public protocol KeyBackupService: Sendable {
-    func fetchBackup() async throws -> KeyBackup?
+    /// The signed-in account, which a device's key gets tied to.
+    func accountID() async throws -> String
+    /// Nil only when both servers answered that there's nothing. Any failure throws, because treating
+    /// an outage as "no backup" could lead to a second recovery key over the first.
+    func fetchBackup() async throws -> FetchedBackup?
     /// Throws `.backupExists` when another device got there first.
     func saveBackup(_ backup: KeyBackup) async throws
+    /// Returns whether Supabase now holds its copy.
+    func restoreSupabaseCopy(_ backup: KeyBackup) async -> Bool
     /// Returns whether the Matrix server now holds its copy.
     func copyBackupToMatrix(_ backup: KeyBackup) async -> Bool
 }
@@ -16,8 +33,10 @@ public protocol KeyBackupService: Sendable {
 public protocol ContentKeyAccess: Sendable {
     func rootKey() async throws -> ContentRootKey
     func adopt(_ key: ContentRootKey) async throws -> KeyMoveReport
-    func joinedBackupID() async throws -> String?
-    func markJoined(_ id: String) async throws
+    func keyOwner() async throws -> String?
+    func claim(for account: String) async throws
+    func joinedBackup() async throws -> String?
+    func markJoined(_ fingerprint: String) async throws
 }
 
 extension SupabaseAccountService: KeyBackupService {
@@ -36,12 +55,22 @@ extension SupabaseAccountService: KeyBackupService {
         let token: String
     }
 
-    /// Supabase first, because it answers even when the Oracle server is down.
-    public func fetchBackup() async throws -> KeyBackup? {
+    public func accountID() async throws -> String {
+        try await mapErrors { try await client.auth.session.user.id.uuidString.lowercased() }
+    }
+
+    /// Supabase first, because it answers even when the Oracle server is down. A backup with a bad ID
+    /// isn't one this app wrote, so it counts as a failure, not as nothing.
+    public func fetchBackup() async throws -> FetchedBackup? {
         try await mapErrors {
             let rows: [BackupRow] = try await client.from("key_backups").select("key_id, backup").execute().value
-            if let row = rows.first { return row.backup }
-            return try? await withMatrix { try await $0.readBackup() }
+            if let row = rows.first {
+                guard row.backup.hasValidID, row.key_id == row.backup.keyID else { throw AccountError.failed }
+                return FetchedBackup(backup: row.backup, inSupabase: true)
+            }
+            guard let backup = try await withMatrix({ try await $0.readBackup() }) else { return nil }
+            guard backup.hasValidID else { throw AccountError.failed }
+            return FetchedBackup(backup: backup, inSupabase: false)
         }
     }
 
@@ -55,6 +84,15 @@ extension SupabaseAccountService: KeyBackupService {
             } catch let error as PostgrestError where error.code == "23505" {
                 throw AccountError.backupExists
             }
+        }
+    }
+
+    public func restoreSupabaseCopy(_ backup: KeyBackup) async -> Bool {
+        do {
+            try await saveBackup(backup)
+            return true
+        } catch {
+            return false
         }
     }
 
@@ -130,7 +168,11 @@ struct MatrixSession: Sendable {
         _ = try? await Self.urlSession.data(for: request)
     }
 
+    /// Refuses to replace a different backup. It may be the only copy of a key someone still needs.
     func writeBackup(_ backup: KeyBackup) async throws {
+        if let current = try await get(DefaultKey.self, type: Self.defaultKeyType), current.key != backup.keyID {
+            throw AccountError.backupExists
+        }
         try await put(
             KeyDescription(algorithm: KeyBackup.algorithm, iv: backup.check.iv, mac: backup.check.mac),
             type: "m.secret_storage.key.\(backup.keyID)"

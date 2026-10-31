@@ -2,7 +2,7 @@
 with allowlist(name) as (values
   ('instance_config'), ('profiles'), ('identity_keys'), ('devices'), ('push_tokens'),
   ('contacts'), ('invites'), ('content_shares'), ('notifications'), ('reports'),
-  ('audit_log'), ('ai_grants')
+  ('audit_log'), ('ai_grants'), ('retired_handles')
 ),
 tables as (
   select c.oid, c.relname, c.relrowsecurity

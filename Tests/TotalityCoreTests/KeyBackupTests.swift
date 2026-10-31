@@ -136,6 +136,42 @@ struct LockedSecretVectorTests {
         #expect(throws: CryptoError.authenticationFailed) { try changed.open(with: recovery) }
     }
 
+    @Test("A swapped backup can't keep the same fingerprint by reusing the ID")
+    func fingerprintCoversTheWholeBackup() throws {
+        let recovery = try RecoveryKey.generate()
+        let backup = try KeyBackup.seal(ContentRootKey.generate(), with: recovery)
+        let other = try KeyBackup.seal(ContentRootKey.generate(), with: recovery)
+        let swapped = KeyBackup(keyID: backup.keyID, check: backup.check, secret: other.secret)
+        #expect(swapped.fingerprint != backup.fingerprint)
+    }
+
+    @Test("The same backup read back from Matrix has the same fingerprint")
+    func fingerprintIgnoresWhatMatrixDrops() throws {
+        let backup = try KeyBackup.seal(ContentRootKey.generate(), with: RecoveryKey.generate())
+        let fromMatrix = KeyBackup(
+            keyID: backup.keyID, check: LockedSecret(iv: backup.check.iv, ciphertext: "", mac: backup.check.mac), secret: backup.secret
+        )
+        #expect(fromMatrix.fingerprint == backup.fingerprint)
+    }
+
+    @Test(arguments: ["", "abc", "../../account_data/evil", String(repeating: "G", count: 32), String(repeating: "A", count: 32)])
+    func badIDsAreRefused(id: String) throws {
+        let backup = try KeyBackup.seal(ContentRootKey.generate(), with: RecoveryKey.generate())
+        #expect(!KeyBackup(keyID: id, check: backup.check, secret: backup.secret).hasValidID)
+    }
+
+    @Test func aRealIDIsAccepted() throws {
+        #expect(try KeyBackup.seal(ContentRootKey.generate(), with: RecoveryKey.generate()).hasValidID)
+    }
+
+    @Test("A short IV from a server is refused, not read past its end")
+    func shortIVIsRefused() throws {
+        let recovery = try RecoveryKey.generate()
+        let backup = try KeyBackup.seal(ContentRootKey.generate(), with: recovery)
+        let short = KeyBackup(keyID: backup.keyID, check: LockedSecret(iv: "AAAA", ciphertext: "", mac: backup.check.mac), secret: backup.secret)
+        #expect(!short.opens(with: recovery))
+    }
+
     @Test("Nothing stored reveals the root key")
     func storesNoPlainKey() throws {
         let root = try ContentRootKey.generate()
@@ -322,8 +358,17 @@ struct LockedSecretVectorTests {
 
     @Test func remembersWhichBackupItJoined() throws {
         let device = try device()
-        #expect(try device.ring.joinedBackupID() == nil)
+        #expect(try device.ring.joinedBackup() == nil)
         try device.ring.markJoined("abc123")
-        #expect(try device.ring.joinedBackupID() == "abc123")
+        #expect(try device.ring.joinedBackup() == "abc123")
+    }
+
+    @Test("A key belongs to the first account that claims it, and no other")
+    func aKeyHasOneOwner() throws {
+        let device = try device()
+        try device.ring.claim(for: "first")
+        try device.ring.claim(for: "first")
+        #expect(throws: ContentKeyError.otherAccount) { try device.ring.claim(for: "second") }
+        #expect(try device.ring.owner() == "first")
     }
 }
