@@ -42,7 +42,8 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
     func nothingInPlaintext() async throws {
         let store = MemoryBlobStore()
         let vault = try newVault(store: store)
-        let note = try await vault.createNote(collection: "Secret collection")
+        let folder = try await vault.createFolder(title: "Secret folder")
+        let note = try await vault.createNote(folder: folder.id)
         try await vault.saveNote(note.id, title: "Secret title", body: "Secret body")
         _ = try await vault.importFile(Data("Secret file".utf8), filename: "secret-name.txt")
         for name in try store.names() {
@@ -84,7 +85,7 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         let vault = try newVault(store: store)
         let note = try await vault.createNote(title: "Gone")
         try await vault.delete(note.id)
-        #expect(try store.names().allSatisfy { $0.hasSuffix(".deleted") })
+        #expect(try !store.names().contains { $0.hasSuffix(".meta") || $0.hasSuffix(".body") })
         await #expect(throws: ReaderError.notFound) { try await vault.body(of: note.id) }
     }
 
@@ -517,7 +518,8 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
     private func sharedNote() async throws -> (owner: ReaderVault, store: MemoryBlobStore, note: ReaderItem) {
         let store = MemoryBlobStore()
         let vault = try newVault(store: store)
-        let note = try await vault.createNote(collection: "Private collection")
+        let folder = try await vault.createFolder(title: "Private folder")
+        let note = try await vault.createNote(folder: folder.id)
         try await vault.saveNote(note.id, title: "Reading list", body: "Book one")
         try await vault.setListenPosition(4, of: note.id)
         return (vault, store, note)
@@ -529,7 +531,8 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         let user2 = ReaderVault(store: store, rootKey: try .generate())
         let listing = try await user2.list()
         #expect(listing.items.isEmpty)
-        #expect(listing.unreadable == 1)
+        #expect(listing.folders.isEmpty)
+        #expect(listing.unreadable == 2)
         await #expect(throws: CryptoError.authenticationFailed) { try await user2.body(of: note.id) }
     }
 
@@ -545,7 +548,7 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         #expect(throws: CryptoError.authenticationFailed) { try share.open(with: user3) }
     }
 
-    @Test("A share reveals no collection or Listen position, and its key opens nothing else")
+    @Test("A share reveals no folder or Listen position, and its key opens nothing else")
     func shareRevealsOnlyTheItem() async throws {
         let (owner, store, note) = try await sharedNote()
         let other = try await owner.createNote(title: "Other")
@@ -554,7 +557,7 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         let key = try user2.open(share.wrappedKey)
 
         let header = try ContentCipher.open(share.sealedHeader, key: key, objectID: note.id)
-        #expect(String(decoding: header, as: UTF8.self).contains("Private collection") == false)
+        #expect(String(decoding: header, as: UTF8.self).contains("folderID") == false)
         #expect(String(decoding: header, as: UTF8.self).contains("listenPosition") == false)
 
         let meta = try #require(try store.read("\(note.id.uuidString.lowercased()).meta"))

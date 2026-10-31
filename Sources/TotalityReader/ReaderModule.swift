@@ -1,7 +1,7 @@
 import Foundation
 import TotalityCore
 
-/// The Reader's entry in the registry. `doc` waits for rich documents (proposal §11-M).
+/// The Reader's entry in the registry.
 public struct ReaderModule: ContentProvider {
     public let module = ModuleID.reader
     public let kinds: Set<ContentKind> = [.note, .file]

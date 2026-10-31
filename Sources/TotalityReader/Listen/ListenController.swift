@@ -28,6 +28,9 @@ public final class ListenController {
     public private(set) var current: ListenTrack?
     public private(set) var queue: [ListenTrack] = []
     public private(set) var sentence = 0
+    /// How far into the current sentence speech has reached. It only moves the bar, so a saved
+    /// position still lands on the start of a sentence.
+    public private(set) var spoken = 0
     public private(set) var isPaused = false
     public private(set) var speed = 1.0
     public private(set) var voice: String?
@@ -41,12 +44,13 @@ public final class ListenController {
     public init(engine: any SpeechEngine) {
         self.engine = engine
         engine.onFinish = { [weak self] in self?.sentenceFinished() }
+        engine.onWord = { [weak self] in self?.spoken = $0 }
     }
 
     public var voices: [ListenVoice] { engine.voices() }
 
     public var progress: Double {
-        current?.script.progress(at: sentence) ?? 0
+        current?.script.progress(at: sentence, spoken: spoken) ?? 0
     }
 
     public func play(_ track: ListenTrack) {
@@ -120,6 +124,7 @@ public final class ListenController {
         guard let track = current else { return }
         isPaused = false
         restartOnResume = false
+        spoken = 0
         engine.stop()
         reportPosition()
         engine.speak(track.script.sentences[sentence].text, speed: speed, voice: voice)

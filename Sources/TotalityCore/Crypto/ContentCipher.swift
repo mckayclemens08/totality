@@ -36,6 +36,14 @@ public struct ContentRootKey: Sendable, Equatable {
     }
 
     /// The key for one object. Sharing it never reveals the root or any other object's key.
+    /// The same text gives the same ID on every device with this key, and nobody else can work it out.
+    public func derivedID(from text: String) -> UUID {
+        var id = Array(hkdf(ikm: bytes, salt: Data(), info: Data("totality/derived-id/v1".utf8) + Data(text.utf8), length: 16))
+        id[6] = (id[6] & 0x0F) | 0x40
+        id[8] = (id[8] & 0x3F) | 0x80
+        return id.withUnsafeBytes { UUID(uuid: $0.load(as: uuid_t.self)) }
+    }
+
     public func objectKey(for objectID: UUID, purpose: KeyPurpose) -> ObjectKey {
         let info = Data("totality/\(purpose.rawValue)/v1".utf8) + objectID.data
         return ObjectKey(unchecked: hkdf(ikm: bytes, salt: Data(), info: info, length: Self.byteCount))

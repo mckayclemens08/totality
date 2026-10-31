@@ -27,6 +27,9 @@ import TotalityUI
             "doc.questionmark", "headphones", "plus", "square.and.pencil", "square.and.arrow.down",
             "books.vertical", "gobackward", "goforward", "play.fill", "pause.fill", "xmark",
             "person.wave.2", "trash", "text.badge.plus", "circle.hexagongrid", "iphone",
+            "doc.text", "doc.richtext", "book.closed", "doc.plaintext", "folder", "folder.badge.plus",
+            "folder.badge.questionmark", "arrow.up.arrow.down", "list.bullet", "list.number",
+            "square.grid.2x2", "chevron.right", "arrow.uturn.backward", "bold", "italic", "link",
         ]
         for name in names {
             #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "\(name)")

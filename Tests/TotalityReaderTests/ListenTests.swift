@@ -39,6 +39,16 @@ import Testing
         #expect(script.index(at: 10) == 1)
         #expect(script.index(at: 1000) == 2)
     }
+
+    @Test("Progress moves inside a sentence, and never past where the next one starts")
+    func progressInsideASentence() {
+        let script = ListenScript(text: "One here. Two here. Three here.")
+        #expect(script.progress(at: 0, spoken: 4) == 4.0 / 31.0)
+        #expect(script.progress(at: 1) == 10.0 / 31.0)
+        #expect(script.progress(at: 1, spoken: 4) == 14.0 / 31.0)
+        #expect(script.progress(at: 0, spoken: 1000) == 9.0 / 31.0)
+        #expect(script.progress(at: 0, spoken: -4) == 0)
+    }
 }
 
 @MainActor
@@ -59,6 +69,43 @@ import Testing
         engine.onFinish?()
         #expect(listen.current == nil)
         #expect(positions == [0, 5, 10, 0])
+    }
+
+    @Test("A word moves the bar, the way a long PDF needs, and the saved position stays on a sentence")
+    func wordsMoveTheBar() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        var positions: [Int] = []
+        listen.onPosition = { _, offset in positions.append(offset) }
+        let text = String(repeating: "A sentence of a few plain words. ", count: 900)
+        let played = try track(text)
+        listen.play(played)
+        #expect(listen.progress == 0)
+        engine.onWord?(11)
+        #expect(listen.progress == 11.0 / Double(played.script.length))
+        engine.onWord?(23)
+        #expect(listen.progress == 23.0 / Double(played.script.length))
+        listen.stop()
+        #expect(positions == [0, 0])
+    }
+
+    @Test("The next sentence starts from its own beginning, however far the last one got")
+    func wordsResetWithEachSentence() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        let played = try track("One two three. Four five six. Seven.")
+        listen.play(played)
+        engine.onWord?(8)
+        engine.onFinish?()
+        #expect(listen.progress == played.script.progress(at: 1))
+        engine.onWord?(5)
+        listen.skip(by: -1)
+        #expect(listen.progress == 0)
+    }
+
+    @Test func theCountSaysWhichSentenceThisIs() {
+        #expect(ListenBar.label(forSentence: 0, of: 3) == "1 of 3")
+        #expect(ListenBar.label(forSentence: 13, of: 875) == "14 of 875")
     }
 
     @Test func resumesFromTheSavedPosition() throws {
@@ -173,13 +220,72 @@ import Testing
     }
 
     /// Runs the real synthesizer silently, when TOTALITY_SPEECH_TEST is set. It proves the adapter
-    /// delivers finish callbacks, which the fake engine cannot.
+    /// delivers word and finish callbacks, which the fake engine cannot.
     @Test func systemEngineFinishesASentence() async throws {
         guard ProcessInfo.processInfo.environment["TOTALITY_SPEECH_TEST"] != nil else { return }
         let engine = SystemSpeechEngine()
         engine.volume = 0
         let listen = ListenController(engine: engine)
-        listen.play(try track("One. Two."))
+        var words: [Int] = []
+        let forward = engine.onWord
+        engine.onWord = {
+            words.append($0)
+            forward?($0)
+        }
+        listen.play(try track("One two three. Four."))
+        for _ in 0..<300 where listen.current != nil {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(listen.current == nil)
+        #expect(words.contains(4))
+    }
+
+    /// Runs the real synthesizer silently too, because stopping and restarting it is what can go wrong.
+    @Test("Skip keeps speaking from the new sentence, even from a pause and at both ends")
+    func systemEngineSkips() async throws {
+        guard ProcessInfo.processInfo.environment["TOTALITY_SPEECH_TEST"] != nil else { return }
+        let engine = SystemSpeechEngine()
+        engine.volume = 0
+        let listen = ListenController(engine: engine)
+        var words = 0
+        let forward = engine.onWord
+        engine.onWord = {
+            words += 1
+            forward?($0)
+        }
+        func speechMoved() async throws -> Bool {
+            let start = words
+            for _ in 0..<100 where words == start {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            return words > start
+        }
+        let sentence = "This sentence has plenty of words in it so that it takes a while to say out loud."
+        listen.play(try track([sentence, sentence, sentence].joined(separator: " ")))
+        #expect(try await speechMoved())
+
+        listen.skip(by: 1)
+        #expect(listen.sentence == 1)
+        #expect(try await speechMoved())
+
+        listen.skip(by: -1)
+        #expect(listen.sentence == 0)
+        #expect(try await speechMoved())
+
+        listen.skip(by: -1)
+        #expect(listen.sentence == 0)
+        #expect(try await speechMoved())
+
+        listen.togglePause()
+        listen.skip(by: 1)
+        #expect(listen.sentence == 1)
+        #expect(!listen.isPaused)
+        #expect(try await speechMoved())
+
+        listen.skip(by: 5)
+        #expect(listen.sentence == 2)
+        #expect(try await speechMoved())
+
         for _ in 0..<300 where listen.current != nil {
             try await Task.sleep(for: .milliseconds(100))
         }
@@ -208,17 +314,35 @@ import Testing
         #expect(model.notice != nil)
     }
 
-    @Test func groupsByCollectionWithLooseItemsFirst() async throws {
+    @Test("Old deletions go when the Reader loads, so 30 days holds on a device that's offline")
+    func purgeWithoutSync() async throws {
+        let store = MemoryBlobStore()
+        let (model, _) = try model(store: store)
+        let note = try #require(await model.newNote())
+        await model.delete(note)
+        #expect(model.trash.count == 1)
+        let old = Date().addingTimeInterval(-ReaderVault.trashLifetime - 60)
+        try store.write(Data(ISO8601DateFormatter().string(from: old).utf8), as: "\(note.id.uuidString.lowercased()).trashed")
+        await model.load()
+        #expect(model.trash.isEmpty)
+    }
+
+    @Test("Deleting a folder takes everything inside out of Listen, and Restore brings it all back")
+    func deletingAFolder() async throws {
         let (model, _) = try model()
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let file = directory.appendingPathComponent("Dune.txt")
-        try Data("Sand.".utf8).write(to: file)
-        _ = await model.newNote()
-        await model.importFiles([file], collection: ReaderItem.speechifyCollection)
-        #expect(model.sections.map(\.title) == ["", ReaderItem.speechifyCollection])
-        #expect(model.sections.last?.items.map(\.title) == ["Dune"])
+        await model.newFolder("Climbing", in: nil)
+        let folder = try #require(model.library.folders.first)
+        let note = try #require(await model.newNote(in: folder.id))
+        await model.saveNote(note.id, title: "Beta", body: "Crimp left, flag right.")
+        await model.startListening(to: note.id)
+        #expect(model.listen.current?.id == note.id)
+        await model.delete(folder)
+        #expect(model.listen.current == nil)
+        #expect(model.items.isEmpty)
+        #expect(model.trash.map(\.item.title) == ["Climbing"])
+        await model.restore(folder)
+        #expect(model.items.map(\.title) == ["Beta"])
+        #expect(model.trash.isEmpty)
     }
 
     @Test func aFailedImportSaysWhichFileAndKeepsTheRest() async throws {

@@ -8,10 +8,21 @@ struct ListenBar: View {
     var body: some View {
         let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s2) {
-            Text(listen.current?.title ?? "")
-                .font(Typeface.callout)
-                .foregroundStyle(theme.textPrimary.color)
-                .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
+                Text(listen.current?.title ?? "")
+                    .font(Typeface.callout)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let track = listen.current {
+                    // In a long file one sentence is less than a pixel of bar, so this shows it's moving.
+                    Text(Self.label(forSentence: listen.sentence, of: track.script.sentences.count))
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
+                        .monospacedDigit()
+                        .accessibilityLabel("Sentence \(Self.label(forSentence: listen.sentence, of: track.script.sentences.count))")
+                }
+            }
             ListenProgress(value: listen.progress)
             HStack(spacing: 0) {
                 control("gobackward", label: "Previous sentence") { listen.skip(by: -1) }
@@ -65,6 +76,10 @@ struct ListenBar: View {
         .accessibilityLabel("Voice")
     }
 
+    static func label(forSentence index: Int, of count: Int) -> String {
+        "\((index + 1).formatted()) of \(count.formatted())"
+    }
+
     static func label(forSpeed speed: Double) -> String {
         "\(speed.formatted(.number.precision(.fractionLength(0...2))))×"
     }
@@ -91,7 +106,8 @@ private struct ListenProgress: View {
                 GeometryReader { proxy in
                     Capsule()
                         .fill(theme.accent.color)
-                        .frame(width: proxy.size.width * min(max(value, 0), 1))
+                        // Never narrower than it is tall, or the start of a long file draws as a sliver.
+                        .frame(width: max(proxy.size.height, proxy.size.width * min(max(value, 0), 1)))
                 }
             }
             .accessibilityElement()

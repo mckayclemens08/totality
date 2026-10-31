@@ -597,6 +597,8 @@ The proposal needs a domain for handles, MXIDs, and `.well-known`, and it is har
 ### M. **Decision needed — the brief's editor is web-only.** §3 names TipTap + Yjs for documents.
 TipTap runs in a browser, so it has no place in SwiftUI short of hosting a web view inside the Reader. Yjs matters only for documents edited by several people, which arrive with Matrix. The Reader therefore ships plain-text notes first and treats documents as unbuilt. Options when rich documents are next: a native editor on `AttributedString` with Y-CRDT bindings (not yet evaluated), or a web view hosting TipTap. Recommendation: stay native and decide after the Figma file, because the editor's design drives the choice. Owner's call.
 
+**Partly resolved.** The owner approved the Reader upgrade on 2026-10-31, which merged notes into docs on a native editor: `UITextView` and `NSTextView` over a small Markdown body. There is no web view. Yjs stays undecided, because it only matters when several people edit one doc, which needs Matrix and so waits for Phase 2.
+
 ### N. **Sign-in is a username and password, with no recovery.**
 The owner chose this on 2026-10-30. It removes the outside email, the custom URL scheme, and the pre-registered password risk that came with email links. The database refuses any account that isn't a valid username at `totality.invalid`, and refuses to change one. What it gives up:
 

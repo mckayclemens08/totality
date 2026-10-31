@@ -11,7 +11,8 @@ public final class ReaderModel {
     }
 
     public private(set) var phase = Phase.loading
-    public private(set) var items: [ReaderItem] = []
+    public private(set) var library = ReaderLibrary()
+    public private(set) var trash: [TrashedItem] = []
     public private(set) var unreadable = 0
     public private(set) var hits: [ReaderSearchHit] = []
     public var query = ""
@@ -37,9 +38,8 @@ public final class ReaderModel {
         !query.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    public var sections: [(title: String, items: [ReaderItem])] {
-        let groups = Dictionary(grouping: items) { $0.collection ?? "" }
-        return groups.keys.sorted().map { (title: $0, items: groups[$0] ?? []) }
+    public var items: [ReaderItem] {
+        library.items
     }
 
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
@@ -50,8 +50,12 @@ public final class ReaderModel {
 
     public func load() async {
         do {
+            try? await vault.adoptCollections()
+            // Sync does this too, but "30 days" has to hold on a device that's offline.
+            try? await vault.emptyOldTrash()
             let listing = try await vault.list()
-            items = listing.items
+            library = ReaderLibrary(items: listing.items, folders: listing.folders)
+            trash = try await vault.trashed()
             unreadable = listing.unreadable
             phase = .ready
         } catch {
@@ -71,14 +75,60 @@ public final class ReaderModel {
         }
     }
 
-    public func newNote() async -> ReaderItem? {
+    public func newNote(in folder: UUID? = nil) async -> ReaderItem? {
         do {
-            let item = try await vault.createNote()
+            let item = try await vault.createNote(folder: folder)
             await load()
             return item
         } catch {
-            notice = "The note couldn't be created."
+            notice = "The doc couldn't be created."
             return nil
+        }
+    }
+
+    public func newFolder(_ title: String, in parent: UUID?) async {
+        await change("The folder couldn't be created.") { _ = try await $0.createFolder(title: title, in: parent) }
+    }
+
+    public func rename(_ item: ReaderItem, to title: String) async {
+        await change("\(item.displayTitle) couldn't be renamed.") { try await $0.rename(item.id, to: title) }
+    }
+
+    public func move(_ item: ReaderItem, to folder: UUID?) async {
+        do {
+            try await vault.move(item.id, to: folder)
+            await load()
+        } catch let error as ReaderError {
+            notice = error.message
+        } catch {
+            notice = "\(item.displayTitle) couldn't be moved."
+        }
+    }
+
+    /// For drag and drop, which carries only an ID. Whatever it names has to be here already.
+    public func move(id: UUID, to folder: UUID?) async {
+        guard let entry = (library.items + library.folders).first(where: { $0.id == id }), library.canMove(entry, to: folder) else { return }
+        await move(entry, to: folder)
+    }
+
+    public func restore(_ item: ReaderItem) async {
+        await change("\(item.displayTitle) couldn't be restored.") { try await $0.restore(item.id) }
+    }
+
+    public func deleteForever(_ item: ReaderItem) async {
+        await change("\(item.displayTitle) couldn't be deleted.") { try await $0.deleteForever(item.id) }
+    }
+
+    public func emptyTrash() async {
+        await change("Recently Deleted couldn't be emptied.") { try await $0.emptyTrash() }
+    }
+
+    private func change(_ failure: String, _ work: (ReaderVault) async throws -> Void) async {
+        do {
+            try await work(vault)
+            await load()
+        } catch {
+            notice = failure
         }
     }
 
@@ -88,6 +138,10 @@ public final class ReaderModel {
 
     public func loadNote(_ id: UUID) async throws -> String {
         String(decoding: try await vault.body(of: id), as: UTF8.self)
+    }
+
+    public func loadDoc(_ id: UUID) async throws -> DocText {
+        try await vault.doc(id)
     }
 
     /// Returns false when the save failed, so the editor keeps the text for another try.
@@ -106,9 +160,13 @@ public final class ReaderModel {
 
     /// For an open note. Returns the version now saved, or nil if the save failed. If the note changed
     /// elsewhere, what was typed is kept as a copy, and that copy opens so typing carries on there.
-    public func saveNote(_ id: UUID, title: String, body: String, basedOn: Date) async -> NoteSave? {
+    public func saveDoc(_ id: UUID, title: String, doc: DocText, basedOn: Date) async -> NoteSave? {
+        await saveNote(id, title: title, body: doc.markdown, mime: ReadableText.markdownMime, basedOn: basedOn)
+    }
+
+    public func saveNote(_ id: UUID, title: String, body: String, mime: String? = nil, basedOn: Date) async -> NoteSave? {
         do {
-            let result = try await vault.saveNote(id, title: title, body: body, basedOn: basedOn)
+            let result = try await vault.saveNote(id, title: title, body: body, mime: mime, basedOn: basedOn)
             await load()
             await search()
             if case .keptAsCopy(let copy) = result {
@@ -122,15 +180,24 @@ public final class ReaderModel {
         }
     }
 
+    public func document(of id: UUID) async throws -> ReadableDocument {
+        try await vault.document(of: id)
+    }
+
+    /// The file itself, decrypted into memory only, for showing PDF pages.
+    public func fileData(of id: UUID) async throws -> Data {
+        try await vault.body(of: id)
+    }
+
     public func text(of id: UUID) async throws -> String {
         try await vault.text(of: id)
     }
 
-    public func importFiles(_ urls: [URL], collection: String? = nil) async {
+    public func importFiles(_ urls: [URL], into folder: UUID? = nil) async {
         var failures: [String] = []
         for url in urls {
             do {
-                try await importFile(url, collection: collection)
+                try await importFile(url, folder: folder)
             } catch let error as ReaderError {
                 failures.append("\(url.lastPathComponent): \(error.message)")
             } catch {
@@ -141,18 +208,17 @@ public final class ReaderModel {
         await load()
     }
 
-    private func importFile(_ url: URL, collection: String?) async throws {
+    private func importFile(_ url: URL, folder: UUID?) async throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size <= ReaderVault.maxImportBytes else { throw ReaderError.tooLarge }
-        _ = try await vault.importFile(Data(contentsOf: url), filename: url.lastPathComponent, collection: collection)
+        _ = try await vault.importFile(Data(contentsOf: url), filename: url.lastPathComponent, folder: folder)
     }
 
     public func delete(_ item: ReaderItem) async {
-        listen.remove(item.id)
         do {
-            try await vault.delete(item.id)
+            for id in try await vault.delete(item.id) { listen.remove(id) }
             await load()
         } catch {
             notice = "\(item.displayTitle) couldn't be deleted."

@@ -10,6 +10,8 @@ public struct ListenVoice: Identifiable, Sendable, Equatable, Hashable {
 @MainActor
 public protocol SpeechEngine: AnyObject {
     var onFinish: (() -> Void)? { get set }
+    /// Called as each word starts, with how far into the text it is, in UTF-16 units.
+    var onWord: ((Int) -> Void)? { get set }
     func speak(_ text: String, speed: Double, voice: String?)
     func pause()
     func resume()
@@ -20,6 +22,7 @@ public protocol SpeechEngine: AnyObject {
 @MainActor
 public final class SystemSpeechEngine: NSObject, SpeechEngine, AVSpeechSynthesizerDelegate {
     public var onFinish: (() -> Void)?
+    public var onWord: ((Int) -> Void)?
     /// Tests set this to zero so they make no sound.
     var volume: Float = 1
 
@@ -69,7 +72,18 @@ public final class SystemSpeechEngine: NSObject, SpeechEngine, AVSpeechSynthesiz
     }
 
     // The delegate can fire off the main actor, and after a stop has already moved on. The identity
-    // check drops a finish that belongs to an earlier utterance.
+    // checks drop anything that belongs to an earlier utterance.
+    public nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance
+    ) {
+        let speaking = ObjectIdentifier(utterance)
+        let offset = characterRange.location
+        Task { @MainActor in
+            guard let current = self.utterance, ObjectIdentifier(current) == speaking else { return }
+            self.onWord?(offset)
+        }
+    }
+
     public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         let finished = ObjectIdentifier(utterance)
         Task { @MainActor in

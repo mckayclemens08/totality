@@ -1,13 +1,17 @@
 import SwiftUI
 import TotalityUI
 
-/// The Reader's front screen: everything the person keeps, with search and Listen.
+enum ReaderRoute: Hashable {
+    case folder(UUID)
+    case item(ReaderItem)
+    case trash
+}
+
+/// The Reader's front door: the top of the library, and everything that outlives one screen.
 public struct ReaderHomeView: View {
     @Bindable private var model: ReaderModel
     private let onClose: (() -> Void)?
-    @State private var path: [ReaderItem] = []
-    @State private var importing = false
-    @State private var importCollection: String?
+    @State private var path: [ReaderRoute] = []
 
     private static let searchPause = Duration.milliseconds(250)
 
@@ -18,14 +22,18 @@ public struct ReaderHomeView: View {
 
     public var body: some View {
         NavigationStack(path: $path) {
-            content
-                .background(Theme.current.bg.color)
-                .navigationTitle("Reader")
-                .navigationDestination(for: ReaderItem.self) { item in
-                    ReaderItemView(item: item, model: model)
+            ReaderFolderView(folder: nil, model: model, path: $path, onClose: onClose)
+                .navigationDestination(for: ReaderRoute.self) { route in
+                    switch route {
+                    case .folder(let id):
+                        ReaderFolderView(folder: id, model: model, path: $path, onClose: nil)
+                    case .item(let item):
+                        ReaderItemView(item: item, model: model)
+                    case .trash:
+                        ReaderTrashView(model: model)
+                    }
                 }
                 .searchable(text: $model.query, prompt: "Search titles and text")
-                .toolbar { toolbar }
         }
         .tint(Theme.current.accent.color)
         .safeAreaInset(edge: .bottom) {
@@ -33,14 +41,6 @@ public struct ReaderHomeView: View {
                 ListenBar(listen: model.listen)
                     .padding(Space.s3)
                     .background(Theme.current.bg.color)
-            }
-        }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result {
-                let collection = importCollection
-                Task { await model.importFiles(urls, collection: collection) }
-            } else if case .failure = result {
-                model.notice = "Those files couldn't be opened."
             }
         }
         .alert("Reader", isPresented: noticeShown) {
@@ -53,7 +53,7 @@ public struct ReaderHomeView: View {
             guard let id = model.requestedItem else { return }
             model.requestedItem = nil
             if let item = try? await model.currentItem(id) {
-                path = [item]
+                path = [.item(item)]
             } else {
                 model.notice = ReaderError.notFound.message
             }
@@ -68,123 +68,24 @@ public struct ReaderHomeView: View {
     private var noticeShown: Binding<Bool> {
         Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })
     }
+}
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if let onClose {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Home", systemImage: "circle.hexagongrid", action: onClose)
-            }
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Button("New note", systemImage: "square.and.pencil") { createNote() }
-                Button("Import files", systemImage: "square.and.arrow.down") { startImport(into: nil) }
-                Button("Import into \(ReaderItem.speechifyCollection)", systemImage: "books.vertical") {
-                    startImport(into: ReaderItem.speechifyCollection)
-                }
-            } label: {
-                Label("Add", systemImage: "plus")
-            }
+extension ReaderItem {
+    var systemImage: String {
+        switch typeName {
+        case "Folder": "folder"
+        case "Doc": "doc.text"
+        case "PDF": "doc.richtext"
+        case "EPUB": "book.closed"
+        case "Word": "doc.plaintext"
+        default: "doc"
         }
     }
 
-    private func createNote() {
-        Task {
-            if let item = await model.newNote() { path.append(item) }
-        }
-    }
-
-    private func startImport(into collection: String?) {
-        importCollection = collection
-        importing = true
-    }
-
-    @ViewBuilder private var content: some View {
-        switch model.phase {
-        case .loading:
-            ProgressView("Opening your Reader")
-                .font(Typeface.callout)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .failed:
-            ReaderMessage(
-                systemImage: "exclamationmark.triangle",
-                title: "Your Reader didn't open",
-                detail: "This device's storage couldn't be read. Close the Reader and try again."
-            )
-        case .ready where model.isSearching:
-            searchResults
-        case .ready where model.items.isEmpty && model.unreadable == 0:
-            ReaderMessage(
-                systemImage: "book",
-                title: "Nothing here yet",
-                detail: model.isSynced
-                    ? "Write a note, or import a PDF or text file. Everything is encrypted before it leaves this device."
-                    : "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
-            )
-        case .ready:
-            library
-        }
-    }
-
-    @ViewBuilder private var searchResults: some View {
-        if model.hits.isEmpty {
-            ReaderMessage(systemImage: "magnifyingglass", title: "No matches", detail: "Search looks through titles, notes, text files, and PDFs.")
-        } else {
-            List(model.hits) { hit in
-                NavigationLink(value: hit.item) {
-                    ReaderRow(item: hit.item, snippet: hit.snippet)
-                }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-        }
-    }
-
-    private var library: some View {
-        List {
-            if model.unreadable > 0 {
-                Label(unreadableText, systemImage: "lock.slash")
-                    .font(Typeface.caption)
-                    .foregroundStyle(Theme.current.danger.color)
-                    .listRowBackground(Color.clear)
-            }
-            Label(
-                model.isSynced ? "Encrypted, and backed up by sync." : "Encrypted here. It can't be recovered on a new device yet.",
-                systemImage: model.isSynced ? "lock" : "iphone"
-            )
-                .font(Typeface.caption)
-                .foregroundStyle(Theme.current.textSecondary.color)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            ForEach(model.sections, id: \.title) { section in
-                Section {
-                    ForEach(section.items) { item in
-                        NavigationLink(value: item) {
-                            ReaderRow(item: item, snippet: nil)
-                        }
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .swipeActions {
-                            Button("Delete", systemImage: "trash", role: .destructive) {
-                                Task { await model.delete(item) }
-                            }
-                        }
-                    }
-                } header: {
-                    if !section.title.isEmpty { Text(section.title) }
-                }
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-    }
-
-    private var unreadableText: String {
-        model.unreadable == 1
-            ? "1 item can't be opened on this device."
-            : "\(model.unreadable) items can't be opened on this device."
+    /// The quiet line under a name.
+    var detail: String {
+        let date = updatedAt.formatted(date: .abbreviated, time: .omitted)
+        return kind == .note ? date : "\(typeName) · \(date)"
     }
 }
 
@@ -195,8 +96,8 @@ struct ReaderRow: View {
     var body: some View {
         let theme = Theme.current
         HStack(spacing: Space.s3) {
-            Image(systemName: item.kind == .note ? "note.text" : "doc")
-                .foregroundStyle(theme.textSecondary.color)
+            Image(systemName: item.systemImage)
+                .foregroundStyle(item.kind == .folder ? theme.accent.color : theme.textSecondary.color)
                 .frame(width: Space.s5)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: Space.s1) {
@@ -204,7 +105,7 @@ struct ReaderRow: View {
                     .font(Typeface.headline)
                     .foregroundStyle(theme.textPrimary.color)
                     .lineLimit(2)
-                Text(snippet ?? item.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                Text(snippet ?? item.detail)
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
                     .lineLimit(2)
