@@ -115,6 +115,26 @@ import Testing
         #expect(doc.markdown == "1. a\n2. b\nbreak\n1. c")
     }
 
+    @Test("Splitting keeps formatting on both sides, even in the middle of a word or an emoji neighbour")
+    func splitting() {
+        var doc = DocText(paragraphs: [Paragraph(.bullet, runs: [Run("🧗 clim", bold: true), Run("bing")])])
+        doc.split(paragraph: 0, at: 5, into: .bullet)
+        #expect(doc.paragraphs[0].runs == [Run("🧗 cl", bold: true)])
+        #expect(doc.paragraphs[1].runs == [Run("im", bold: true), Run("bing")])
+        #expect(doc.paragraphs[1].style == .bullet)
+    }
+
+    @Test("Splitting at the ends leaves an empty paragraph, not a lost one")
+    func splittingAtEnds() {
+        var doc = DocText(paragraphs: [Paragraph(.heading1, runs: [Run("Title")])])
+        doc.split(paragraph: 0, at: 5, into: .body)
+        #expect(doc.paragraphs == [Paragraph(.heading1, runs: [Run("Title")]), Paragraph()])
+        doc.split(paragraph: 0, at: 0, into: .body)
+        #expect(doc.paragraphs[0].text.isEmpty)
+        #expect(doc.paragraphs[1].text == "Title")
+        #expect(doc.paragraphs.count == 3)
+    }
+
     @Test("A doc saves with its formatting and reads back, and a plain note still opens")
     func vaultRoundTrip() async throws {
         let vault = try newVault()

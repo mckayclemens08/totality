@@ -49,20 +49,21 @@ struct ReaderFolderView: View {
             }
             .alert("New folder", isPresented: $namingFolder) {
                 TextField("Name", text: $name)
+                // Not disabled while empty: a button that opens disabled keeps doing nothing once it's enabled.
                 Button("Create") {
                     let title = cleanedName
+                    guard !title.isEmpty else { return }
                     Task { await model.newFolder(title, in: folder) }
                 }
-                .disabled(cleanedName.isEmpty)
                 Button("Cancel", role: .cancel) {}
             }
             .alert("Rename", isPresented: isRenaming, presenting: renaming) { entry in
                 TextField("Name", text: $name)
                 Button("Save") {
                     let title = cleanedName
+                    guard !title.isEmpty else { return }
                     Task { await model.rename(entry, to: title) }
                 }
-                .disabled(cleanedName.isEmpty)
                 Button("Cancel", role: .cancel) {}
             }
             .confirmationDialog(deleteTitle, isPresented: isDeleting, titleVisibility: .visible, presenting: deleting) { entry in

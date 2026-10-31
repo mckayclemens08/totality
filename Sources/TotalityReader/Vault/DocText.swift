@@ -38,6 +38,29 @@ public struct DocText: Sendable, Equatable {
             runs.map(\.text).joined()
         }
 
+        fileprivate func split(at offset: Int) -> (before: [Run], after: [Run]) {
+            var before: [Run] = []
+            var after: [Run] = []
+            var remaining = offset
+            for run in runs {
+                let length = run.text.utf16.count
+                if remaining >= length {
+                    before.append(run)
+                } else if remaining <= 0 {
+                    after.append(run)
+                } else {
+                    let middle = String.Index(utf16Offset: remaining, in: run.text)
+                    var (head, tail) = (run, run)
+                    head.text = String(run.text[..<middle])
+                    tail.text = String(run.text[middle...])
+                    before.append(head)
+                    after.append(tail)
+                }
+                remaining -= length
+            }
+            return (before, after)
+        }
+
         /// Neighbouring runs that look the same become one, so equal text compares equal.
         private static func merged(_ runs: [Run]) -> [Run] {
             var result: [Run] = []
@@ -94,6 +117,15 @@ public struct DocText: Sendable, Equatable {
 
     private static func lines(_ text: String) -> [String] {
         text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+    }
+
+    // MARK: Editing
+
+    /// Breaks a paragraph at a character offset. The new one starts as `style`.
+    public mutating func split(paragraph index: Int, at offset: Int, into style: Style) {
+        let (before, after) = paragraphs[index].split(at: offset)
+        paragraphs[index] = Paragraph(paragraphs[index].style, runs: before)
+        paragraphs.insert(Paragraph(style, runs: after), at: index + 1)
     }
 
     // MARK: Writing

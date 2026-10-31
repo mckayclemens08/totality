@@ -21,6 +21,22 @@ public struct ColorToken: Sendable, Equatable {
     }
 }
 
+#if canImport(UIKit)
+import UIKit
+
+extension ColorToken {
+    /// For views that SwiftUI doesn't draw itself.
+    public var platformColor: UIColor { UIColor(color) }
+}
+#elseif canImport(AppKit)
+import AppKit
+
+extension ColorToken {
+    /// For views that SwiftUI doesn't draw itself.
+    public var platformColor: NSColor { NSColor(color) }
+}
+#endif
+
 /// Provisional until the Figma file arrives. Values and rules are in docs/design-tokens.md.
 public struct Theme: Sendable, Equatable {
     public let bg, surface, surfaceSunken: ColorToken

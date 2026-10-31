@@ -7,9 +7,10 @@ struct ReaderTrashView: View {
     @State private var confirmingEmpty = false
     @State private var deleting: ReaderItem?
 
-    private static func left(_ entry: TrashedItem) -> String {
-        let end = entry.deletedAt.addingTimeInterval(ReaderVault.trashLifetime)
-        let days = max(0, Calendar.current.dateComponents([.day], from: Date(), to: end).day ?? 0)
+    /// Rounds up, so something deleted just now shows the whole 30 days.
+    static func left(_ entry: TrashedItem, now: Date = Date()) -> String {
+        let remaining = entry.deletedAt.addingTimeInterval(ReaderVault.trashLifetime).timeIntervalSince(now)
+        let days = max(0, Int((remaining / 86_400).rounded(.up)))
         return days == 1 ? "1 day left" : "\(days) days left"
     }
 

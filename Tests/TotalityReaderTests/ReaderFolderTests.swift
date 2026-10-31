@@ -150,6 +150,20 @@ import TotalityCore
 }
 
 @Suite struct RecentlyDeletedTests {
+    @MainActor
+    @Test("Days left start at the full 30, reach 1, and never go negative")
+    func daysLeft() {
+        let now = Date(timeIntervalSince1970: 1_793_000_000)
+        func left(deletedDaysAgo days: Double) -> String {
+            let item = ReaderItem(id: UUID(), kind: .note, title: "Trip", collection: nil, mime: nil, byteCount: 0,
+                                  createdAt: now, updatedAt: now, listenPosition: 0)
+            return ReaderTrashView.left(TrashedItem(item: item, deletedAt: now.addingTimeInterval(-days * 86_400)), now: now)
+        }
+        #expect(left(deletedDaysAgo: 0.001) == "30 days left")
+        #expect(left(deletedDaysAgo: 29.5) == "1 day left")
+        #expect(left(deletedDaysAgo: 31) == "0 days left")
+    }
+
     @Test("Deleting keeps a sealed copy and tells sync")
     func deletingKeepsACopy() async throws {
         let store = MemoryBlobStore()

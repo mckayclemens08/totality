@@ -14,8 +14,25 @@ A new contract is recorded here before it is implemented.
 
 ## Reader
 
-`ReaderModule` handles `note` and `file` content. It does not claim `doc` until rich documents exist
-(proposal §11-M), so a `doc` ref draws its preview chip.
+`ReaderModule` handles `note` and `file` content. Notes became docs in the Reader upgrade, and they
+kept the `note` content kind and their IDs so that existing items, refs, and sync rows carry on. Nothing
+uses the `doc` kind yet, so a `doc` ref draws its preview chip.
+
+A doc's body is a small Markdown subset inside the sealed blob: headings, bold, italic, bullet and
+numbered lists, and links. `DocText` reads and writes it, and an old plain note opens as it always did.
+Only `http`, `https`, and `mailto` links open. Anything else stays as text.
+
+Folders are sealed items, travelling as `note` rows, so the server can't tell a folder from a doc or
+see a name. An item names its parent inside its sealed details. A missing parent or a loop puts an item
+at the top level, because a sync can deliver them in any order. The old collections became folders
+with an ID drawn from the name, so two devices migrating alone land on one folder.
+
+Deleted items stay sealed in Recently Deleted for 30 days, then they're removed for good. A deleted
+folder takes what's inside it, and restoring it brings them back.
+
+PDFs show their real pages, decrypted into memory only. EPUB and Word files show extracted text. Their
+parsers take hostile files, so `ZipArchive` bounds every read and total size, and `SafeXML` removes
+DOCTYPEs before anything parses, which rules out external entities and entity expansion.
 
 The proposal had Listen hand an audio `ContentRef` to the player. On-device speech produces no audio
 file, so there is nothing to refer to. Listen lives in `TotalityReader` as `ListenController` for now.
@@ -85,7 +102,6 @@ Notes, files, and events move between one person's devices as sealed bytes. A ro
 - **Listen position counts as an edit.** It lives in the sealed details, so a file deleted elsewhere comes back from a device that only listened to it. Nothing is lost. Moving positions out of the details fixes this.
 - **Blob and row races.** Storage and the row can't change in one step, so two devices racing on the same body can leave a row with no blob, and failed uploads can leave orphaned blobs that nothing counts or collects. Closing it takes a server-side swap.
 - **Deletes aren't authenticated.** A server can claim anything is deleted. The trash and the 5-removal hold limit the damage, and they don't prevent it.
-- **Trash has no screen yet.** It's recoverable by the app, not by the person. "Recently deleted" arrives with the Reader upgrade.
 
 ## Sharing an item
 
