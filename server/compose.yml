@@ -1,0 +1,33 @@
+# The server plane on the Oracle box. Secrets never live here: anything private stays in files on the
+# server that this repo ignores. Tuwunel listens only on the machine itself.
+services:
+  tuwunel:
+    # v1.9.4 for arm64, pinned by digest so an upgrade is always a deliberate change.
+    image: ghcr.io/matrix-construct/tuwunel@sha256:0bb78226d66a1cb9c120f741df279cdcc7afa0f9bbcbe4a50f1264c8e73bc36a
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp"]
+    environment:
+      TUWUNEL_CONFIG: /etc/tuwunel.toml
+    ports:
+      - "127.0.0.1:8008:8008"
+    volumes:
+      - ./tuwunel.toml:/etc/tuwunel.toml:ro
+      - ./data:/var/lib/tuwunel
+
+  # Reaches out to Cloudflare, so the server needs no open ports. credentials.json is the tunnel's
+  # secret and exists only on the server.
+  cloudflared:
+    image: cloudflare/cloudflared@sha256:17ab7aa52b3a9805b36c81cbe353bad657fb6395d63c81e12021beaea95f03d3
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    depends_on: [tuwunel]
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro

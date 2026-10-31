@@ -1,0 +1,13 @@
+# What the tunnel will carry. Everything else gets a 404, including federation, which stays off until
+# Phase 2.
+tunnel: e4887556-fad1-46ac-b6c4-b1996a4fce65
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: matrix.usetotality.com
+    path: ^/_matrix/(client|media)/
+    service: http://tuwunel:8008
+  - hostname: usetotality.com
+    path: ^/\.well-known/matrix/
+    service: http://tuwunel:8008
+  - service: http_status:404
