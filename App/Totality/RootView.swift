@@ -1,5 +1,6 @@
 import SwiftUI
 import TotalityAccount
+import TotalityCalendar
 import TotalityCore
 import TotalityReader
 import TotalityUI
@@ -11,7 +12,8 @@ struct RootView: View {
     // Only which module was last open, on this device. It holds no content.
     @AppStorage("home.recentModule") private var recentModule = ModuleID.reader
     @State private var reader: ReaderModel?
-    @State private var readerProblem: ReaderProblem?
+    @State private var calendar: CalendarModel?
+    @State private var contentProblem: ContentProblem?
     @State private var account = AccountSetup.makeModel()
     @State private var showingAccount = false
     @Environment(\.colorScheme) private var scheme
@@ -21,7 +23,7 @@ struct RootView: View {
             switch open {
             case nil:
                 HomeView(center: recentModule) { module in
-                    if module == .reader { prepareReader() }
+                    if module == .reader || module == .calendar { prepareContent() }
                     recentModule = module
                     open = module
                 }
@@ -30,14 +32,19 @@ struct RootView: View {
                 if let reader {
                     ReaderHomeView(model: reader) { open = nil }
                 } else {
-                    let problem = readerProblem ?? .keyUnavailable
-                    ModuleMessage(systemImage: "lock.slash", title: problem.title, detail: problem.detail) { open = nil }
+                    contentMessage
+                }
+            case .calendar:
+                if let calendar {
+                    CalendarHomeView(model: calendar, onClose: { open = nil }, onOpen: show)
+                } else {
+                    contentMessage
                 }
             case .some(let module):
                 ModuleMessage(
                     systemImage: "hammer",
                     title: ModuleEntry.all.first { $0.id == module }?.name ?? "This module",
-                    detail: "This isn't built yet. The Reader is the first module you can use."
+                    detail: "This isn't built yet. The Reader and Calendar are ready to use."
                 ) { open = nil }
             }
         }
@@ -70,25 +77,40 @@ struct RootView: View {
         .accessibilityLabel("Account")
     }
 
-    private func prepareReader() {
+    private var contentMessage: some View {
+        let problem = contentProblem ?? .keyUnavailable
+        return ModuleMessage(systemImage: "lock.slash", title: problem.title, detail: problem.detail) { open = nil }
+    }
+
+    private func prepareContent() {
         guard reader == nil else { return }
         do {
-            reader = try ReaderSetup.makeModel()
+            let content = try ContentSetup.makeModels()
+            reader = content.reader
+            calendar = content.calendar
         } catch KeyStoreError.keyMissing {
-            readerProblem = .keyMissing
+            contentProblem = .keyMissing
         } catch {
-            readerProblem = .keyUnavailable
+            contentProblem = .keyUnavailable
         }
+    }
+
+    /// Only the Reader's content can be attached so far, so that's where a ref opens.
+    private func show(_ ref: ContentRef) {
+        guard ref.module == .reader else { return }
+        reader?.requestedItem = ref.id
+        recentModule = .reader
+        open = .reader
     }
 }
 
-private enum ReaderProblem {
+private enum ContentProblem {
     case keyMissing, keyUnavailable
 
     var title: String {
         switch self {
         case .keyMissing: "Your key isn't on this device"
-        case .keyUnavailable: "Your Reader didn't open"
+        case .keyUnavailable: "This didn't open"
         }
     }
 

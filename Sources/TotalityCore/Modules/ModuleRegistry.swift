@@ -4,6 +4,13 @@ public protocol ContentHandler: Sendable {
     var kinds: Set<ContentKind> { get }
 }
 
+/// A module whose content other modules can attach. Refs are the only thing that crosses over.
+public protocol ContentProvider: ContentHandler {
+    func attachable() async throws -> [ContentRef]
+    /// The ref as it is now, or nil if the content is gone.
+    func current(_ ref: ContentRef) async throws -> ContentRef?
+}
+
 public enum ModuleRegistryError: Error, Equatable {
     case duplicateModule(ModuleID)
     case duplicateKind(ContentKind)
@@ -12,6 +19,7 @@ public enum ModuleRegistryError: Error, Equatable {
 /// Resolves a `ContentRef` to the module that handles it. Built once at launch and never changed.
 public struct ModuleRegistry: Sendable {
     private let byKind: [ContentKind: any ContentHandler]
+    private let handlers: [any ContentHandler]
 
     public init(handlers: [any ContentHandler]) throws {
         var modules = Set<ModuleID>()
@@ -26,10 +34,16 @@ public struct ModuleRegistry: Sendable {
             }
         }
         self.byKind = byKind
+        self.handlers = handlers
     }
 
     /// Nil means nothing installed can open this, so callers show the preview chip alone.
     public func handler(for ref: ContentRef) -> (any ContentHandler)? {
         byKind[ref.kind]
+    }
+
+    /// What a module can attach, which is everything except its own content.
+    public func providers(for module: ModuleID) -> [any ContentProvider] {
+        handlers.compactMap { $0 as? any ContentProvider }.filter { $0.module != module }
     }
 }

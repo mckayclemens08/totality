@@ -185,7 +185,7 @@ struct AccountSettingsView: View {
                 AccountDetail(text: "Signed in as \(username).")
             }
             AccountDetail(text: model.deviceRegistered ? "This device is added to your account." : "This device isn't added to your account yet.")
-            AccountDetail(text: "Your notes aren't synced yet. They stay on this device, and signing out leaves them here.")
+            AccountDetail(text: "Your notes and events aren't synced yet. Signing out leaves them on this device, and event reminders keep showing.")
             AccountButton(title: "Sign out", isWorking: model.isWorking) { Task { await model.signOut() } }
             if let notice = model.notice {
                 Text(notice)
