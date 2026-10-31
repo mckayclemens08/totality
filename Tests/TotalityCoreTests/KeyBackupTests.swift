@@ -405,6 +405,15 @@ struct LockedSecretVectorTests {
         #expect(try ring.current() != old)
     }
 
+    @Test("A leftover delete record isn't content, and is cleared by a reset")
+    func deletionRecordsDoNotBlockReset() throws {
+        let device = try device(notes: 0)
+        try device.blobs.write(Data(), as: "\(UUID().uuidString.lowercased()).deleted")
+        #expect(try device.ring.hasSealedContent() == false)
+        try device.ring.resetEmptyDevice()
+        #expect(try device.blobs.names().isEmpty)
+    }
+
     @Test("A device with any content can never be reset")
     func deviceWithContentNeverResets() throws {
         let device = try device()

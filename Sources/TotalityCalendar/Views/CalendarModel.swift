@@ -147,6 +147,8 @@ public final class CalendarModel {
     public var mode: Mode
     /// A problem to show the person, cleared when they dismiss it.
     public var notice: String?
+    /// True once this device syncs, which decides what the screen can truthfully say about recovery.
+    public var isSynced = false
 
     public let display: Calendar
     private let vault: CalendarVault

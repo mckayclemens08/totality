@@ -38,7 +38,8 @@ public struct ReaderShare: Sendable, Equatable {
 /// A user's Reader content. Each item is two blobs: metadata and body, under separate per-object
 /// keys. Blob names hold only the object ID.
 public actor ReaderVault {
-    public static let maxImportBytes = 50 * 1024 * 1024
+    /// Under Supabase's 50 MB upload limit, leaving room for what sealing adds.
+    public static let maxImportBytes = 49 * 1024 * 1024
     /// How each kind of blob is sealed, so a key change can reach them without knowing what they are.
     public static let sealedPurposes: [String: KeyPurpose] = [".meta": .metadata, ".body": .content]
     private static let snippetRadius = 60
@@ -47,6 +48,7 @@ public actor ReaderVault {
     private let rootKey: ContentRootKey
     private var textCache: [UUID: String] = [:]
     private var isClosed = false
+    private var hashes: [UUID: String] = [:]
 
     public init(store: any BlobStore, rootKey: ContentRootKey) {
         self.store = store
@@ -54,6 +56,7 @@ public actor ReaderVault {
     }
 
     private func metaName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).meta" }
+    private func deletionName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).deleted" }
     private func bodyName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).body" }
 
     /// Refuses all further writes. A key move lists every blob once, so anything written after that,
@@ -64,12 +67,14 @@ public actor ReaderVault {
 
     private func writeMeta(_ item: ReaderItem) throws {
         guard !isClosed else { throw ReaderError.closed }
+        hashes[item.id] = nil
         let key = rootKey.objectKey(for: item.id, purpose: .metadata)
         try store.write(try ContentCipher.seal(JSONEncoder().encode(item), key: key, objectID: item.id), as: metaName(item.id))
     }
 
     private func writeBody(_ data: Data, id: UUID) throws {
         guard !isClosed else { throw ReaderError.closed }
+        hashes[id] = nil
         let key = rootKey.objectKey(for: id, purpose: .content)
         try store.write(try ContentCipher.seal(data, key: key, objectID: id), as: bodyName(id))
         textCache[id] = nil
@@ -155,9 +160,16 @@ public actor ReaderVault {
 
     public func delete(_ id: UUID) throws {
         guard !isClosed else { throw ReaderError.closed }
+        // The record goes first, so a crash can't lose the fact that this was deleted on purpose.
+        try store.write(Data(), as: deletionName(id))
+        try removeBlobs(id)
+    }
+
+    private func removeBlobs(_ id: UUID) throws {
         try store.delete(metaName(id))
         try store.delete(bodyName(id))
         textCache[id] = nil
+        hashes[id] = nil
     }
 
     /// Every word must appear in the title or text. Files with no readable text match on title only.
@@ -195,5 +207,87 @@ public actor ReaderVault {
             sealedHeader: try ContentCipher.seal(JSONEncoder().encode(header), key: key, objectID: id),
             sealedBody: try ContentCipher.seal(body(of: id), key: key, objectID: id)
         )
+    }
+}
+
+extension ReaderVault: SyncArea {
+    public nonisolated var kinds: Set<ContentKind> { [.note, .file] }
+
+    public func sealedObjectIDs() throws -> [UUID] {
+        try store.names().compactMap { name in
+            name.hasSuffix(".meta") ? UUID(uuidString: String(name.dropLast(".meta".count))) : nil
+        }
+    }
+
+    public func sealedHash(of id: UUID) throws -> String? {
+        if let known = hashes[id] { return known }
+        let hash = try sealedObject(id)?.hash
+        hashes[id] = hash
+        return hash
+    }
+
+    public func sealedObject(_ id: UUID) throws -> SealedObject? {
+        guard let meta = try store.read(metaName(id)) else { return nil }
+        return SealedObject(
+            id: id, kind: try item(id).kind == .note ? .note : .file, meta: meta, body: try store.read(bodyName(id))
+        )
+    }
+
+    /// Checks before writing: only what opens under this device's key, and belongs under this ID, is kept.
+    public func store(_ object: SealedObject) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        guard let body = object.body else { throw CryptoError.malformedCiphertext }
+        let item = try opened(object).item
+        guard item.id == object.id else { throw CryptoError.authenticationFailed }
+        _ = try ContentCipher.open(body, key: rootKey.objectKey(for: object.id, purpose: .content), objectID: object.id)
+        try store.write(body, as: bodyName(object.id))
+        try store.write(object.meta, as: metaName(object.id))
+        textCache[object.id] = nil
+        hashes[object.id] = nil
+    }
+
+    public func removeObject(_ id: UUID) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        try removeBlobs(id)
+    }
+
+    public func deletedObjectIDs() throws -> Set<UUID> {
+        Set(try store.names().compactMap { name in
+            name.hasSuffix(".deleted") ? UUID(uuidString: String(name.dropLast(".deleted".count))) : nil
+        })
+    }
+
+    public func clearDeletion(_ id: UUID) throws {
+        try store.delete(deletionName(id))
+    }
+
+    /// The newest version stays. An older version with a different body is kept as a copy, so nothing
+    /// is silently lost. If only the details differ, like a Listen position, there's nothing to keep.
+    public func resolveConflict(local: SealedObject, remote: SealedObject) throws -> ConflictResolution {
+        let mine = try opened(local)
+        let theirs = try opened(remote)
+        let keepMine = mine.item.updatedAt >= theirs.item.updatedAt
+        if mine.body != theirs.body {
+            let older = keepMine ? theirs : mine
+            try writeConflictCopy(of: older.item, body: older.body)
+        }
+        return keepMine ? .keepLocal : .keepRemote
+    }
+
+    private func opened(_ object: SealedObject) throws -> (item: ReaderItem, body: Data) {
+        let id = object.id
+        let meta = try ContentCipher.open(object.meta, key: rootKey.objectKey(for: id, purpose: .metadata), objectID: id)
+        let body = try object.body.map { try ContentCipher.open($0, key: rootKey.objectKey(for: id, purpose: .content), objectID: id) }
+        return (try JSONDecoder().decode(ReaderItem.self, from: meta), body ?? Data())
+    }
+
+    private func writeConflictCopy(of item: ReaderItem, body: Data) throws {
+        let now = Date()
+        let copy = ReaderItem(
+            id: UUID(), kind: item.kind, title: "\(item.displayTitle) (conflict copy)", collection: item.collection,
+            mime: item.mime, byteCount: item.byteCount, createdAt: now, updatedAt: now, listenPosition: 0
+        )
+        try writeBody(body, id: copy.id)
+        try writeMeta(copy)
     }
 }

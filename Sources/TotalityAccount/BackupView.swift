@@ -62,7 +62,7 @@ struct BackupView: View {
         case .notSetUp:
             AccountDetail(text: "Your recovery key is what opens your encrypted content on a new or restored device. Totality doesn't keep it, so once you finish here it can't be shown again.")
             warning
-            AccountDetail(text: "This is the first step. Sync isn't finished, so today your recovery key only helps with what's restored from a device backup. Once sync is on, it brings everything back.")
+            AccountDetail(text: "Once it's set up, your notes, files, and events sync between your devices, sealed so only your key opens them, and a new device can get them all back.")
             AccountButton(title: "Create recovery key", isWorking: false) { model.begin() }
             releaseButton
         case .showingKey(let key):
@@ -112,7 +112,7 @@ struct BackupView: View {
         case .ready(let copies):
             AccountDetail(text: "Your recovery key is set up, and this device has joined.")
             AccountDetail(text: copiesText(copies))
-            AccountDetail(text: "Sync isn't finished, so your notes and events aren't on Totality's servers yet.")
+            AccountDetail(text: "Your notes, files, and events sync between your devices. The servers only ever see them encrypted.")
             warning
         }
     }

@@ -21,6 +21,7 @@ public actor CalendarVault {
     private let store: any BlobStore
     private let rootKey: ContentRootKey
     private var isClosed = false
+    private var hashes: [UUID: String] = [:]
 
     public init(store: any BlobStore, rootKey: ContentRootKey) {
         self.store = store
@@ -28,6 +29,7 @@ public actor CalendarVault {
     }
 
     private func name(_ id: UUID) -> String { "\(id.uuidString.lowercased()).event" }
+    private func deletionName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).deleted" }
 
     /// Refuses all further writes, so nothing lands under the old key during a key move.
     public func close() {
@@ -36,6 +38,7 @@ public actor CalendarVault {
 
     public func save(_ event: CalendarEvent) throws {
         guard !isClosed else { throw CalendarError.closed }
+        hashes[event.id] = nil
         let key = rootKey.objectKey(for: event.id, purpose: .event)
         try store.write(try ContentCipher.seal(JSONEncoder().encode(event), key: key, objectID: event.id), as: name(event.id))
     }
@@ -64,6 +67,81 @@ public actor CalendarVault {
 
     public func delete(_ id: UUID) throws {
         guard !isClosed else { throw CalendarError.closed }
+        // The record goes first, so a crash can't lose the fact that this was deleted on purpose.
+        try store.write(Data(), as: deletionName(id))
         try store.delete(name(id))
+        hashes[id] = nil
+    }
+}
+
+extension CalendarVault: SyncArea {
+    public nonisolated var kinds: Set<ContentKind> { [.event] }
+
+    public func sealedObjectIDs() throws -> [UUID] {
+        try store.names().compactMap { file in
+            file.hasSuffix(".event") ? UUID(uuidString: String(file.dropLast(".event".count))) : nil
+        }
+    }
+
+    public func sealedHash(of id: UUID) throws -> String? {
+        if let known = hashes[id] { return known }
+        let hash = try sealedObject(id)?.hash
+        hashes[id] = hash
+        return hash
+    }
+
+    public func sealedObject(_ id: UUID) throws -> SealedObject? {
+        try store.read(name(id)).map { SealedObject(id: id, kind: .event, meta: $0, body: nil) }
+    }
+
+    /// Checks before writing: only what opens under this device's key, and belongs under this ID, is kept.
+    public func store(_ object: SealedObject) throws {
+        guard !isClosed else { throw CalendarError.closed }
+        _ = try opened(object)
+        try store.write(object.meta, as: name(object.id))
+        hashes[object.id] = nil
+    }
+
+    public func removeObject(_ id: UUID) throws {
+        guard !isClosed else { throw CalendarError.closed }
+        try store.delete(name(id))
+        hashes[id] = nil
+    }
+
+    public func deletedObjectIDs() throws -> Set<UUID> {
+        Set(try store.names().compactMap { file in
+            file.hasSuffix(".deleted") ? UUID(uuidString: String(file.dropLast(".deleted".count))) : nil
+        })
+    }
+
+    public func clearDeletion(_ id: UUID) throws {
+        try store.delete(deletionName(id))
+    }
+
+    /// The newest version stays, and an older one that really differs is kept as a copy.
+    public func resolveConflict(local: SealedObject, remote: SealedObject) throws -> ConflictResolution {
+        let mine = try opened(local)
+        let theirs = try opened(remote)
+        let keepMine = mine.updatedAt >= theirs.updatedAt
+        var older = keepMine ? theirs : mine
+        let newer = keepMine ? mine : theirs
+        older.updatedAt = newer.updatedAt
+        if older != newer {
+            let copy = CalendarEvent(
+                title: "\(older.displayTitle) (conflict copy)", location: older.location, notes: older.notes,
+                start: older.start, end: older.end, isAllDay: older.isAllDay, timeZoneID: older.timeZoneID,
+                repeatRule: older.repeatRule, skipped: older.skipped, reminderMinutes: older.reminderMinutes,
+                attachments: older.attachments
+            )
+            try save(copy)
+        }
+        return keepMine ? .keepLocal : .keepRemote
+    }
+
+    private func opened(_ object: SealedObject) throws -> CalendarEvent {
+        let key = rootKey.objectKey(for: object.id, purpose: .event)
+        let event = try JSONDecoder().decode(CalendarEvent.self, from: ContentCipher.open(object.meta, key: key, objectID: object.id))
+        guard event.id == object.id else { throw CryptoError.authenticationFailed }
+        return event
     }
 }

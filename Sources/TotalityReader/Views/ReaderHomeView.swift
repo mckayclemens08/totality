@@ -118,7 +118,9 @@ public struct ReaderHomeView: View {
             ReaderMessage(
                 systemImage: "book",
                 title: "Nothing here yet",
-                detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
+                detail: model.isSynced
+                    ? "Write a note, or import a PDF or text file. Everything is encrypted before it leaves this device."
+                    : "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
             )
         case .ready:
             library
@@ -149,7 +151,10 @@ public struct ReaderHomeView: View {
                     .foregroundStyle(Theme.current(scheme).danger.color)
                     .listRowBackground(Color.clear)
             }
-            Label("Encrypted here. It can't be recovered on a new device yet.", systemImage: "iphone")
+            Label(
+                model.isSynced ? "Encrypted, and synced between your devices." : "Encrypted here. It can't be recovered on a new device yet.",
+                systemImage: model.isSynced ? "lock" : "iphone"
+            )
                 .font(Typeface.caption)
                 .foregroundStyle(Theme.current(scheme).textSecondary.color)
                 .listRowBackground(Color.clear)

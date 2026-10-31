@@ -40,6 +40,8 @@ public final class BackupModel {
     public private(set) var canRelease = false
     /// True on the other-account screen when this account has a recovery key to prove the content with.
     public private(set) var canProveOwnership = false
+    /// Called once this device has joined, so sync can start.
+    public var onJoined: (() async -> Void)?
 
     private let service: any KeyBackupService
     private let content: any ContentKeyAccess
@@ -71,6 +73,15 @@ public final class BackupModel {
         } catch {
             // Nothing is claimed, so `load` falls back to asking.
         }
+    }
+
+    /// Whether this device may sync: it has to belong to the signed-in account and have joined.
+    public func deviceCanSync() async -> Bool {
+        guard let account = await service.signedInAccountID(),
+              let owner = try? await content.keyOwner(), owner == account,
+              let joined = try? await content.joinedBackup()
+        else { return false }
+        return !joined.isEmpty
     }
 
     public func load() async {
@@ -217,6 +228,7 @@ public final class BackupModel {
             self.newKey = nil
             existing = FetchedBackup(backup: backup, inSupabase: true)
             phase = .ready(await copies(of: FetchedBackup(backup: backup, inSupabase: true)))
+            await onJoined?()
         } catch ContentKeyError.otherAccount {
             self.newKey = nil
             phase = .otherAccount
@@ -265,6 +277,7 @@ public final class BackupModel {
             if report.unreadable > 0 {
                 notice = "\(report.unreadable) items can't be opened with this key. They're untouched."
             }
+            await onJoined?()
         } catch ContentKeyError.otherAccount {
             phase = .otherAccount
         } catch ContentKeyError.keyDoesNotOpenContent {

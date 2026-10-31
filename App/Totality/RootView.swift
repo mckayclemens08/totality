@@ -13,11 +13,13 @@ struct RootView: View {
     @AppStorage("home.recentModule") private var recentModule = ModuleID.reader
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
+    @State private var syncAreas: [any SyncArea] = []
     @State private var contentProblem: ContentProblem?
     @State private var contentKeys: DeviceContentKeys
     @State private var account: AccountModel?
     @State private var showingAccount = false
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let keys = DeviceContentKeys()
@@ -58,13 +60,24 @@ struct RootView: View {
         .animation(Motion.standard, value: open)
         .task {
             contentKeys.willMove = {
+                await account?.sync?.pause()
                 await reader?.stopForKeyChange()
                 await calendar?.stopForKeyChange()
                 reader = nil
                 calendar = nil
+                syncAreas = []
                 contentProblem = nil
             }
+            contentKeys.didMove = { account?.sync?.resume() }
             await account?.backup?.settleDevice()
+            connectSync()
+            await account?.sync?.syncNow()
+        }
+        .onChange(of: scenePhase) {
+            if scenePhase == .active { Task { await account?.sync?.syncNow() } }
+        }
+        .onChange(of: open) {
+            if open == nil { Task { await account?.sync?.syncNow() } }
         }
         .sheet(isPresented: $showingAccount) {
             if let account {
@@ -109,11 +122,37 @@ struct RootView: View {
             let content = try ContentSetup.makeModels()
             reader = content.reader
             calendar = content.calendar
+            syncAreas = content.areas
+            Task { await refreshRecoveryLabels() }
         } catch KeyStoreError.keyMissing {
             contentProblem = .keyMissing
         } catch {
             contentProblem = .keyUnavailable
         }
+    }
+
+    private func refreshRecoveryLabels() async {
+        let canSync = await account?.backup?.deviceCanSync() ?? false
+        reader?.isSynced = canSync
+        calendar?.isSynced = canSync
+    }
+
+    /// Sync runs on the same vaults the modules use, so it opens them if nothing has yet.
+    private func connectSync() {
+        guard let account, let sync = account.sync, let remote = account.syncRemote, let backup = account.backup else { return }
+        sync.run = {
+            guard await backup.deviceCanSync() else { return nil }
+            prepareContent()
+            guard !syncAreas.isEmpty else { return nil }
+            await refreshRecoveryLabels()
+            let engine = SyncEngine(areas: syncAreas, remote: remote, state: FileSyncState(file: try ContentSetup.syncStateFile()))
+            return try await engine.sync()
+        }
+        sync.onChanged = {
+            await reader?.load()
+            await calendar?.load()
+        }
+        backup.onJoined = { await sync.syncNow() }
     }
 
     /// Only the Reader's content can be attached so far, so that's where a ref opens.

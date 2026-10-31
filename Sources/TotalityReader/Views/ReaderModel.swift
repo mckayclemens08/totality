@@ -17,6 +17,8 @@ public final class ReaderModel {
     public var query = ""
     /// An item another module asked to open. The home screen takes it from here.
     public var requestedItem: UUID?
+    /// True once this device syncs, which decides what the screen can truthfully say about recovery.
+    public var isSynced = false
     /// A problem to show the person, cleared when they dismiss it.
     public var notice: String?
 

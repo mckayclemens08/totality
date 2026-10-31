@@ -352,7 +352,62 @@ enum Dates {
         let event = Dates.event(Dates.date(2026, 10, 15, 9))
         try await vault.save(event)
         try await vault.delete(event.id)
-        #expect(try blobs.names().isEmpty)
+        #expect(try blobs.names().allSatisfy { $0.hasSuffix(".deleted") })
+    }
+}
+
+@Suite struct CalendarSyncTests {
+    private func pair() throws -> (first: CalendarVault, second: CalendarVault) {
+        let key = try ContentRootKey.generate()
+        return (CalendarVault(store: MemoryBlobs(), rootKey: key), CalendarVault(store: MemoryBlobs(), rootKey: key))
+    }
+
+    @Test func anEventMovesBetweenDevices() async throws {
+        let (first, second) = try pair()
+        let event = Dates.event(Dates.date(2026, 10, 15, 9), title: "Dentist")
+        try await first.save(event)
+        try await second.store(try #require(try await first.sealedObject(event.id)))
+        #expect(try await second.event(event.id) == event)
+    }
+
+    @Test("An event sealed under another key is refused")
+    func refusesOtherKeys() async throws {
+        let (first, _) = try pair()
+        let stranger = CalendarVault(store: MemoryBlobs(), rootKey: try ContentRootKey.generate())
+        let event = Dates.event(Dates.date(2026, 10, 15, 9))
+        try await stranger.save(event)
+        await #expect(throws: (any Error).self) { try await first.store(try #require(try await stranger.sealedObject(event.id))) }
+    }
+
+    @Test("Both changed: the newest stays, and the older is kept as a copy")
+    func conflictKeepsBoth() async throws {
+        let (first, second) = try pair()
+        var event = Dates.event(Dates.date(2026, 10, 15, 9), title: "Dentist")
+        event.updatedAt = Date(timeIntervalSince1970: 100)
+        try await first.save(event)
+        var newer = event
+        newer.title = "Dentist moved"
+        newer.updatedAt = Date(timeIntervalSince1970: 200)
+        try await second.save(newer)
+        let local = try #require(try await first.sealedObject(event.id))
+        let remote = try #require(try await second.sealedObject(event.id))
+        #expect(try await first.resolveConflict(local: local, remote: remote) == .keepRemote)
+        #expect(try await first.list().events.contains { $0.title == "Dentist (conflict copy)" })
+    }
+
+    @Test("Identical events apart from the time saved make no copy")
+    func noCopyForTheSameEvent() async throws {
+        let (first, second) = try pair()
+        var event = Dates.event(Dates.date(2026, 10, 15, 9))
+        event.updatedAt = Date(timeIntervalSince1970: 100)
+        try await first.save(event)
+        event.updatedAt = Date(timeIntervalSince1970: 200)
+        try await second.save(event)
+        _ = try await first.resolveConflict(
+            local: try #require(try await first.sealedObject(event.id)),
+            remote: try #require(try await second.sealedObject(event.id))
+        )
+        #expect(try await first.list().events.count == 1)
     }
 }
 
@@ -577,7 +632,7 @@ enum Dates {
         _ = await model.create(series)
         await model.delete(try onlyOccurrence(model, day: 16), scope: .allOccurrences)
         #expect(model.agenda.isEmpty)
-        #expect(try blobs.names().isEmpty)
+        #expect(try blobs.names().allSatisfy { $0.hasSuffix(".deleted") })
     }
 
     @Test("Device calendars stay away until permission is given")

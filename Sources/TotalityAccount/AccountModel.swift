@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TotalityCore
 
 /// What the account screens show. Signing in and out never touches notes or their keys.
 @MainActor
@@ -27,11 +28,18 @@ public final class AccountModel {
 
     /// Nil when this build has nothing to back up with.
     public let backup: BackupModel?
+    /// Nil when this build has nothing to sync with.
+    public let sync: SyncModel?
+    public let syncRemote: (any SyncRemote)?
     private let service: any AccountService
 
-    public init(service: any AccountService, backup: BackupModel? = nil) {
+    public init(
+        service: any AccountService, backup: BackupModel? = nil, sync: SyncModel? = nil, syncRemote: (any SyncRemote)? = nil
+    ) {
         self.service = service
         self.backup = backup
+        self.sync = sync
+        self.syncRemote = syncRemote
     }
 
     public func load() async {

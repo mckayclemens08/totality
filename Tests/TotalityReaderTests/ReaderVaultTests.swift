@@ -84,7 +84,7 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         let vault = try newVault(store: store)
         let note = try await vault.createNote(title: "Gone")
         try await vault.delete(note.id)
-        #expect(try store.names().isEmpty)
+        #expect(try store.names().allSatisfy { $0.hasSuffix(".deleted") })
         await #expect(throws: ReaderError.notFound) { try await vault.body(of: note.id) }
     }
 
@@ -154,6 +154,89 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         let file = try await vault.importFile(Data([0, 1, 2]), filename: "archive.zip")
         await #expect(throws: ReaderError.notReadable) { try await vault.text(of: file.id) }
         #expect(try await vault.body(of: file.id) == Data([0, 1, 2]))
+    }
+}
+
+@Suite struct ReaderSyncTests {
+    private func pair() throws -> (first: ReaderVault, second: ReaderVault, key: ContentRootKey) {
+        let key = try ContentRootKey.generate()
+        func vault() throws -> ReaderVault {
+            ReaderVault(store: try FileBlobStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), rootKey: key)
+        }
+        return (try vault(), try vault(), key)
+    }
+
+    @Test("A sealed item moves between devices and opens on the other side")
+    func movesBetweenVaults() async throws {
+        let (first, second, _) = try pair()
+        let note = try await first.createNote(title: "Lease")
+        try await first.saveNote(note.id, title: "Lease", body: "Twelve months")
+        try await second.store(try #require(try await first.sealedObject(note.id)))
+        #expect(try await second.item(note.id).title == "Lease")
+        #expect(String(decoding: try await second.body(of: note.id), as: UTF8.self) == "Twelve months")
+    }
+
+    @Test("Content sealed under another key is refused, and what's here stays")
+    func refusesOtherKeys() async throws {
+        let (first, _, _) = try pair()
+        let stranger = ReaderVault(store: try FileBlobStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), rootKey: try ContentRootKey.generate())
+        let note = try await stranger.createNote(title: "Forged")
+        await #expect(throws: (any Error).self) { try await first.store(try #require(try await stranger.sealedObject(note.id))) }
+        #expect(try await first.list().items.isEmpty)
+    }
+
+    @Test("A body swapped in from another item is refused")
+    func refusesSwappedBodies() async throws {
+        let (first, second, _) = try pair()
+        let one = try await first.createNote(title: "One")
+        let two = try await first.createNote(title: "Two")
+        let meta = try #require(try await first.sealedObject(one.id))
+        let body = try #require(try await first.sealedObject(two.id))
+        await #expect(throws: (any Error).self) {
+            try await second.store(SealedObject(id: one.id, kind: .note, meta: meta.meta, body: body.body))
+        }
+    }
+
+    @Test("Both changed: the newest stays, and the older text is kept as a copy")
+    func conflictKeepsBoth() async throws {
+        let (first, second, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        try await second.store(try #require(try await first.sealedObject(note.id)))
+        try await first.saveNote(note.id, title: "Plan", body: "older")
+        try await Task.sleep(for: .milliseconds(5))
+        try await second.saveNote(note.id, title: "Plan", body: "newer")
+        let local = try #require(try await first.sealedObject(note.id))
+        let remote = try #require(try await second.sealedObject(note.id))
+        #expect(try await first.resolveConflict(local: local, remote: remote) == .keepRemote)
+        let copy = try #require(try await first.list().items.first { $0.title == "Plan (conflict copy)" })
+        #expect(String(decoding: try await first.body(of: copy.id), as: UTF8.self) == "older")
+    }
+
+    @Test("Only the details differ, like a Listen position: no copy is made")
+    func noCopyForSameText() async throws {
+        let (first, second, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        try await second.store(try #require(try await first.sealedObject(note.id)))
+        try await first.setListenPosition(4, of: note.id)
+        try await second.setListenPosition(9, of: note.id)
+        let local = try #require(try await first.sealedObject(note.id))
+        let remote = try #require(try await second.sealedObject(note.id))
+        _ = try await first.resolveConflict(local: local, remote: remote)
+        #expect(try await first.list().items.count == 1)
+    }
+
+    @Test("Deleting leaves a record for sync, and a stored copy changes the hash")
+    func deletionsAreRecorded() async throws {
+        let (first, _, _) = try pair()
+        let note = try await first.createNote(title: "Gone")
+        let before = try await first.sealedHash(of: note.id)
+        try await first.saveNote(note.id, title: "Changed", body: "new")
+        #expect(try await first.sealedHash(of: note.id) != before)
+        try await first.delete(note.id)
+        #expect(try await first.deletedObjectIDs() == [note.id])
+        #expect(try await first.sealedObjectIDs().isEmpty)
+        try await first.clearDeletion(note.id)
+        #expect(try await first.deletedObjectIDs().isEmpty)
     }
 }
 

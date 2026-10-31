@@ -11,6 +11,9 @@ public enum ContentKeyError: Error, Equatable {
 
 /// One module's sealed storage, and which key purpose each kind of blob uses.
 public struct SealedArea: Sendable {
+    /// A vault's record that something was deleted. It holds no content, so it doesn't count as any.
+    public static let deletionSuffix = ".deleted"
+
     public let store: any BlobStore
     /// File suffix to purpose, like ".event" to `.event`.
     public let purposes: [String: KeyPurpose]
@@ -57,7 +60,7 @@ public struct ContentKeyRing: Sendable {
     /// does, some blobs are under each key.
     public func current() throws -> ContentRootKey {
         if try keys.load(Slot.incoming) != nil { _ = try finishMove() }
-        return try ContentRootKey.loadOrCreate(in: keys, sealedIn: areas.map(\.store))
+        return try ContentRootKey.loadOrCreate(in: keys, hasSealedData: hasSealedContent())
     }
 
     /// Makes `new` this device's key. With no key here at all, this is a recovery: whatever is on the
@@ -172,8 +175,13 @@ public struct ContentKeyRing: Sendable {
     /// Clears a device with nothing on it, so a new account starts with a key of its own and the old
     /// one can't end up in the new account's backup. Refused if there's any content at all.
     public func resetEmptyDevice() throws {
-        let isEmpty = try areas.allSatisfy { try $0.store.names().isEmpty }
+        let isEmpty = try areas.allSatisfy { area in
+            try area.store.names().allSatisfy { $0.hasSuffix(SealedArea.deletionSuffix) }
+        }
         guard isEmpty, try keys.load(Slot.incoming) == nil else { throw ContentKeyError.notAllowedNow }
+        for area in areas {
+            for name in try area.store.names() { try area.store.delete(name) }
+        }
         for slot in [Slot.current, Slot.previous, Slot.owner, Slot.backupFingerprint] {
             try keys.delete(slot)
         }

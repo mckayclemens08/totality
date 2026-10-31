@@ -11,6 +11,9 @@ enum AccountSetup {
             sessionStore: KeychainKeyStore(service: "app.totality.session"),
             deviceStore: KeychainKeyStore(service: "app.totality.device")
         )
-        return AccountModel(service: service, backup: BackupModel(service: service, content: content))
+        return AccountModel(
+            service: service, backup: BackupModel(service: service, content: content),
+            sync: SyncModel(), syncRemote: service.syncRemote
+        )
     }
 }
