@@ -224,9 +224,12 @@ public actor ReaderVault {
     public func importFile(_ data: Data, filename: String, folder: UUID? = nil) throws -> ReaderItem {
         guard data.count <= Self.maxImportBytes else { throw ReaderError.tooLarge }
         let now = Date()
+        let mime = ReadableText.mime(forFilename: filename)
+        // A book's own title beats its filename. One that can't be read still gets stored.
+        let bookTitle = mime == ReadableText.epubMime ? (try? BookReader.epub(data).title) : nil
         let item = ReaderItem(
-            id: UUID(), kind: .file, title: (filename as NSString).deletingPathExtension,
-            collection: nil, mime: ReadableText.mime(forFilename: filename),
+            id: UUID(), kind: .file, title: bookTitle ?? (filename as NSString).deletingPathExtension,
+            collection: nil, mime: mime,
             byteCount: data.count, createdAt: now, updatedAt: now, listenPosition: 0, folderID: folder
         )
         try writeBody(data, id: item.id)
@@ -245,6 +248,10 @@ public actor ReaderVault {
         let text = try ReadableText.extract(body(of: id), mime: item(id).mime)
         textCache[id] = text
         return text
+    }
+
+    public func document(of id: UUID) throws -> ReadableDocument {
+        try ReadableText.document(body(of: id), mime: item(id).mime)
     }
 
     /// Listening is not editing, so `updatedAt` stays put.

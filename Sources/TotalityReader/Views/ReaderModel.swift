@@ -172,6 +172,15 @@ public final class ReaderModel {
         }
     }
 
+    public func document(of id: UUID) async throws -> ReadableDocument {
+        try await vault.document(of: id)
+    }
+
+    /// The file itself, decrypted into memory only, for showing PDF pages.
+    public func fileData(of id: UUID) async throws -> Data {
+        try await vault.body(of: id)
+    }
+
     public func text(of id: UUID) async throws -> String {
         try await vault.text(of: id)
     }
