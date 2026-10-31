@@ -26,7 +26,9 @@ Folders are sealed items, travelling as `note` rows, so the server can't tell a 
 see a name. An item names its parent inside its sealed details. A missing parent or a loop puts an item
 at the top level, because a sync can deliver them in any order. The old collections became folders
 with an ID derived from the name and the root key, so two devices migrating alone land on one folder
-and the same name gives a different ID on every account.
+and the same name gives a different ID on every account. The brief's Speechify Library import was
+removed on 2026-10-31 at the owner's request ("I don't want it anymore"): it only ever filled a folder,
+and any file can go in any folder.
 
 Deleted items stay sealed in Recently Deleted for 30 days, then they're removed the next time the
 Reader loads or syncs. A deleted folder takes what's inside it, and restoring it brings them back,

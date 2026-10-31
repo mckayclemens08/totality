@@ -145,8 +145,8 @@ import TotalityCore
 
     @Test("A named folder's ID depends on the key, so the server can't recognise the name")
     func keyedFolderIDs() async throws {
-        let mine = try await newVault().namedFolder(ReaderItem.speechifyCollection)
-        let theirs = try await newVault().namedFolder(ReaderItem.speechifyCollection)
+        let mine = try await newVault().namedFolder("Reading list")
+        let theirs = try await newVault().namedFolder("Reading list")
         #expect(mine.id != theirs.id)
     }
 
@@ -156,16 +156,16 @@ import TotalityCore
         let (firstStore, secondStore) = (MemoryBlobStore(), MemoryBlobStore())
         let (one, two) = (UUID(), UUID())
         var note = entry("Dune", kind: .note, id: one)
-        note.collection = "Speechify Library"
+        note.collection = "Reading list"
         var other = entry("Foundation", kind: .note, id: two)
-        other.collection = "Speechify Library"
+        other.collection = "Reading list"
         try writeOldItem(note, key: key, store: firstStore)
         try writeOldItem(other, key: key, store: secondStore)
         let (first, second) = (ReaderVault(store: firstStore, rootKey: key), ReaderVault(store: secondStore, rootKey: key))
         try await first.adoptCollections()
         try await second.adoptCollections()
         let folders = try await first.list().folders
-        #expect(folders.map(\.title) == ["Speechify Library"])
+        #expect(folders.map(\.title) == ["Reading list"])
         #expect(try await second.list().folders.map(\.id) == folders.map(\.id))
         let adopted = try await first.item(one)
         #expect(adopted.folderID == folders[0].id)

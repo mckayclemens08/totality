@@ -239,6 +239,58 @@ import Testing
         #expect(listen.current == nil)
         #expect(words.contains(4))
     }
+
+    /// Runs the real synthesizer silently too, because stopping and restarting it is what can go wrong.
+    @Test("Skip keeps speaking from the new sentence, even from a pause and at both ends")
+    func systemEngineSkips() async throws {
+        guard ProcessInfo.processInfo.environment["TOTALITY_SPEECH_TEST"] != nil else { return }
+        let engine = SystemSpeechEngine()
+        engine.volume = 0
+        let listen = ListenController(engine: engine)
+        var words = 0
+        let forward = engine.onWord
+        engine.onWord = {
+            words += 1
+            forward?($0)
+        }
+        func speechMoved() async throws -> Bool {
+            let start = words
+            for _ in 0..<100 where words == start {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            return words > start
+        }
+        let sentence = "This sentence has plenty of words in it so that it takes a while to say out loud."
+        listen.play(try track([sentence, sentence, sentence].joined(separator: " ")))
+        #expect(try await speechMoved())
+
+        listen.skip(by: 1)
+        #expect(listen.sentence == 1)
+        #expect(try await speechMoved())
+
+        listen.skip(by: -1)
+        #expect(listen.sentence == 0)
+        #expect(try await speechMoved())
+
+        listen.skip(by: -1)
+        #expect(listen.sentence == 0)
+        #expect(try await speechMoved())
+
+        listen.togglePause()
+        listen.skip(by: 1)
+        #expect(listen.sentence == 1)
+        #expect(!listen.isPaused)
+        #expect(try await speechMoved())
+
+        listen.skip(by: 5)
+        #expect(listen.sentence == 2)
+        #expect(try await speechMoved())
+
+        for _ in 0..<300 where listen.current != nil {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(listen.current == nil)
+    }
 }
 
 @MainActor
@@ -260,22 +312,6 @@ import Testing
         }
         #expect(model.requestedItem == copy.id)
         #expect(model.notice != nil)
-    }
-
-    @Test("Speechify imports land in their own folder, made when it's first needed")
-    func speechifyImportsGoInAFolder() async throws {
-        let (model, _) = try model()
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let file = directory.appendingPathComponent("Dune.txt")
-        try Data("Sand.".utf8).write(to: file)
-        _ = await model.newNote()
-        await model.importSpeechify([file])
-        let top = model.library.contents(of: nil)
-        #expect(top.folders.map(\.title) == [ReaderItem.speechifyCollection])
-        #expect(top.items.count == 1)
-        #expect(model.library.contents(of: top.folders[0].id).items.map(\.title) == ["Dune"])
     }
 
     @Test("Old deletions go when the Reader loads, so 30 days holds on a device that's offline")

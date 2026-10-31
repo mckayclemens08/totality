@@ -6,8 +6,6 @@ public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
         case note, file, folder
     }
 
-    public static let speechifyCollection = "Speechify Library"
-
     public let id: UUID
     public let kind: Kind
     public var title: String

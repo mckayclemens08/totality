@@ -13,7 +13,6 @@ struct ReaderFolderView: View {
     @AppStorage("reader.grid") private var showsGrid = false
 
     @State private var importing = false
-    @State private var importsToSpeechify = false
     @State private var namingFolder = false
     @State private var renaming: ReaderItem?
     @State private var name = ""
@@ -35,14 +34,7 @@ struct ReaderFolderView: View {
             .toolbar { toolbar }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
                 if case .success(let urls) = result {
-                    let toSpeechify = importsToSpeechify
-                    Task {
-                        if toSpeechify {
-                            await model.importSpeechify(urls)
-                        } else {
-                            await model.importFiles(urls, into: folder)
-                        }
-                    }
+                    Task { await model.importFiles(urls, into: folder) }
                 } else if case .failure = result {
                     model.notice = "Those files couldn't be opened."
                 }
@@ -131,16 +123,7 @@ struct ReaderFolderView: View {
                     name = ""
                     namingFolder = true
                 }
-                Button("Import files", systemImage: "square.and.arrow.down") {
-                    importsToSpeechify = false
-                    importing = true
-                }
-                if folder == nil {
-                    Button("Import into \(ReaderItem.speechifyCollection)", systemImage: "books.vertical") {
-                        importsToSpeechify = true
-                        importing = true
-                    }
-                }
+                Button("Import files", systemImage: "square.and.arrow.down") { importing = true }
             } label: {
                 Label("Add", systemImage: "plus")
             }

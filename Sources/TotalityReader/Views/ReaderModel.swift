@@ -208,15 +208,6 @@ public final class ReaderModel {
         await load()
     }
 
-    /// The folder Speechify exports go into, made the first time it's needed.
-    public func importSpeechify(_ urls: [URL]) async {
-        do {
-            await importFiles(urls, into: try await vault.namedFolder(ReaderItem.speechifyCollection).id)
-        } catch {
-            notice = "Those files couldn't be imported."
-        }
-    }
-
     private func importFile(_ url: URL, folder: UUID?) async throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
