@@ -8,12 +8,11 @@ import TotalityUI
 /// Writes profile screens to PNGs for a person to look at, when TOTALITY_RENDER_DIR is set.
 @MainActor
 @Suite struct RenderAccount {
-    private func write(_ view: some View, scheme: ColorScheme, name: String, to directory: String) throws {
+    private func write(_ view: some View, name: String, to directory: String) throws {
         let renderer = ImageRenderer(content: view
             .padding(Space.s4)
-            .environment(\.colorScheme, scheme)
             .frame(width: 393, height: 420)
-            .background(Theme.current(scheme).bg.color))
+            .background(Theme.current.bg.color))
         renderer.scale = 2
         let image = try #require(renderer.nsImage)
         let tiff = try #require(image.tiffRepresentation)
@@ -33,12 +32,12 @@ import TotalityUI
         let full = Profile(username: "mckay_clemens", displayName: "McKay Clemens",
                            bio: "Building Totality, one module at a time.")
         let empty = Profile(username: "mckay_clemens")
-        for (scheme, label) in [(ColorScheme.light, "light"), (ColorScheme.dark, "dark")] {
+        for label in ["light"] {
             for (profile, kind) in [(full, "full"), (empty, "empty")] {
                 try write(VStack(spacing: Space.s4) {
                     ProfileHeader(profile: profile)
                     AccountButton(title: "Edit profile", isWorking: false) {}
-                }, scheme: scheme, name: "profile-\(kind)-\(label).png", to: directory)
+                }, name: "profile-\(kind)-\(label).png", to: directory)
             }
         }
     }

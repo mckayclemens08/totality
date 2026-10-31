@@ -8,7 +8,6 @@ public struct ReaderHomeView: View {
     @State private var path: [ReaderItem] = []
     @State private var importing = false
     @State private var importCollection: String?
-    @Environment(\.colorScheme) private var scheme
 
     private static let searchPause = Duration.milliseconds(250)
 
@@ -20,7 +19,7 @@ public struct ReaderHomeView: View {
     public var body: some View {
         NavigationStack(path: $path) {
             content
-                .background(Theme.current(scheme).bg.color)
+                .background(Theme.current.bg.color)
                 .navigationTitle("Reader")
                 .navigationDestination(for: ReaderItem.self) { item in
                     ReaderItemView(item: item, model: model)
@@ -28,12 +27,12 @@ public struct ReaderHomeView: View {
                 .searchable(text: $model.query, prompt: "Search titles and text")
                 .toolbar { toolbar }
         }
-        .tint(Theme.current(scheme).accent.color)
+        .tint(Theme.current.accent.color)
         .safeAreaInset(edge: .bottom) {
             if model.listen.current != nil {
                 ListenBar(listen: model.listen)
                     .padding(Space.s3)
-                    .background(Theme.current(scheme).bg.color)
+                    .background(Theme.current.bg.color)
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
@@ -118,7 +117,9 @@ public struct ReaderHomeView: View {
             ReaderMessage(
                 systemImage: "book",
                 title: "Nothing here yet",
-                detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
+                detail: model.isSynced
+                    ? "Write a note, or import a PDF or text file. Everything is encrypted before it leaves this device."
+                    : "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
             )
         case .ready:
             library
@@ -146,12 +147,15 @@ public struct ReaderHomeView: View {
             if model.unreadable > 0 {
                 Label(unreadableText, systemImage: "lock.slash")
                     .font(Typeface.caption)
-                    .foregroundStyle(Theme.current(scheme).danger.color)
+                    .foregroundStyle(Theme.current.danger.color)
                     .listRowBackground(Color.clear)
             }
-            Label("Encrypted here. It can't be recovered on a new device yet.", systemImage: "iphone")
+            Label(
+                model.isSynced ? "Encrypted, and backed up by sync." : "Encrypted here. It can't be recovered on a new device yet.",
+                systemImage: model.isSynced ? "lock" : "iphone"
+            )
                 .font(Typeface.caption)
-                .foregroundStyle(Theme.current(scheme).textSecondary.color)
+                .foregroundStyle(Theme.current.textSecondary.color)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             ForEach(model.sections, id: \.title) { section in
@@ -187,10 +191,9 @@ public struct ReaderHomeView: View {
 struct ReaderRow: View {
     let item: ReaderItem
     let snippet: String?
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         HStack(spacing: Space.s3) {
             Image(systemName: item.kind == .note ? "note.text" : "doc")
                 .foregroundStyle(theme.textSecondary.color)
@@ -217,10 +220,9 @@ struct ReaderMessage: View {
     let systemImage: String
     let title: String
     let detail: String
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         VStack(spacing: Space.s3) {
             Image(systemName: systemImage)
                 .font(Typeface.display)

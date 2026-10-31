@@ -17,6 +17,8 @@ public final class ReaderModel {
     public var query = ""
     /// An item another module asked to open. The home screen takes it from here.
     public var requestedItem: UUID?
+    /// True once this device syncs, which decides what the screen can truthfully say about recovery.
+    public var isSynced = false
     /// A problem to show the person, cleared when they dismiss it.
     public var notice: String?
 
@@ -99,6 +101,24 @@ public final class ReaderModel {
         } catch {
             notice = "Your latest changes weren't saved."
             return false
+        }
+    }
+
+    /// For an open note. Returns the version now saved, or nil if the save failed. If the note changed
+    /// elsewhere, what was typed is kept as a copy, and that copy opens so typing carries on there.
+    public func saveNote(_ id: UUID, title: String, body: String, basedOn: Date) async -> NoteSave? {
+        do {
+            let result = try await vault.saveNote(id, title: title, body: body, basedOn: basedOn)
+            await load()
+            await search()
+            if case .keptAsCopy(let copy) = result {
+                notice = "This note changed on another device. What you typed is kept as \(copy.displayTitle)."
+                requestedItem = copy.id
+            }
+            return result
+        } catch {
+            notice = "Your latest changes weren't saved."
+            return nil
         }
     }
 

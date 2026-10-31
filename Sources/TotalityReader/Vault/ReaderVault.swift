@@ -35,18 +35,31 @@ public struct ReaderShare: Sendable, Equatable {
     }
 }
 
+/// How a save from an open note went.
+public enum NoteSave: Sendable, Equatable {
+    case saved(ReaderItem)
+    /// The note changed somewhere else first, so what was typed became a copy and nothing was lost.
+    case keptAsCopy(ReaderItem)
+}
+
 /// A user's Reader content. Each item is two blobs: metadata and body, under separate per-object
 /// keys. Blob names hold only the object ID.
 public actor ReaderVault {
-    public static let maxImportBytes = 50 * 1024 * 1024
+    /// Under Supabase's 50 MB upload limit, leaving room for what sealing adds.
+    public static let maxImportBytes = 49 * 1024 * 1024
     /// How each kind of blob is sealed, so a key change can reach them without knowing what they are.
-    public static let sealedPurposes: [String: KeyPurpose] = [".meta": .metadata, ".body": .content]
+    public static let sealedPurposes: [String: KeyPurpose] = [
+        ".meta": .metadata, ".body": .content, ".meta.trash": .metadata, ".body.trash": .content,
+    ]
+    /// How long something removed by another device stays recoverable here.
+    public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
     private static let snippetRadius = 60
 
     private let store: any BlobStore
     private let rootKey: ContentRootKey
     private var textCache: [UUID: String] = [:]
     private var isClosed = false
+    private var hashes: [UUID: String] = [:]
 
     public init(store: any BlobStore, rootKey: ContentRootKey) {
         self.store = store
@@ -54,6 +67,7 @@ public actor ReaderVault {
     }
 
     private func metaName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).meta" }
+    private func deletionName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).deleted" }
     private func bodyName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).body" }
 
     /// Refuses all further writes. A key move lists every blob once, so anything written after that,
@@ -64,12 +78,14 @@ public actor ReaderVault {
 
     private func writeMeta(_ item: ReaderItem) throws {
         guard !isClosed else { throw ReaderError.closed }
+        hashes[item.id] = nil
         let key = rootKey.objectKey(for: item.id, purpose: .metadata)
         try store.write(try ContentCipher.seal(JSONEncoder().encode(item), key: key, objectID: item.id), as: metaName(item.id))
     }
 
     private func writeBody(_ data: Data, id: UUID) throws {
         guard !isClosed else { throw ReaderError.closed }
+        hashes[id] = nil
         let key = rootKey.objectKey(for: id, purpose: .content)
         try store.write(try ContentCipher.seal(data, key: key, objectID: id), as: bodyName(id))
         textCache[id] = nil
@@ -120,6 +136,16 @@ public actor ReaderVault {
         return updated
     }
 
+    /// For an open note. `basedOn` is the version the editor loaded, so a sync that changed the note
+    /// underneath it can't be overwritten by the older text in the editor.
+    public func saveNote(_ id: UUID, title: String, body: String, basedOn: Date) throws -> NoteSave {
+        if let current = try? item(id), current.updatedAt == basedOn {
+            return .saved(try saveNote(id, title: title, body: body))
+        }
+        let copy = try createNote(title: "\(title.isEmpty ? "Untitled" : title) (conflict copy)")
+        return .keptAsCopy(try saveNote(copy.id, title: copy.title, body: body))
+    }
+
     public func importFile(_ data: Data, filename: String, collection: String? = nil) throws -> ReaderItem {
         guard data.count <= Self.maxImportBytes else { throw ReaderError.tooLarge }
         let now = Date()
@@ -155,9 +181,16 @@ public actor ReaderVault {
 
     public func delete(_ id: UUID) throws {
         guard !isClosed else { throw ReaderError.closed }
+        // The record goes first, so a crash can't lose the fact that this was deleted on purpose.
+        try store.write(Data(), as: deletionName(id))
+        try removeBlobs(id)
+    }
+
+    private func removeBlobs(_ id: UUID) throws {
         try store.delete(metaName(id))
         try store.delete(bodyName(id))
         textCache[id] = nil
+        hashes[id] = nil
     }
 
     /// Every word must appear in the title or text. Files with no readable text match on title only.
@@ -195,5 +228,123 @@ public actor ReaderVault {
             sealedHeader: try ContentCipher.seal(JSONEncoder().encode(header), key: key, objectID: id),
             sealedBody: try ContentCipher.seal(body(of: id), key: key, objectID: id)
         )
+    }
+}
+
+extension ReaderVault: SyncArea {
+    public nonisolated var kinds: Set<ContentKind> { [.note, .file] }
+
+    public func sealedObjectIDs() throws -> [UUID] {
+        // A crash can stop a delete halfway. The record says what was meant, so finish it.
+        if !isClosed {
+            for id in try deletedObjectIDs() where try store.read(metaName(id)) != nil { try removeBlobs(id) }
+        }
+        return try store.names().compactMap { name in
+            name.hasSuffix(".meta") ? UUID(uuidString: String(name.dropLast(".meta".count))) : nil
+        }
+    }
+
+    public func sealedHash(of id: UUID) throws -> String? {
+        if let known = hashes[id] { return known }
+        guard try store.read(bodyName(id)) != nil else { return nil }
+        let hash = try sealedObject(id)?.hash
+        hashes[id] = hash
+        return hash
+    }
+
+    public func sealedObject(_ id: UUID) throws -> SealedObject? {
+        guard let meta = try store.read(metaName(id)) else { return nil }
+        let kind: ContentKind = ((try? item(id).kind) ?? .note) == .note ? .note : .file
+        return SealedObject(id: id, kind: kind, meta: meta, body: try store.read(bodyName(id)))
+    }
+
+    public func verifiedObject(_ id: UUID) throws -> SealedObject? {
+        guard let object = try sealedObject(id) else { return nil }
+        guard object.body != nil else { throw CryptoError.malformedCiphertext }
+        _ = try opened(object)
+        return object
+    }
+
+    public func store(_ object: SealedObject, ifLocalHash expected: String?) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        guard try sealedHash(of: object.id) == expected else { throw SyncError.changedLocally }
+        if expected == nil, try store.read(deletionName(object.id)) != nil { throw SyncError.changedLocally }
+        guard let body = object.body else { throw CryptoError.malformedCiphertext }
+        guard try opened(object).item.id == object.id else { throw CryptoError.authenticationFailed }
+        try store.write(body, as: bodyName(object.id))
+        try store.write(object.meta, as: metaName(object.id))
+        textCache[object.id] = nil
+        hashes[object.id] = nil
+    }
+
+    public func removeObject(_ id: UUID, ifLocalHash expected: String) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        guard try sealedHash(of: id) == expected else { throw SyncError.changedLocally }
+        guard let object = try sealedObject(id) else { return }
+        // The stamp goes first, so a crash can't leave trash that's never cleaned up.
+        try store.write(Data(ISO8601DateFormatter().string(from: Date()).utf8), as: trashStampName(id))
+        try store.write(object.meta, as: metaName(id) + ".trash")
+        if let body = object.body { try store.write(body, as: bodyName(id) + ".trash") }
+        try removeBlobs(id)
+    }
+
+    public func emptyOldTrash() throws {
+        guard !isClosed else { return }
+        let formatter = ISO8601DateFormatter()
+        for name in try store.names() where name.hasSuffix(".trashed") {
+            guard let id = UUID(uuidString: String(name.dropLast(".trashed".count))),
+                  let stamp = try store.read(name), let date = formatter.date(from: String(decoding: stamp, as: UTF8.self)),
+                  Date().timeIntervalSince(date) > Self.trashLifetime
+            else { continue }
+            try store.delete(metaName(id) + ".trash")
+            try store.delete(bodyName(id) + ".trash")
+            try store.delete(name)
+        }
+    }
+
+    private func trashStampName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).trashed" }
+
+    public func deletedObjectIDs() throws -> Set<UUID> {
+        Set(try store.names().compactMap { name in
+            name.hasSuffix(".deleted") ? UUID(uuidString: String(name.dropLast(".deleted".count))) : nil
+        })
+    }
+
+    public func clearDeletion(_ id: UUID) throws {
+        try store.delete(deletionName(id))
+    }
+
+    /// The newest version stays. An older version that differs in any way a person would notice is
+    /// kept as a copy. If only a Listen position differs, there's nothing to keep.
+    public func resolveConflict(local: SealedObject, remote: SealedObject) throws -> ConflictResolution {
+        let mine = try opened(local)
+        let theirs = try opened(remote)
+        let keepMine = mine.item.updatedAt >= theirs.item.updatedAt
+        let same = mine.body == theirs.body && mine.item.title == theirs.item.title
+            && mine.item.collection == theirs.item.collection
+        if !same {
+            let older = keepMine ? theirs : mine
+            // Named for the version it preserves, so retries can't double it even if this device changes again.
+            try writeConflictCopy(of: older.item, body: older.body, id: UUID(derivedFrom: (keepMine ? remote : local).hash))
+        }
+        return keepMine ? .keepLocal : .keepRemote
+    }
+
+    private func opened(_ object: SealedObject) throws -> (item: ReaderItem, body: Data) {
+        let id = object.id
+        let meta = try ContentCipher.open(object.meta, key: rootKey.objectKey(for: id, purpose: .metadata), objectID: id)
+        let body = try object.body.map { try ContentCipher.open($0, key: rootKey.objectKey(for: id, purpose: .content), objectID: id) }
+        return (try JSONDecoder().decode(ReaderItem.self, from: meta), body ?? Data())
+    }
+
+    private func writeConflictCopy(of item: ReaderItem, body: Data, id: UUID) throws {
+        guard try store.read(metaName(id)) == nil else { return }
+        let now = Date()
+        let copy = ReaderItem(
+            id: id, kind: item.kind, title: "\(item.displayTitle) (conflict copy)", collection: item.collection,
+            mime: item.mime, byteCount: item.byteCount, createdAt: now, updatedAt: now, listenPosition: 0
+        )
+        try writeBody(body, id: copy.id)
+        try writeMeta(copy)
     }
 }

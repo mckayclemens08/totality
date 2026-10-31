@@ -7,11 +7,13 @@ struct TotalityApp: App {
         #if os(macOS)
         Window("Totality", id: "main") {
             RootView()
+                .preferredColorScheme(.light)
         }
         .defaultSize(width: 430, height: 800)
         #else
         WindowGroup {
             RootView()
+                .preferredColorScheme(.light)
         }
         #endif
     }

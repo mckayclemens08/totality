@@ -4,10 +4,9 @@ import TotalityUI
 /// The Listen transport. Speech is generated on this device, so text never leaves it to be read.
 struct ListenBar: View {
     let listen: ListenController
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s2) {
             Text(listen.current?.title ?? "")
                 .font(Typeface.callout)
@@ -82,10 +81,9 @@ private struct TapTarget: ViewModifier {
 /// Drawn from tokens so it matches the surface it sits on.
 private struct ListenProgress: View {
     let value: Double
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         Capsule()
             .fill(theme.surfaceSunken.color)
             .frame(height: Space.s1)

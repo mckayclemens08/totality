@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSRequiresAquaSystemAppearance</key>
+	<true/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Shows the calendars on this device next to your Totality events. Totality doesn't copy or upload them.</string>
 	<key>NSCalendarsUsageDescription</key>
@@ -10,6 +12,8 @@
 	<string>$(TOTALITY_BACKEND_URL)</string>
 	<key>TotalityBackendKey</key>
 	<string>$(TOTALITY_BACKEND_KEY)</string>
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

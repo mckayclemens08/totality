@@ -10,7 +10,6 @@ struct EventDetailView: View {
     let onChanged: () -> Void
     @State private var editing = false
     @State private var confirmingDelete = false
-    @Environment(\.colorScheme) private var scheme
 
     private var occurrence: EventOccurrence? {
         if case .own(let occurrence) = entry.source { occurrence } else { nil }
@@ -38,7 +37,7 @@ struct EventDetailView: View {
     }
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s3) {
                 Text(entry.title)
@@ -95,7 +94,7 @@ struct EventDetailView: View {
                         editing = false
                     }
                 }
-                .tint(Theme.current(scheme).accent.color)
+                .tint(Theme.current.accent.color)
             }
         }
         .confirmationDialog("Delete this event?", isPresented: $confirmingDelete, titleVisibility: .visible) {
@@ -124,10 +123,9 @@ private struct AttachmentRow: View {
     let onOpen: (ContentRef) -> Void
     @State private var current: ContentRef?
     @State private var checked = false
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         Group {
             if let current {
                 Button {
@@ -179,7 +177,6 @@ struct EventEditorView: View {
     @State private var draft: EventDraft
     @State private var choosingScope = false
     @State private var attaching = false
-    @Environment(\.colorScheme) private var scheme
 
     init(model: CalendarModel, draft: EventDraft, occurrence: EventOccurrence?, onDone: @escaping () -> Void, onCancel: (() -> Void)? = nil) {
         self.model = model
@@ -194,7 +191,7 @@ struct EventEditorView: View {
     }
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         Form {
             Section {
                 TextField("Title", text: $draft.title)
@@ -316,10 +313,9 @@ private struct AttachmentPicker: View {
     let onPick: (ContentRef) -> Void
     let onCancel: () -> Void
     @State private var available: [ContentRef]?
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         Group {
             if let available {
                 let options = available.filter { option in !chosen.contains { $0.id == option.id } }

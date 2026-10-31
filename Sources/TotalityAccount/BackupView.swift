@@ -7,11 +7,10 @@ import UniformTypeIdentifiers
 struct BackupView: View {
     let model: BackupModel
     @State private var typed = ""
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
                 content
@@ -62,14 +61,14 @@ struct BackupView: View {
         case .notSetUp:
             AccountDetail(text: "Your recovery key is what opens your encrypted content on a new or restored device. Totality doesn't keep it, so once you finish here it can't be shown again.")
             warning
-            AccountDetail(text: "This is the first step. Sync isn't finished, so today your recovery key only helps with what's restored from a device backup. Once sync is on, it brings everything back.")
+            AccountDetail(text: "Once it's set up, your notes, files, and events sync between your devices, sealed so only your key opens them, and a new device can get them all back.")
             AccountButton(title: "Create recovery key", isWorking: false) { model.begin() }
             releaseButton
         case .showingKey(let key):
             AccountDetail(text: "Save this now, in a password manager and on paper. Don't rely on a screenshot or your Notes.")
             Text(key)
                 .font(Typeface.code)
-                .foregroundStyle(Theme.current(scheme).textPrimary.color)
+                .foregroundStyle(Theme.current.textPrimary.color)
                 .opacity(keyOpacity)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Space.s4)
@@ -112,7 +111,7 @@ struct BackupView: View {
         case .ready(let copies):
             AccountDetail(text: "Your recovery key is set up, and this device has joined.")
             AccountDetail(text: copiesText(copies))
-            AccountDetail(text: "Sync isn't finished, so your notes and events aren't on Totality's servers yet.")
+            AccountDetail(text: "Your notes, files, and events sync between your devices once this device finishes its first sync. The servers only ever see them encrypted.")
             warning
         }
     }
@@ -140,7 +139,7 @@ struct BackupView: View {
     private var warning: some View {
         Text("If you lose your recovery key and all your devices, your content is gone. Nobody can get it back, including you.")
             .font(Typeface.callout)
-            .foregroundStyle(Theme.current(scheme).danger.color)
+            .foregroundStyle(Theme.current.danger.color)
             .fixedSize(horizontal: false, vertical: true)
     }
 

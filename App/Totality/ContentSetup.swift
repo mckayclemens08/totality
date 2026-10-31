@@ -8,10 +8,14 @@ import TotalityReader
 /// they're set up together.
 @MainActor
 enum ContentSetup {
-    private static func stores() throws -> (reader: FileBlobStore, calendar: FileBlobStore) {
-        let base = try FileManager.default
+    private static func base() throws -> URL {
+        try FileManager.default
             .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("Totality", isDirectory: true)
+    }
+
+    private static func stores() throws -> (reader: FileBlobStore, calendar: FileBlobStore) {
+        let base = try base()
         return (
             try FileBlobStore(directory: base.appendingPathComponent("Reader", isDirectory: true)),
             try FileBlobStore(directory: base.appendingPathComponent("Calendar", isDirectory: true))
@@ -26,12 +30,19 @@ enum ContentSetup {
         ])
     }
 
+    static func syncStateFile() throws -> URL {
+        let directory = try base().appendingPathComponent("Sync", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("state.json")
+    }
+
     /// The key step finishes any move that was interrupted, so this always opens with the right key.
-    static func makeModels() throws -> (reader: ReaderModel, calendar: CalendarModel) {
+    static func makeModels() throws -> (reader: ReaderModel, calendar: CalendarModel, areas: [any SyncArea]) {
         let stores = try stores()
         let rootKey = try keyRing().current()
 
         let readerVault = ReaderVault(store: stores.reader, rootKey: rootKey)
+        let calendarVault = CalendarVault(store: stores.calendar, rootKey: rootKey)
         let registry = try ModuleRegistry(handlers: [ReaderModule(vault: readerVault), CalendarModule()])
         #if os(iOS)
         let startingMode = CalendarModel.Mode.agenda
@@ -41,10 +52,11 @@ enum ContentSetup {
         return (
             ReaderModel(vault: readerVault, listen: ListenController(engine: SystemSpeechEngine())),
             CalendarModel(
-                vault: CalendarVault(store: stores.calendar, rootKey: rootKey),
+                vault: calendarVault,
                 devices: SystemCalendarSource(), reminders: SystemReminders(),
                 registry: registry, startingMode: startingMode
-            )
+            ),
+            [readerVault, calendarVault]
         )
     }
 }
@@ -54,6 +66,7 @@ enum ContentSetup {
 @MainActor
 final class DeviceContentKeys: ContentKeyAccess {
     var willMove: () async -> Void = {}
+    var didMove: () -> Void = {}
     /// True while blobs are being rewritten, so nothing opens them halfway through.
     private(set) var isMoving = false
 
@@ -64,7 +77,10 @@ final class DeviceContentKeys: ContentKeyAccess {
 
     func adopt(_ key: ContentRootKey) async throws -> KeyMoveReport {
         isMoving = true
-        defer { isMoving = false }
+        defer {
+            isMoving = false
+            didMove()
+        }
         await willMove()
         let ring = try ContentSetup.keyRing()
         return try await Task.detached { try ring.adopt(key) }.value
@@ -97,7 +113,10 @@ final class DeviceContentKeys: ContentKeyAccess {
     /// The old key goes, so any open module has to go with it.
     func resetEmptyDevice() async throws {
         await willMove()
+        defer { didMove() }
         try ContentSetup.keyRing().resetEmptyDevice()
+        // What the last account agreed with its server means nothing to the next one.
+        try? FileManager.default.removeItem(at: ContentSetup.syncStateFile())
     }
 
     func joinedBackup() async throws -> String? {
