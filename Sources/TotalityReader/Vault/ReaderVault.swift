@@ -3,6 +3,7 @@ import TotalityCore
 
 public struct ReaderListing: Sendable, Equatable {
     public let items: [ReaderItem]
+    public let folders: [ReaderItem]
     /// Items whose metadata would not decrypt. The UI says so instead of hiding them.
     public let unreadable: Int
 }
@@ -35,6 +36,14 @@ public struct ReaderShare: Sendable, Equatable {
     }
 }
 
+/// Something in Recently Deleted.
+public struct TrashedItem: Sendable, Equatable, Identifiable {
+    public let item: ReaderItem
+    public let deletedAt: Date
+
+    public var id: UUID { item.id }
+}
+
 /// How a save from an open note went.
 public enum NoteSave: Sendable, Equatable {
     case saved(ReaderItem)
@@ -51,7 +60,7 @@ public actor ReaderVault {
     public static let sealedPurposes: [String: KeyPurpose] = [
         ".meta": .metadata, ".body": .content, ".meta.trash": .metadata, ".body.trash": .content,
     ]
-    /// How long something removed by another device stays recoverable here.
+    /// How long anything deleted, here or on another device, stays recoverable.
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
     private static let snippetRadius = 60
 
@@ -108,14 +117,74 @@ public actor ReaderVault {
                 unreadable += 1
             }
         }
-        return ReaderListing(items: items.sorted { $0.updatedAt > $1.updatedAt }, unreadable: unreadable)
+        let sorted = items.sorted { $0.updatedAt > $1.updatedAt }
+        return ReaderListing(
+            items: sorted.filter { $0.kind != .folder }, folders: sorted.filter { $0.kind == .folder },
+            unreadable: unreadable
+        )
     }
 
-    public func createNote(title: String = "", collection: String? = nil) throws -> ReaderItem {
+    private func library() throws -> ReaderLibrary {
+        let listing = try list()
+        return ReaderLibrary(items: listing.items, folders: listing.folders)
+    }
+
+    public func createFolder(title: String, in parent: UUID? = nil) throws -> ReaderItem {
+        try writeFolder(id: UUID(), title: title, in: parent)
+    }
+
+    private func writeFolder(id: UUID, title: String, in parent: UUID?) throws -> ReaderItem {
+        let now = Date()
+        let folder = ReaderItem(
+            id: id, kind: .folder, title: title, collection: nil, mime: nil,
+            byteCount: 0, createdAt: now, updatedAt: now, listenPosition: 0, folderID: parent
+        )
+        try writeBody(Data(), id: id)
+        try writeMeta(folder)
+        return folder
+    }
+
+    /// The ID comes from the name, so two devices making the same folder land on one folder.
+    public func namedFolder(_ name: String) throws -> ReaderItem {
+        let id = UUID(derivedFrom: "reader-folder:\(name)")
+        if let existing = try? item(id) { return existing }
+        try store.delete(deletionName(id))
+        return try writeFolder(id: id, title: name, in: nil)
+    }
+
+    /// Collections were plain labels. Each becomes a real folder. The time stays as it was, because
+    /// tidying up isn't an edit.
+    public func adoptCollections() throws {
+        guard !isClosed else { return }
+        for var item in try list().items {
+            guard let collection = item.collection else { continue }
+            item.folderID = try namedFolder(collection).id
+            item.collection = nil
+            try writeMeta(item)
+        }
+    }
+
+    public func rename(_ id: UUID, to title: String) throws {
+        var updated = try item(id)
+        updated.title = title
+        updated.updatedAt = Date()
+        try writeMeta(updated)
+    }
+
+    /// Where something lives isn't an edit, so this leaves the time alone, and an open doc on another
+    /// device isn't told it fell behind.
+    public func move(_ id: UUID, to folder: UUID?) throws {
+        var updated = try item(id)
+        guard try library().canMove(updated, to: folder) else { throw ReaderError.folderInsideItself }
+        updated.folderID = folder
+        try writeMeta(updated)
+    }
+
+    public func createNote(title: String = "", folder: UUID? = nil) throws -> ReaderItem {
         let now = Date()
         let item = ReaderItem(
-            id: UUID(), kind: .note, title: title, collection: collection, mime: "text/plain",
-            byteCount: 0, createdAt: now, updatedAt: now, listenPosition: 0
+            id: UUID(), kind: .note, title: title, collection: nil, mime: "text/plain",
+            byteCount: 0, createdAt: now, updatedAt: now, listenPosition: 0, folderID: folder
         )
         try writeBody(Data(), id: item.id)
         try writeMeta(item)
@@ -142,17 +211,17 @@ public actor ReaderVault {
         if let current = try? item(id), current.updatedAt == basedOn {
             return .saved(try saveNote(id, title: title, body: body))
         }
-        let copy = try createNote(title: "\(title.isEmpty ? "Untitled" : title) (conflict copy)")
+        let copy = try createNote(title: "\(title.isEmpty ? "Untitled" : title) (conflict copy)", folder: try? item(id).folderID)
         return .keptAsCopy(try saveNote(copy.id, title: copy.title, body: body))
     }
 
-    public func importFile(_ data: Data, filename: String, collection: String? = nil) throws -> ReaderItem {
+    public func importFile(_ data: Data, filename: String, folder: UUID? = nil) throws -> ReaderItem {
         guard data.count <= Self.maxImportBytes else { throw ReaderError.tooLarge }
         let now = Date()
         let item = ReaderItem(
             id: UUID(), kind: .file, title: (filename as NSString).deletingPathExtension,
-            collection: collection, mime: ReadableText.mime(forFilename: filename),
-            byteCount: data.count, createdAt: now, updatedAt: now, listenPosition: 0
+            collection: nil, mime: ReadableText.mime(forFilename: filename),
+            byteCount: data.count, createdAt: now, updatedAt: now, listenPosition: 0, folderID: folder
         )
         try writeBody(data, id: item.id)
         try writeMeta(item)
@@ -179,11 +248,98 @@ public actor ReaderVault {
         try writeMeta(updated)
     }
 
-    public func delete(_ id: UUID) throws {
+    /// Moves it to Recently Deleted, along with anything inside it. Returns every ID that went.
+    @discardableResult
+    public func delete(_ id: UUID) throws -> [UUID] {
         guard !isClosed else { throw ReaderError.closed }
-        // The record goes first, so a crash can't lose the fact that this was deleted on purpose.
-        try store.write(Data(), as: deletionName(id))
+        let inside = (try? item(id).kind) == .folder ? try library().descendants(of: id).map(\.id) : []
+        for target in inside + [id] {
+            // The record goes first, so a crash can't lose the fact that this was deleted on purpose.
+            try store.write(Data(), as: deletionName(target))
+            try moveToTrash(target)
+        }
+        return inside + [id]
+    }
+
+    private func moveToTrash(_ id: UUID) throws {
+        guard let object = try sealedObject(id) else { return }
+        // The stamp goes first, so a crash can't leave trash that's never cleaned up.
+        try store.write(Data(ISO8601DateFormatter().string(from: Date()).utf8), as: trashStampName(id))
+        try store.write(object.meta, as: metaName(id) + ".trash")
+        if let body = object.body { try store.write(body, as: bodyName(id) + ".trash") }
         try removeBlobs(id)
+    }
+
+    private func removeTrash(_ id: UUID) throws {
+        try store.delete(metaName(id) + ".trash")
+        try store.delete(bodyName(id) + ".trash")
+        try store.delete(trashStampName(id))
+    }
+
+    /// Everything in the trash that opens, including what's inside trashed folders.
+    private func allTrash() throws -> [TrashedItem] {
+        let formatter = ISO8601DateFormatter()
+        return try store.names().compactMap { name -> TrashedItem? in
+            guard name.hasSuffix(".trashed"), let id = UUID(uuidString: String(name.dropLast(".trashed".count))),
+                  let stamp = try store.read(name), let meta = try store.read(metaName(id) + ".trash"),
+                  let opened = try? opened(SealedObject(id: id, kind: .note, meta: meta, body: nil))
+            else { return nil }
+            let date = formatter.date(from: String(decoding: stamp, as: UTF8.self)) ?? Date()
+            return TrashedItem(item: opened.item, deletedAt: date)
+        }
+    }
+
+    /// Recently Deleted, newest first. What's inside a trashed folder comes and goes with it.
+    public func trashed() throws -> [TrashedItem] {
+        let trash = try allTrash()
+        let ids = Set(trash.map(\.id))
+        return trash
+            .filter { $0.item.folderID.map(ids.contains) != true }
+            .sorted { $0.deletedAt > $1.deletedAt }
+    }
+
+    private func trashedTree(_ id: UUID) throws -> [UUID] {
+        let trash = try allTrash().map(\.item)
+        var tree = [id]
+        var index = 0
+        while index < tree.count {
+            let parent = tree[index]
+            tree += trash.filter { $0.folderID == parent && !tree.contains($0.id) }.map(\.id)
+            index += 1
+        }
+        return tree
+    }
+
+    public func restore(_ id: UUID) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        for target in try trashedTree(id) { try restoreOne(target) }
+    }
+
+    private func restoreOne(_ id: UUID) throws {
+        guard let meta = try store.read(metaName(id) + ".trash") else { throw ReaderError.notFound }
+        let body = try store.read(bodyName(id) + ".trash")
+        if try store.read(metaName(id)) != nil {
+            // It came back another way, so this version stays beside it rather than replacing it.
+            let old = try opened(SealedObject(id: id, kind: .note, meta: meta, body: body))
+            if old.item.kind != .folder { try writeConflictCopy(of: old.item, body: old.body, id: UUID()) }
+        } else {
+            if let body { try store.write(body, as: bodyName(id)) }
+            try store.write(meta, as: metaName(id))
+            try store.delete(deletionName(id))
+            hashes[id] = nil
+        }
+        try removeTrash(id)
+    }
+
+    /// For when the person chooses this. It can't be undone.
+    public func deleteForever(_ id: UUID) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        for target in try trashedTree(id) { try removeTrash(target) }
+    }
+
+    public func emptyTrash() throws {
+        guard !isClosed else { throw ReaderError.closed }
+        for entry in try allTrash() { try removeTrash(entry.id) }
     }
 
     private func removeBlobs(_ id: UUID) throws {
@@ -237,7 +393,7 @@ extension ReaderVault: SyncArea {
     public func sealedObjectIDs() throws -> [UUID] {
         // A crash can stop a delete halfway. The record says what was meant, so finish it.
         if !isClosed {
-            for id in try deletedObjectIDs() where try store.read(metaName(id)) != nil { try removeBlobs(id) }
+            for id in try deletedObjectIDs() where try store.read(metaName(id)) != nil { try moveToTrash(id) }
         }
         return try store.names().compactMap { name in
             name.hasSuffix(".meta") ? UUID(uuidString: String(name.dropLast(".meta".count))) : nil
@@ -254,7 +410,8 @@ extension ReaderVault: SyncArea {
 
     public func sealedObject(_ id: UUID) throws -> SealedObject? {
         guard let meta = try store.read(metaName(id)) else { return nil }
-        let kind: ContentKind = ((try? item(id).kind) ?? .note) == .note ? .note : .file
+        // A folder travels as a note, so the server can't tell how someone organizes things.
+        let kind: ContentKind = (try? item(id).kind) == .file ? .file : .note
         return SealedObject(id: id, kind: kind, meta: meta, body: try store.read(bodyName(id)))
     }
 
@@ -280,12 +437,7 @@ extension ReaderVault: SyncArea {
     public func removeObject(_ id: UUID, ifLocalHash expected: String) throws {
         guard !isClosed else { throw ReaderError.closed }
         guard try sealedHash(of: id) == expected else { throw SyncError.changedLocally }
-        guard let object = try sealedObject(id) else { return }
-        // The stamp goes first, so a crash can't leave trash that's never cleaned up.
-        try store.write(Data(ISO8601DateFormatter().string(from: Date()).utf8), as: trashStampName(id))
-        try store.write(object.meta, as: metaName(id) + ".trash")
-        if let body = object.body { try store.write(body, as: bodyName(id) + ".trash") }
-        try removeBlobs(id)
+        try moveToTrash(id)
     }
 
     public func emptyOldTrash() throws {
@@ -296,9 +448,7 @@ extension ReaderVault: SyncArea {
                   let stamp = try store.read(name), let date = formatter.date(from: String(decoding: stamp, as: UTF8.self)),
                   Date().timeIntervalSince(date) > Self.trashLifetime
             else { continue }
-            try store.delete(metaName(id) + ".trash")
-            try store.delete(bodyName(id) + ".trash")
-            try store.delete(name)
+            try removeTrash(id)
         }
     }
 
@@ -314,14 +464,14 @@ extension ReaderVault: SyncArea {
         try store.delete(deletionName(id))
     }
 
-    /// The newest version stays. An older version that differs in any way a person would notice is
-    /// kept as a copy. If only a Listen position differs, there's nothing to keep.
+    /// The newest version stays. An older version with different words or a different name is kept as
+    /// a copy. If only a Listen position or a location differs, there's nothing to keep, and a folder
+    /// has nothing to keep at all.
     public func resolveConflict(local: SealedObject, remote: SealedObject) throws -> ConflictResolution {
         let mine = try opened(local)
         let theirs = try opened(remote)
         let keepMine = mine.item.updatedAt >= theirs.item.updatedAt
-        let same = mine.body == theirs.body && mine.item.title == theirs.item.title
-            && mine.item.collection == theirs.item.collection
+        let same = mine.item.kind == .folder || (mine.body == theirs.body && mine.item.title == theirs.item.title)
         if !same {
             let older = keepMine ? theirs : mine
             // Named for the version it preserves, so retries can't double it even if this device changes again.
@@ -341,8 +491,9 @@ extension ReaderVault: SyncArea {
         guard try store.read(metaName(id)) == nil else { return }
         let now = Date()
         let copy = ReaderItem(
-            id: id, kind: item.kind, title: "\(item.displayTitle) (conflict copy)", collection: item.collection,
-            mime: item.mime, byteCount: item.byteCount, createdAt: now, updatedAt: now, listenPosition: 0
+            id: id, kind: item.kind, title: "\(item.displayTitle) (conflict copy)", collection: nil,
+            mime: item.mime, byteCount: item.byteCount, createdAt: now, updatedAt: now, listenPosition: 0,
+            folderID: item.folderID
         )
         try writeBody(body, id: copy.id)
         try writeMeta(copy)

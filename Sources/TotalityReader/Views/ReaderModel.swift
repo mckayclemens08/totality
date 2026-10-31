@@ -11,7 +11,8 @@ public final class ReaderModel {
     }
 
     public private(set) var phase = Phase.loading
-    public private(set) var items: [ReaderItem] = []
+    public private(set) var library = ReaderLibrary()
+    public private(set) var trash: [TrashedItem] = []
     public private(set) var unreadable = 0
     public private(set) var hits: [ReaderSearchHit] = []
     public var query = ""
@@ -37,9 +38,8 @@ public final class ReaderModel {
         !query.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    public var sections: [(title: String, items: [ReaderItem])] {
-        let groups = Dictionary(grouping: items) { $0.collection ?? "" }
-        return groups.keys.sorted().map { (title: $0, items: groups[$0] ?? []) }
+    public var items: [ReaderItem] {
+        library.items
     }
 
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
@@ -50,8 +50,10 @@ public final class ReaderModel {
 
     public func load() async {
         do {
+            try? await vault.adoptCollections()
             let listing = try await vault.list()
-            items = listing.items
+            library = ReaderLibrary(items: listing.items, folders: listing.folders)
+            trash = try await vault.trashed()
             unreadable = listing.unreadable
             phase = .ready
         } catch {
@@ -71,14 +73,54 @@ public final class ReaderModel {
         }
     }
 
-    public func newNote() async -> ReaderItem? {
+    public func newNote(in folder: UUID? = nil) async -> ReaderItem? {
         do {
-            let item = try await vault.createNote()
+            let item = try await vault.createNote(folder: folder)
             await load()
             return item
         } catch {
-            notice = "The note couldn't be created."
+            notice = "The doc couldn't be created."
             return nil
+        }
+    }
+
+    public func newFolder(_ title: String, in parent: UUID?) async {
+        await change("The folder couldn't be created.") { _ = try await $0.createFolder(title: title, in: parent) }
+    }
+
+    public func rename(_ item: ReaderItem, to title: String) async {
+        await change("\(item.displayTitle) couldn't be renamed.") { try await $0.rename(item.id, to: title) }
+    }
+
+    public func move(_ item: ReaderItem, to folder: UUID?) async {
+        do {
+            try await vault.move(item.id, to: folder)
+            await load()
+        } catch let error as ReaderError {
+            notice = error.message
+        } catch {
+            notice = "\(item.displayTitle) couldn't be moved."
+        }
+    }
+
+    public func restore(_ item: ReaderItem) async {
+        await change("\(item.displayTitle) couldn't be restored.") { try await $0.restore(item.id) }
+    }
+
+    public func deleteForever(_ item: ReaderItem) async {
+        await change("\(item.displayTitle) couldn't be deleted.") { try await $0.deleteForever(item.id) }
+    }
+
+    public func emptyTrash() async {
+        await change("Recently Deleted couldn't be emptied.") { try await $0.emptyTrash() }
+    }
+
+    private func change(_ failure: String, _ work: (ReaderVault) async throws -> Void) async {
+        do {
+            try await work(vault)
+            await load()
+        } catch {
+            notice = failure
         }
     }
 
@@ -126,11 +168,11 @@ public final class ReaderModel {
         try await vault.text(of: id)
     }
 
-    public func importFiles(_ urls: [URL], collection: String? = nil) async {
+    public func importFiles(_ urls: [URL], into folder: UUID? = nil) async {
         var failures: [String] = []
         for url in urls {
             do {
-                try await importFile(url, collection: collection)
+                try await importFile(url, folder: folder)
             } catch let error as ReaderError {
                 failures.append("\(url.lastPathComponent): \(error.message)")
             } catch {
@@ -141,18 +183,26 @@ public final class ReaderModel {
         await load()
     }
 
-    private func importFile(_ url: URL, collection: String?) async throws {
+    /// The folder Speechify exports go into, made the first time it's needed.
+    public func importSpeechify(_ urls: [URL]) async {
+        do {
+            await importFiles(urls, into: try await vault.namedFolder(ReaderItem.speechifyCollection).id)
+        } catch {
+            notice = "Those files couldn't be imported."
+        }
+    }
+
+    private func importFile(_ url: URL, folder: UUID?) async throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard size <= ReaderVault.maxImportBytes else { throw ReaderError.tooLarge }
-        _ = try await vault.importFile(Data(contentsOf: url), filename: url.lastPathComponent, collection: collection)
+        _ = try await vault.importFile(Data(contentsOf: url), filename: url.lastPathComponent, folder: folder)
     }
 
     public func delete(_ item: ReaderItem) async {
-        listen.remove(item.id)
         do {
-            try await vault.delete(item.id)
+            for id in try await vault.delete(item.id) { listen.remove(id) }
             await load()
         } catch {
             notice = "\(item.displayTitle) couldn't be deleted."

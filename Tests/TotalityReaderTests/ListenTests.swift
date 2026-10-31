@@ -208,7 +208,8 @@ import Testing
         #expect(model.notice != nil)
     }
 
-    @Test func groupsByCollectionWithLooseItemsFirst() async throws {
+    @Test("Speechify imports land in their own folder, made when it's first needed")
+    func speechifyImportsGoInAFolder() async throws {
         let (model, _) = try model()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -216,9 +217,29 @@ import Testing
         let file = directory.appendingPathComponent("Dune.txt")
         try Data("Sand.".utf8).write(to: file)
         _ = await model.newNote()
-        await model.importFiles([file], collection: ReaderItem.speechifyCollection)
-        #expect(model.sections.map(\.title) == ["", ReaderItem.speechifyCollection])
-        #expect(model.sections.last?.items.map(\.title) == ["Dune"])
+        await model.importSpeechify([file])
+        let top = model.library.contents(of: nil)
+        #expect(top.folders.map(\.title) == [ReaderItem.speechifyCollection])
+        #expect(top.items.count == 1)
+        #expect(model.library.contents(of: top.folders[0].id).items.map(\.title) == ["Dune"])
+    }
+
+    @Test("Deleting a folder takes everything inside out of Listen, and Restore brings it all back")
+    func deletingAFolder() async throws {
+        let (model, _) = try model()
+        await model.newFolder("Climbing", in: nil)
+        let folder = try #require(model.library.folders.first)
+        let note = try #require(await model.newNote(in: folder.id))
+        await model.saveNote(note.id, title: "Beta", body: "Crimp left, flag right.")
+        await model.startListening(to: note.id)
+        #expect(model.listen.current?.id == note.id)
+        await model.delete(folder)
+        #expect(model.listen.current == nil)
+        #expect(model.items.isEmpty)
+        #expect(model.trash.map(\.item.title) == ["Climbing"])
+        await model.restore(folder)
+        #expect(model.items.map(\.title) == ["Beta"])
+        #expect(model.trash.isEmpty)
     }
 
     @Test func aFailedImportSaysWhichFileAndKeepsTheRest() async throws {

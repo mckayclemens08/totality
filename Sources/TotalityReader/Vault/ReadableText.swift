@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 
 /// Turns a stored item into text for reading, search, and Listen.
 enum ReadableText {
+    static let wordMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
     static func extract(_ data: Data, mime: String?) throws -> String {
         guard let mime else { throw ReaderError.notReadable }
         if mime == "application/pdf" {

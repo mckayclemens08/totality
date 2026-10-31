@@ -37,8 +37,14 @@ public struct ReaderHomeView: View {
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result {
-                let collection = importCollection
-                Task { await model.importFiles(urls, collection: collection) }
+                let toSpeechify = importCollection != nil
+                Task {
+                    if toSpeechify {
+                        await model.importSpeechify(urls)
+                    } else {
+                        await model.importFiles(urls)
+                    }
+                }
             } else if case .failure = result {
                 model.notice = "Those files couldn't be opened."
             }
@@ -158,22 +164,16 @@ public struct ReaderHomeView: View {
                 .foregroundStyle(Theme.current.textSecondary.color)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-            ForEach(model.sections, id: \.title) { section in
-                Section {
-                    ForEach(section.items) { item in
-                        NavigationLink(value: item) {
-                            ReaderRow(item: item, snippet: nil)
-                        }
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .swipeActions {
-                            Button("Delete", systemImage: "trash", role: .destructive) {
-                                Task { await model.delete(item) }
-                            }
-                        }
+            ForEach(model.items) { item in
+                NavigationLink(value: item) {
+                    ReaderRow(item: item, snippet: nil)
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .swipeActions {
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        Task { await model.delete(item) }
                     }
-                } header: {
-                    if !section.title.isEmpty { Text(section.title) }
                 }
             }
         }

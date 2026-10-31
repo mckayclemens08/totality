@@ -1,9 +1,9 @@
 import Foundation
 
-/// One note or file. All of this is encrypted at rest, because titles and filenames are content.
+/// One doc, file, or folder. All of this is encrypted at rest, because titles and filenames are content.
 public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
     public enum Kind: String, Codable, Sendable {
-        case note, file
+        case note, file, folder
     }
 
     public static let speechifyCollection = "Speechify Library"
@@ -11,6 +11,7 @@ public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
     public let id: UUID
     public let kind: Kind
     public var title: String
+    /// The old flat label. `adoptCollections` turns it into a folder.
     public var collection: String?
     public var mime: String?
     public var byteCount: Int
@@ -18,9 +19,22 @@ public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
     public var updatedAt: Date
     /// Where Listen stopped, as a UTF-16 offset into the item's readable text.
     public var listenPosition: Int
+    public var folderID: UUID? = nil
 
     public var displayTitle: String {
         title.isEmpty ? "Untitled" : title
+    }
+
+    /// What sorting by type groups on, and what the library shows.
+    public var typeName: String {
+        switch (kind, mime) {
+        case (.folder, _): "Folder"
+        case (.note, _): "Doc"
+        case (_, "application/pdf"): "PDF"
+        case (_, "application/epub+zip"): "EPUB"
+        case (_, ReadableText.wordMime): "Word"
+        default: "File"
+        }
     }
 }
 
@@ -29,6 +43,7 @@ public enum ReaderError: Error, Equatable {
     case notANote
     case tooLarge
     case passwordProtected
+    case folderInsideItself
     case notReadable
     case closed
 }
@@ -38,6 +53,7 @@ extension ReaderError {
     public var message: String {
         switch self {
         case .notFound: "This item is no longer here."
+        case .folderInsideItself: "A folder can't go inside itself."
         case .notANote: "Only notes can be edited."
         case .tooLarge: "Files can be up to 49 MB for now."
         case .passwordProtected: "This PDF is password protected, so it can be stored but not read."
