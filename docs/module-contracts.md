@@ -28,7 +28,7 @@ A module offers content through `ContentProvider`, and `ModuleRegistry.providers
 
 ## Calendar
 
-Spec: issue #12. An event is one sealed blob with its times inside, so storage shows only an ID.
+Spec: issue #12. An event is one sealed blob with its times inside, so storage shows only an ID. Events use their own key purpose, so a Reader blob can't open as an event, and the ID inside must match the one outside.
 
 - All-day events are midnight GMT on their first and last days, so they're plain dates in any zone. Timed events repeat in their own zone, so 3 PM at home stays 3 PM at home while the person travels.
 - Repeats that don't exist, like the 31st of a short month, are skipped rather than moved. Editing one occurrence adds it to `skipped` and makes a standalone event.
@@ -36,6 +36,8 @@ Spec: issue #12. An event is one sealed blob with its times inside, so storage s
 - A reminder gives the operating system the title and time only, outside Totality's encryption. Locations and notes never go with it.
 - Reader and Calendar share one root key, so `ContentRootKey.loadOrCreate(in:sealedIn:)` has to count every module's storage. A key is only created when nothing anywhere is sealed under a missing one.
 - Sync waits for key backup, because each device still has its own key. Reminders are also planned per device.
+- Sealed events go into device backups as ciphertext, but the key doesn't, so a restore lands on the missing-key screen until key backup exists. That's why the screen doesn't say events stay on this device.
+- App-switcher snapshots can hold event text, the same as the Reader. Both need a privacy screen before Phase 3.
 
 ## Sharing an item
 

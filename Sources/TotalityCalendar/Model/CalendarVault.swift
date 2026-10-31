@@ -9,6 +9,7 @@ public struct CalendarListing: Sendable, Equatable {
 
 public enum CalendarError: Error, Equatable {
     case notFound
+    case mismatched
 }
 
 /// A person's own events. Each one is a single blob, and its name holds only the object ID.
@@ -24,14 +25,16 @@ public actor CalendarVault {
     private func name(_ id: UUID) -> String { "\(id.uuidString.lowercased()).event" }
 
     public func save(_ event: CalendarEvent) throws {
-        let key = rootKey.objectKey(for: event.id, purpose: .content)
+        let key = rootKey.objectKey(for: event.id, purpose: .event)
         try store.write(try ContentCipher.seal(JSONEncoder().encode(event), key: key, objectID: event.id), as: name(event.id))
     }
 
     public func event(_ id: UUID) throws -> CalendarEvent {
         guard let sealed = try store.read(name(id)) else { throw CalendarError.notFound }
-        let key = rootKey.objectKey(for: id, purpose: .content)
-        return try JSONDecoder().decode(CalendarEvent.self, from: ContentCipher.open(sealed, key: key, objectID: id))
+        let key = rootKey.objectKey(for: id, purpose: .event)
+        let event = try JSONDecoder().decode(CalendarEvent.self, from: ContentCipher.open(sealed, key: key, objectID: id))
+        guard event.id == id else { throw CalendarError.mismatched }
+        return event
     }
 
     public func list() throws -> CalendarListing {
@@ -41,7 +44,7 @@ public actor CalendarVault {
             guard let id = UUID(uuidString: String(file.dropLast(".event".count))) else { continue }
             do {
                 events.append(try event(id))
-            } catch is CryptoError, is DecodingError {
+            } catch is CryptoError, is DecodingError, is CalendarError {
                 unreadable += 1
             }
         }

@@ -102,7 +102,7 @@ public struct CalendarHomeView: View {
             CalendarMessage(
                 systemImage: "calendar",
                 title: "Nothing coming up",
-                detail: "Add an event, or show your Apple and Google calendars here. Your own events are encrypted and stay on this device for now."
+                detail: "Add an event, or show your Apple and Google calendars here. Events you add here are encrypted and aren't synced between your devices yet."
             )
         } else {
             List {
@@ -147,7 +147,7 @@ struct CalendarNotes: View {
                 Label(unreadableText, systemImage: "lock.slash")
                     .foregroundStyle(theme.danger.color)
             }
-            Label("Your events are encrypted here and stay on this device for now.", systemImage: "iphone")
+            Label("Events you add here are encrypted and can't be recovered on a new device yet. Apple and Google calendars aren't encrypted by Totality.", systemImage: "iphone")
                 .foregroundStyle(theme.textSecondary.color)
         }
         .font(Typeface.caption)

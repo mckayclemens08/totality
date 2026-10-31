@@ -173,6 +173,13 @@ enum Dates {
         #expect(found.count == 1)
     }
 
+    @Test("An absurd date can't crash the calendar", arguments: [1e300, -1e300, Double.greatestFiniteMagnitude])
+    func absurdDatesDoNotCrash(seconds: Double) {
+        let event = Dates.event(Date(timeIntervalSinceReferenceDate: seconds), rule: .init(frequency: .daily))
+        let (first, last) = october()
+        #expect(event.occurrences(from: first, through: last, in: display).count <= 31)
+    }
+
     @Test("An all-day event is the same date wherever you are")
     func allDayIgnoresZones() {
         let event = Dates.allDay(2026, 10, 30)
@@ -290,6 +297,41 @@ enum Dates {
         let name = "\(second.id.uuidString.lowercased()).event"
         try blobs.write(try #require(try blobs.read("\(first.id.uuidString.lowercased()).event")), as: name)
         #expect(try await vault.list().unreadable == 1)
+    }
+
+    @Test("Another module's blob can't open as an event, even under the same ID")
+    func modulesDoNotShareKeys() async throws {
+        let blobs = MemoryBlobs()
+        let rootKey = try ContentRootKey.generate()
+        let vault = CalendarVault(store: blobs, rootKey: rootKey)
+        let event = Dates.event(Dates.date(2026, 10, 15, 9))
+        let body = try JSONEncoder().encode(event)
+        let sealed = try ContentCipher.seal(body, key: rootKey.objectKey(for: event.id, purpose: .content), objectID: event.id)
+        try blobs.write(sealed, as: "\(event.id.uuidString.lowercased()).event")
+        #expect(try await vault.list().unreadable == 1)
+    }
+
+    @Test("An event sealed under one ID but claiming another is refused")
+    func theIDInsideMustMatch() async throws {
+        let blobs = MemoryBlobs()
+        let rootKey = try ContentRootKey.generate()
+        let vault = CalendarVault(store: blobs, rootKey: rootKey)
+        let event = Dates.event(Dates.date(2026, 10, 15, 9))
+        let other = UUID()
+        let sealed = try ContentCipher.seal(JSONEncoder().encode(event), key: rootKey.objectKey(for: other, purpose: .event), objectID: other)
+        try blobs.write(sealed, as: "\(other.uuidString.lowercased()).event")
+        #expect(try await vault.list().unreadable == 1)
+    }
+
+    @Test("A stray file name is counted, and the rest of the list still opens")
+    func strayNamesDoNotBreakTheList() async throws {
+        let blobs = MemoryBlobs()
+        let vault = try vault(blobs)
+        try await vault.save(Dates.event(Dates.date(2026, 10, 15, 9)))
+        try blobs.write(Data([1]), as: "\(UUID().uuidString.uppercased()).event")
+        let listing = try await vault.list()
+        #expect(listing.events.count == 1)
+        #expect(listing.unreadable == 1)
     }
 
     @Test func deletesForGood() async throws {

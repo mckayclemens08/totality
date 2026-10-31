@@ -159,7 +159,8 @@ public struct CalendarEvent: Identifiable, Codable, Sendable, Hashable {
         case .monthly: 2_678_400
         case .yearly: 31_622_400
         }
-        var index = max(0, Int(lower.addingTimeInterval(-span).timeIntervalSince(start) / approximate) - 1)
+        let elapsed = lower.addingTimeInterval(-span).timeIntervalSince(start) / approximate
+        var index = elapsed.isFinite ? Int(max(0, min(elapsed - 1, Double(Int32.max)))) : 0
         var found: [EventOccurrence] = []
         var misses = 0
         while misses < 500 {

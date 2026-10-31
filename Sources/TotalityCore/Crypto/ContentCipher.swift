@@ -16,6 +16,8 @@ public enum CryptoError: Error, Equatable {
 public enum KeyPurpose: String, Sendable {
     case content
     case metadata
+    /// Calendar events. Their own purpose means one module's blob can never open as another's.
+    case event
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.

@@ -222,7 +222,7 @@ struct EventEditorView: View {
                     ForEach(CalendarModel.reminderChoices, id: \.self) { Text(ReminderText.name($0)).tag($0) }
                 }
             } footer: {
-                Text("Reminders show the event's title and time, including on your lock screen.")
+                Text("Reminders show the event's title and time, including on your lock screen. Your device keeps those outside Totality's encryption until the reminder fires.")
             }
             Section("Attached") {
                 ForEach(draft.attachments, id: \.id) { ref in

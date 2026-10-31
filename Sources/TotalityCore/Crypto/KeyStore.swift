@@ -24,7 +24,7 @@ extension ContentRootKey {
         try loadOrCreate(in: store, hasSealedData: stores.contains { try !$0.names().isEmpty })
     }
 
-    public static func loadOrCreate(in store: any KeyStore, hasSealedData: Bool) throws -> ContentRootKey {
+    static func loadOrCreate(in store: any KeyStore, hasSealedData: Bool) throws -> ContentRootKey {
         if let stored = try store.load(keyStoreName) {
             return try ContentRootKey(bytes: stored)
         }
