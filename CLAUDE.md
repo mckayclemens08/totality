@@ -69,7 +69,7 @@ Phase 4 commerce. Brief §7. One module at a time.
 ## Architecture in one paragraph
 
 SwiftUI multiplatform client, three server planes. **Supabase** holds the account, the public handle
-directory, solo-module data, and ciphertext blobs. **Matrix** (Conduit) carries every private
+directory, solo-module data, and ciphertext blobs. **Matrix** (Tuwunel) carries every private
 interpersonal thing — DMs, communities/channels, call signalling, device keys, private posts, shared
 docs — all E2E. **atproto** (Phase 2) carries public social posts only. A record's transport is chosen
 by its **visibility**, not by its module. Keys live on devices, backed up in Matrix SSSS under one
@@ -107,6 +107,14 @@ The project signs with the owner's free Personal Team, and command-line builds n
 `-allowProvisioningUpdates -allowProvisioningDeviceRegistration`. An ad-hoc Mac build gets `-34018` from
 the Keychain, so the Reader shows its key error by design: never fall back to a weaker keychain to get
 around that. `keychain-access-groups` is pinned in the entitlements so a team change cannot hide the key.
+
+## The server
+
+The Oracle Always Free box runs the Matrix server behind a Cloudflare tunnel. Its setup is in `server/`,
+copied to `~/totality` and started with `docker compose`. Reach it with
+`ssh -i ~/.ssh/totality_server ubuntu@158.101.16.156`. Secrets stay on the server and never enter the repo.
+The only public paths are the ones in `server/cloudflared.yml`, and the only open port is SSH.
+Never upgrade the Oracle account to paid: that's the owner's decision under the cost rule.
 
 ## Working discipline
 

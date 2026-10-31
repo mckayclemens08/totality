@@ -80,13 +80,15 @@ Large binaries never go through Matrix (its media repo on a Pi is a bad idea). P
 | Plane | Software | Where it runs (A/B) | Where it runs (post-Pi) | Cost |
 |---|---|---|---|---|
 | Account/data | Supabase | Supabase free tier | self-hosted on Pi (Docker) | $0 |
-| Private traffic | Matrix **Conduit** (not Synapse) | Pi, or a free-tier VPS; Oracle Cloud Always-Free ARM is the gap-filler | Pi | $0 |
+| Private traffic | Matrix **Tuwunel** (not Synapse) | Oracle Cloud Always-Free ARM, behind a Cloudflare tunnel | Pi | $0 |
 | Public social | atproto PDS (`bluesky-social/pds`) | **deferred to Phase 2** | Pi | $0 |
 | Calls | LiveKit Cloud free tier | cloud | self-host on Pi (later) | $0 |
 | AI inference | Ollama on the owner's Mac | Mac (LAN + Tailscale) | Pi or Mac | $0 |
 | Private network | Tailscale free tier | — | — | $0 |
 
-**Conduit over Synapse** is a deliberate change from the brief's implied default. Synapse is Python, wants ~2 GB RAM idle and a tuned Postgres; Conduit is a single Rust binary on RocksDB and fits a Raspberry Pi far better. Those memory figures are from recollection, not measured. **Not confirmed:** JWT login, spaces, and threads on Conduit; searches found JWT documentation only for Tuwunel, a server in the same family. **Mitigation:** the client talks only to the Matrix client-server API, so swapping servers later is an ops change, not a code change. The server must be picked before step 0.4, because Phase 0 already depends on JWT login and SSSS. Custom room types use `app.totality.*` because the `m.` namespace is reserved for the Matrix spec.
+**Tuwunel, not Conduit or Synapse.** This proposal first chose Conduit, a single Rust binary that fits small hardware better than Synapse. On 2026-10-30 the server was built on Tuwunel instead, from the same family: it documents JWT login with ES256 public keys, which is how Supabase signs tokens on this project and which was never confirmed for Conduit. It's actively released, has arm64 builds, and is Apache-2.0. Its own docs list a Conduit migration path, but not a route to Synapse yet.
+
+The server runs with registration and federation off. Cloudflare's tunnel means no inbound ports, but Cloudflare ends TLS, so it handles traffic in the clear. Matrix's E2E content and the key backup stay ciphertext there. Sign-in tokens don't.
 
 **atproto is deferred, not dropped.** Phase 1 ships no social module (§7), so running a PDS in Phase 0/1 buys nothing but a second identity system to keep alive. What Phase 0 *does* do is reserve the DID in the identity model (§4.3) so adding it in Phase 2 is additive.
 
@@ -522,7 +524,7 @@ Every later module adds its own case to this suite. A module that cannot add one
 | 0.1 | Repo, CLAUDE.md, tokens, brief committed | owner |
 | 0.2 | **This document approved** by owner + independent model | **hard gate — no app code before this** |
 | 0.3 | Supabase project, migration 1 (types + core tables + RLS), schema-invariant CI check | invariant check green |
-| 0.4 | Conduit in Docker, JWT login wired to Supabase JWKS | owner signs in once, lands in both planes |
+| 0.4 | Tuwunel in Docker, JWT login wired to Supabase | owner signs in once, lands in both planes |
 | 0.5 | `TotalityCore`: crypto (XChaCha20-Poly1305, HKDF via swift-sodium), `KeyStore` over SSSS, `ContentRef`, `ModuleRegistry` | unit tests + known-answer vectors |
 | 0.6 | SwiftUI shell: sign-up/sign-in, recovery-key ceremony, device verification, contacts, invites, settings | runs on owner's iPhone **and** Mac |
 | 0.7 | Shared services: search shell, notifications, storage client, audit log, export, account deletion | — |

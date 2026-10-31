@@ -39,3 +39,7 @@ node_modules/
 .venv/
 __pycache__/
 App/Local.xcconfig
+
+# Server state and secrets stay on the server.
+server/data/
+server/cloudflared/

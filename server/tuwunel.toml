@@ -1,0 +1,23 @@
+# Tuwunel, the Matrix server. See proposal §2 for why this replaced Conduit.
+[global]
+# Part of every Matrix address, and it can never change.
+server_name = "usetotality.com"
+database_path = "/var/lib/tuwunel"
+address = ["0.0.0.0"]
+port = 8008
+
+# Accounts come only from Totality sign-in, once that's wired up. Nobody can register here directly.
+allow_registration = false
+
+# Phase 2 is closed, so this server talks to no other Matrix server yet.
+allow_federation = false
+trusted_servers = []
+
+# Only the tunnel can reach this server, and Cloudflare sets this header itself.
+ip_source = "cf_connecting_ip"
+
+log = "warn"
+
+[global.well_known]
+client = "https://matrix.usetotality.com"
+server = "matrix.usetotality.com:443"
