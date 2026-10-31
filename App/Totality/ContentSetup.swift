@@ -54,6 +54,8 @@ enum ContentSetup {
 @MainActor
 final class DeviceContentKeys: ContentKeyAccess {
     var willMove: () async -> Void = {}
+    /// True while blobs are being rewritten, so nothing opens them halfway through.
+    private(set) var isMoving = false
 
     func rootKey() async throws -> ContentRootKey {
         let ring = try ContentSetup.keyRing()
@@ -61,6 +63,8 @@ final class DeviceContentKeys: ContentKeyAccess {
     }
 
     func adopt(_ key: ContentRootKey) async throws -> KeyMoveReport {
+        isMoving = true
+        defer { isMoving = false }
         await willMove()
         let ring = try ContentSetup.keyRing()
         return try await Task.detached { try ring.adopt(key) }.value
@@ -72,6 +76,14 @@ final class DeviceContentKeys: ContentKeyAccess {
 
     func claim(for account: String) async throws {
         try ContentSetup.keyRing().claim(for: account)
+    }
+
+    func settleExistingInstall(signedInAccount: String?) async throws {
+        try ContentSetup.keyRing().settleExistingInstall(signedInAccount: signedInAccount)
+    }
+
+    func hasSealedContent() async throws -> Bool {
+        try ContentSetup.keyRing().hasSealedContent()
     }
 
     func joinedBackup() async throws -> String? {

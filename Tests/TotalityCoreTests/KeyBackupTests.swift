@@ -307,6 +307,43 @@ struct LockedSecretVectorTests {
         #expect(device.keys.secrets["content-root-key.previous"] == device.old.bytes)
     }
 
+    @Test("A restored device told the wrong key reports what it can't open, not success")
+    func keylessAdoptReportsUnreadable() throws {
+        let device = try device()
+        device.keys.secrets = [:]
+        #expect(try device.ring.adopt(ContentRootKey.generate()) == KeyMoveReport(moved: 0, unreadable: 6))
+    }
+
+    @Test("An install from before owners takes its signed-in account, once")
+    func existingInstallSettlesOnce() throws {
+        let device = try device()
+        try device.ring.settleExistingInstall(signedInAccount: "owner")
+        #expect(try device.ring.owner() == "owner")
+        try device.ring.settleExistingInstall(signedInAccount: "someone-else")
+        #expect(try device.ring.owner() == "owner")
+    }
+
+    @Test("Signed out on first launch, nothing is claimed, and a later session can't be treated as the old one")
+    func signedOutSettlingClaimsNothing() throws {
+        let device = try device()
+        try device.ring.settleExistingInstall(signedInAccount: nil)
+        #expect(try device.ring.owner() == nil)
+        try device.ring.settleExistingInstall(signedInAccount: "someone-else")
+        #expect(try device.ring.owner() == nil)
+    }
+
+    @Test func knowsWhetherSealedContentIsHere() throws {
+        #expect(try device(notes: 0).ring.hasSealedContent() == false)
+        #expect(try device(notes: 1).ring.hasSealedContent())
+    }
+
+    @Test("A stray file doesn't count as someone's content")
+    func strayFilesAreNotContent() throws {
+        let device = try device(notes: 0)
+        try device.blobs.write(Data("not ours".utf8), as: ".DS_Store")
+        #expect(try device.ring.hasSealedContent() == false)
+    }
+
     @Test("Moving to the key it already has does nothing")
     func sameKeyIsANoOp() throws {
         let device = try device()

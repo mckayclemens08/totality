@@ -64,6 +64,7 @@ struct RootView: View {
                 calendar = nil
                 contentProblem = nil
             }
+            await account?.backup?.settleDevice()
         }
         .sheet(isPresented: $showingAccount) {
             if let account {
@@ -100,6 +101,10 @@ struct RootView: View {
 
     private func prepareContent() {
         guard reader == nil else { return }
+        guard !contentKeys.isMoving else {
+            contentProblem = .keyUnavailable
+            return
+        }
         do {
             let content = try ContentSetup.makeModels()
             reader = content.reader

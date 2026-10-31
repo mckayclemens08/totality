@@ -154,6 +154,7 @@ public final class AccountModel {
     }
 
     private func finishSigningIn() async {
+        await backup?.accountSignedIn()
         await registerDevice()
         await loadProfile()
     }

@@ -38,6 +38,7 @@ public struct ContentKeyRing: Sendable {
         static let previous = "content-root-key.previous"
         static let backupFingerprint = "content-key-backup-fingerprint"
         static let owner = "content-key-owner"
+        static let ownerSettled = "content-key-owner-settled"
     }
 
     private let keys: any KeyStore
@@ -61,13 +62,26 @@ public struct ContentKeyRing: Sendable {
         if try keys.load(Slot.incoming) != nil { _ = try finishMove() }
         guard let stored = try keys.load(Slot.current) else {
             try keys.save(new.bytes, as: Slot.current)
-            return KeyMoveReport(moved: 0, unreadable: 0)
+            return KeyMoveReport(moved: 0, unreadable: try countUnreadable(with: new))
         }
         let old = try ContentRootKey(bytes: stored)
         guard old != new else { return KeyMoveReport(moved: 0, unreadable: 0) }
         try keys.save(old.bytes, as: Slot.previous)
         try keys.save(new.bytes, as: Slot.incoming)
         return try finishMove()
+    }
+
+    private func countUnreadable(with key: ContentRootKey) throws -> Int {
+        var unreadable = 0
+        for area in areas {
+            for name in try area.store.names() {
+                guard let (id, purpose) = area.identify(name), let sealed = try area.store.read(name) else { continue }
+                if (try? ContentCipher.open(sealed, key: key.objectKey(for: id, purpose: purpose), objectID: id)) == nil {
+                    unreadable += 1
+                }
+            }
+        }
+        return unreadable
     }
 
     /// Safe to repeat: a blob already under the new key is skipped.
@@ -114,6 +128,19 @@ public struct ContentKeyRing: Sendable {
             return
         }
         try keys.save(Data(account.utf8), as: Slot.owner)
+    }
+
+    /// Runs once. An install from before accounts owned keys already has one person's content and
+    /// session, so that account is the owner. Everyone after has to be asked or start empty, which is
+    /// why this never runs again: a later session on this device could be anyone's.
+    public func settleExistingInstall(signedInAccount: String?) throws {
+        guard try keys.load(Slot.ownerSettled) == nil else { return }
+        if let signedInAccount, try owner() == nil { try claim(for: signedInAccount) }
+        try keys.save(Data([1]), as: Slot.ownerSettled)
+    }
+
+    public func hasSealedContent() throws -> Bool {
+        try areas.contains { area in try area.store.names().contains { area.identify($0) != nil } }
     }
 
     /// The fingerprint of the backup this device joined, if any.

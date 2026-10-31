@@ -122,7 +122,7 @@ public struct KeyBackup: Codable, Sendable, Equatable {
 
     /// IDs end up in URL paths, so one from a server is checked before it's used.
     public var hasValidID: Bool {
-        keyID.count == 32 && keyID.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+        keyID.count == 32 && keyID.allSatisfy { $0.isASCII && $0.isHexDigit && !$0.isUppercase }
     }
 
     public func open(with recovery: RecoveryKey) throws -> ContentRootKey {

@@ -27,6 +27,8 @@ public final class BackupModel {
         case confirmingKey
         case working
         case needsKey
+        /// Sealed content is here and no account owns it, so the person has to say whether it's theirs.
+        case confirmingOwnership
         /// This device's content belongs to a different account, so nothing here can be touched.
         case otherAccount
         case ready(BackupCopies)
@@ -38,11 +40,26 @@ public final class BackupModel {
     private let service: any KeyBackupService
     private let content: any ContentKeyAccess
     private var newKey: RecoveryKey?
-    private var existing: KeyBackup?
+    private var existing: FetchedBackup?
 
     public init(service: any KeyBackupService, content: any ContentKeyAccess) {
         self.service = service
         self.content = content
+    }
+
+    /// At launch, before anything else can sign in. Old installs get their owner here, once.
+    public func settleDevice() async {
+        try? await content.settleExistingInstall(signedInAccount: await service.signedInAccountID())
+    }
+
+    /// After a sign-in. An empty device simply belongs to whoever arrived. A device with content
+    /// doesn't, because that content could be someone else's, so `load` asks.
+    public func accountSignedIn() async {
+        guard let account = await service.signedInAccountID(),
+              (try? await content.keyOwner()) == .some(nil),
+              (try? await content.hasSealedContent()) == false
+        else { return }
+        try? await content.claim(for: account)
     }
 
     public func load() async {
@@ -50,9 +67,17 @@ public final class BackupModel {
         notice = nil
         newKey = nil
         do {
-            let account = try await service.accountID()
-            if let owner = try await content.keyOwner(), owner != account {
-                phase = .otherAccount
+            guard let account = await service.signedInAccountID() else {
+                phase = .unavailable
+                return
+            }
+            if let owner = try await content.keyOwner() {
+                guard owner == account else {
+                    phase = .otherAccount
+                    return
+                }
+            } else if try await content.hasSealedContent() {
+                phase = .confirmingOwnership
                 return
             }
             guard let fetched = try await service.fetchBackup() else {
@@ -60,7 +85,7 @@ public final class BackupModel {
                 phase = .notSetUp
                 return
             }
-            existing = fetched.backup
+            existing = fetched
             // The whole backup is compared, not its ID, so a swapped copy never counts as this one and
             // never gets pushed over the good copy on the other server.
             if try await content.joinedBackup() == fetched.backup.fingerprint {
@@ -71,6 +96,21 @@ public final class BackupModel {
         } catch {
             phase = .unavailable
         }
+    }
+
+    /// The person says the content here is theirs, which ties it to this account for good.
+    public func confirmOwnership() async {
+        do {
+            guard let account = await service.signedInAccountID() else { return }
+            try await content.claim(for: account)
+            await load()
+        } catch {
+            phase = .otherAccount
+        }
+    }
+
+    public func declineOwnership() {
+        phase = .otherAccount
     }
 
     private func copies(of fetched: FetchedBackup) async -> BackupCopies {
@@ -124,13 +164,14 @@ public final class BackupModel {
         }
         phase = .working
         do {
-            // Claiming comes first, so another account's key can never be locked into this backup.
-            try await content.claim(for: try await service.accountID())
+            let account = try await requireOwnership()
             let backup = try KeyBackup.seal(try await content.rootKey(), with: newKey)
             try await service.saveBackup(backup)
+            // Claimed only now, so a failed attempt leaves no mark on the device.
+            try await content.claim(for: account)
             try await content.markJoined(backup.fingerprint)
             self.newKey = nil
-            existing = backup
+            existing = FetchedBackup(backup: backup, inSupabase: true)
             phase = .ready(await copies(of: FetchedBackup(backup: backup, inSupabase: true)))
         } catch ContentKeyError.otherAccount {
             self.newKey = nil
@@ -148,6 +189,13 @@ public final class BackupModel {
         }
     }
 
+    /// Checks without writing anything, so nothing is claimed by an attempt that goes on to fail.
+    private func requireOwnership() async throws -> String {
+        guard let account = await service.signedInAccountID() else { throw AccountError.failed }
+        if let owner = try await content.keyOwner(), owner != account { throw ContentKeyError.otherAccount }
+        return account
+    }
+
     /// Joins this device, moving anything sealed under its old key. It can take a while.
     public func enter(_ typed: String) async {
         guard let existing else { return }
@@ -155,18 +203,19 @@ public final class BackupModel {
             notice = "That isn't a recovery key. Check each character."
             return
         }
-        guard existing.opens(with: recovery) else {
+        guard existing.backup.opens(with: recovery) else {
             notice = "That's not the recovery key for this account."
             return
         }
         phase = .working
         do {
-            try await content.claim(for: try await service.accountID())
-            let report = try await content.adopt(try existing.open(with: recovery))
-            try await content.markJoined(existing.fingerprint)
-            phase = .ready(await copies(of: FetchedBackup(backup: existing, inSupabase: true)))
+            let account = try await requireOwnership()
+            let report = try await content.adopt(try existing.backup.open(with: recovery))
+            try await content.claim(for: account)
+            try await content.markJoined(existing.backup.fingerprint)
+            phase = .ready(await copies(of: existing))
             if report.unreadable > 0 {
-                notice = "\(report.unreadable) items couldn't be opened, so they weren't moved. They're untouched."
+                notice = "\(report.unreadable) items can't be opened with this key. They're untouched."
             }
         } catch ContentKeyError.otherAccount {
             phase = .otherAccount

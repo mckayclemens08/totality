@@ -1,5 +1,6 @@
 import SwiftUI
 import TotalityUI
+import UniformTypeIdentifiers
 
 /// Setting up the recovery key, and joining a device to it. The words here are deliberately blunt:
 /// this is the one thing in the app that can't be undone by anyone.
@@ -27,10 +28,22 @@ struct BackupView: View {
         .background(theme.bg.color)
         .navigationTitle("Recovery key")
         .navigationBarBackButtonHidden(model.phase == .working)
-        .interactiveDismissDisabled(model.phase == .working)
+        .interactiveDismissDisabled(isMidCeremony)
         .task { await model.load() }
         .onChange(of: model.phase) { typed = "" }
         .onDisappear { model.leave() }
+    }
+
+    private var isMidCeremony: Bool {
+        switch model.phase {
+        case .working, .showingKey, .confirmingKey: true
+        default: false
+        }
+    }
+
+    /// Key text fades when the app isn't active, so the app switcher's snapshot doesn't capture it.
+    private var keyOpacity: Double {
+        scenePhase == .active ? 1 : 0
     }
 
     @ViewBuilder private var content: some View {
@@ -42,21 +55,21 @@ struct BackupView: View {
             AccountDetail(text: "Your backup couldn't be checked. You may be offline.")
             AccountButton(title: "Try again", isWorking: false) { Task { await model.load() } }
         case .notSetUp:
-            AccountDetail(text: "Your recovery key is what opens your encrypted content on a new or restored device. Totality will show it once, and it can't be shown again.")
+            AccountDetail(text: "Your recovery key is what opens your encrypted content on a new or restored device. Totality doesn't keep it, so once you finish here it can't be shown again.")
             warning
-            AccountDetail(text: "This is the first step. Sync isn't finished, so today your recovery key only helps with notes and events restored from a device backup. Once sync is on, it brings everything back.")
+            AccountDetail(text: "This is the first step. Sync isn't finished, so today your recovery key only helps with what's restored from a device backup. Once sync is on, it brings everything back.")
             AccountButton(title: "Create recovery key", isWorking: false) { model.begin() }
         case .showingKey(let key):
             AccountDetail(text: "Save this now, in a password manager and on paper. Don't rely on a screenshot or your Notes.")
-            // Hidden when the app isn't active, so the app switcher's snapshot doesn't capture it.
-            Text(scenePhase == .active ? key : " ")
+            Text(key)
                 .font(Typeface.code)
                 .foregroundStyle(Theme.current(scheme).textPrimary.color)
-                .textSelection(.enabled)
-                .privacySensitive()
+                .opacity(keyOpacity)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Space.s4)
                 .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+            Button("Copy for 2 minutes") { RecoveryKeyClipboard.copy(key) }
+                .font(Typeface.callout)
             warning
             AccountButton(title: "I've saved it", isWorking: false) { model.continueToConfirm() }
             Button("Cancel") { model.cancel() }
@@ -76,12 +89,18 @@ struct BackupView: View {
             keyField
             AccountButton(title: "Add this device", isWorking: false) { Task { await model.enter(typed) } }
             warning
+        case .confirmingOwnership:
+            AccountDetail(text: "This device already has encrypted content on it. Is it yours?")
+            AccountDetail(text: "Answering yes ties it to this account for good. If it's someone else's, say no and sign in with their account instead.")
+            AccountButton(title: "Yes, it's mine", isWorking: false) { Task { await model.confirmOwnership() } }
+            Button("No, it isn't") { model.declineOwnership() }
+                .font(Typeface.callout)
         case .otherAccount:
             AccountDetail(text: "The encrypted content on this device belongs to a different account, so a recovery key can't be set up here. Sign in with that account to manage it.")
         case .ready(let copies):
             AccountDetail(text: "Your recovery key is set up, and this device has joined.")
             AccountDetail(text: copiesText(copies))
-            AccountDetail(text: "Sync isn't finished, so your notes and events aren't on any server yet.")
+            AccountDetail(text: "Sync isn't finished, so your notes and events aren't on Totality's servers yet.")
             warning
         }
     }
@@ -114,8 +133,34 @@ struct BackupView: View {
             #if os(iOS)
             .textInputAutocapitalization(.never)
             #endif
-            .privacySensitive()
+            .opacity(keyOpacity)
             .padding(Space.s4)
             .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+    }
+}
+
+/// Copying a recovery key has to be easy, because a password manager is the best place for it, but
+/// it mustn't linger or travel to other devices.
+private enum RecoveryKeyClipboard {
+    private static let lifetime = Duration.seconds(120)
+
+    @MainActor static func copy(_ key: String) {
+        #if os(iOS)
+        UIPasteboard.general.setItems(
+            [[UTType.plainText.identifier: key]],
+            options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)]
+        )
+        #else
+        let board = NSPasteboard.general
+        board.clearContents()
+        // The marker asks clipboard managers and Universal Clipboard to leave it alone.
+        board.declareTypes([.string, NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")], owner: nil)
+        board.setString(key, forType: .string)
+        let change = board.changeCount
+        Task { @MainActor in
+            try? await Task.sleep(for: lifetime)
+            if board.changeCount == change { board.clearContents() }
+        }
+        #endif
     }
 }

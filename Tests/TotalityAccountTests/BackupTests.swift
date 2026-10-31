@@ -5,7 +5,7 @@ import TotalityCore
 
 actor FakeBackupService: KeyBackupService {
     var stored: KeyBackup?
-    var account = "user-1"
+    var account: String? = "user-1"
     var inSupabase = true
     var supabaseRestores = true
     var fetchError: AccountError?
@@ -20,9 +20,9 @@ actor FakeBackupService: KeyBackupService {
         self.stored = stored
         self.inSupabase = inSupabase
     }
-    func set(account: String) { self.account = account }
+    func set(account: String?) { self.account = account }
     func setSupabaseRestores(_ works: Bool) { supabaseRestores = works }
-    func accountID() async throws -> String { account }
+    func signedInAccountID() async -> String? { account }
     func fail(fetch: AccountError? = nil, save: AccountError? = nil) {
         fetchError = fetch
         saveError = save
@@ -56,6 +56,8 @@ actor FakeContentKeys: ContentKeyAccess {
     var key: ContentRootKey
     var joined: String?
     var owner: String?
+    var sealedContent = false
+    var settled = false
     var adoptError: Error?
     var report = KeyMoveReport(moved: 0, unreadable: 0)
     private(set) var adopted: [ContentRootKey] = []
@@ -65,8 +67,20 @@ actor FakeContentKeys: ContentKeyAccess {
     func setReport(_ report: KeyMoveReport) { self.report = report }
     func setJoined(_ fingerprint: String) { joined = fingerprint }
     func setOwner(_ owner: String) { self.owner = owner }
+    func setSealedContent(_ present: Bool) { sealedContent = present }
+    func setRootKeyMissing() { rootKeyMissing = true }
 
-    func rootKey() async throws -> ContentRootKey { key }
+    private var rootKeyMissing = false
+    func rootKey() async throws -> ContentRootKey {
+        if rootKeyMissing { throw KeyStoreError.keyMissing }
+        return key
+    }
+    func settleExistingInstall(signedInAccount: String?) async throws {
+        guard !settled else { return }
+        settled = true
+        if owner == nil { owner = signedInAccount }
+    }
+    func hasSealedContent() async throws -> Bool { sealedContent }
     func adopt(_ key: ContentRootKey) async throws -> KeyMoveReport {
         if let adoptError { throw adoptError }
         adopted.append(key)
@@ -320,8 +334,6 @@ actor FakeContentKeys: ContentKeyAccess {
         await service.set(account: "user-2")
         await model.load()
         #expect(model.phase == .otherAccount)
-        model.begin()
-        model.continueToConfirm()
         #expect(await service.stored == nil)
     }
 
@@ -396,5 +408,129 @@ actor FakeContentKeys: ContentKeyAccess {
         model.leave()
         model.showKeyAgain()
         #expect(model.phase == .checking)
+    }
+
+    @Test("An old install takes its signed-in account at launch, so a later sign-in can't claim it")
+    func launchSettlesAnExistingInstall() async throws {
+        let (model, service, content) = try setUp()
+        await content.setSealedContent(true)
+        await model.settleDevice()
+        #expect(await content.owner == "user-1")
+        await service.set(account: "user-2")
+        await model.settleDevice()
+        await model.load()
+        #expect(model.phase == .otherAccount)
+    }
+
+    @Test("A fresh sign-in on a device with someone's content has to answer whether it's theirs")
+    func unclaimedContentIsAskedAbout() async throws {
+        let (model, service, content) = try setUp()
+        await service.set(account: nil)
+        await model.settleDevice()
+        await content.setSealedContent(true)
+        await service.set(account: "user-2")
+        await model.accountSignedIn()
+        #expect(await content.owner == nil)
+        await model.load()
+        #expect(model.phase == .confirmingOwnership)
+    }
+
+    @Test("Saying it isn't yours touches nothing")
+    func decliningClaimsNothing() async throws {
+        let (model, _, content) = try setUp()
+        await content.setSealedContent(true)
+        await model.load()
+        model.declineOwnership()
+        #expect(model.phase == .otherAccount)
+        #expect(await content.owner == nil)
+    }
+
+    @Test("Saying it's yours claims it and carries on")
+    func confirmingClaims() async throws {
+        let (model, _, content) = try setUp()
+        await content.setSealedContent(true)
+        await model.load()
+        await model.confirmOwnership()
+        #expect(await content.owner == "user-1")
+        #expect(model.phase == .notSetUp)
+    }
+
+    @Test("An empty device simply belongs to whoever signs in")
+    func emptyDeviceIsClaimedAtSignIn() async throws {
+        let (model, _, content) = try setUp()
+        await model.accountSignedIn()
+        #expect(await content.owner == "user-1")
+    }
+
+    @Test("A device that already has an owner isn't reassigned by a sign-in")
+    func signInDoesNotReassign() async throws {
+        let (model, service, content) = try setUp()
+        await content.setOwner("user-1")
+        await service.set(account: "user-2")
+        await model.accountSignedIn()
+        #expect(await content.owner == "user-1")
+    }
+
+    @Test("A failed setup leaves no claim on the device")
+    func failedSetupClaimsNothing() async throws {
+        let (model, service, content) = try setUp()
+        model.begin()
+        let key = try shownKey(model)
+        model.continueToConfirm()
+        await service.fail(save: .offline)
+        await model.confirm(key)
+        #expect(await content.owner == nil)
+    }
+
+    @Test("Sealed content with no key can't claim the device either")
+    func missingKeyClaimsNothing() async throws {
+        let (model, _, content) = try setUp()
+        model.begin()
+        let key = try shownKey(model)
+        model.continueToConfirm()
+        await content.setRootKeyMissing()
+        await model.confirm(key)
+        #expect(await content.owner == nil)
+        #expect(model.phase == .confirmingKey)
+    }
+
+    @Test("A failed join leaves no claim on the device")
+    func failedJoinClaimsNothing() async throws {
+        let (model, service, content) = try setUp()
+        let recovery = try RecoveryKey.generate()
+        await service.set(stored: try KeyBackup.seal(try ContentRootKey.generate(), with: recovery))
+        await content.failAdopting()
+        await model.load()
+        await model.enter(recovery.encoded)
+        #expect(await content.owner == nil)
+    }
+
+    @Test("Joining a backup found only on Matrix puts the Supabase copy back")
+    func joiningFromMatrixRestoresSupabase() async throws {
+        let (model, service, _) = try setUp()
+        let recovery = try RecoveryKey.generate()
+        await service.set(stored: try KeyBackup.seal(try ContentRootKey.generate(), with: recovery), inSupabase: false)
+        await model.load()
+        await model.enter(recovery.encoded)
+        #expect(await service.supabaseRestoreCount == 1)
+    }
+
+    @Test("Signed out, nothing assumes anything")
+    func signedOutIsUnavailable() async throws {
+        let (model, service, _) = try setUp()
+        await service.set(account: nil)
+        await model.load()
+        #expect(model.phase == .unavailable)
+    }
+}
+
+@Suite struct MatrixIDTests {
+    @Test(arguments: ["", "a b", "../../evil", String(repeating: "G", count: 32), String(repeating: "A", count: 32), String(repeating: "a", count: 31)])
+    func refusesBadIDs(id: String) {
+        #expect(!MatrixSession.isValidID(id))
+    }
+
+    @Test func acceptsARealID() {
+        #expect(MatrixSession.isValidID(String(repeating: "a", count: 32)))
     }
 }

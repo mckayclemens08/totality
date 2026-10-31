@@ -16,8 +16,8 @@ public struct FetchedBackup: Sendable, Equatable {
 /// Where the locked key is kept. Everything here is ciphertext to the servers, because only the
 /// recovery key opens it, and that never leaves the person's hands.
 public protocol KeyBackupService: Sendable {
-    /// The signed-in account, which a device's key gets tied to.
-    func accountID() async throws -> String
+    /// The signed-in account, which a device's key gets tied to. Read locally, so it works offline.
+    func signedInAccountID() async -> String?
     /// Nil only when both servers answered that there's nothing. Any failure throws, because treating
     /// an outage as "no backup" could lead to a second recovery key over the first.
     func fetchBackup() async throws -> FetchedBackup?
@@ -35,6 +35,8 @@ public protocol ContentKeyAccess: Sendable {
     func adopt(_ key: ContentRootKey) async throws -> KeyMoveReport
     func keyOwner() async throws -> String?
     func claim(for account: String) async throws
+    func settleExistingInstall(signedInAccount: String?) async throws
+    func hasSealedContent() async throws -> Bool
     func joinedBackup() async throws -> String?
     func markJoined(_ fingerprint: String) async throws
 }
@@ -55,8 +57,8 @@ extension SupabaseAccountService: KeyBackupService {
         let token: String
     }
 
-    public func accountID() async throws -> String {
-        try await mapErrors { try await client.auth.session.user.id.uuidString.lowercased() }
+    public func signedInAccountID() async -> String? {
+        client.auth.currentSession?.user.id.uuidString.lowercased()
     }
 
     /// Supabase first, because it answers even when the Oracle server is down. A backup with a bad ID
@@ -170,6 +172,7 @@ struct MatrixSession: Sendable {
 
     /// Refuses to replace a different backup. It may be the only copy of a key someone still needs.
     func writeBackup(_ backup: KeyBackup) async throws {
+        guard backup.hasValidID else { throw AccountError.failed }
         if let current = try await get(DefaultKey.self, type: Self.defaultKeyType), current.key != backup.keyID {
             throw AccountError.backupExists
         }
@@ -181,16 +184,24 @@ struct MatrixSession: Sendable {
         try await put(DefaultKey(key: backup.keyID), type: Self.defaultKeyType)
     }
 
+    /// Nil only when there's no default key at all. A default key with parts missing means a backup
+    /// exists and is damaged, and that must never look like there being no backup. The ID is checked
+    /// first, because it's about to go into a URL.
     func readBackup() async throws -> KeyBackup? {
-        guard let id = try await get(DefaultKey.self, type: Self.defaultKeyType)?.key,
+        guard let id = try await get(DefaultKey.self, type: Self.defaultKeyType)?.key else { return nil }
+        guard Self.isValidID(id),
               let description = try await get(KeyDescription.self, type: "m.secret_storage.key.\(id)"),
               let secret = try await get(SecretContent.self, type: KeyBackup.secretName)?.encrypted[id]
-        else { return nil }
+        else { throw AccountError.failed }
         return KeyBackup(
             keyID: id,
             check: LockedSecret(iv: description.iv, ciphertext: "", mac: description.mac),
             secret: secret.locked
         )
+    }
+
+    static func isValidID(_ id: String) -> Bool {
+        id.count == 32 && id.allSatisfy { $0.isASCII && $0.isHexDigit && !$0.isUppercase }
     }
 
     private func put(_ value: some Encodable, type: String) async throws {
