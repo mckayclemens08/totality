@@ -36,6 +36,9 @@ public protocol ContentKeyAccess: Sendable {
     func keyOwner() async throws -> String?
     func claim(for account: String) async throws
     func settleExistingInstall(signedInAccount: String?) async throws
+    func reassign(to account: String, provenBy key: ContentRootKey) async throws
+    func release(by account: String) async throws
+    func resetEmptyDevice() async throws
     func hasSealedContent() async throws -> Bool
     func joinedBackup() async throws -> String?
     func markJoined(_ fingerprint: String) async throws

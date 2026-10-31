@@ -36,6 +36,10 @@ public final class BackupModel {
 
     public private(set) var phase = Phase.checking
     public var notice: String?
+    /// True when this account owns the device and can still give it up.
+    public private(set) var canRelease = false
+    /// True on the other-account screen when this account has a recovery key to prove the content with.
+    public private(set) var canProveOwnership = false
 
     private let service: any KeyBackupService
     private let content: any ContentKeyAccess
@@ -55,13 +59,17 @@ public final class BackupModel {
     }
 
     /// After a sign-in. An empty device simply belongs to whoever arrived. A device with content
-    /// doesn't, because that content could be someone else's, so `load` asks.
+    /// doesn't, because that content could be someone else's, so `load` asks. Either way this ends the
+    /// first-launch rule, so a later launch can't mistake this session for an old install's.
     public func accountSignedIn() async {
-        guard let account = await service.signedInAccountID(),
-              (try? await content.keyOwner()) == .some(nil),
-              (try? await content.hasSealedContent()) == false
-        else { return }
-        try? await content.claim(for: account)
+        guard let account = await service.signedInAccountID() else { return }
+        do {
+            try await content.settleExistingInstall(signedInAccount: nil)
+            guard try await content.keyOwner() == nil, try await !content.hasSealedContent() else { return }
+            try await content.claim(for: account)
+        } catch {
+            // Nothing is claimed, so `load` falls back to asking.
+        }
     }
 
     public func load() async {
@@ -73,12 +81,21 @@ public final class BackupModel {
                 phase = .unavailable
                 return
             }
-            if let owner = try await content.keyOwner() {
-                guard owner == account else {
+            canRelease = false
+            canProveOwnership = false
+            let hasContent = try await content.hasSealedContent()
+            if let owner = try await content.keyOwner(), owner != account {
+                if hasContent {
+                    existing = try? await service.fetchBackup()
+                    canProveOwnership = existing != nil
                     phase = .otherAccount
                     return
                 }
-            } else if !ownershipConfirmed, try await content.hasSealedContent() {
+                // Nothing here to protect, so the device passes on with a key of its own.
+                try await content.resetEmptyDevice()
+            } else if try await content.keyOwner() == account {
+                canRelease = try await content.joinedBackup() == nil
+            } else if !ownershipConfirmed, hasContent {
                 phase = .confirmingOwnership
                 return
             }
@@ -107,7 +124,36 @@ public final class BackupModel {
     }
 
     public func declineOwnership() {
+        canProveOwnership = false
         phase = .otherAccount
+    }
+
+    /// For a device claimed by the wrong account. Sign in with the right one afterwards.
+    public func release() async {
+        do {
+            guard let account = await service.signedInAccountID() else { return }
+            try await content.release(by: account)
+            ownershipConfirmed = false
+            await load()
+        } catch {
+            notice = "This device couldn't be released."
+        }
+    }
+
+    /// A recovery key that opens the content here proves it's this account's, whoever claimed it first.
+    public func proveOwnership(_ typed: String) async {
+        guard let existing, let account = await service.signedInAccountID() else { return }
+        guard let recovery = try? RecoveryKey(encoded: typed), existing.backup.opens(with: recovery) else {
+            notice = "That's not the recovery key for this account."
+            return
+        }
+        do {
+            try await content.reassign(to: account, provenBy: try existing.backup.open(with: recovery))
+            ownershipConfirmed = true
+            await enter(typed)
+        } catch {
+            notice = "That recovery key doesn't open what's on this device, so it stays as it is."
+        }
     }
 
     private func copies(of fetched: FetchedBackup) async -> BackupCopies {
@@ -173,6 +219,10 @@ public final class BackupModel {
         } catch ContentKeyError.otherAccount {
             self.newKey = nil
             phase = .otherAccount
+        } catch KeyStoreError.keyMissing {
+            self.newKey = nil
+            phase = .notSetUp
+            notice = "This device has encrypted content but not the key that opens it, so it can't start a new recovery key."
         } catch AccountError.backupExists {
             // Another device finished first. Its key is the one that counts.
             await load()
@@ -216,6 +266,9 @@ public final class BackupModel {
             }
         } catch ContentKeyError.otherAccount {
             phase = .otherAccount
+        } catch ContentKeyError.keyDoesNotOpenContent {
+            phase = .needsKey
+            notice = "This recovery key doesn't open what's on this device. Nothing was changed."
         } catch {
             phase = .needsKey
             notice = "This device didn't finish joining, but nothing was lost. Try again."

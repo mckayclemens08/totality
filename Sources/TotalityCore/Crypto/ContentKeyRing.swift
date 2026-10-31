@@ -3,6 +3,10 @@ import Foundation
 public enum ContentKeyError: Error, Equatable {
     /// This device's content belongs to a different account.
     case otherAccount
+    /// The key opens nothing on this device, so it can't be the right one.
+    case keyDoesNotOpenContent
+    /// This can't be done while there's content here, or after joining a backup.
+    case notAllowedNow
 }
 
 /// One module's sealed storage, and which key purpose each kind of blob uses.
@@ -57,10 +61,12 @@ public struct ContentKeyRing: Sendable {
     }
 
     /// Makes `new` this device's key. With no key here at all, this is a recovery: whatever is on the
-    /// device was sealed by the key being restored, so nothing needs moving.
+    /// device was sealed by the key being restored, so nothing needs moving. If it opens none of it,
+    /// it's the wrong key, and it's refused rather than left in place over content it can't read.
     public func adopt(_ new: ContentRootKey) throws -> KeyMoveReport {
         if try keys.load(Slot.incoming) != nil { _ = try finishMove() }
         guard let stored = try keys.load(Slot.current) else {
+            guard try !hasSealedContent() || opensSomething(new) else { throw ContentKeyError.keyDoesNotOpenContent }
             try keys.save(new.bytes, as: Slot.current)
             return KeyMoveReport(moved: 0, unreadable: try countUnreadable(with: new))
         }
@@ -69,6 +75,18 @@ public struct ContentKeyRing: Sendable {
         try keys.save(old.bytes, as: Slot.previous)
         try keys.save(new.bytes, as: Slot.incoming)
         return try finishMove()
+    }
+
+    private func opensSomething(_ key: ContentRootKey) throws -> Bool {
+        for area in areas {
+            for name in try area.store.names() {
+                guard let (id, purpose) = area.identify(name), let sealed = try area.store.read(name) else { continue }
+                if (try? ContentCipher.open(sealed, key: key.objectKey(for: id, purpose: purpose), objectID: id)) != nil {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private func countUnreadable(with key: ContentRootKey) throws -> Int {
@@ -128,6 +146,30 @@ public struct ContentKeyRing: Sendable {
             return
         }
         try keys.save(Data(account.utf8), as: Slot.owner)
+    }
+
+    /// Hands the device to `account`, which has proved the content is theirs: only someone holding its
+    /// key can make a key that opens it.
+    public func reassign(to account: String, provenBy key: ContentRootKey) throws {
+        guard try opensSomething(key) else { throw ContentKeyError.keyDoesNotOpenContent }
+        try keys.save(Data(account.utf8), as: Slot.owner)
+    }
+
+    /// The owner gives the device up, for a device claimed by the wrong account. Not after joining a
+    /// backup, because the account's recovery key is then tied to this key.
+    public func release(by account: String) throws {
+        guard try owner() == account else { throw ContentKeyError.otherAccount }
+        guard try joinedBackup() == nil else { throw ContentKeyError.notAllowedNow }
+        try keys.delete(Slot.owner)
+    }
+
+    /// Clears a device with nothing on it, so a new account starts with a key of its own and the old
+    /// one can't end up in the new account's backup. Refused if there's any content at all.
+    public func resetEmptyDevice() throws {
+        guard try !hasSealedContent(), try keys.load(Slot.incoming) == nil else { throw ContentKeyError.notAllowedNow }
+        for slot in [Slot.current, Slot.previous, Slot.owner, Slot.backupFingerprint] {
+            try keys.delete(slot)
+        }
     }
 
     /// Runs once. An install from before accounts owned keys already has one person's content and

@@ -41,9 +41,14 @@ struct BackupView: View {
         }
     }
 
-    /// Key text fades when the app isn't active, so the app switcher's snapshot doesn't capture it.
+    /// Key text fades when the app isn't active, so the iOS app switcher's snapshot doesn't capture it.
+    /// The Mac takes no such snapshot, and the key has to stay readable beside a password manager.
     private var keyOpacity: Double {
+        #if os(iOS)
         scenePhase == .active ? 1 : 0
+        #else
+        1
+        #endif
     }
 
     @ViewBuilder private var content: some View {
@@ -59,6 +64,7 @@ struct BackupView: View {
             warning
             AccountDetail(text: "This is the first step. Sync isn't finished, so today your recovery key only helps with what's restored from a device backup. Once sync is on, it brings everything back.")
             AccountButton(title: "Create recovery key", isWorking: false) { model.begin() }
+            releaseButton
         case .showingKey(let key):
             AccountDetail(text: "Save this now, in a password manager and on paper. Don't rely on a screenshot or your Notes.")
             Text(key)
@@ -89,6 +95,7 @@ struct BackupView: View {
             keyField
             AccountButton(title: "Add this device", isWorking: false) { Task { await model.enter(typed) } }
             warning
+            releaseButton
         case .confirmingOwnership:
             AccountDetail(text: "This device already has encrypted content on it. Is it yours?")
             AccountDetail(text: "If it's someone else's, say no and sign in with their account instead. It's tied to this account only when you finish setting up.")
@@ -97,11 +104,23 @@ struct BackupView: View {
                 .font(Typeface.callout)
         case .otherAccount:
             AccountDetail(text: "The encrypted content on this device belongs to a different account, so a recovery key can't be set up here. Sign in with that account to manage it.")
+            if model.canProveOwnership {
+                AccountDetail(text: "If it's yours, enter this account's recovery key to prove it.")
+                keyField
+                AccountButton(title: "It's mine", isWorking: false) { Task { await model.proveOwnership(typed) } }
+            }
         case .ready(let copies):
             AccountDetail(text: "Your recovery key is set up, and this device has joined.")
             AccountDetail(text: copiesText(copies))
             AccountDetail(text: "Sync isn't finished, so your notes and events aren't on Totality's servers yet.")
             warning
+        }
+    }
+
+    @ViewBuilder private var releaseButton: some View {
+        if model.canRelease {
+            Button("This content isn't mine") { Task { await model.release() } }
+                .font(Typeface.callout)
         }
     }
 
@@ -152,14 +171,22 @@ private enum RecoveryKeyClipboard {
         )
         #else
         let board = NSPasteboard.general
-        board.clearContents()
-        // The marker asks clipboard managers and Universal Clipboard to leave it alone.
-        board.declareTypes([.string, NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")], owner: nil)
+        board.prepareForNewContents(with: .currentHostOnly)
         board.setString(key, forType: .string)
+        // The marker asks clipboard managers to leave it alone. `.currentHostOnly` is what keeps it here.
+        board.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
         let change = board.changeCount
+        let clear = { @MainActor in
+            if board.changeCount == change { board.clearContents() }
+        }
+        var observer: NSObjectProtocol?
+        observer = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { clear() }
+        }
         Task { @MainActor in
             try? await Task.sleep(for: lifetime)
-            if board.changeCount == change { board.clearContents() }
+            clear()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
         }
         #endif
     }

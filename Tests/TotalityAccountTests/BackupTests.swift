@@ -58,6 +58,7 @@ actor FakeContentKeys: ContentKeyAccess {
     var owner: String?
     var sealedContent = false
     var settled = false
+    private(set) var resets = 0
     var adoptError: Error?
     var report = KeyMoveReport(moved: 0, unreadable: 0)
     private(set) var adopted: [ContentRootKey] = []
@@ -81,6 +82,22 @@ actor FakeContentKeys: ContentKeyAccess {
         if owner == nil { owner = signedInAccount }
     }
     func hasSealedContent() async throws -> Bool { sealedContent }
+    func reassign(to account: String, provenBy key: ContentRootKey) async throws {
+        guard key == self.key else { throw ContentKeyError.keyDoesNotOpenContent }
+        owner = account
+    }
+    func release(by account: String) async throws {
+        guard owner == account else { throw ContentKeyError.otherAccount }
+        guard joined == nil else { throw ContentKeyError.notAllowedNow }
+        owner = nil
+    }
+    func resetEmptyDevice() async throws {
+        guard !sealedContent else { throw ContentKeyError.notAllowedNow }
+        resets += 1
+        key = try ContentRootKey.generate()
+        owner = nil
+        joined = nil
+    }
     func adopt(_ key: ContentRootKey) async throws -> KeyMoveReport {
         if let adoptError { throw adoptError }
         adopted.append(key)
@@ -330,6 +347,7 @@ actor FakeContentKeys: ContentKeyAccess {
     @Test("Another account can't lock this device's key into its own backup")
     func anotherAccountCannotTakeTheKey() async throws {
         let (model, service, content) = try setUp()
+        await content.setSealedContent(true)
         await content.setOwner("user-1")
         await service.set(account: "user-2")
         await model.load()
@@ -491,7 +509,6 @@ actor FakeContentKeys: ContentKeyAccess {
         await content.setRootKeyMissing()
         await model.confirm(key)
         #expect(await content.owner == nil)
-        #expect(model.phase == .confirmingKey)
     }
 
     @Test("A failed join leaves no claim on the device")
@@ -521,6 +538,125 @@ actor FakeContentKeys: ContentKeyAccess {
         await service.set(account: nil)
         await model.load()
         #expect(model.phase == .unavailable)
+    }
+
+    @Test("The wrong account on a device with content can prove it's theirs with their recovery key")
+    func recoveryKeyReclaimsADevice() async throws {
+        let (model, service, content) = try setUp()
+        let recovery = try RecoveryKey.generate()
+        let shared = await content.key
+        let backup = try KeyBackup.seal(shared, with: recovery)
+        await content.setOwner("test-account")
+        await content.setSealedContent(true)
+        await service.set(stored: backup)
+        await model.load()
+        #expect(model.phase == .otherAccount)
+        #expect(model.canProveOwnership)
+        await model.proveOwnership(recovery.encoded)
+        #expect(await content.owner == "user-1")
+        #expect(await content.joined == backup.fingerprint)
+        #expect(model.phase == .ready(BackupCopies(supabase: true, matrix: true)))
+    }
+
+    @Test("A recovery key that doesn't open the content changes nothing")
+    func wrongProofChangesNothing() async throws {
+        let (model, service, content) = try setUp()
+        let recovery = try RecoveryKey.generate()
+        await content.setOwner("test-account")
+        await content.setSealedContent(true)
+        await service.set(stored: try KeyBackup.seal(try ContentRootKey.generate(), with: recovery))
+        await model.load()
+        await model.proveOwnership(recovery.encoded)
+        #expect(await content.owner == "test-account")
+        #expect(await content.adopted.isEmpty)
+        #expect(model.notice != nil)
+    }
+
+    @Test("A key that isn't this account's says so, and touches nothing")
+    func strangerKeyIsRefusedByName() async throws {
+        let (model, service, content) = try setUp()
+        await content.setOwner("test-account")
+        await content.setSealedContent(true)
+        await service.set(stored: try KeyBackup.seal(try ContentRootKey.generate(), with: try RecoveryKey.generate()))
+        await model.load()
+        await model.proveOwnership(try RecoveryKey.generate().encoded)
+        #expect(model.notice?.contains("not the recovery key") == true)
+        #expect(await content.owner == "test-account")
+    }
+
+    @Test("Without a backup of its own, the other account has nothing to prove with")
+    func noBackupNoProof() async throws {
+        let (model, _, content) = try setUp()
+        await content.setOwner("test-account")
+        await content.setSealedContent(true)
+        await model.load()
+        #expect(model.phase == .otherAccount)
+        #expect(!model.canProveOwnership)
+    }
+
+    @Test("An empty device passes to the next account with a new key")
+    func emptyDevicePassesOn() async throws {
+        let (model, _, content) = try setUp()
+        let old = await content.key
+        await content.setOwner("old-account")
+        await model.load()
+        #expect(model.phase == .notSetUp)
+        #expect(await content.resets == 1)
+        #expect(await content.key != old)
+    }
+
+    @Test("A device with content is never reset for a new account")
+    func contentIsNeverReset() async throws {
+        let (model, _, content) = try setUp()
+        await content.setOwner("old-account")
+        await content.setSealedContent(true)
+        await model.load()
+        #expect(await content.resets == 0)
+    }
+
+    @Test("An owner that never joined can release the device, and it asks again")
+    func ownerCanRelease() async throws {
+        let (model, _, content) = try setUp()
+        await content.setOwner("user-1")
+        await content.setSealedContent(true)
+        await model.load()
+        #expect(model.canRelease)
+        await model.release()
+        #expect(await content.owner == nil)
+        #expect(model.phase == .confirmingOwnership)
+    }
+
+    @Test("Once joined, a device can't be released")
+    func joinedDeviceCannotRelease() async throws {
+        let (model, service, content) = try setUp()
+        let backup = try KeyBackup.seal(try ContentRootKey.generate(), with: try RecoveryKey.generate())
+        await content.setOwner("user-1")
+        await service.set(stored: backup)
+        await content.setJoined(backup.fingerprint)
+        await model.load()
+        #expect(!model.canRelease)
+    }
+
+    @Test("Signing in ends the first-launch rule, so a relaunch can't claim for this session")
+    func signInEndsTheFirstLaunchRule() async throws {
+        let (model, service, content) = try setUp()
+        await content.setSealedContent(true)
+        await service.set(account: "user-2")
+        await model.accountSignedIn()
+        await model.settleDevice()
+        #expect(await content.owner == nil)
+    }
+
+    @Test("With content but no key, setup says so instead of offering a retry that can't work")
+    func missingKeySaysSo() async throws {
+        let (model, _, content) = try setUp()
+        model.begin()
+        let key = try shownKey(model)
+        model.continueToConfirm()
+        await content.setRootKeyMissing()
+        await model.confirm(key)
+        #expect(model.phase == .notSetUp)
+        #expect(model.notice?.contains("not the key") == true)
     }
 }
 

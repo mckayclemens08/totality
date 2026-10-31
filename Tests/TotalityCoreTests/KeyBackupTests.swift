@@ -307,11 +307,68 @@ struct LockedSecretVectorTests {
         #expect(device.keys.secrets["content-root-key.previous"] == device.old.bytes)
     }
 
-    @Test("A restored device told the wrong key reports what it can't open, not success")
-    func keylessAdoptReportsUnreadable() throws {
+    @Test("A restored device refuses a key that opens none of its content, and saves nothing")
+    func keylessAdoptRefusesTheWrongKey() throws {
         let device = try device()
         device.keys.secrets = [:]
-        #expect(try device.ring.adopt(ContentRootKey.generate()) == KeyMoveReport(moved: 0, unreadable: 6))
+        #expect(throws: ContentKeyError.keyDoesNotOpenContent) { try device.ring.adopt(ContentRootKey.generate()) }
+        #expect(device.keys.secrets["content-root-key"] == nil)
+    }
+
+    @Test("A restored device reports the items a right key can't open")
+    func keylessAdoptReportsPartlyUnreadable() throws {
+        let device = try device(notes: 1)
+        try put("from elsewhere", id: UUID(), suffix: ".body", purpose: .content, key: ContentRootKey.generate(), in: device.blobs)
+        device.keys.secrets = [:]
+        #expect(try device.ring.adopt(device.old) == KeyMoveReport(moved: 0, unreadable: 1))
+    }
+
+    @Test("A key that opens the content proves whose it is")
+    func provenKeyReassigns() throws {
+        let device = try device()
+        try device.ring.claim(for: "wrong")
+        try device.ring.reassign(to: "right", provenBy: device.old)
+        #expect(try device.ring.owner() == "right")
+    }
+
+    @Test("A key that opens nothing proves nothing")
+    func unprovenKeyDoesNotReassign() throws {
+        let device = try device()
+        try device.ring.claim(for: "first")
+        #expect(throws: ContentKeyError.keyDoesNotOpenContent) { try device.ring.reassign(to: "second", provenBy: ContentRootKey.generate()) }
+        #expect(try device.ring.owner() == "first")
+    }
+
+    @Test("An owner can give up a device, unless it has joined a backup")
+    func releaseRules() throws {
+        let device = try device()
+        try device.ring.claim(for: "first")
+        #expect(throws: ContentKeyError.otherAccount) { try device.ring.release(by: "second") }
+        try device.ring.release(by: "first")
+        #expect(try device.ring.owner() == nil)
+
+        try device.ring.claim(for: "first")
+        try device.ring.markJoined("abc")
+        #expect(throws: ContentKeyError.notAllowedNow) { try device.ring.release(by: "first") }
+        #expect(try device.ring.owner() == "first")
+    }
+
+    @Test("An empty device resets to a new key, and its old key can never reach a new backup")
+    func emptyDeviceResets() throws {
+        let device = try device(notes: 0)
+        try device.ring.claim(for: "first")
+        try device.ring.markJoined("abc")
+        try device.ring.resetEmptyDevice()
+        #expect(try device.ring.owner() == nil)
+        #expect(try device.ring.joinedBackup() == nil)
+        #expect(try device.ring.current() != device.old)
+    }
+
+    @Test("A device with any content can never be reset")
+    func deviceWithContentNeverResets() throws {
+        let device = try device()
+        #expect(throws: ContentKeyError.notAllowedNow) { try device.ring.resetEmptyDevice() }
+        #expect(try device.ring.current() == device.old)
     }
 
     @Test("An install from before owners takes its signed-in account, once")

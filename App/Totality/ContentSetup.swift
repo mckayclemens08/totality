@@ -86,6 +86,20 @@ final class DeviceContentKeys: ContentKeyAccess {
         try ContentSetup.keyRing().hasSealedContent()
     }
 
+    func reassign(to account: String, provenBy key: ContentRootKey) async throws {
+        try ContentSetup.keyRing().reassign(to: account, provenBy: key)
+    }
+
+    func release(by account: String) async throws {
+        try ContentSetup.keyRing().release(by: account)
+    }
+
+    /// The old key goes, so any open module has to go with it.
+    func resetEmptyDevice() async throws {
+        await willMove()
+        try ContentSetup.keyRing().resetEmptyDevice()
+    }
+
     func joinedBackup() async throws -> String? {
         try ContentSetup.keyRing().joinedBackup()
     }
