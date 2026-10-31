@@ -49,8 +49,10 @@ public struct ListenScript: Sendable, Equatable {
         sentences.lastIndex { $0.offset <= offset } ?? 0
     }
 
-    public func progress(at index: Int) -> Double {
+    /// `spoken` is how far into the sentence speech has reached, so the bar moves between sentences too.
+    public func progress(at index: Int, spoken: Int = 0) -> Double {
         guard length > 0, sentences.indices.contains(index) else { return 0 }
-        return Double(sentences[index].offset) / Double(length)
+        let sentence = sentences[index]
+        return Double(sentence.offset + min(max(spoken, 0), sentence.text.utf16.count)) / Double(length)
     }
 }

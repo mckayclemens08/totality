@@ -39,6 +39,16 @@ import Testing
         #expect(script.index(at: 10) == 1)
         #expect(script.index(at: 1000) == 2)
     }
+
+    @Test("Progress moves inside a sentence, and never past where the next one starts")
+    func progressInsideASentence() {
+        let script = ListenScript(text: "One here. Two here. Three here.")
+        #expect(script.progress(at: 0, spoken: 4) == 4.0 / 31.0)
+        #expect(script.progress(at: 1) == 10.0 / 31.0)
+        #expect(script.progress(at: 1, spoken: 4) == 14.0 / 31.0)
+        #expect(script.progress(at: 0, spoken: 1000) == 9.0 / 31.0)
+        #expect(script.progress(at: 0, spoken: -4) == 0)
+    }
 }
 
 @MainActor
@@ -59,6 +69,43 @@ import Testing
         engine.onFinish?()
         #expect(listen.current == nil)
         #expect(positions == [0, 5, 10, 0])
+    }
+
+    @Test("A word moves the bar, the way a long PDF needs, and the saved position stays on a sentence")
+    func wordsMoveTheBar() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        var positions: [Int] = []
+        listen.onPosition = { _, offset in positions.append(offset) }
+        let text = String(repeating: "A sentence of a few plain words. ", count: 900)
+        let played = try track(text)
+        listen.play(played)
+        #expect(listen.progress == 0)
+        engine.onWord?(11)
+        #expect(listen.progress == 11.0 / Double(played.script.length))
+        engine.onWord?(23)
+        #expect(listen.progress == 23.0 / Double(played.script.length))
+        listen.stop()
+        #expect(positions == [0, 0])
+    }
+
+    @Test("The next sentence starts from its own beginning, however far the last one got")
+    func wordsResetWithEachSentence() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        let played = try track("One two three. Four five six. Seven.")
+        listen.play(played)
+        engine.onWord?(8)
+        engine.onFinish?()
+        #expect(listen.progress == played.script.progress(at: 1))
+        engine.onWord?(5)
+        listen.skip(by: -1)
+        #expect(listen.progress == 0)
+    }
+
+    @Test func theCountSaysWhichSentenceThisIs() {
+        #expect(ListenBar.label(forSentence: 0, of: 3) == "1 of 3")
+        #expect(ListenBar.label(forSentence: 13, of: 875) == "14 of 875")
     }
 
     @Test func resumesFromTheSavedPosition() throws {
@@ -173,17 +220,24 @@ import Testing
     }
 
     /// Runs the real synthesizer silently, when TOTALITY_SPEECH_TEST is set. It proves the adapter
-    /// delivers finish callbacks, which the fake engine cannot.
+    /// delivers word and finish callbacks, which the fake engine cannot.
     @Test func systemEngineFinishesASentence() async throws {
         guard ProcessInfo.processInfo.environment["TOTALITY_SPEECH_TEST"] != nil else { return }
         let engine = SystemSpeechEngine()
         engine.volume = 0
         let listen = ListenController(engine: engine)
-        listen.play(try track("One. Two."))
+        var words: [Int] = []
+        let forward = engine.onWord
+        engine.onWord = {
+            words.append($0)
+            forward?($0)
+        }
+        listen.play(try track("One two three. Four."))
         for _ in 0..<300 where listen.current != nil {
             try await Task.sleep(for: .milliseconds(100))
         }
         #expect(listen.current == nil)
+        #expect(words.contains(4))
     }
 }
 

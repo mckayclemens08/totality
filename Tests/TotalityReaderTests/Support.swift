@@ -20,6 +20,7 @@ func newVault(store: any BlobStore = MemoryBlobStore()) throws -> ReaderVault {
 @MainActor
 final class FakeSpeechEngine: SpeechEngine {
     var onFinish: (() -> Void)?
+    var onWord: ((Int) -> Void)?
     private(set) var spoken: [String] = []
     private(set) var speeds: [Double] = []
     private(set) var voiceIDs: [String?] = []
