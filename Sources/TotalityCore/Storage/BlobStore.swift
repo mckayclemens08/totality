@@ -46,7 +46,8 @@ public struct FileBlobStore: BlobStore {
         try FileManager.default.removeItem(at: file)
     }
 
+    /// Dot-files are the system's, like Finder's `.DS_Store`. They can't be blob names, so they're left out.
     public func names() throws -> [String] {
-        try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { !$0.hasPrefix(".") }
     }
 }

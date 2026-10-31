@@ -25,10 +25,13 @@ public final class AccountModel {
     public private(set) var profileFailed = false
     public var notice: String?
 
+    /// Nil when this build has nothing to back up with.
+    public let backup: BackupModel?
     private let service: any AccountService
 
-    public init(service: any AccountService) {
+    public init(service: any AccountService, backup: BackupModel? = nil) {
         self.service = service
+        self.backup = backup
     }
 
     public func load() async {
@@ -151,6 +154,7 @@ public final class AccountModel {
     }
 
     private func finishSigningIn() async {
+        await backup?.accountSignedIn()
         await registerDevice()
         await loadProfile()
     }

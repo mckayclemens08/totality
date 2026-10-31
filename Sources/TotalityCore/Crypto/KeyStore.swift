@@ -14,7 +14,7 @@ public protocol KeyStore: Sendable {
 }
 
 extension ContentRootKey {
-    private static let keyStoreName = "content-root-key"
+    static let keyStoreName = "content-root-key"
 
     /// Only creates a key on a true first run. A read error, or sealed data with no key to open it,
     /// stops here: a new root would sit beside the old data and split the person's content in two.

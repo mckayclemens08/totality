@@ -39,11 +39,14 @@ public struct ReaderShare: Sendable, Equatable {
 /// keys. Blob names hold only the object ID.
 public actor ReaderVault {
     public static let maxImportBytes = 50 * 1024 * 1024
+    /// How each kind of blob is sealed, so a key change can reach them without knowing what they are.
+    public static let sealedPurposes: [String: KeyPurpose] = [".meta": .metadata, ".body": .content]
     private static let snippetRadius = 60
 
     private let store: any BlobStore
     private let rootKey: ContentRootKey
     private var textCache: [UUID: String] = [:]
+    private var isClosed = false
 
     public init(store: any BlobStore, rootKey: ContentRootKey) {
         self.store = store
@@ -53,12 +56,20 @@ public actor ReaderVault {
     private func metaName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).meta" }
     private func bodyName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).body" }
 
+    /// Refuses all further writes. A key move lists every blob once, so anything written after that,
+    /// sealed under the old key, would be lost when the old key goes.
+    public func close() {
+        isClosed = true
+    }
+
     private func writeMeta(_ item: ReaderItem) throws {
+        guard !isClosed else { throw ReaderError.closed }
         let key = rootKey.objectKey(for: item.id, purpose: .metadata)
         try store.write(try ContentCipher.seal(JSONEncoder().encode(item), key: key, objectID: item.id), as: metaName(item.id))
     }
 
     private func writeBody(_ data: Data, id: UUID) throws {
+        guard !isClosed else { throw ReaderError.closed }
         let key = rootKey.objectKey(for: id, purpose: .content)
         try store.write(try ContentCipher.seal(data, key: key, objectID: id), as: bodyName(id))
         textCache[id] = nil
@@ -143,6 +154,7 @@ public actor ReaderVault {
     }
 
     public func delete(_ id: UUID) throws {
+        guard !isClosed else { throw ReaderError.closed }
         try store.delete(metaName(id))
         try store.delete(bodyName(id))
         textCache[id] = nil

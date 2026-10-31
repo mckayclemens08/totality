@@ -40,6 +40,12 @@ public final class ReaderModel {
         return groups.keys.sorted().map { (title: $0, items: groups[$0] ?? []) }
     }
 
+    /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
+    public func stopForKeyChange() async {
+        listen.stop()
+        await vault.close()
+    }
+
     public func load() async {
         do {
             let listing = try await vault.list()

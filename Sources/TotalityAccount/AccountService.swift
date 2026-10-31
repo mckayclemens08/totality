@@ -9,6 +9,7 @@ public enum AccountError: Error, Equatable {
     case wrongPassword
     case usernameTaken
     case weakPassword
+    case backupExists
     case rateLimited
     case offline
     case failed
@@ -21,6 +22,7 @@ extension AccountError {
         case .wrongPassword: "That username and password don't match."
         case .usernameTaken: "That username is taken. Try another."
         case .weakPassword: "Choose a harder password."
+        case .backupExists: "Your account already has a recovery key."
         case .rateLimited: "Too many tries. Wait a while, then try again."
         case .offline: "You're offline. Connect and try again."
         case .failed: "That didn't work. Try again."
@@ -48,7 +50,7 @@ public enum SignOutResult: Equatable, Sendable {
 }
 
 public struct SupabaseAccountService: AccountService {
-    private let client: SupabaseClient
+    let client: SupabaseClient
     private let deviceStore: any KeyStore
 
     public init(config: AccountConfig, sessionStore: any KeyStore, deviceStore: any KeyStore) {
@@ -223,7 +225,8 @@ public struct SupabaseAccountService: AccountService {
         #endif
     }
 
-    private func mapErrors<Result>(_ work: () async throws -> Result) async throws -> Result {
+    @discardableResult
+    func mapErrors<Result>(_ work: () async throws -> Result) async throws -> Result {
         do {
             return try await work()
         } catch {

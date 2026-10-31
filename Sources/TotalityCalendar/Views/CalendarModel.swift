@@ -200,6 +200,11 @@ public final class CalendarModel {
         return entriesByDay.keys.filter { $0 >= start && $0 <= end }.sorted().map { ($0, entriesByDay[$0] ?? []) }
     }
 
+    /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
+    public func stopForKeyChange() async {
+        await vault.close()
+    }
+
     public func load() async {
         do {
             let listing = try await vault.list()

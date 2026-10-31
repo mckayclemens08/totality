@@ -186,6 +186,10 @@ struct AccountSettingsView: View {
             }
             AccountDetail(text: model.deviceRegistered ? "This device is added to your account." : "This device isn't added to your account yet.")
             AccountDetail(text: "Your notes and events aren't synced yet. Signing out leaves them on this device, and event reminders keep showing.")
+            if let backup = model.backup {
+                NavigationLink("Recovery key") { BackupView(model: backup) }
+                    .font(Typeface.callout)
+            }
             AccountButton(title: "Sign out", isWorking: model.isWorking) { Task { await model.signOut() } }
             if let notice = model.notice {
                 Text(notice)

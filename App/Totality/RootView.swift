@@ -14,9 +14,16 @@ struct RootView: View {
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
     @State private var contentProblem: ContentProblem?
-    @State private var account = AccountSetup.makeModel()
+    @State private var contentKeys: DeviceContentKeys
+    @State private var account: AccountModel?
     @State private var showingAccount = false
     @Environment(\.colorScheme) private var scheme
+
+    init() {
+        let keys = DeviceContentKeys()
+        _contentKeys = State(initialValue: keys)
+        _account = State(initialValue: AccountSetup.makeModel(content: keys))
+    }
 
     var body: some View {
         Group {
@@ -49,6 +56,16 @@ struct RootView: View {
             }
         }
         .animation(Motion.standard, value: open)
+        .task {
+            contentKeys.willMove = {
+                await reader?.stopForKeyChange()
+                await calendar?.stopForKeyChange()
+                reader = nil
+                calendar = nil
+                contentProblem = nil
+            }
+            await account?.backup?.settleDevice()
+        }
         .sheet(isPresented: $showingAccount) {
             if let account {
                 AccountView(model: account) { showingAccount = false }
@@ -84,6 +101,10 @@ struct RootView: View {
 
     private func prepareContent() {
         guard reader == nil else { return }
+        guard !contentKeys.isMoving else {
+            contentProblem = .keyUnavailable
+            return
+        }
         do {
             let content = try ContentSetup.makeModels()
             reader = content.reader
