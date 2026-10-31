@@ -27,6 +27,33 @@ test('a handle can be claimed before the server name is set, with no Matrix addr
   assert.deepEqual(rows, [{ handle: 'early_owner', mxid: null }])
 })
 
+test('setting the server name fills in addresses made before it, and new ones follow', async () => {
+  const db = await newDatabase({ configured: false })
+  await newUser(db, 'early_user')
+  await db.query(`update public.instance_config set matrix_server_name = 'usetotality.com'`)
+  await newUser(db, 'later_user')
+  const { rows } = await db.query('select handle, mxid from public.profiles order by handle')
+  assert.deepEqual(rows, [
+    { handle: 'early_user', mxid: '@early_user:usetotality.com' },
+    { handle: 'later_user', mxid: '@later_user:usetotality.com' },
+  ])
+})
+
+test('the server name cannot change once set, because Matrix addresses cannot be renamed', async () => {
+  const db = await newDatabase({ configured: false })
+  await db.query(`update public.instance_config set matrix_server_name = 'usetotality.com'`)
+  await assert.rejects(db.query(`update public.instance_config set matrix_server_name = 'other.example'`), /server name/)
+  await assert.rejects(db.query(`update public.instance_config set matrix_server_name = null`), /server name/)
+  await db.query(`update public.instance_config set matrix_server_name = 'usetotality.com'`)
+})
+
+test('clients cannot set the server name', async () => {
+  const db = await newDatabase({ configured: false })
+  const u = await newUser(db, 'plain_user')
+  await assert.rejects(as(db, u, (q) => q(`update public.instance_config set matrix_server_name = 'evil.example'`)), /permission denied/)
+  await assert.rejects(as(db, null, (q) => q(`update public.instance_config set matrix_server_name = 'evil.example'`)), /permission denied/)
+})
+
 test('a function added by a later migration is closed to anon by default', async () => {
   const db = await newDatabase()
   await db.exec(`create function public.later_rpc() returns int language sql security definer as 'select 1'`)
