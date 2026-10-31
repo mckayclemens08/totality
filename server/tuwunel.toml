@@ -18,6 +18,23 @@ ip_source = "cf_connecting_ip"
 
 log = "warn"
 
+# Accounts are made here from a signed pass that only supabase/functions/matrix-login can issue. This is
+# the public half of its key, so it's safe in the repo. The private half is in Supabase's secrets.
+[global.jwt]
+enable = true
+format = "ECDSA"
+algorithm = "ES256"
+key = """
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEOur7osLPr+Aw6UynrG45k6quGhGu
+sRGV33+/PfZpss6Y+TpATMJFB+XNrBSGwnvtpGkIHvTpLpLTaOGhgoQnwQ==
+-----END PUBLIC KEY-----
+"""
+register_user = true
+audience = ["matrix.usetotality.com"]
+issuer = ["totality"]
+require_exp = true
+
 [global.well_known]
 client = "https://matrix.usetotality.com"
 server = "matrix.usetotality.com:443"

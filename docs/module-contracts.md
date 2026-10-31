@@ -39,6 +39,16 @@ Spec: issue #12. An event is one sealed blob with its times inside, so storage s
 - Sealed events go into device backups as ciphertext, but the key doesn't, so a restore lands on the missing-key screen until key backup exists. That's why the screen doesn't say events stay on this device.
 - App-switcher snapshots can hold event text, the same as the Reader. Both need a privacy screen before Phase 3.
 
+## Key backup
+
+Spec: issue #17. A device's content key is locked by a recovery key in Matrix's secret storage format, `m.secret_storage.v1.aes-hmac-sha2`, and stored as Matrix account data and in `key_backups`. Both copies are the same ciphertext. Only the recovery key opens them, and it's never written anywhere.
+
+- `supabase/functions/matrix-login` turns a Supabase sign-in into a one-minute pass with the person's handle, because Supabase identifies people by ID and Matrix by name. Its private key is in Supabase's secrets, and the public half is in `server/tuwunel.toml`. The pass is signed for `matrix.usetotality.com`.
+- A Matrix session lasts for one job and then signs out, so no Matrix token is stored on a device.
+- `key_backups` allows no client update or delete, so a stolen session can't replace or erase a backup. Replacing a recovery key will need a server-side flow.
+- `ContentKeyRing` is the only code that moves content between keys. The old key is saved, then the new key, and only then does any blob change, so a crash at any point resumes on the next launch. Each moved blob is read back before going on. A blob neither key opens is left alone, and the old key stays on the device.
+- Any new sealed module must declare its blobs in `sealedPurposes` and be added to `ContentSetup.keyRing()`, or a key move will leave it behind.
+
 ## Sharing an item
 
 A `ReaderShare` is a snapshot: a sealed copy of the body and a sealed header under a random key made for

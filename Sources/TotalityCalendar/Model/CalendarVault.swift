@@ -14,6 +14,9 @@ public enum CalendarError: Error, Equatable {
 
 /// A person's own events. Each one is a single blob, and its name holds only the object ID.
 public actor CalendarVault {
+    /// How each kind of blob is sealed, so a key change can reach them without knowing what they are.
+    public static let sealedPurposes: [String: KeyPurpose] = [".event": .event]
+
     private let store: any BlobStore
     private let rootKey: ContentRootKey
 

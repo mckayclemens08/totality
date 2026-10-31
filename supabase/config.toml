@@ -9,3 +9,7 @@ minimum_password_length = 12
 # nothing can be confirmed by email and nothing is sent.
 [auth.email]
 enable_confirmations = false
+
+# It checks the caller itself, so this works with the project's asymmetric signing keys.
+[functions.matrix-login]
+verify_jwt = false

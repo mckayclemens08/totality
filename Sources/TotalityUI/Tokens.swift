@@ -73,6 +73,8 @@ public enum Typeface {
     public static let callout = Font.callout.weight(.medium)
     public static let caption = Font.footnote
     public static let micro = Font.caption2.weight(.medium)
+    /// Keys and codes, where every character has to be told apart.
+    public static let code = Font.body.monospaced()
 }
 
 public enum Motion {

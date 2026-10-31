@@ -1,4 +1,5 @@
 import Foundation
+import TotalityAccount
 import TotalityCalendar
 import TotalityCore
 import TotalityReader
@@ -7,16 +8,30 @@ import TotalityReader
 /// they're set up together.
 @MainActor
 enum ContentSetup {
-    /// Storage opens first, so the key step can see whether anything is already sealed under it.
-    static func makeModels() throws -> (reader: ReaderModel, calendar: CalendarModel) {
+    private static func stores() throws -> (reader: FileBlobStore, calendar: FileBlobStore) {
         let base = try FileManager.default
             .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("Totality", isDirectory: true)
-        let readerStore = try FileBlobStore(directory: base.appendingPathComponent("Reader", isDirectory: true))
-        let calendarStore = try FileBlobStore(directory: base.appendingPathComponent("Calendar", isDirectory: true))
-        let rootKey = try ContentRootKey.loadOrCreate(in: KeychainKeyStore(), sealedIn: [readerStore, calendarStore])
+        return (
+            try FileBlobStore(directory: base.appendingPathComponent("Reader", isDirectory: true)),
+            try FileBlobStore(directory: base.appendingPathComponent("Calendar", isDirectory: true))
+        )
+    }
 
-        let readerVault = ReaderVault(store: readerStore, rootKey: rootKey)
+    static func keyRing() throws -> ContentKeyRing {
+        let stores = try stores()
+        return ContentKeyRing(keys: KeychainKeyStore(), areas: [
+            SealedArea(store: stores.reader, purposes: ReaderVault.sealedPurposes),
+            SealedArea(store: stores.calendar, purposes: CalendarVault.sealedPurposes),
+        ])
+    }
+
+    /// The key step finishes any move that was interrupted, so this always opens with the right key.
+    static func makeModels() throws -> (reader: ReaderModel, calendar: CalendarModel) {
+        let stores = try stores()
+        let rootKey = try keyRing().current()
+
+        let readerVault = ReaderVault(store: stores.reader, rootKey: rootKey)
         let registry = try ModuleRegistry(handlers: [ReaderModule(vault: readerVault), CalendarModule()])
         #if os(iOS)
         let startingMode = CalendarModel.Mode.agenda
@@ -26,10 +41,36 @@ enum ContentSetup {
         return (
             ReaderModel(vault: readerVault, listen: ListenController(engine: SystemSpeechEngine())),
             CalendarModel(
-                vault: CalendarVault(store: calendarStore, rootKey: rootKey),
+                vault: CalendarVault(store: stores.calendar, rootKey: rootKey),
                 devices: SystemCalendarSource(), reminders: SystemReminders(),
                 registry: registry, startingMode: startingMode
             )
         )
+    }
+}
+
+/// The content key as the account screens reach it. Moving keys rewrites every sealed blob, so the
+/// open modules are stopped first and rebuilt afterwards.
+@MainActor
+final class DeviceContentKeys: ContentKeyAccess {
+    var willMove: () async -> Void = {}
+
+    func rootKey() async throws -> ContentRootKey {
+        let ring = try ContentSetup.keyRing()
+        return try await Task.detached { try ring.current() }.value
+    }
+
+    func adopt(_ key: ContentRootKey) async throws -> KeyMoveReport {
+        await willMove()
+        let ring = try ContentSetup.keyRing()
+        return try await Task.detached { try ring.adopt(key) }.value
+    }
+
+    func joinedBackupID() async throws -> String? {
+        try ContentSetup.keyRing().joinedBackupID()
+    }
+
+    func markJoined(_ id: String) async throws {
+        try ContentSetup.keyRing().markJoined(id)
     }
 }

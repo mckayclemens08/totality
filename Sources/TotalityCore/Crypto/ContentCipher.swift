@@ -13,7 +13,7 @@ public enum CryptoError: Error, Equatable {
 }
 
 /// What a derived key is for. Each purpose gets its own key, so a metadata key can never open a blob.
-public enum KeyPurpose: String, Sendable {
+public enum KeyPurpose: String, Sendable, Hashable {
     case content
     case metadata
     /// Calendar events. Their own purpose means one module's blob can never open as another's.

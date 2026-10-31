@@ -39,6 +39,8 @@ public struct ReaderShare: Sendable, Equatable {
 /// keys. Blob names hold only the object ID.
 public actor ReaderVault {
     public static let maxImportBytes = 50 * 1024 * 1024
+    /// How each kind of blob is sealed, so a key change can reach them without knowing what they are.
+    public static let sealedPurposes: [String: KeyPurpose] = [".meta": .metadata, ".body": .content]
     private static let snippetRadius = 60
 
     private let store: any BlobStore

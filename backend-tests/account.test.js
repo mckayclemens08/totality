@@ -160,3 +160,51 @@ describe('profiles', () => {
     await assert.rejects(upload(user2, `${user1.id}/${randomUUID()}`, 'content'), /row-level security/)
   })
 })
+
+describe('key backups', () => {
+  const id = (byte) => byte.repeat(32)
+  const locked = { keyID: 'x', check: {}, secret: {} }
+  const store = (user, owner, keyId = id('a')) => as(db, user, (q) => q(
+    'insert into public.key_backups (owner_id, key_id, backup) values ($1, $2, $3)', [owner, keyId, locked]))
+  const read = (user) => as(db, user, (q) => q('select owner_id from public.key_backups'))
+
+  test('you can store and read your own', async () => {
+    const [user1] = await pair()
+    await store(user1, user1.id)
+    assert.equal((await read(user1)).length, 1)
+  })
+
+  test('user 2 cannot read user 1 backup', async () => {
+    const [user1, user2] = await pair()
+    await store(user1, user1.id)
+    assert.equal((await read(user2)).length, 0)
+  })
+
+  test('nobody can store a backup for someone else', async () => {
+    const [user1, user2] = await pair()
+    await assert.rejects(store(user2, user1.id), /row-level security/)
+  })
+
+  test('the first device to set up wins, and a second copy is refused', async () => {
+    const [user1] = await pair()
+    await store(user1, user1.id, id('a'))
+    await assert.rejects(store(user1, user1.id, id('b')), /duplicate key/)
+  })
+
+  test('a stolen session cannot replace or erase a backup', async () => {
+    const [user1] = await pair()
+    await store(user1, user1.id)
+    await assert.rejects(as(db, user1, (q) => q(`update public.key_backups set key_id = $1`, [id('c')])), /permission denied/)
+    await assert.rejects(as(db, user1, (q) => q('delete from public.key_backups')), /permission denied/)
+  })
+
+  test('signed-out callers cannot read backups', async () => {
+    await assert.rejects(read(null), /permission denied/)
+  })
+
+  test('a backup can never be made public', async () => {
+    const [user1] = await pair()
+    await assert.rejects(db.query(
+      `insert into public.key_backups (owner_id, visibility, key_id, backup) values ($1, 'public', $2, '{}')`, [user1.id, id('d')]), /check constraint/)
+  })
+})
