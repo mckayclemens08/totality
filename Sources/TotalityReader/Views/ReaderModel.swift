@@ -103,6 +103,12 @@ public final class ReaderModel {
         }
     }
 
+    /// For drag and drop, which carries only an ID. Whatever it names has to be here already.
+    public func move(id: UUID, to folder: UUID?) async {
+        guard let entry = (library.items + library.folders).first(where: { $0.id == id }), library.canMove(entry, to: folder) else { return }
+        await move(entry, to: folder)
+    }
+
     public func restore(_ item: ReaderItem) async {
         await change("\(item.displayTitle) couldn't be restored.") { try await $0.restore(item.id) }
     }
