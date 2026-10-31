@@ -8,14 +8,14 @@ These ship as `Sources/TotalityUI/Tokens.swift`, and `Tests/TotalityUITests/Toke
 
 ## Principle
 
-Neumorphic, white / dark grey. **Background and surface stay close in value — that closeness is the
+Neumorphic and light only: the owner removed dark mode on 2026-10-31. **Background and surface stay close in value — that closeness is the
 effect.** Elevation and grouping come from the soft shadow pair, never from borders or hard drop
 shadows. Content contrast is carried by type weight, the single accent, and imagery.
 
 The failure mode of neumorphism is unreadable text. Guardrail: **body text meets WCAG AA (4.5:1),
 large text 3:1.** Every ratio below was computed, not estimated. The look never wins over legibility.
 
-## Colour — light
+## Colour
 
 | Token | Hex | Use | Contrast vs `surface` |
 |---|---|---|---|
@@ -32,23 +32,6 @@ large text 3:1.** Every ratio below was computed, not estimated. The look never 
 | `danger` | `#B3261E` | destructive, key-loss warnings | 5.7:1 ✓ AA |
 | `success` | `#1E6F4C` | verified contact, synced | 5.3:1 ✓ AA |
 
-## Colour — dark
-
-| Token | Hex | Use | Contrast vs `surface` |
-|---|---|---|---|
-| `bg` | `#191C21` | app background — **not pure black** | — |
-| `surface` | `#20242A` | raised cards, controls, bubbles | — |
-| `surfaceSunken` | `#171A1F` | pressed / inset state | — |
-| `shadowLight` | `#2C3138` @ 80% | top-left highlight | — |
-| `shadowDark` | `#101317` @ 80% | bottom-right depth | — |
-| `textPrimary` | `#EFF1F4` | body, titles | **13.8:1** ✓ AA/AAA |
-| `textSecondary` | `#A3ABB7` | captions, metadata | **6.7:1** ✓ AA |
-| `textTertiary` | `#737B87` | disabled, placeholder | 3.7:1 — large text / non-text only |
-| `accent` | `#5E9EEB` | lightened for dark surfaces | **5.6:1** ✓ AA |
-| `accentOn` | `#07131F` | text on an accent fill | **6.7:1** vs accent ✓ AA |
-| `danger` | `#F2645A` | destructive | 5.0:1 ✓ AA |
-| `success` | `#4FC08D` | verified, synced | 6.9:1 ✓ AA |
-
 > **Accent is the most provisional token here.** The owner chose blue on 2026-10-30, replacing the
 > original burnt ochre. The exact shades are placeholders until the Figma file arrives. Changing them
 > is one line in two places.
@@ -57,12 +40,12 @@ large text 3:1.** Every ratio below was computed, not estimated. The look never 
 
 Neumorphism is two shadows, always offset in opposite directions, always soft.
 
-| Token | Light | Dark |
-|---|---|---|
-| `elevationRaised` | `+6,+6 blur 12 shadowDark` · `−6,−6 blur 12 shadowLight` | same offsets, dark values |
-| `elevationSubtle` | `+3,+3 blur 6` · `−3,−3 blur 6` | same |
-| `elevationPressed` | inner `+4,+4 blur 8 shadowDark` · inner `−4,−4 blur 8 shadowLight` | same |
-| `elevationFlat` | none | none |
+| Token | Value |
+|---|---|
+| `elevationRaised` | `+6,+6 blur 12 shadowDark` · `−6,−6 blur 12 shadowLight` |
+| `elevationSubtle` | `+3,+3 blur 6` · `−3,−3 blur 6` |
+| `elevationPressed` | inner `+4,+4 blur 8 shadowDark` · inner `−4,−4 blur 8 shadowLight` |
+| `elevationFlat` | none |
 
 Nothing else. No `elevationXL`, no coloured shadows, no border as a substitute.
 
@@ -123,4 +106,4 @@ SF Symbols for system chrome; Lucide for the module bubbles — **pending the ow
    propose adding one — do not inline a value.
 2. All UI composes from `TotalityUI` components. Bespoke one-off styling is a review failure.
 3. Empty, loading, and error states are designed, not left to default. They are checked before commit.
-4. Both themes are checked on both platforms before a module is called done.
+4. Every screen is checked on both platforms before a module is called done.

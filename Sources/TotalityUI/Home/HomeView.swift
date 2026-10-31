@@ -8,7 +8,6 @@ public struct HomeView: View {
     private let center: ModuleID
     private let onOpen: (ModuleID) -> Void
     @State private var showsList = false
-    @Environment(\.colorScheme) private var scheme
 
     public init(modules: [ModuleEntry] = ModuleEntry.all, center: ModuleID = .reader, onOpen: @escaping (ModuleID) -> Void) {
         self.modules = modules
@@ -19,7 +18,7 @@ public struct HomeView: View {
     public var body: some View {
         let arranged = ModuleEntry.arranged(modules, around: center)
         ZStack(alignment: .topTrailing) {
-            Theme.current(scheme).bg.color.ignoresSafeArea()
+            Theme.current.bg.color.ignoresSafeArea()
             if showsList {
                 ModuleListView(modules: arranged, onOpen: onOpen)
             } else {
@@ -30,7 +29,7 @@ public struct HomeView: View {
             } label: {
                 Image(systemName: showsList ? "circle.hexagongrid" : "list.bullet")
                     .font(Typeface.body)
-                    .foregroundStyle(Theme.current(scheme).textPrimary.color)
+                    .foregroundStyle(Theme.current.textPrimary.color)
                     .frame(width: Space.s7, height: Space.s7)
                     .neumorphic(.subtle, in: Circle())
             }
@@ -71,12 +70,11 @@ private struct BubbleLabel: View {
     let module: ModuleEntry
     let diameter: CGFloat
     @ScaledMetric(relativeTo: .title2) private var iconSize: CGFloat = 26
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Image(systemName: module.systemImage)
             .font(.system(size: min(iconSize, diameter / 2), weight: .regular))
-            .foregroundStyle(Theme.current(scheme).textPrimary.color)
+            .foregroundStyle(Theme.current.textPrimary.color)
             .frame(width: diameter, height: diameter)
             .accessibilityLabel(module.name)
     }
@@ -108,10 +106,9 @@ struct ModuleListView: View {
 struct ModuleRows: View {
     let modules: [ModuleEntry]
     let onOpen: (ModuleID) -> Void
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         LazyVStack(spacing: Space.s3) {
             ForEach(modules) { module in
                 Button {

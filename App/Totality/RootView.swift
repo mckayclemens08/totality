@@ -18,7 +18,6 @@ struct RootView: View {
     @State private var contentKeys: DeviceContentKeys
     @State private var account: AccountModel?
     @State private var showingAccount = false
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -98,7 +97,7 @@ struct RootView: View {
         } label: {
             Image(systemName: "person")
                 .font(Typeface.body)
-                .foregroundStyle(Theme.current(scheme).textPrimary.color)
+                .foregroundStyle(Theme.current.textPrimary.color)
                 .frame(width: Space.s7, height: Space.s7)
                 .neumorphic(.subtle, in: Circle())
         }
@@ -190,10 +189,9 @@ private struct ModuleMessage: View {
     let title: String
     let detail: String
     let onClose: () -> Void
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         VStack(spacing: Space.s3) {
             Image(systemName: systemImage)
                 .font(Typeface.display)

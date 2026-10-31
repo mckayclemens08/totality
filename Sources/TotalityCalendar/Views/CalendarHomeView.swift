@@ -10,7 +10,6 @@ public struct CalendarHomeView: View {
     @State private var path: [CalendarEntry] = []
     @State private var creating = false
     @State private var showingSources = false
-    @Environment(\.colorScheme) private var scheme
 
     public init(model: CalendarModel, onClose: (() -> Void)? = nil, onOpen: @escaping (ContentRef) -> Void = { _ in }) {
         self.model = model
@@ -19,7 +18,7 @@ public struct CalendarHomeView: View {
     }
 
     public var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         NavigationStack(path: $path) {
             content
                 .background(theme.bg.color)
@@ -140,10 +139,9 @@ public struct CalendarHomeView: View {
 /// The two things worth saying above the list: what's unreadable, and where events are kept.
 struct CalendarNotes: View {
     let model: CalendarModel
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s2) {
             if model.unreadable > 0 {
                 Label(unreadableText, systemImage: "lock.slash")
@@ -169,7 +167,6 @@ struct CalendarNotes: View {
 
 struct EntryRow: View {
     let entry: CalendarEntry
-    @Environment(\.colorScheme) private var scheme
 
     private var isOwn: Bool {
         if case .own = entry.source { true } else { false }
@@ -183,7 +180,7 @@ struct EntryRow: View {
     }
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
             Text(entry.isAllDay ? "All day" : entry.start.formatted(date: .omitted, time: .shortened))
                 .font(Typeface.caption)
@@ -212,10 +209,9 @@ struct CalendarMessage: View {
     let systemImage: String
     let title: String
     let detail: String
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         VStack(spacing: Space.s3) {
             Image(systemName: systemImage)
                 .font(Typeface.display)
@@ -237,10 +233,9 @@ struct CalendarMessage: View {
 struct DeviceCalendarsView: View {
     let model: CalendarModel
     let onDone: () -> Void
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         Form {
             switch model.deviceAccess {
             case .notAsked:

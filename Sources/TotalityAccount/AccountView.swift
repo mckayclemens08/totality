@@ -11,7 +11,6 @@ public struct AccountView: View {
     @State private var creating = false
     @State private var editing = false
     @State private var showingSettings = false
-    @Environment(\.colorScheme) private var scheme
 
     private static let noticeID = "notice"
 
@@ -21,7 +20,7 @@ public struct AccountView: View {
     }
 
     public var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         NavigationStack {
             Group {
                 #if os(iOS)
@@ -83,7 +82,7 @@ public struct AccountView: View {
             if let notice = model.notice {
                 Text(notice)
                     .font(Typeface.caption)
-                    .foregroundStyle(Theme.current(scheme).danger.color)
+                    .foregroundStyle(Theme.current.danger.color)
                     .id(Self.noticeID)
             }
         }

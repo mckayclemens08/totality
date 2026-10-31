@@ -78,7 +78,8 @@ membership.
 
 ## Design
 
-- **Neumorphic, white / dark grey.** Soft dual shadows; background and surface close in value.
+- **Neumorphic and light only.** The owner removed dark mode on 2026-10-31, so there's one palette: white
+  and pale grey surfaces with dark grey text. Soft dual shadows; background and surface close in value.
   No rainbow palette, no pure black, no hard borders or harsh drop shadows as the default treatment.
   Elevation comes from the shadow pair, not from lines.
 - **One accent colour, used sparingly.**

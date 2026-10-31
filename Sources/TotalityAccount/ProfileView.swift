@@ -6,7 +6,6 @@ import TotalityUI
 struct ProfileSummary: View {
     let model: AccountModel
     let onEdit: () -> Void
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         if let profile = model.profile {
@@ -25,10 +24,9 @@ struct ProfileSummary: View {
 
 struct ProfileHeader: View {
     let profile: Profile
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         VStack(spacing: Space.s2) {
             ProfilePicture(url: profile.avatarURL)
                 .padding(.bottom, Space.s2)
@@ -56,10 +54,9 @@ struct ProfilePicture: View {
     private static let diameter = Space.s8 * 1.5
 
     let url: URL?
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         Group {
             if let url {
                 AsyncImage(url: url) { phase in
@@ -95,7 +92,6 @@ struct EditProfileView: View {
     @State private var displayName: String
     @State private var bio: String
     @State private var picked: PhotosPickerItem?
-    @Environment(\.colorScheme) private var scheme
 
     init(model: AccountModel, onDone: @escaping () -> Void) {
         self.model = model
@@ -105,7 +101,7 @@ struct EditProfileView: View {
     }
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
                 VStack(spacing: Space.s3) {
@@ -176,10 +172,9 @@ private struct ProfileField: ViewModifier {
 
 struct AccountSettingsView: View {
     let model: AccountModel
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s4) {
             if case .signedIn(let username) = model.phase {
                 AccountDetail(text: "Signed in as \(username).")
@@ -215,12 +210,11 @@ struct AccountSettingsView: View {
 
 struct AccountDetail: View {
     let text: String
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Text(text)
             .font(Typeface.body)
-            .foregroundStyle(Theme.current(scheme).textSecondary.color)
+            .foregroundStyle(Theme.current.textSecondary.color)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -229,10 +223,9 @@ struct AccountButton: View {
     let title: String
     let isWorking: Bool
     let action: () -> Void
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         Button(action: action) {
             Group {
                 if isWorking {

@@ -9,11 +9,10 @@ import TotalityUI
 /// Writes Reader screens to PNGs for a person to look at, when TOTALITY_RENDER_DIR is set.
 @MainActor
 @Suite struct RenderReader {
-    private func write(_ view: some View, scheme: ColorScheme, name: String, to directory: String) throws {
+    private func write(_ view: some View, name: String, to directory: String) throws {
         let renderer = ImageRenderer(content: view
-            .environment(\.colorScheme, scheme)
             .frame(width: 393, height: 760)
-            .background(Theme.current(scheme).bg.color))
+            .background(Theme.current.bg.color))
         renderer.scale = 2
         let image = try #require(renderer.nsImage)
         let tiff = try #require(image.tiffRepresentation)
@@ -48,7 +47,7 @@ import TotalityUI
             text: "Climbing is a mental game. Most falls happen in the head first. Commit to the move."
         )))
         listen.skip(by: 1)
-        for (scheme, label) in [(ColorScheme.light, "light"), (.dark, "dark")] {
+        for label in ["light"] {
             // ImageRenderer draws List and ScrollView as blank, so this renders what they hold.
             let rows = VStack(alignment: .leading, spacing: Space.s3) {
                 ReaderRow(item: item("Climbing team schedule"), snippet: nil)
@@ -58,13 +57,13 @@ import TotalityUI
                 ListenBar(listen: listen)
             }
             .padding(Space.s4)
-            try write(rows, scheme: scheme, name: "reader-rows-\(label).png", to: directory)
+            try write(rows, name: "reader-rows-\(label).png", to: directory)
             let empty = ReaderMessage(
                 systemImage: "book",
                 title: "Nothing here yet",
                 detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
             )
-            try write(empty, scheme: scheme, name: "reader-empty-\(label).png", to: directory)
+            try write(empty, name: "reader-empty-\(label).png", to: directory)
         }
     }
 }

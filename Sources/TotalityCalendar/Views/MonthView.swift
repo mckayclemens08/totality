@@ -3,7 +3,6 @@ import TotalityUI
 
 struct MonthView: View {
     let model: CalendarModel
-    @Environment(\.colorScheme) private var scheme
 
     private var columns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
@@ -16,7 +15,7 @@ struct MonthView: View {
     }
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         let entries = model.entries(on: model.selectedDay)
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
@@ -58,7 +57,7 @@ struct MonthView: View {
     }
 
     private var header: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         return HStack(spacing: Space.s3) {
             Button("Previous month", systemImage: "chevron.left") { model.show(monthsFromNow: -1) }
                 .labelStyle(.iconOnly)
@@ -79,10 +78,9 @@ struct MonthView: View {
 private struct DayCell: View {
     let day: CalendarDay
     let model: CalendarModel
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         let isToday = day == model.today
         let isSelected = day == model.selectedDay
         let hasEntries = !model.entries(on: day).isEmpty

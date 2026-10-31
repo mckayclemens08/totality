@@ -7,11 +7,10 @@ import UniformTypeIdentifiers
 struct BackupView: View {
     let model: BackupModel
     @State private var typed = ""
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
                 content
@@ -69,7 +68,7 @@ struct BackupView: View {
             AccountDetail(text: "Save this now, in a password manager and on paper. Don't rely on a screenshot or your Notes.")
             Text(key)
                 .font(Typeface.code)
-                .foregroundStyle(Theme.current(scheme).textPrimary.color)
+                .foregroundStyle(Theme.current.textPrimary.color)
                 .opacity(keyOpacity)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Space.s4)
@@ -140,7 +139,7 @@ struct BackupView: View {
     private var warning: some View {
         Text("If you lose your recovery key and all your devices, your content is gone. Nobody can get it back, including you.")
             .font(Typeface.callout)
-            .foregroundStyle(Theme.current(scheme).danger.color)
+            .foregroundStyle(Theme.current.danger.color)
             .fixedSize(horizontal: false, vertical: true)
     }
 

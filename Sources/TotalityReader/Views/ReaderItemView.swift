@@ -48,14 +48,13 @@ private struct NoteEditor: View {
     /// Nil until the note has loaded, so an empty editor can never overwrite the stored note.
     @State private var saved: Draft?
     @State private var failed = false
-    @Environment(\.colorScheme) private var scheme
 
     private var draft: Draft {
         Draft(title: title, body: text)
     }
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         Group {
             if saved != nil {
                 VStack(alignment: .leading, spacing: Space.s3) {
@@ -116,10 +115,9 @@ private struct FileReader: View {
 
     @State private var paragraphs: [String]?
     @State private var problem: String?
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let theme = Theme.current(scheme)
+        let theme = Theme.current
         Group {
             if let paragraphs {
                 ScrollView {
