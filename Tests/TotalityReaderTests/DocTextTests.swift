@@ -115,6 +115,46 @@ import Testing
         #expect(doc.markdown == "1. a\n2. b\nbreak\n1. c")
     }
 
+    @Test("Any whitespace at the edge of styled text survives", arguments: ["\tfoo", "\u{00A0}foo", "\u{3000}foo", "foo\t", " \tfoo\u{00A0} "])
+    func edgeWhitespace(_ text: String) {
+        let doc = DocText(paragraphs: [Paragraph(runs: [Run("a"), Run(text, bold: true), Run("b")])])
+        #expect(DocText(markdown: doc.markdown).plainText == "a\(text)b")
+    }
+
+    @Test("Styles can run straight into each other", arguments: [
+        [Run("bold", bold: true), Run("ital", italic: true)],
+        [Run("ital", italic: true), Run("bold", bold: true)],
+        [Run("both", bold: true, italic: true), Run("bold", bold: true)],
+        [Run("both", bold: true, italic: true), Run("ital", italic: true)],
+        [Run("bold", bold: true), Run("both", bold: true, italic: true)],
+        [Run("ital", italic: true), Run("both", bold: true, italic: true)],
+        [Run("plain"), Run("both", bold: true, italic: true), Run("plain again")],
+    ])
+    func adjacentStyles(_ runs: [DocText.Run]) {
+        let doc = DocText(paragraphs: [Paragraph(runs: runs)])
+        #expect(DocText(markdown: doc.markdown) == doc)
+    }
+
+    @Test("A link's address can hold brackets", arguments: [
+        "https://en.wikipedia.org/wiki/Mercury_(planet)", "https://a.example/x)y", "https://a.example/x(y",
+    ])
+    func bracketsInLinks(_ address: String) throws {
+        let url = try #require(URL(string: address))
+        let doc = DocText(paragraphs: [Paragraph(runs: [Run("Map", link: url), Run(" and more")])])
+        #expect(DocText(markdown: doc.markdown) == doc)
+    }
+
+    @Test("Hostile lines stay quick", arguments: [
+        String(repeating: "[a](", count: 40_000), String(repeating: "[", count: 200_000),
+        String(repeating: "[a](http:", count: 20_000) + String(repeating: ")", count: 20_000), String(repeating: "*", count: 200_000),
+        String(repeating: "* ", count: 100_000),
+    ])
+    func hostileLines(_ line: String) {
+        let start = Date()
+        _ = DocText(markdown: line)
+        #expect(Date().timeIntervalSince(start) < 5)
+    }
+
     @Test("Splitting keeps formatting on both sides, even in the middle of a word or an emoji neighbour")
     func splitting() {
         var doc = DocText(paragraphs: [Paragraph(.bullet, runs: [Run("🧗 clim", bold: true), Run("bing")])])

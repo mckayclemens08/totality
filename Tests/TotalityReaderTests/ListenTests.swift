@@ -224,6 +224,19 @@ import Testing
         #expect(model.library.contents(of: top.folders[0].id).items.map(\.title) == ["Dune"])
     }
 
+    @Test("Old deletions go when the Reader loads, so 30 days holds on a device that's offline")
+    func purgeWithoutSync() async throws {
+        let store = MemoryBlobStore()
+        let (model, _) = try model(store: store)
+        let note = try #require(await model.newNote())
+        await model.delete(note)
+        #expect(model.trash.count == 1)
+        let old = Date().addingTimeInterval(-ReaderVault.trashLifetime - 60)
+        try store.write(Data(ISO8601DateFormatter().string(from: old).utf8), as: "\(note.id.uuidString.lowercased()).trashed")
+        await model.load()
+        #expect(model.trash.isEmpty)
+    }
+
     @Test("Deleting a folder takes everything inside out of Listen, and Restore brings it all back")
     func deletingAFolder() async throws {
         let (model, _) = try model()

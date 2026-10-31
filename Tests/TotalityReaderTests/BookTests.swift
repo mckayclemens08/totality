@@ -53,9 +53,9 @@ private struct ZipBuilder {
     }
 }
 
-private func epub(chapters: [String], title: String = "The Rock Warrior's Way", base: String = "OEBPS/") -> [ZipBuilder.File] {
+private func epub(chapters: [String], title: String = "The Rock Warrior's Way", base: String = "OEBPS/", spineOrder: [Int]? = nil) -> [ZipBuilder.File] {
     let manifest = chapters.indices.map { #"<item id="c\#($0)" href="text/ch\#($0).xhtml" media-type="application/xhtml+xml"/>"# }.joined()
-    let spine = chapters.indices.map { #"<itemref idref="c\#($0)"/>"# }.joined()
+    let spine = (spineOrder ?? Array(chapters.indices)).map { #"<itemref idref="c\#($0)"/>"# }.joined()
     let package = """
     <?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>\(title)</dc:title></metadata><manifest><item id="css" href="s.css" media-type="text/css"/>\(manifest)</manifest>
@@ -157,6 +157,32 @@ happen in the head first.</p><ul><li>Commit</li><li>to the &ldquo;move&rdquo;</l
         #expect(throws: ReaderError.notReadable) { try archive.read("odd") }
     }
 
+    @Test("A stored file whose two sizes disagree is refused")
+    func storedSizes() throws {
+        var archive = try ZipArchive(zip([.init(name: "x", data: Data(repeating: 7, count: 100), deflate: false, claimedSize: 10)]))
+        #expect(throws: ReaderError.notReadable) { try archive.read("x") }
+    }
+
+    @Test("A directory entry that points at something else is refused")
+    func wrongHeader() throws {
+        var data = zip([.init(name: "x", data: Data("words".utf8), deflate: false)])
+        data[data.startIndex] = 0
+        var archive = try ZipArchive(data)
+        #expect(throws: ReaderError.notReadable) { try archive.read("x") }
+    }
+
+    @Test("One file over the limit is refused even with budget to spare")
+    func entryLimit() throws {
+        var archive = try ZipArchive(zip([.init(name: "x", data: Data(count: ZipArchive.maxEntryBytes + 1), deflate: false)]))
+        #expect(throws: ReaderError.notReadable) { try archive.read("x") }
+    }
+
+    @Test("A real list of too many files is refused")
+    func tooManyEntries() {
+        let files = (0...ZipArchive.maxEntries).map { ZipBuilder.File(name: "\($0)", data: Data(), deflate: false) }
+        #expect(throws: ReaderError.notReadable) { try ZipArchive(zip(files)) }
+    }
+
     @Test("Directory numbers that point nowhere are refused")
     func lyingDirectory() {
         var count = ZipBuilder(files: [.init(name: "a", data: Data("b".utf8))])
@@ -210,6 +236,73 @@ happen in the head first.</p><ul><li>Commit</li><li>to the &ldquo;move&rdquo;</l
         let book = try BookReader.epub(ZipBuilder(files: epub(chapters: [bomb])).build())
         #expect(book.document.plainText.contains("Real words."))
         #expect(book.document.plainText.count < 1000)
+    }
+
+    @Test("An entity a file defines for itself never reaches the text")
+    func planted() throws {
+        let chapter = #"<?xml version="1.0"?><!DOCTYPE html [<!ENTITY a "planted words">]><html><body><p>Real words.</p><p>&a;</p></body></html>"#
+        let book = try BookReader.epub(ZipBuilder(files: epub(chapters: [chapter])).build())
+        #expect(book.document.plainText.contains("Real words."))
+        #expect(!book.document.plainText.contains("planted"))
+    }
+
+    @Test("A doctype can't hide behind a comment, a quote, or a split in its own name")
+    func hiddenDoctypes() {
+        for text in [
+            #"<!-- <!DOCTYPE a> --><!DOCTYPE x [<!ENTITY a "]>"><!ENTITY b "more">]><p>&a;</p>"#,
+            #"<!DOC<!DOCTYPE x>TYPE y [<!ENTITY a "planted">]><p>&a;</p>"#,
+            #"<!doctype x SYSTEM "file:///etc/passwd"><p>Real</p>"#,
+        ] {
+            #expect(!SafeXML.withoutDoctypes(text).lowercased().contains("<!doctype"), "\(text)")
+        }
+        #expect(SafeXML.withoutDoctypes("<p>Real</p>") == "<p>Real</p>")
+    }
+
+    @Test("Text in UTF-16 reads, and a declared encoding can't change how it's read", arguments: [
+        String.Encoding.utf16LittleEndian, .utf16BigEndian, .utf16,
+    ])
+    func encodings(_ encoding: String.Encoding) throws {
+        let chapter = #"<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE x [<!ENTITY a "planted">]><html><body><p>Real words.</p><p>&a;</p></body></html>"#
+        var files = epub(chapters: ["<html></html>"])
+        files[3].data = try #require(chapter.data(using: encoding))
+        let text = try BookReader.epub(ZipBuilder(files: files).build()).document.plainText
+        #expect(text.contains("Real words."))
+        #expect(!text.contains("planted"))
+    }
+
+    @Test("A file claiming UTF-7 is read as UTF-8")
+    func declaredEncoding() throws {
+        let chapter = #"<?xml version="1.0" encoding="UTF-7"?><html><body><p>Real +ADw-words.</p></body></html>"#
+        let text = try BookReader.epub(ZipBuilder(files: epub(chapters: [chapter])).build()).document.plainText
+        #expect(text.contains("Real +ADw-words."))
+    }
+
+    @Test("Thousands of false doctypes take no time at all")
+    func manyDoctypes() throws {
+        let text = String(repeating: "<!DOCTYPE ", count: 200_000)
+        let start = Date()
+        _ = SafeXML.withoutDoctypes(text)
+        #expect(Date().timeIntervalSince(start) < 5)
+    }
+
+    @Test("A book's title can't run on forever")
+    func longTitle() throws {
+        let book = try BookReader.epub(ZipBuilder(files: epub(chapters: [chapterOne], title: String(repeating: "Long ", count: 10_000))).build())
+        #expect(book.title?.count == SafeXML.maxTitleLength)
+    }
+
+    @Test("A chapter listed twice reads once")
+    func repeatedChapter() throws {
+        let book = try BookReader.epub(ZipBuilder(files: epub(chapters: [chapterOne], spineOrder: [0, 0, 0])).build())
+        #expect(book.document.sections.count == 1)
+    }
+
+    @Test("A stylesheet in the reading order isn't read as a chapter")
+    func stylesheetInSpine() throws {
+        let files = epub(chapters: [chapterOne]) + [.init(name: "OEBPS/s.css", data: Data("<p>p { color: red }</p>".utf8))]
+        let book = try BookReader.epub(ZipBuilder(files: files).build())
+        #expect(book.document.sections.count == 1)
+        #expect(!book.document.plainText.contains("color"))
     }
 
     @Test("Paths that climb out of the book find nothing", arguments: [

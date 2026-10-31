@@ -287,12 +287,25 @@ private struct PDFReader: View {
     }
 }
 
+/// A PDF's links are the file's own, so they pass the same check as a doc's before anything opens.
+@MainActor
+private final class PDFLinks: NSObject, @preconcurrency PDFViewDelegate {
+    var open: OpenURLAction?
+
+    func pdfViewWillClick(onLink sender: PDFView, with url: URL) {
+        if DocText.isOpenable(url) { open?(url) }
+    }
+}
+
 #if canImport(UIKit)
 private struct PDFPages: UIViewRepresentable {
     let document: PDFDocument
 
+    func makeCoordinator() -> PDFLinks { PDFLinks() }
+
     func makeUIView(context: Context) -> PDFView {
         let view = PDFView()
+        view.delegate = context.coordinator
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.backgroundColor = Theme.current.bg.platformColor
@@ -301,6 +314,7 @@ private struct PDFPages: UIViewRepresentable {
     }
 
     func updateUIView(_ view: PDFView, context: Context) {
+        context.coordinator.open = context.environment.openURL
         if view.document !== document { view.document = document }
     }
 }
@@ -308,8 +322,11 @@ private struct PDFPages: UIViewRepresentable {
 private struct PDFPages: NSViewRepresentable {
     let document: PDFDocument
 
+    func makeCoordinator() -> PDFLinks { PDFLinks() }
+
     func makeNSView(context: Context) -> PDFView {
         let view = PDFView()
+        view.delegate = context.coordinator
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.backgroundColor = Theme.current.bg.platformColor
@@ -318,6 +335,7 @@ private struct PDFPages: NSViewRepresentable {
     }
 
     func updateNSView(_ view: PDFView, context: Context) {
+        context.coordinator.open = context.environment.openURL
         if view.document !== document { view.document = document }
     }
 }

@@ -70,6 +70,23 @@ import TotalityCore
         #expect(library.path(to: inner.id).map(\.title) == ["One", "Inner"])
     }
 
+    @Test("A very deep tree stays quick and can't overflow anything")
+    func deepTree() {
+        var parent: UUID?
+        var folders: [ReaderItem] = []
+        for index in 0..<20_000 {
+            let folder = entry("\(index)", in: parent)
+            folders.append(folder)
+            parent = folder.id
+        }
+        let start = Date()
+        let library = ReaderLibrary(folders: folders)
+        #expect(library.descendants(of: folders[0].id).count == 19_999)
+        #expect(library.path(to: parent).count == 20_000)
+        #expect(!library.canMove(folders[0], to: parent))
+        #expect(Date().timeIntervalSince(start) < 5)
+    }
+
     @Test("Moving changes where something lives, and doesn't count as an edit")
     func movingKeepsTheTime() async throws {
         let vault = try newVault()
@@ -114,6 +131,13 @@ import TotalityCore
         #expect(library.contents(of: nil, sortedBy: .recent).items == [new, pdf, old])
         #expect(library.contents(of: nil, sortedBy: .name).items == [pdf, new, old])
         #expect(library.contents(of: nil, sortedBy: .type).items == [new, old, pdf])
+    }
+
+    @Test("A named folder's ID depends on the key, so the server can't recognise the name")
+    func keyedFolderIDs() async throws {
+        let mine = try await newVault().namedFolder(ReaderItem.speechifyCollection)
+        let theirs = try await newVault().namedFolder(ReaderItem.speechifyCollection)
+        #expect(mine.id != theirs.id)
     }
 
     @Test("Old collections become folders, and two devices land on the same one")
@@ -255,6 +279,42 @@ import TotalityCore
         #expect(try await vault.trashed().isEmpty)
         let names = try store.names()
         #expect(names == ["\(note.id.uuidString.lowercased()).deleted"])
+    }
+
+    @Test("A looped folder in the trash still shows, with its contents, rather than vanishing")
+    func loopedTrash() async throws {
+        let key = try ContentRootKey.generate()
+        let vault = ReaderVault(store: MemoryBlobStore(), rootKey: key)
+        let there = ReaderVault(store: MemoryBlobStore(), rootKey: key)
+        let first = try await vault.createFolder(title: "First")
+        let second = try await vault.createFolder(title: "Second", in: first.id)
+        let note = try await vault.createNote(title: "Inside", folder: second.id)
+        // Two devices can each move one folder inside the other, so the loop arrives by sync.
+        for id in [first.id, second.id] {
+            try await there.store(try #require(try await vault.sealedObject(id)), ifLocalHash: nil)
+        }
+        try await there.move(second.id, to: nil)
+        try await there.move(first.id, to: second.id)
+        let moved = try #require(try await there.sealedObject(first.id))
+        try await vault.store(moved, ifLocalHash: try await vault.sealedHash(of: first.id))
+        try await vault.delete(first.id)
+        try await vault.delete(second.id)
+        #expect(Set(try await vault.trashed().map(\.item.title)) == ["First", "Second"])
+        try await vault.restore(first.id)
+        #expect(try await vault.item(note.id).title == "Inside")
+    }
+
+    @Test("Deleting a folder for good takes what's inside it")
+    func foreverTakesContents() async throws {
+        let store = MemoryBlobStore()
+        let vault = try newVault(store: store)
+        let folder = try await vault.createFolder(title: "Top")
+        let inner = try await vault.createFolder(title: "Inner", in: folder.id)
+        _ = try await vault.createNote(title: "Inside", folder: inner.id)
+        try await vault.delete(folder.id)
+        try await vault.deleteForever(folder.id)
+        #expect(try await vault.trashed().isEmpty)
+        #expect(try store.names().allSatisfy { $0.hasSuffix(".deleted") })
     }
 
     @Test("Emptying takes everything, and what's inside folders")

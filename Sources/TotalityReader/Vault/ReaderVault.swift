@@ -144,9 +144,10 @@ public actor ReaderVault {
         return folder
     }
 
-    /// The ID comes from the name, so two devices making the same folder land on one folder.
+    /// The ID comes from the name and the key, so two of this person's devices land on one folder,
+    /// and the server can't spot a folder name by its ID.
     public func namedFolder(_ name: String) throws -> ReaderItem {
-        let id = UUID(derivedFrom: "reader-folder:\(name)")
+        let id = rootKey.derivedID(from: "reader-folder:\(name)")
         if let existing = try? item(id) { return existing }
         try store.delete(deletionName(id))
         return try writeFolder(id: id, title: name, in: nil)
@@ -305,19 +306,20 @@ public actor ReaderVault {
     /// Recently Deleted, newest first. What's inside a trashed folder comes and goes with it.
     public func trashed() throws -> [TrashedItem] {
         let trash = try allTrash()
-        let ids = Set(trash.map(\.id))
+        // The same rule as the library, so a looped folder shows here instead of vanishing with its contents.
+        let tree = ReaderLibrary(folders: trash.map(\.item).filter { $0.kind == .folder })
         return trash
-            .filter { $0.item.folderID.map(ids.contains) != true }
+            .filter { tree.parent(of: $0.item) == nil }
             .sorted { $0.deletedAt > $1.deletedAt }
     }
 
     private func trashedTree(_ id: UUID) throws -> [UUID] {
-        let trash = try allTrash().map(\.item)
+        let children = Dictionary(grouping: try allTrash().map(\.item), by: \.folderID)
         var tree = [id]
+        var seen: Set = [id]
         var index = 0
         while index < tree.count {
-            let parent = tree[index]
-            tree += trash.filter { $0.folderID == parent && !tree.contains($0.id) }.map(\.id)
+            for child in children[tree[index]] ?? [] where seen.insert(child.id).inserted { tree.append(child.id) }
             index += 1
         }
         return tree

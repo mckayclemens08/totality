@@ -11,34 +11,54 @@ public struct ReaderLibrary: Sendable, Equatable {
     public let items: [ReaderItem]
     public let folders: [ReaderItem]
     private let folderByID: [UUID: ReaderItem]
+    private let looped: Set<UUID>
+    private let foldersByParent: [UUID?: [ReaderItem]]
+    private let itemsByParent: [UUID?: [ReaderItem]]
 
     public init(items: [ReaderItem] = [], folders: [ReaderItem] = []) {
         self.items = items
         self.folders = folders
-        folderByID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let byID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let looped = Self.loops(in: byID)
+        let parent = { (entry: ReaderItem) in Self.parent(of: entry, folders: byID, looped: looped) }
+        folderByID = byID
+        self.looped = looped
+        foldersByParent = Dictionary(grouping: folders, by: parent)
+        itemsByParent = Dictionary(grouping: items, by: parent)
+    }
+
+    /// The folders that lead back to themselves. Each folder is walked once, however the tree is shaped.
+    private static func loops(in folders: [UUID: ReaderItem]) -> Set<UUID> {
+        var looped = Set<UUID>()
+        var finished = Set<UUID>()
+        for start in folders.keys where !finished.contains(start) {
+            var walk: [UUID] = []
+            var onWalk = Set<UUID>()
+            var next: UUID? = start
+            while let current = next, folders[current] != nil, !finished.contains(current), onWalk.insert(current).inserted {
+                walk.append(current)
+                next = folders[current]?.folderID
+            }
+            if let repeated = next, onWalk.contains(repeated) {
+                looped.formUnion(walk.drop { $0 != repeated })
+            }
+            finished.formUnion(walk)
+        }
+        return looped
+    }
+
+    private static func parent(of entry: ReaderItem, folders: [UUID: ReaderItem], looped: Set<UUID>) -> UUID? {
+        guard let parent = entry.folderID, folders[parent] != nil, !looped.contains(entry.id) else { return nil }
+        return parent
     }
 
     public func contents(of folder: UUID?, sortedBy sort: ReaderSort = .recent) -> (folders: [ReaderItem], items: [ReaderItem]) {
-        (
-            Self.sorted(folders.filter { parent(of: $0) == folder }, by: sort),
-            Self.sorted(items.filter { parent(of: $0) == folder }, by: sort)
-        )
+        (Self.sorted(foldersByParent[folder] ?? [], by: sort), Self.sorted(itemsByParent[folder] ?? [], by: sort))
     }
 
     /// Nil means the top level, including when the stored parent can't be reached.
     public func parent(of entry: ReaderItem) -> UUID? {
-        guard let parent = entry.folderID, folderByID[parent] != nil, !isInLoop(entry.id) else { return nil }
-        return parent
-    }
-
-    private func isInLoop(_ id: UUID) -> Bool {
-        var seen = Set<UUID>()
-        var next = folderByID[id]?.folderID
-        while let current = next, seen.insert(current).inserted {
-            if current == id { return true }
-            next = folderByID[current]?.folderID
-        }
-        return false
+        Self.parent(of: entry, folders: folderByID, looped: looped)
     }
 
     /// From the top level down to `folder`, for breadcrumbs.
@@ -46,16 +66,22 @@ public struct ReaderLibrary: Sendable, Equatable {
         var path: [ReaderItem] = []
         var next = folder.flatMap { folderByID[$0] }
         while let current = next {
-            path.insert(current, at: 0)
+            path.append(current)
             next = parent(of: current).flatMap { folderByID[$0] }
         }
-        return path
+        return path.reversed()
     }
 
     /// Every item and folder inside, at any depth.
     public func descendants(of folder: UUID) -> [ReaderItem] {
-        let inside = contents(of: folder)
-        return inside.items + inside.folders + inside.folders.flatMap { descendants(of: $0.id) }
+        var found: [ReaderItem] = []
+        var waiting = [folder]
+        while let next = waiting.popLast() {
+            let inside = contents(of: next)
+            found += inside.items + inside.folders
+            waiting += inside.folders.map(\.id)
+        }
+        return found
     }
 
     public func canMove(_ entry: ReaderItem, to destination: UUID?) -> Bool {

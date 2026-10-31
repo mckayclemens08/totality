@@ -101,6 +101,10 @@ enum DocRendering {
         return ranges
     }
 
+    nonisolated static func openable(_ url: URL) -> URL? {
+        DocText.isOpenable(url) ? url : nil
+    }
+
     static func doc(from text: NSAttributedString) -> DocText {
         let string = text.string as NSString
         let paragraphs = paragraphRanges(in: string).map { range -> DocText.Paragraph in
@@ -116,7 +120,7 @@ enum DocRendering {
                 runs.append(DocText.Run(
                     string.substring(with: part),
                     bold: attributes[boldKey] != nil, italic: attributes[italicKey] != nil,
-                    link: attributes[.link] as? URL
+                    link: (attributes[.link] as? URL).flatMap(openable)
                 ))
             }
             return DocText.Paragraph(style, runs: runs)

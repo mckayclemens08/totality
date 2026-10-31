@@ -157,6 +157,39 @@ struct DocEditorTests {
         #expect(controller.document.paragraphs[0].runs == [Run("Map")])
     }
 
+    @Test("What was typed is still there for the last save after the view has gone")
+    func lastSave() {
+        let controller = DocEditorController()
+        controller.load(DocText(paragraphs: [Paragraph(runs: [Run("original")])]))
+        autoreleasepool {
+            let view = NSTextView()
+            view.delegate = controller
+            controller.attach(view)
+            view.setSelectedRange(NSRange(location: 8, length: 0))
+            view.insertText(" and more", replacementRange: view.selectedRange())
+        }
+        #expect(controller.document.plainText == "original and more")
+    }
+
+    @Test("A new view picks up what the last one held")
+    func reattach() {
+        let (controller, view) = editor(DocText(paragraphs: [Paragraph(runs: [Run("Pack")])]))
+        type(" light", in: view)
+        let next = NSTextView()
+        controller.attach(next)
+        #expect(next.string == "Pack light")
+    }
+
+    @Test("A link that came in some other way can't open or be saved")
+    func foreignLinks() throws {
+        let (controller, view) = editor(DocText(paragraphs: [Paragraph(runs: [Run("Map")])]))
+        let evil = try #require(URL(string: "x-evil://run"))
+        view.textStorage?.addAttribute(.link, value: evil, range: NSRange(location: 0, length: 3))
+        view.setSelectedRange(NSRange(location: 0, length: 3))
+        #expect(controller.currentLink == nil)
+        #expect(controller.document.paragraphs[0].runs == [Run("Map")])
+    }
+
     @Test("Loading a doc before the view exists shows it once the view arrives")
     func loadBeforeAttach() {
         let controller = DocEditorController()

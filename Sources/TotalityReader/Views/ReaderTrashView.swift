@@ -7,6 +7,9 @@ struct ReaderTrashView: View {
     @State private var confirmingEmpty = false
     @State private var deleting: ReaderItem?
 
+    /// Each device keeps its own Recently Deleted, so this can only speak for this one.
+    private static let reach = "It can't be brought back on this device. A copy in Recently Deleted on another device stays there until its 30 days are up."
+
     /// Rounds up, so something deleted just now shows the whole 30 days.
     static func left(_ entry: TrashedItem, now: Date = Date()) -> String {
         let remaining = entry.deletedAt.addingTimeInterval(ReaderVault.trashLifetime).timeIntervalSince(now)
@@ -56,21 +59,21 @@ struct ReaderTrashView: View {
                 }
             }
         }
-        .confirmationDialog("Delete everything here for good?", isPresented: $confirmingEmpty, titleVisibility: .visible) {
-            Button("Delete for good", role: .destructive) {
+        .confirmationDialog("Delete everything here now?", isPresented: $confirmingEmpty, titleVisibility: .visible) {
+            Button("Delete now", role: .destructive) {
                 Task { await model.emptyTrash() }
             }
         } message: {
-            Text("This can't be undone.")
+            Text(Self.reach)
         }
         .confirmationDialog(
-            "Delete \(deleting?.displayTitle ?? "this") for good?", isPresented: isDeleting, titleVisibility: .visible, presenting: deleting
+            "Delete \(deleting?.displayTitle ?? "this") now?", isPresented: isDeleting, titleVisibility: .visible, presenting: deleting
         ) { item in
-            Button("Delete for good", role: .destructive) {
+            Button("Delete now", role: .destructive) {
                 Task { await model.deleteForever(item) }
             }
         } message: { _ in
-            Text("This can't be undone.")
+            Text(Self.reach)
         }
         .task { await model.load() }
     }

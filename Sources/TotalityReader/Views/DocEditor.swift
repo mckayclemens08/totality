@@ -21,6 +21,8 @@ final class DocEditorController: NSObject {
     private(set) var currentLink: URL?
 
     @ObservationIgnored private weak var textView: PlatformTextView?
+    /// Held here, because the last save can come after the view has gone.
+    @ObservationIgnored private var storage: NSTextStorage?
     @ObservationIgnored private var loaded = DocText()
     @ObservationIgnored private var needsRedraw = false
     @ObservationIgnored private var isRedrawing = false
@@ -43,19 +45,13 @@ final class DocEditorController: NSObject {
     }
 
     func attach(_ view: PlatformTextView) {
+        let current = document
         textView = view
-        redraw(loaded, caret: nil)
+        storage = view.textStorage
+        redraw(current, caret: nil)
     }
 
     // MARK: The two platforms' differences
-
-    private var storage: NSTextStorage? {
-        #if canImport(UIKit)
-        textView?.textStorage
-        #else
-        textView?.textStorage
-        #endif
-    }
 
     private var selection: NSRange {
         get {
@@ -148,13 +144,17 @@ final class DocEditorController: NSObject {
         if range.length > 0 {
             isBold = isEverywhere(DocRendering.boldKey, in: range)
             isItalic = isEverywhere(DocRendering.italicKey, in: range)
-            currentLink = storage.attribute(.link, at: range.location, effectiveRange: nil) as? URL
+            currentLink = link(at: range.location)
         } else {
             isBold = typing[DocRendering.boldKey] != nil
             isItalic = typing[DocRendering.italicKey] != nil
             let inside = range.location > 0 && range.location <= storage.length
-            currentLink = inside ? storage.attribute(.link, at: range.location - 1, effectiveRange: nil) as? URL : nil
+            currentLink = inside ? link(at: range.location - 1) : nil
         }
+    }
+
+    private func link(at location: Int) -> URL? {
+        (storage?.attribute(.link, at: location, effectiveRange: nil) as? URL).flatMap(DocRendering.openable)
     }
 
     private func isEverywhere(_ key: NSAttributedString.Key, in range: NSRange) -> Bool {
@@ -230,6 +230,7 @@ final class DocEditorController: NSObject {
             _ = storage.attribute(.link, at: range.location - 1, longestEffectiveRange: &range, in: NSRange(location: 0, length: storage.length))
         }
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.utf8.count <= DocText.maxLinkLength else { return }
         if trimmed.isEmpty {
             storage.removeAttribute(.link, range: range)
         } else if let url = URL(string: trimmed.contains(":") ? trimmed : "https://\(trimmed)"), DocText.isOpenable(url) {
@@ -343,8 +344,11 @@ struct DocTextEditor: UIViewRepresentable {
     func updateUIView(_ view: UITextView, context: Context) {}
 }
 #else
-/// Pasted text arrives as plain text, so another app's fonts and colours can't get in.
+/// Text only ever comes in plain, by paste or by drop, so another app's fonts, colours, and links can't get in.
 private final class PlainPasteTextView: NSTextView {
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { [.string] }
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [.string] }
+
     override func paste(_ sender: Any?) {
         pasteAsPlainText(sender)
     }

@@ -412,16 +412,27 @@ private struct ReaderMoveSheet: View {
     let onChoose: (UUID?) -> Void
     @Environment(\.dismiss) private var dismiss
 
+    private static let deepestIndent = 6
+
     private struct Choice: Identifiable {
         let folder: ReaderItem
         let depth: Int
         var id: UUID { folder.id }
     }
 
-    private func choices(in parent: UUID?, depth: Int) -> [Choice] {
-        library.contents(of: parent, sortedBy: .name).folders.flatMap {
-            [Choice(folder: $0, depth: depth)] + choices(in: $0.id, depth: depth + 1)
+    /// Every folder, each under its parent. Sync can bring any depth, so this doesn't recurse.
+    private var choices: [Choice] {
+        var found: [Choice] = []
+        var waiting: [Choice] = []
+        func queue(_ parent: UUID?, depth: Int) {
+            waiting += library.contents(of: parent, sortedBy: .name).folders.reversed().map { Choice(folder: $0, depth: depth) }
         }
+        queue(nil, depth: 1)
+        while let next = waiting.popLast() {
+            found.append(next)
+            queue(next.folder.id, depth: next.depth + 1)
+        }
+        return found
     }
 
     var body: some View {
@@ -430,7 +441,7 @@ private struct ReaderMoveSheet: View {
         NavigationStack {
             List {
                 row("Reader", systemImage: "books.vertical", depth: 0, destination: nil, isEnabled: parent != nil)
-                ForEach(choices(in: nil, depth: 1)) { choice in
+                ForEach(choices) { choice in
                     row(
                         choice.folder.displayTitle, systemImage: "folder", depth: choice.depth, destination: choice.folder.id,
                         isEnabled: parent != choice.folder.id && library.canMove(entry, to: choice.folder.id)
@@ -457,7 +468,7 @@ private struct ReaderMoveSheet: View {
         } label: {
             Label(title, systemImage: systemImage)
                 .font(Typeface.body)
-                .padding(.leading, Space.s4 * CGFloat(depth))
+                .padding(.leading, Space.s4 * CGFloat(min(depth, Self.deepestIndent)))
         }
         .disabled(!isEnabled)
         .listRowBackground(Color.clear)

@@ -25,14 +25,21 @@ Only `http`, `https`, and `mailto` links open. Anything else stays as text.
 Folders are sealed items, travelling as `note` rows, so the server can't tell a folder from a doc or
 see a name. An item names its parent inside its sealed details. A missing parent or a loop puts an item
 at the top level, because a sync can deliver them in any order. The old collections became folders
-with an ID drawn from the name, so two devices migrating alone land on one folder.
+with an ID derived from the name and the root key, so two devices migrating alone land on one folder
+and the same name gives a different ID on every account.
 
-Deleted items stay sealed in Recently Deleted for 30 days, then they're removed for good. A deleted
-folder takes what's inside it, and restoring it brings them back.
+Deleted items stay sealed in Recently Deleted for 30 days, then they're removed the next time the
+Reader loads or syncs. A deleted folder takes what's inside it, and restoring it brings them back,
+including anything deleted from that folder earlier. Each device keeps its own Recently Deleted:
+"Delete now" clears this device's copy, and a copy still waiting on another device can be restored
+from there and sync back. The screen says so.
 
-PDFs show their real pages, decrypted into memory only. EPUB and Word files show extracted text. Their
-parsers take hostile files, so `ZipArchive` bounds every read and total size, and `SafeXML` removes
-DOCTYPEs before anything parses, which rules out external entities and entity expansion.
+PDFs show their real pages, decrypted into memory only, and their links pass `DocText.isOpenable` like
+a doc's. EPUB and Word files show extracted text. Their parsers take hostile files, so `ZipArchive`
+bounds every read and the total size, and `SafeXML` hands the XML parser UTF-8 with no declaration
+and no doctype, which rules out external entities, entity expansion, and declared-encoding tricks.
+Parsing stays linear in the file's size, because a file that freezes the vault freezes every device
+it syncs to.
 
 The proposal had Listen hand an audio `ContentRef` to the player. On-device speech produces no audio
 file, so there is nothing to refer to. Listen lives in `TotalityReader` as `ListenController` for now.

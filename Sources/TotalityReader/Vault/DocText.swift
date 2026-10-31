@@ -110,6 +110,9 @@ public struct DocText: Sendable, Equatable {
         }.joined(separator: "\n")
     }
 
+    /// Longer than this isn't kept as a link, which also keeps a hostile line from being slow to read.
+    public static let maxLinkLength = 2048
+
     /// Only these open from a doc, so a link can't start anything but a browser or a mail app.
     public static func isOpenable(_ url: URL) -> Bool {
         ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "")
@@ -143,12 +146,11 @@ public struct DocText: Sendable, Equatable {
 
     private static func markdown(_ run: Run) -> String {
         // Spaces stay outside the markers, because a marker next to a space reads badly in the file.
-        let trimmed = run.text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, run.bold || run.italic || run.link != nil else { return escaped(run.text) }
-        let leading = String(run.text.prefix { $0 == " " })
-        let trailing = trimmed.count + leading.count < run.text.count
-            ? String(run.text.suffix(run.text.count - trimmed.count - leading.count)) : ""
-        var text = escaped(trimmed)
+        let isSpace = { (character: Character) in character.unicodeScalars.allSatisfy(CharacterSet.whitespaces.contains) }
+        let leading = String(run.text.prefix(while: isSpace))
+        guard leading.count < run.text.count, run.bold || run.italic || run.link != nil else { return escaped(run.text) }
+        let trailing = String(run.text.reversed().prefix(while: isSpace).reversed())
+        var text = escaped(String(run.text.dropFirst(leading.count).dropLast(trailing.count)))
         if run.bold && run.italic {
             text = "***\(text)***"
         } else if run.bold {
@@ -156,7 +158,10 @@ public struct DocText: Sendable, Equatable {
         } else if run.italic {
             text = "*\(text)*"
         }
-        if let link = run.link { text = "[\(text)](\(link.absoluteString))" }
+        if let link = run.link {
+            let address = link.absoluteString.replacingOccurrences(of: "(", with: "\\(").replacingOccurrences(of: ")", with: "\\)")
+            text = "[\(text)](\(address))"
+        }
         return leading + text + trailing
     }
 
@@ -198,9 +203,26 @@ public struct DocText: Sendable, Equatable {
         var pending = ""
         var result: [Run] = []
         var link: URL?
+        /// Where each `(` closes, and every `]`, found once so that a line of nothing but `[a](` stays
+        /// quick. Worked out per line, and escaped characters don't count.
+        private var addressEnds: [Int: Int] = [:]
+        private var brackets: [Int] = []
+        private var nextBracket = 0
 
         init(_ characters: [Character]) {
             self.characters = characters
+            var open: [Int] = []
+            var position = 0
+            while position < characters.count {
+                switch characters[position] {
+                case "\\": position += 1
+                case "]": brackets.append(position)
+                case "(": open.append(position)
+                case ")": if let start = open.popLast() { addressEnds[start] = position }
+                default: break
+                }
+                position += 1
+            }
         }
 
         mutating func parse() -> [Run] {
@@ -227,9 +249,10 @@ public struct DocText: Sendable, Equatable {
             pending = ""
         }
 
-        private func count(of character: Character, at start: Int) -> Int {
+        /// Stops at four, because no marker needs to know more, and a line of nothing but stars stays quick.
+        private func stars(at start: Int) -> Int {
             var end = start
-            while end < characters.count, characters[end] == character { end += 1 }
+            while end < characters.count, end - start < 4, characters[end] == "*" { end += 1 }
             return end - start
         }
 
@@ -240,7 +263,7 @@ public struct DocText: Sendable, Equatable {
                 if characters[position] == "\\" {
                     position += 2
                 } else if characters[position] == "*" {
-                    let run = count(of: "*", at: position)
+                    let run = stars(at: position)
                     if run >= length { return true }
                     position += run
                 } else {
@@ -250,10 +273,20 @@ public struct DocText: Sendable, Equatable {
             return false
         }
 
+        /// How many stars of a run end what's open. Whatever's left over is read next, so bold running
+        /// straight into italic closes one and opens the other.
+        private func closingLength(_ run: Int) -> Int {
+            if bold && italic { return min(run, 3) }
+            if bold { return run >= 2 ? 2 : 0 }
+            if italic { return run == 2 ? 0 : 1 }
+            return 0
+        }
+
         private mutating func marker() {
-            let length = min(count(of: "*", at: index), 3)
-            let isClosing = (length == 3 && bold && italic) || (length == 2 && bold) || (length == 1 && italic)
-            guard isClosing || hasCloser(length: length, after: index + length) else {
+            let run = stars(at: index)
+            let closing = closingLength(run)
+            let length = closing > 0 ? closing : min(run, 3)
+            guard closing > 0 || hasCloser(length: length, after: index + length) else {
                 pending.append("*")
                 index += 1
                 return
@@ -265,27 +298,20 @@ public struct DocText: Sendable, Equatable {
         }
 
         /// `[words](address)`: the address, and where the words end, if this really is a link.
-        private func linkTarget() -> (close: Int, end: Int, url: URL)? {
+        private mutating func linkTarget() -> (close: Int, end: Int, url: URL)? {
             guard link == nil, let close = closingBracket() else { return nil }
             guard close + 1 < characters.count, characters[close + 1] == "(",
-                  let end = characters[(close + 2)...].firstIndex(of: ")"),
-                  let url = URL(string: String(characters[(close + 2)..<end])), DocText.isOpenable(url)
+                  let end = addressEnds[close + 1], end - close - 2 <= DocText.maxLinkLength
             else { return nil }
+            // A web address never holds a real backslash, so here it only ever marks a bracket.
+            let address = String(characters[(close + 2)..<end]).replacingOccurrences(of: "\\", with: "")
+            guard let url = URL(string: address), DocText.isOpenable(url) else { return nil }
             return (close, end, url)
         }
 
-        private func closingBracket() -> Int? {
-            var position = index + 1
-            while position < characters.count {
-                if characters[position] == "\\" {
-                    position += 2
-                } else if characters[position] == "]" {
-                    return position
-                } else {
-                    position += 1
-                }
-            }
-            return nil
+        private mutating func closingBracket() -> Int? {
+            while nextBracket < brackets.count, brackets[nextBracket] <= index { nextBracket += 1 }
+            return nextBracket < brackets.count ? brackets[nextBracket] : nil
         }
 
         private mutating func openLink(_ target: (close: Int, end: Int, url: URL)) {

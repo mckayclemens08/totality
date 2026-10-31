@@ -51,6 +51,8 @@ public final class ReaderModel {
     public func load() async {
         do {
             try? await vault.adoptCollections()
+            // Sync does this too, but "30 days" has to hold on a device that's offline.
+            try? await vault.emptyOldTrash()
             let listing = try await vault.list()
             library = ReaderLibrary(items: listing.items, folders: listing.folders)
             trash = try await vault.trashed()
