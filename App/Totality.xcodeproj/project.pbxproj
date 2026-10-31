@@ -11,6 +11,7 @@
 		A1B2C3D40000000000000016 /* TotalityCore in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000013 /* TotalityCore */; };
 		A1B2C3D40000000000000017 /* TotalityUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000014 /* TotalityUI */; };
 		A1B2C3D40000000000000018 /* TotalityReader in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000015 /* TotalityReader */; };
+		A1B2C3D40000000000000031 /* TotalityCalendar in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000032 /* TotalityCalendar */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 				A1B2C3D40000000000000016 /* TotalityCore in Frameworks */,
 				A1B2C3D40000000000000017 /* TotalityUI in Frameworks */,
 				A1B2C3D40000000000000018 /* TotalityReader in Frameworks */,
+				A1B2C3D40000000000000031 /* TotalityCalendar in Frameworks */,
 				A1B2C3D4000000000000001A /* TotalityAccount in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -81,6 +83,7 @@
 				A1B2C3D40000000000000013 /* TotalityCore */,
 				A1B2C3D40000000000000014 /* TotalityUI */,
 				A1B2C3D40000000000000015 /* TotalityReader */,
+				A1B2C3D40000000000000032 /* TotalityCalendar */,
 				A1B2C3D40000000000000019 /* TotalityAccount */,
 			);
 			productName = Totality;
@@ -282,6 +285,10 @@
 		A1B2C3D40000000000000015 /* TotalityReader */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TotalityReader;
+		};
+		A1B2C3D40000000000000032 /* TotalityCalendar */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TotalityCalendar;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

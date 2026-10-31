@@ -50,6 +50,15 @@ public struct ReaderHomeView: View {
             Text(model.notice ?? "")
         }
         .task { await model.load() }
+        .task(id: model.requestedItem) {
+            guard let id = model.requestedItem else { return }
+            model.requestedItem = nil
+            if let item = try? await model.currentItem(id) {
+                path = [item]
+            } else {
+                model.notice = ReaderError.notFound.message
+            }
+        }
         .task(id: model.query) {
             try? await Task.sleep(for: Self.searchPause)
             guard !Task.isCancelled else { return }

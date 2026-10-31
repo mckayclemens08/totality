@@ -15,6 +15,8 @@ public final class ReaderModel {
     public private(set) var unreadable = 0
     public private(set) var hits: [ReaderSearchHit] = []
     public var query = ""
+    /// An item another module asked to open. The home screen takes it from here.
+    public var requestedItem: UUID?
     /// A problem to show the person, cleared when they dismiss it.
     public var notice: String?
 

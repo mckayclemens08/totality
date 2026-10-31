@@ -18,6 +18,12 @@ extension ContentRootKey {
 
     /// Only creates a key on a true first run. A read error, or sealed data with no key to open it,
     /// stops here: a new root would sit beside the old data and split the person's content in two.
+    /// Every module's storage has to be counted. A key is only safe to create when nothing anywhere
+    /// is sealed under the one that's missing.
+    public static func loadOrCreate(in store: any KeyStore, sealedIn stores: [any BlobStore]) throws -> ContentRootKey {
+        try loadOrCreate(in: store, hasSealedData: stores.contains { try !$0.names().isEmpty })
+    }
+
     public static func loadOrCreate(in store: any KeyStore, hasSealedData: Bool) throws -> ContentRootKey {
         if let stored = try store.load(keyStoreName) {
             return try ContentRootKey(bytes: stored)
