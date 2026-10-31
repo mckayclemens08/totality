@@ -132,6 +132,10 @@ public final class ReaderModel {
         String(decoding: try await vault.body(of: id), as: UTF8.self)
     }
 
+    public func loadDoc(_ id: UUID) async throws -> DocText {
+        try await vault.doc(id)
+    }
+
     /// Returns false when the save failed, so the editor keeps the text for another try.
     @discardableResult
     public func saveNote(_ id: UUID, title: String, body: String) async -> Bool {
@@ -148,9 +152,13 @@ public final class ReaderModel {
 
     /// For an open note. Returns the version now saved, or nil if the save failed. If the note changed
     /// elsewhere, what was typed is kept as a copy, and that copy opens so typing carries on there.
-    public func saveNote(_ id: UUID, title: String, body: String, basedOn: Date) async -> NoteSave? {
+    public func saveDoc(_ id: UUID, title: String, doc: DocText, basedOn: Date) async -> NoteSave? {
+        await saveNote(id, title: title, body: doc.markdown, mime: ReadableText.markdownMime, basedOn: basedOn)
+    }
+
+    public func saveNote(_ id: UUID, title: String, body: String, mime: String? = nil, basedOn: Date) async -> NoteSave? {
         do {
-            let result = try await vault.saveNote(id, title: title, body: body, basedOn: basedOn)
+            let result = try await vault.saveNote(id, title: title, body: body, mime: mime, basedOn: basedOn)
             await load()
             await search()
             if case .keptAsCopy(let copy) = result {

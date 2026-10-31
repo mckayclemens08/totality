@@ -193,11 +193,12 @@ public actor ReaderVault {
 
     /// Reads the latest metadata first, so saving a note never undoes a newer Listen position.
     @discardableResult
-    public func saveNote(_ id: UUID, title: String, body: String) throws -> ReaderItem {
+    public func saveNote(_ id: UUID, title: String, body: String, mime: String? = nil) throws -> ReaderItem {
         var updated = try item(id)
         guard updated.kind == .note else { throw ReaderError.notANote }
         let data = Data(body.utf8)
         updated.title = title
+        if let mime { updated.mime = mime }
         updated.byteCount = data.count
         updated.updatedAt = Date()
         try writeBody(data, id: id)
@@ -207,12 +208,17 @@ public actor ReaderVault {
 
     /// For an open note. `basedOn` is the version the editor loaded, so a sync that changed the note
     /// underneath it can't be overwritten by the older text in the editor.
-    public func saveNote(_ id: UUID, title: String, body: String, basedOn: Date) throws -> NoteSave {
+    public func saveNote(_ id: UUID, title: String, body: String, mime: String? = nil, basedOn: Date) throws -> NoteSave {
         if let current = try? item(id), current.updatedAt == basedOn {
-            return .saved(try saveNote(id, title: title, body: body))
+            return .saved(try saveNote(id, title: title, body: body, mime: mime))
         }
         let copy = try createNote(title: "\(title.isEmpty ? "Untitled" : title) (conflict copy)", folder: try? item(id).folderID)
-        return .keptAsCopy(try saveNote(copy.id, title: copy.title, body: body))
+        return .keptAsCopy(try saveNote(copy.id, title: copy.title, body: body, mime: mime))
+    }
+
+    public func doc(_ id: UUID) throws -> DocText {
+        let text = String(decoding: try body(of: id), as: UTF8.self)
+        return try item(id).mime == ReadableText.markdownMime ? DocText(markdown: text) : DocText(plain: text)
     }
 
     public func importFile(_ data: Data, filename: String, folder: UUID? = nil) throws -> ReaderItem {
