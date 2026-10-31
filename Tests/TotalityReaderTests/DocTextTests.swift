@@ -147,7 +147,7 @@ import Testing
     @Test("Hostile lines stay quick", arguments: [
         String(repeating: "[a](", count: 40_000), String(repeating: "[", count: 200_000),
         String(repeating: "[a](http:", count: 20_000) + String(repeating: ")", count: 20_000), String(repeating: "*", count: 200_000),
-        String(repeating: "* ", count: 100_000),
+        String(repeating: "* ", count: 100_000), String(repeating: "[a](", count: 20_000) + String(repeating: ")", count: 20_000),
     ])
     func hostileLines(_ line: String) {
         let start = Date()

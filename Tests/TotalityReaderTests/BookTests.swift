@@ -255,6 +255,8 @@ happen in the head first.</p><ul><li>Commit</li><li>to the &ldquo;move&rdquo;</l
         ] {
             #expect(!SafeXML.withoutDoctypes(text).lowercased().contains("<!doctype"), "\(text)")
         }
+        // A `>` inside quotes doesn't end it, so nothing of the doctype is left over to parse.
+        #expect(SafeXML.withoutDoctypes(#"<!DOCTYPE x [<!ENTITY a "]>"><!ENTITY b "more">]><p>Real</p>"#) == " <p>Real</p>")
         #expect(SafeXML.withoutDoctypes("<p>Real</p>") == "<p>Real</p>")
     }
 

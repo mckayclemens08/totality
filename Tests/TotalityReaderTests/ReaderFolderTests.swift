@@ -70,6 +70,16 @@ import TotalityCore
         #expect(library.path(to: inner.id).map(\.title) == ["One", "Inner"])
     }
 
+    @Test("Folders inside a loop stay where they are, and only the loop itself moves to the top")
+    func leadInsAreNotLoops() {
+        let (first, second) = (UUID(), UUID())
+        let loop = [entry("One", in: second, id: first), entry("Two", in: first, id: second)]
+        let inside = (0..<200).map { entry("Inside \($0)", in: first) }
+        let library = ReaderLibrary(folders: loop + inside)
+        #expect(library.contents(of: first).folders.count == 200)
+        #expect(library.contents(of: nil).folders.count == 2)
+    }
+
     @Test("A very deep tree stays quick and can't overflow anything")
     func deepTree() {
         var parent: UUID?
