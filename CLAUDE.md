@@ -96,7 +96,8 @@ membership.
 
 Stages A and B cost nothing. Free tiers, open source, hardware already owned. If a feature cannot be
 done at $0, it waits or gets redesigned — it does not quietly start a subscription. Flag it, don't
-decide it.
+decide it. The one named exception is the domain, `usetotality.com`, which the owner bought on 2026-10-30
+at roughly $10 a year (proposal §11-L).
 
 ## Running the app
 
@@ -123,7 +124,8 @@ Mac app. Groups are Discord-shaped; DMs are Snapchat-shaped minus the clutter. S
 with a Lemon8-style discovery homepage. Docs are a content type inside the Reader — there is no Docs
 module. Listen is a button inside the Reader — there is no Speechify module. Shopping is
 Amazon-*like*, never an Amazon wrapper. Home screen is a flower: one ring of same-sized modules around the most recently used one (owner, 2026-10-30, replacing the panning bubble cloud).
-Federation and E2E are principles, not features. Pi self-hosting is the hosting direction.
+Federation and E2E are principles, not features. Pi self-hosting is the hosting direction. The Matrix
+server name is `usetotality.com`, and it cannot change.
 
 ## Decisions that are OPEN — ask, do not guess
 
