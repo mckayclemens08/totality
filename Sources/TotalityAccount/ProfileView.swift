@@ -180,14 +180,19 @@ struct AccountSettingsView: View {
                 AccountDetail(text: "Signed in as \(username).")
             }
             AccountDetail(text: model.deviceRegistered ? "This device is added to your account." : "This device isn't added to your account yet.")
-            AccountDetail(text: model.sync?.lastSynced == nil
-                ? "Set up your recovery key to sync your notes, files, and events. Signing out leaves them on this device, and event reminders keep showing."
-                : "Your notes, files, and events sync between your devices, encrypted. Signing out leaves them on this device, and event reminders keep showing.")
+            AccountDetail(text: model.sync?.isAvailable == true
+                ? "Your notes, files, and events sync between your devices, encrypted. Signing out leaves them on this device, and event reminders keep showing."
+                : "Set up your recovery key to sync your notes, files, and events. Signing out leaves them on this device, and event reminders keep showing.")
             if let sync = model.sync, let summary = sync.summary {
                 AccountDetail(text: summary)
                 Button("Sync now") { Task { await sync.syncNow() } }
                     .font(Typeface.callout)
                     .disabled(sync.status == .syncing)
+                if sync.heldRemovals > 0 {
+                    Button("Remove those \(sync.heldRemovals) items here too") { Task { await sync.applyHeldRemovals() } }
+                        .font(Typeface.callout)
+                        .disabled(sync.status == .syncing)
+                }
             }
             if let backup = model.backup {
                 NavigationLink("Recovery key") { BackupView(model: backup) }

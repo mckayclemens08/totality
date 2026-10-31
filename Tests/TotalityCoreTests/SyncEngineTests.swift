@@ -9,6 +9,11 @@ private actor Area: SyncArea {
     var conflictAnswer = ConflictResolution.keepLocal
     var conflicts = 0
     var deletions = Set<UUID>()
+    var trash: [UUID: SealedObject] = [:]
+    var trashSweeps = 0
+    var damaged = Set<UUID>()
+    /// Runs once, right before a store or removal, to stand in for a save landing mid-sync.
+    var beforeWrite: (@Sendable (Area) async -> Void)?
     /// Stands in for a key that doesn't open what arrives.
     var refuseWith: (any Error)?
 
@@ -22,15 +27,41 @@ private actor Area: SyncArea {
     }
     /// The file just vanishes, with no record of anyone deleting it.
     func lose(_ id: UUID) { objects[id] = nil }
+    /// A file's bytes go bad on disk.
+    func corrupt(_ id: UUID) {
+        guard let old = objects[id] else { return }
+        objects[id] = SealedObject(id: id, kind: old.kind, meta: old.meta + Data([0]), body: old.body)
+        damaged.insert(id)
+    }
+    func setBeforeWrite(_ action: @escaping @Sendable (Area) async -> Void) { beforeWrite = action }
 
     func sealedObjectIDs() async throws -> [UUID] { Array(objects.keys) }
     func sealedHash(of id: UUID) async throws -> String? { objects[id]?.hash }
     func sealedObject(_ id: UUID) async throws -> SealedObject? { objects[id] }
-    func store(_ object: SealedObject) async throws {
-        if let refuseWith { throw refuseWith }
-        objects[object.id] = object
+    func verifiedObject(_ id: UUID) async throws -> SealedObject? {
+        if damaged.contains(id) { throw CryptoError.authenticationFailed }
+        return objects[id]
     }
-    func removeObject(_ id: UUID) async throws { objects[id] = nil }
+    private func runBeforeWrite() async {
+        guard let action = beforeWrite else { return }
+        beforeWrite = nil
+        await action(self)
+    }
+    func store(_ object: SealedObject, ifLocalHash: String?) async throws {
+        if let refuseWith { throw refuseWith }
+        await runBeforeWrite()
+        guard objects[object.id]?.hash == ifLocalHash else { throw SyncError.changedLocally }
+        if ifLocalHash == nil, deletions.contains(object.id) { throw SyncError.changedLocally }
+        objects[object.id] = object
+        damaged.remove(object.id)
+    }
+    func removeObject(_ id: UUID, ifLocalHash: String) async throws {
+        await runBeforeWrite()
+        guard objects[id]?.hash == ifLocalHash else { throw SyncError.changedLocally }
+        trash[id] = objects[id]
+        objects[id] = nil
+    }
+    func emptyOldTrash() async throws { trashSweeps += 1 }
     func deletedObjectIDs() async throws -> Set<UUID> { deletions }
     func clearDeletion(_ id: UUID) async throws { deletions.remove(id) }
     func resolveConflict(local: SealedObject, remote: SealedObject) async throws -> ConflictResolution {
@@ -45,20 +76,30 @@ private actor Server: SyncRemote {
     var failUploads = false
     var failFetches = false
     var failDeletes = false
+    /// What `fetch` returns instead of the listed version, like a replayed old copy.
+    var stale: [UUID: SealedObject] = [:]
+    /// Rows the list leaves out, like a page that came back short.
+    var hidden = Set<UUID>()
     private(set) var uploads = 0
 
     func setFailUploads(_ fail: Bool) { failUploads = fail }
     func setFailFetches(_ fail: Bool) { failFetches = fail }
     func setFailDeletes(_ fail: Bool) { failDeletes = fail }
     func tamper(_ id: UUID, with object: SealedObject) { live[id] = object }
+    func serveStale(_ object: SealedObject) { stale[object.id] = object }
+    func hide(_ id: UUID) { hidden.insert(id) }
+    func markDeleted(_ id: UUID) {
+        guard let object = live.removeValue(forKey: id) else { return }
+        tombstones[id] = object.kind
+    }
 
     func list() async throws -> [RemoteRecord] {
-        live.values.map { RemoteRecord(id: $0.id, kind: $0.kind, hash: $0.hash, byteCount: $0.body?.count ?? 0) }
+        live.values.filter { !hidden.contains($0.id) }.map { RemoteRecord(id: $0.id, kind: $0.kind, hash: $0.hash, byteCount: $0.body?.count ?? 0) }
             + tombstones.map { RemoteRecord(id: $0.key, kind: $0.value, hash: nil, byteCount: 0) }
     }
-    func fetch(_ id: UUID) async throws -> SealedObject? {
+    func fetch(_ id: UUID, reusing local: SealedObject?) async throws -> SealedObject? {
         if failFetches { throw URLError(.notConnectedToInternet) }
-        return live[id]
+        return stale[id] ?? live[id]
     }
     func upload(_ object: SealedObject, expected: String?, replacingDeleted: Bool) async throws {
         if failUploads { throw URLError(.notConnectedToInternet) }
@@ -232,6 +273,150 @@ private struct Device {
         #expect(report.downloaded == 4)
         #expect(await server.tombstones.isEmpty)
         #expect(await phone.area.objects.count == 4)
+    }
+
+    @Test("A save that lands during a pull is never overwritten")
+    func aSaveDuringAPullSurvives() async throws {
+        let (phone, mac) = (Device(server: server), Device(server: server))
+        let id = UUID()
+        await phone.area.put(note(id, "one"))
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        await mac.area.put(note(id, "from the mac"))
+        _ = try await mac.engine.sync()
+        await phone.area.setBeforeWrite { await $0.put(note(id, "typed just now")) }
+        _ = try await phone.engine.sync()
+        #expect(await phone.area.objects[id] == note(id, "typed just now"))
+    }
+
+    @Test("A save that lands during a removal isn't thrown away")
+    func aSaveDuringARemovalSurvives() async throws {
+        let (phone, mac) = (Device(server: server), Device(server: server))
+        let id = UUID()
+        await phone.area.put(note(id, "one"))
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        await mac.area.delete(id)
+        _ = try await mac.engine.sync()
+        await phone.area.setBeforeWrite { await $0.put(note(id, "typed just now")) }
+        _ = try await phone.engine.sync()
+        #expect(await phone.area.objects[id] == note(id, "typed just now"))
+    }
+
+    @Test("A damaged file here is repaired from the server, and never replaces the good copy")
+    func damageIsRepairedNotPushed() async throws {
+        let phone = Device(server: server)
+        let item = note("good")
+        await phone.area.put(item)
+        _ = try await phone.engine.sync()
+        await phone.area.corrupt(item.id)
+        let report = try await phone.engine.sync()
+        #expect(report.uploaded == 0)
+        #expect(await server.live[item.id] == item)
+        #expect(await phone.area.objects[item.id] == item)
+    }
+
+    @Test("A damaged file with no server copy goes nowhere, and stays here for someone to look at")
+    func damageWithNoCopyIsNotUploaded() async throws {
+        let phone = Device(server: server)
+        let item = note("only here")
+        await phone.area.put(item)
+        await phone.area.corrupt(item.id)
+        #expect(try await phone.engine.sync().rejected == 1)
+        #expect(await server.live.isEmpty)
+        #expect(await phone.area.objects[item.id] != nil)
+    }
+
+    @Test("Removed by another device means trash here, not gone")
+    func removalsGoToTrash() async throws {
+        let (phone, mac) = (Device(server: server), Device(server: server))
+        let item = note("first")
+        await phone.area.put(item)
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        await phone.area.delete(item.id)
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        #expect(await mac.area.trash[item.id] == item)
+    }
+
+    @Test("If a server says nearly everything was deleted, nothing goes until the person agrees")
+    func massRemovalsWait() async throws {
+        let (phone, mac) = (Device(server: server), Device(server: server))
+        let items = (0..<20).map { note("item \($0)") }
+        for item in items { await phone.area.put(item) }
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        for item in items { await server.markDeleted(item.id) }
+        let held = try await mac.engine.sync()
+        #expect(held.heldRemovals == 20)
+        #expect(held.removedHere == 0)
+        #expect(await mac.area.objects.count == 20)
+        let agreed = try await mac.engine.sync(allowLargeRemoval: true)
+        #expect(agreed.removedHere == 20)
+        #expect(await mac.area.trash.count == 20)
+    }
+
+    @Test("Every sync clears out trash that's past its time")
+    func syncSweepsTrash() async throws {
+        let phone = Device(server: server)
+        _ = try await phone.engine.sync()
+        #expect(await phone.area.trashSweeps == 1)
+    }
+
+    @Test("A few deletes go through without asking")
+    func smallRemovalsDoNotAsk() async throws {
+        let (phone, mac) = (Device(server: server), Device(server: server))
+        let items = (0..<20).map { note("item \($0)") }
+        for item in items { await phone.area.put(item) }
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        for item in items.prefix(3) { await phone.area.delete(item.id) }
+        _ = try await phone.engine.sync()
+        let report = try await mac.engine.sync()
+        #expect(report.heldRemovals == 0)
+        #expect(report.removedHere == 3)
+    }
+
+    @Test("What arrives must be what the list promised, so a replayed old copy is ignored")
+    func staleFetchesAreRefused() async throws {
+        let (phone, mac) = (Device(server: server), Device(server: server))
+        let id = UUID()
+        let old = note(id, "old")
+        await phone.area.put(old)
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        await phone.area.put(note(id, "new"))
+        _ = try await phone.engine.sync()
+        await server.serveStale(old)
+        #expect(try await mac.engine.sync().downloaded == 0)
+        #expect(await mac.area.objects[id] == old)
+    }
+
+    @Test("An item that exists doesn't keep a stale delete record")
+    func staleDeletionRecordsClear() async throws {
+        let (phone, mac) = (Device(server: server), Device(server: server))
+        let item = note("first")
+        await phone.area.put(item)
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        await mac.area.delete(item.id)
+        await mac.area.put(item)
+        _ = try await mac.engine.sync()
+        #expect(await mac.area.deletions.isEmpty)
+        #expect(await server.live[item.id] == item)
+    }
+
+    @Test("A delete that a partial list didn't mention isn't forgotten")
+    func pendingDeletesSurviveAShortList() async throws {
+        let phone = Device(server: server)
+        let item = note("first")
+        await phone.area.put(item)
+        _ = try await phone.engine.sync()
+        await phone.area.delete(item.id)
+        await server.hide(item.id)
+        _ = try await phone.engine.sync()
+        #expect(await phone.area.deletions == [item.id])
     }
 
     @Test("Deleting your only item really deletes it")
@@ -416,6 +601,12 @@ private struct Device {
         let id = UUID()
         try state.save([id: "abc"])
         #expect(try FileSyncState(file: file).load() == [id: "abc"])
+    }
+
+    @Test("A derived ID is stable, so a retry can't make a second copy")
+    func derivedIDsAreStable() {
+        #expect(UUID(derivedFrom: "a") == UUID(derivedFrom: "a"))
+        #expect(UUID(derivedFrom: "a") != UUID(derivedFrom: "b"))
     }
 
     @Test("Any change to the sealed bytes changes the hash")

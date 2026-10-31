@@ -122,7 +122,7 @@ struct RootView: View {
             reader = content.reader
             calendar = content.calendar
             syncAreas = content.areas
-            Task { await refreshRecoveryLabels() }
+            refreshRecoveryLabels()
         } catch KeyStoreError.keyMissing {
             contentProblem = .keyMissing
         } catch {
@@ -130,23 +130,24 @@ struct RootView: View {
         }
     }
 
-    private func refreshRecoveryLabels() async {
-        let canSync = await account?.backup?.deviceCanSync() ?? false
-        reader?.isSynced = canSync
-        calendar?.isSynced = canSync
+    /// Only a sync that really finished counts, so the screens can't claim safety too early.
+    private func refreshRecoveryLabels() {
+        let isProtected = account?.sync?.isProtected ?? false
+        reader?.isSynced = isProtected
+        calendar?.isSynced = isProtected
     }
 
     /// Sync runs on the same vaults the modules use, so it opens them if nothing has yet.
     private func connectSync() {
         guard let account, let sync = account.sync, let remote = account.syncRemote, let backup = account.backup else { return }
-        sync.run = {
+        sync.run = { allowLargeRemoval in
             guard await backup.deviceCanSync() else { return nil }
             prepareContent()
             guard !syncAreas.isEmpty else { return nil }
-            await refreshRecoveryLabels()
             let engine = SyncEngine(areas: syncAreas, remote: remote, state: FileSyncState(file: try ContentSetup.syncStateFile()))
-            return try await engine.sync()
+            return try await engine.sync(allowLargeRemoval: allowLargeRemoval)
         }
+        sync.onFinished = { refreshRecoveryLabels() }
         sync.onChanged = {
             await reader?.load()
             await calendar?.load()

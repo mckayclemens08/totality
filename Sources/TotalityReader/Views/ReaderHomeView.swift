@@ -151,7 +151,7 @@ public struct ReaderHomeView: View {
                     .listRowBackground(Color.clear)
             }
             Label(
-                model.isSynced ? "Encrypted, and synced between your devices." : "Encrypted here. It can't be recovered on a new device yet.",
+                model.isSynced ? "Encrypted, and backed up by sync." : "Encrypted here. It can't be recovered on a new device yet.",
                 systemImage: model.isSynced ? "lock" : "iphone"
             )
                 .font(Typeface.caption)

@@ -35,7 +35,7 @@ Spec: issue #12. An event is one sealed blob with its times inside, so storage s
 - Device calendars are read through EventKit, held in memory, and never written to Totality's storage. Totality doesn't encrypt them, and the UI says so. Only opaque calendar IDs are kept, in `UserDefaults`, to remember which are hidden.
 - A reminder gives the operating system the title and time only, outside Totality's encryption. Locations and notes never go with it.
 - Reader and Calendar share one root key, so `ContentRootKey.loadOrCreate(in:sealedIn:)` has to count every module's storage. A key is only created when nothing anywhere is sealed under a missing one.
-- Sync waits for key backup, because each device still has its own key. Reminders are also planned per device.
+- Reminders are planned per device. Events sync, and each device schedules its own reminders from what it has.
 - Sealed events go into device backups as ciphertext, but the key doesn't, so a restore lands on the missing-key screen until key backup exists. That's why the screen doesn't say events stay on this device.
 - App-switcher snapshots can hold event text, the same as the Reader. Both need a privacy screen before Phase 3.
 
@@ -48,13 +48,38 @@ Spec: issue #17. A device's content key is locked by a recovery key in Matrix's 
 - `key_backups` allows no client update or delete, so a stolen session can't replace or erase a backup. Replacing a recovery key will need a server-side flow.
 - `ContentKeyRing` is the only code that moves content between keys. The old key is saved, then the new key, and only then does any blob change, so a crash at any point resumes on the next launch. Each moved blob is read back before going on. A blob neither key opens is left alone, and the old key stays on the device.
 - Any new sealed module must declare its blobs in `sealedPurposes`, be added to `ContentSetup.keyRing()`, and close its vault in the app's `willMove`, or a key move will leave it behind. A vault closes before the move lists blobs, because anything written after that under the old key would be lost.
-- A device's key belongs to one account, in `content-key-owner`. Content isn't kept per account yet, so without this a second person signing in could lock the first person's key into their own backup. Per-account storage replaces this when sync lands.
+- A device's key belongs to one account, in `content-key-owner`. Content isn't kept per account, so without this a second person signing in could lock the first person's key into their own backup. A device still holds one person's content, and sync doesn't change that.
   - **Getting an owner:** an install from before this existed takes its signed-in account once at launch. An empty device takes whoever signs in. A device with content asks, but a yes only continues the screen: the claim is written when setup or joining succeeds, because an answer proves nothing.
   - **Changing owner:** an empty device passes to the next account with a new key. With content, a recovery key that opens it proves ownership. The owning account can release a device it never joined to a backup.
   - **Known gap:** with content and no recovery key, the owner's password is the only way back in. The server owner can reset it from the Supabase dashboard, and account deletion will need its own release.
 - A joined device remembers the backup's fingerprint, not its ID, so a server can't swap the contents behind the same ID. A backup is never written over a different one on Matrix.
 - `fetchBackup` returns nil only when both servers answer that there's nothing. An outage must never read as "no backup", because that invites a second recovery key.
 - A handle is retired for good when its profile is deleted, because Matrix finds accounts by name and the next owner would inherit the old account.
+
+## Encrypted sync
+
+Notes, files, and events move between one person's devices as sealed bytes. A row in `content_objects` is one item, with its sealed details in `meta_cipher`. A body goes to the `content` Storage bucket at `<owner>/<id>/<bodyHash>.body`. A deleted item keeps a row with `deleted_at` and nothing else. The server sees each item's ID, kind, size, and times, and never what's in it.
+
+- `SyncEngine` compares three things for each item: this device, the server, and the hash they last agreed on, saved after every item. That's how it tells "I changed this" from "they changed this".
+- Every write names the version it expects, on both sides. The server takes `content_hash` as the check. A vault's `store` and `removeObject` take `ifLocalHash`, so a save that lands during a sync is never overwritten. The next sync sorts it out.
+- Only an explicit `.deleted` record here deletes from the server. A missing file comes back from the server instead of spreading.
+- Only a row with `deleted_at` counts as deleted there. A live row with no valid hash is skipped, because broken isn't gone.
+- What the server says is deleted moves to a local trash for 30 days, because that claim can't be proved. `removeObject` writes `<id>.trashed` first, so a crash can't strand trash.
+- More than 5 removals, and more than a fifth of what's here, in one sync waits for the person to agree in Settings.
+- Nothing leaves without opening. `verifiedObject` proves every part opens under this device's key, so a damaged file can't replace the good copy. If the server has a copy, the damaged one is repaired from it. If not, it stays here and is counted as rejected.
+- Nothing arrives without opening, and what's fetched must match the hash the list gave.
+- If both sides changed, the newest stays and the older is kept as a conflict copy, unless nothing a person would notice differs. The copy's ID comes from the two hashes, so a retry can't double it.
+- An edit against a delete keeps the edit, because a lost edit can't be undone.
+- An open editor saves against the version it loaded. A note that changed meanwhile keeps what was typed as a conflict copy. A stale calendar edit is refused and the screen reloads.
+- Screens may only say content is backed up once `SyncModel.isProtected` is true, which takes a sync that really finished cleanly.
+- The Reader caps imports at 49 MB, so anything that gets in fits under the bucket's 50 MB ceiling once sealed.
+- New sealed files need to be in `sealedPurposes`, including their `.trash` names, or a key move leaves them behind.
+
+**Known limits, not yet closed:**
+
+- **Rollback and splicing.** A server can't read or forge an item, but it can replay an old sealed version, or pair one version's details with another's body. Hashes only prove the bytes match the list, and the list comes from the same server. Closing this takes a rising version number and the body's hash inside the sealed details, which goes in before Phase 2.
+- **Deletes aren't authenticated.** A server can claim anything is deleted. The trash and the 5-removal hold limit the damage, and they don't prevent it.
+- **Trash has no screen yet.** It's recoverable by the app, not by the person. "Recently deleted" arrives with the Reader upgrade.
 
 ## Sharing an item
 

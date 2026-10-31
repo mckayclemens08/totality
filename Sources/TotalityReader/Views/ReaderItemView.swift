@@ -47,6 +47,8 @@ private struct NoteEditor: View {
     @State private var text = ""
     /// Nil until the note has loaded, so an empty editor can never overwrite the stored note.
     @State private var saved: Draft?
+    /// The version the editor loaded, so a save can tell if the note moved on underneath it.
+    @State private var version: Date?
     @State private var failed = false
 
     private var draft: Draft {
@@ -80,17 +82,13 @@ private struct NoteEditor: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.bg.color)
-        .task {
-            do {
-                // The navigation value can be out of date, so only its ID is trusted.
-                let current = try await model.currentItem(item.id)
-                let loaded = Draft(title: current.title, body: try await model.loadNote(item.id))
-                title = loaded.title
-                text = loaded.body
-                saved = loaded
-            } catch {
-                failed = true
-            }
+        .task { await reload() }
+        .onChange(of: model.items) {
+            // A sync brought a newer version. With nothing unsaved here, the editor just catches up.
+            guard draft == saved, let latest = model.items.first(where: { $0.id == item.id }),
+                  latest.updatedAt != version
+            else { return }
+            Task { await reload() }
         }
         .task(id: draft) {
             try? await Task.sleep(for: Self.savePause)
@@ -102,10 +100,32 @@ private struct NoteEditor: View {
         }
     }
 
+    private func reload() async {
+        do {
+            // The navigation value can be out of date, so only its ID is trusted.
+            let current = try await model.currentItem(item.id)
+            let loaded = Draft(title: current.title, body: try await model.loadNote(item.id))
+            title = loaded.title
+            text = loaded.body
+            saved = loaded
+            version = current.updatedAt
+        } catch {
+            failed = true
+        }
+    }
+
     private func save() async {
         let current = draft
-        guard let saved, current != saved else { return }
-        if await model.saveNote(item.id, title: current.title, body: current.body) { self.saved = current }
+        guard let saved, let version, current != saved else { return }
+        switch await model.saveNote(item.id, title: current.title, body: current.body, basedOn: version) {
+        case .saved(let item):
+            self.saved = current
+            self.version = item.updatedAt
+        case .keptAsCopy:
+            await reload()
+        case nil:
+            break
+        }
     }
 }
 

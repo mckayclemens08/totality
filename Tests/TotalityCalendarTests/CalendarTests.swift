@@ -366,7 +366,7 @@ enum Dates {
         let (first, second) = try pair()
         let event = Dates.event(Dates.date(2026, 10, 15, 9), title: "Dentist")
         try await first.save(event)
-        try await second.store(try #require(try await first.sealedObject(event.id)))
+        try await second.store(try #require(try await first.sealedObject(event.id)), ifLocalHash: nil)
         #expect(try await second.event(event.id) == event)
     }
 
@@ -376,7 +376,7 @@ enum Dates {
         let stranger = CalendarVault(store: MemoryBlobs(), rootKey: try ContentRootKey.generate())
         let event = Dates.event(Dates.date(2026, 10, 15, 9))
         try await stranger.save(event)
-        await #expect(throws: (any Error).self) { try await first.store(try #require(try await stranger.sealedObject(event.id))) }
+        await #expect(throws: (any Error).self) { try await first.store(try #require(try await stranger.sealedObject(event.id)), ifLocalHash: nil) }
     }
 
     @Test("Both changed: the newest stays, and the older is kept as a copy")
@@ -393,6 +393,49 @@ enum Dates {
         let remote = try #require(try await second.sealedObject(event.id))
         #expect(try await first.resolveConflict(local: local, remote: remote) == .keepRemote)
         #expect(try await first.list().events.contains { $0.title == "Dentist (conflict copy)" })
+    }
+
+    @Test("A store only lands if nothing changed since sync looked")
+    func storeChecksTheVersion() async throws {
+        let (first, second) = try pair()
+        var event = Dates.event(Dates.date(2026, 10, 15, 9), title: "One")
+        try await first.save(event)
+        try await second.store(try #require(try await first.sealedObject(event.id)), ifLocalHash: nil)
+        let looked = try await second.sealedHash(of: event.id)
+        event.title = "Typed just now"
+        try await second.save(event)
+        await #expect(throws: SyncError.changedLocally) {
+            try await second.store(try #require(try await first.sealedObject(event.id)), ifLocalHash: looked)
+        }
+        #expect(try await second.event(event.id).title == "Typed just now")
+    }
+
+    @Test("Removed by sync goes to the trash, and comes round on the key move list")
+    func removalsAreKept() async throws {
+        let blobs = MemoryBlobs()
+        let vault = CalendarVault(store: blobs, rootKey: try ContentRootKey.generate())
+        let event = Dates.event(Dates.date(2026, 10, 15, 9))
+        try await vault.save(event)
+        try await vault.removeObject(event.id, ifLocalHash: try #require(try await vault.sealedHash(of: event.id)))
+        #expect(try await vault.list().events.isEmpty)
+        #expect(try blobs.read("\(event.id.uuidString.lowercased()).event.trash") != nil)
+        #expect(CalendarVault.sealedPurposes[".event.trash"] == .event)
+    }
+
+    @Test("A retried conflict doesn't make a second copy")
+    func conflictCopiesDoNotDouble() async throws {
+        let (first, second) = try pair()
+        var event = Dates.event(Dates.date(2026, 10, 15, 9), title: "Dentist")
+        event.updatedAt = Date(timeIntervalSince1970: 100)
+        try await first.save(event)
+        var newer = event
+        newer.title = "Dentist moved"
+        newer.updatedAt = Date(timeIntervalSince1970: 200)
+        try await second.save(newer)
+        let local = try #require(try await first.sealedObject(event.id))
+        let remote = try #require(try await second.sealedObject(event.id))
+        for _ in 0..<3 { _ = try await first.resolveConflict(local: local, remote: remote) }
+        #expect(try await first.list().events.count == 2)
     }
 
     @Test("Identical events apart from the time saved make no copy")
@@ -633,6 +676,26 @@ enum Dates {
         await model.delete(try onlyOccurrence(model, day: 16), scope: .allOccurrences)
         #expect(model.agenda.isEmpty)
         #expect(try blobs.names().allSatisfy { $0.hasSuffix(".deleted") })
+    }
+
+    @Test("An edit from a stale screen is refused, so it can't undo what a sync just brought in")
+    func staleEditsAreRefused() async throws {
+        let vault = CalendarVault(store: blobs, rootKey: try ContentRootKey.generate())
+        let model = CalendarModel(
+            vault: vault, devices: devices, reminders: reminders, startingMode: .agenda, display: Dates.calendar(),
+            defaults: UserDefaults(suiteName: "totality.tests.\(UUID().uuidString)")!, now: { Dates.date(2026, 10, 15, 8, 30) }
+        )
+        _ = await model.create(draft("Dentist"))
+        let stale = try onlyOccurrence(model, day: 15)
+        var newer = stale.event
+        newer.title = "Dentist moved"
+        newer.updatedAt = newer.updatedAt.addingTimeInterval(60)
+        try await vault.save(newer)
+        var edit = model.draft(for: stale)
+        edit.title = "Old screen's change"
+        #expect(await model.update(stale, with: edit, scope: .allOccurrences) == false)
+        #expect(try await vault.event(newer.id).title == "Dentist moved")
+        #expect(model.notice != nil)
     }
 
     @Test("Device calendars stay away until permission is given")

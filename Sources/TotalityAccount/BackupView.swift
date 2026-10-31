@@ -111,7 +111,7 @@ struct BackupView: View {
         case .ready(let copies):
             AccountDetail(text: "Your recovery key is set up, and this device has joined.")
             AccountDetail(text: copiesText(copies))
-            AccountDetail(text: "Your notes, files, and events sync between your devices. The servers only ever see them encrypted.")
+            AccountDetail(text: "Your notes, files, and events sync between your devices once this device finishes its first sync. The servers only ever see them encrypted.")
             warning
         }
     }

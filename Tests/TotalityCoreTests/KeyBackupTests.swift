@@ -474,6 +474,19 @@ struct LockedSecretVectorTests {
         #expect(try read(id: id, suffix: ".event", purpose: .event, key: shared, in: events) == "dentist")
     }
 
+    @Test("Trashed items move with everything else, so they stay recoverable")
+    func trashMovesToo() throws {
+        let keys = Keys()
+        let blobs = Blobs()
+        let ring = ContentKeyRing(keys: keys, areas: [SealedArea(store: blobs, purposes: [".meta": .metadata, ".meta.trash": .metadata])])
+        let old = try ring.current()
+        let id = UUID()
+        try put("trashed title", id: id, suffix: ".meta.trash", purpose: .metadata, key: old, in: blobs)
+        let shared = try ContentRootKey.generate()
+        #expect(try ring.adopt(shared).moved == 1)
+        #expect(try read(id: id, suffix: ".meta.trash", purpose: .metadata, key: shared, in: blobs) == "trashed title")
+    }
+
     @Test("Files it doesn't recognize are left alone")
     func ignoresStrangers() throws {
         let device = try device(notes: 1)

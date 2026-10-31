@@ -171,7 +171,7 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         let (first, second, _) = try pair()
         let note = try await first.createNote(title: "Lease")
         try await first.saveNote(note.id, title: "Lease", body: "Twelve months")
-        try await second.store(try #require(try await first.sealedObject(note.id)))
+        try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: nil)
         #expect(try await second.item(note.id).title == "Lease")
         #expect(String(decoding: try await second.body(of: note.id), as: UTF8.self) == "Twelve months")
     }
@@ -181,7 +181,7 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         let (first, _, _) = try pair()
         let stranger = ReaderVault(store: try FileBlobStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), rootKey: try ContentRootKey.generate())
         let note = try await stranger.createNote(title: "Forged")
-        await #expect(throws: (any Error).self) { try await first.store(try #require(try await stranger.sealedObject(note.id))) }
+        await #expect(throws: (any Error).self) { try await first.store(try #require(try await stranger.sealedObject(note.id)), ifLocalHash: nil) }
         #expect(try await first.list().items.isEmpty)
     }
 
@@ -193,15 +193,165 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         let meta = try #require(try await first.sealedObject(one.id))
         let body = try #require(try await first.sealedObject(two.id))
         await #expect(throws: (any Error).self) {
-            try await second.store(SealedObject(id: one.id, kind: .note, meta: meta.meta, body: body.body))
+            try await second.store(SealedObject(id: one.id, kind: .note, meta: meta.meta, body: body.body), ifLocalHash: nil)
         }
+    }
+
+    @Test("Forged details on a real body are refused")
+    func refusesForgedDetails() async throws {
+        let (first, second, _) = try pair()
+        let stranger = ReaderVault(store: try FileBlobStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), rootKey: try ContentRootKey.generate())
+        let note = try await first.createNote(title: "Real")
+        let forged = try await stranger.createNote(title: "Forged")
+        let real = try #require(try await first.sealedObject(note.id))
+        let fake = try #require(try await stranger.sealedObject(forged.id))
+        await #expect(throws: (any Error).self) {
+            try await second.store(SealedObject(id: note.id, kind: .note, meta: fake.meta, body: real.body), ifLocalHash: nil)
+        }
+    }
+
+    @Test("An open editor's save can't overwrite a newer version, and what was typed is kept")
+    func staleEditorSaveKeepsBoth() async throws {
+        let (first, second, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        try await first.saveNote(note.id, title: "Plan", body: "base")
+        let opened = try await first.item(note.id).updatedAt
+        try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: nil)
+        try await Task.sleep(for: .milliseconds(5))
+        try await second.saveNote(note.id, title: "Plan", body: "from the mac")
+        let newer = try #require(try await second.sealedObject(note.id))
+        try await first.store(newer, ifLocalHash: try await first.sealedHash(of: note.id))
+
+        let result = try await first.saveNote(note.id, title: "Plan", body: "typed on the phone", basedOn: opened)
+        guard case .keptAsCopy(let copy) = result else {
+            Issue.record("Expected a copy")
+            return
+        }
+        #expect(String(decoding: try await first.body(of: note.id), as: UTF8.self) == "from the mac")
+        #expect(String(decoding: try await first.body(of: copy.id), as: UTF8.self) == "typed on the phone")
+    }
+
+    @Test("Saving from the version on disk just saves")
+    func currentEditorSaveSaves() async throws {
+        let (first, _, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        let result = try await first.saveNote(note.id, title: "Plan", body: "text", basedOn: note.updatedAt)
+        guard case .saved = result else {
+            Issue.record("Expected a save")
+            return
+        }
+        #expect(try await first.list().items.count == 1)
+    }
+
+    @Test("A note deleted elsewhere while open keeps what was typed")
+    func editorSaveAfterDeleteKeepsText() async throws {
+        let (first, _, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        try await first.delete(note.id)
+        let result = try await first.saveNote(note.id, title: "Plan", body: "still typing", basedOn: note.updatedAt)
+        guard case .keptAsCopy(let copy) = result else {
+            Issue.record("Expected a copy")
+            return
+        }
+        #expect(String(decoding: try await first.body(of: copy.id), as: UTF8.self) == "still typing")
+    }
+
+    @Test("A store only lands if nothing changed since sync looked")
+    func storeChecksTheVersion() async throws {
+        let (first, second, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: nil)
+        let looked = try await second.sealedHash(of: note.id)
+        try await second.saveNote(note.id, title: "Typed", body: "just now")
+        await #expect(throws: SyncError.changedLocally) {
+            try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: looked)
+        }
+        #expect(try await second.item(note.id).title == "Typed")
+    }
+
+    @Test("Something removed by sync can still be found in the trash")
+    func removalsAreKept() async throws {
+        let store = MemoryBlobStore()
+        let vault = ReaderVault(store: store, rootKey: try ContentRootKey.generate())
+        let note = try await vault.createNote(title: "Keep me")
+        try await vault.removeObject(note.id, ifLocalHash: try #require(try await vault.sealedHash(of: note.id)))
+        #expect(try await vault.list().items.isEmpty)
+        let name = note.id.uuidString.lowercased()
+        #expect(try store.read("\(name).meta.trash") != nil)
+        #expect(try store.read("\(name).body.trash") != nil)
+        try await vault.emptyOldTrash()
+        #expect(try store.read("\(name).meta.trash") != nil)
+    }
+
+    @Test("Old trash goes after its time is up")
+    func oldTrashGoes() async throws {
+        let store = MemoryBlobStore()
+        let vault = ReaderVault(store: store, rootKey: try ContentRootKey.generate())
+        let note = try await vault.createNote(title: "Old")
+        try await vault.removeObject(note.id, ifLocalHash: try #require(try await vault.sealedHash(of: note.id)))
+        let name = note.id.uuidString.lowercased()
+        let old = Date().addingTimeInterval(-ReaderVault.trashLifetime - 60)
+        try store.write(Data(ISO8601DateFormatter().string(from: old).utf8), as: "\(name).trashed")
+        try await vault.emptyOldTrash()
+        #expect(try store.read("\(name).meta.trash") == nil)
+        #expect(try store.read("\(name).trashed") == nil)
+    }
+
+    @Test("A note missing its body counts as missing here, so it's pulled, not pushed")
+    func missingBodyIsNotAnEdit() async throws {
+        let store = MemoryBlobStore()
+        let vault = ReaderVault(store: store, rootKey: try ContentRootKey.generate())
+        let note = try await vault.createNote(title: "Plan")
+        let directory = store
+        try directory.delete("\(note.id.uuidString.lowercased()).body")
+        let fresh = ReaderVault(store: store, rootKey: try ContentRootKey.generate())
+        #expect(try await fresh.sealedHash(of: note.id) == nil)
+    }
+
+    @Test("Damage is caught before anything leaves")
+    func damagedItemsDoNotVerify() async throws {
+        let store = MemoryBlobStore()
+        let key = try ContentRootKey.generate()
+        let vault = ReaderVault(store: store, rootKey: key)
+        let note = try await vault.createNote(title: "Plan")
+        try store.write(Data(repeating: 7, count: 80), as: "\(note.id.uuidString.lowercased()).body")
+        let reopened = ReaderVault(store: store, rootKey: key)
+        await #expect(throws: (any Error).self) { _ = try await reopened.verifiedObject(note.id) }
+    }
+
+    @Test("A different title counts as different, so the older one is kept")
+    func differentTitlesMakeACopy() async throws {
+        let (first, second, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: nil)
+        try await first.saveNote(note.id, title: "Older title", body: "")
+        try await Task.sleep(for: .milliseconds(5))
+        try await second.saveNote(note.id, title: "Newer title", body: "")
+        let local = try #require(try await first.sealedObject(note.id))
+        let remote = try #require(try await second.sealedObject(note.id))
+        _ = try await first.resolveConflict(local: local, remote: remote)
+        #expect(try await first.list().items.contains { $0.title == "Older title (conflict copy)" })
+    }
+
+    @Test("A retried conflict doesn't make a second copy")
+    func conflictCopiesDoNotDouble() async throws {
+        let (first, second, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: nil)
+        try await first.saveNote(note.id, title: "Plan", body: "one")
+        try await Task.sleep(for: .milliseconds(5))
+        try await second.saveNote(note.id, title: "Plan", body: "two")
+        let local = try #require(try await first.sealedObject(note.id))
+        let remote = try #require(try await second.sealedObject(note.id))
+        for _ in 0..<3 { _ = try await first.resolveConflict(local: local, remote: remote) }
+        #expect(try await first.list().items.count == 2)
     }
 
     @Test("Both changed: the newest stays, and the older text is kept as a copy")
     func conflictKeepsBoth() async throws {
         let (first, second, _) = try pair()
         let note = try await first.createNote(title: "Plan")
-        try await second.store(try #require(try await first.sealedObject(note.id)))
+        try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: nil)
         try await first.saveNote(note.id, title: "Plan", body: "older")
         try await Task.sleep(for: .milliseconds(5))
         try await second.saveNote(note.id, title: "Plan", body: "newer")
@@ -216,7 +366,7 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
     func noCopyForSameText() async throws {
         let (first, second, _) = try pair()
         let note = try await first.createNote(title: "Plan")
-        try await second.store(try #require(try await first.sealedObject(note.id)))
+        try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: nil)
         try await first.setListenPosition(4, of: note.id)
         try await second.setListenPosition(9, of: note.id)
         let local = try #require(try await first.sealedObject(note.id))

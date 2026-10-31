@@ -3,7 +3,8 @@ import Storage
 import Supabase
 import TotalityCore
 
-/// Sync's server side. Every value here is ciphertext, an ID, or a size.
+/// Sync's server side. Content only ever crosses as ciphertext. The server does see each item's ID,
+/// kind, size, and when it changed.
 public struct SupabaseSyncRemote: SyncRemote {
     private static let bucket = "content"
     private static let pageSize = 1000
@@ -41,24 +42,28 @@ public struct SupabaseSyncRemote: SyncRemote {
     /// fell off the end would look new.
     public func list() async throws -> [RemoteRecord] {
         var records: [RemoteRecord] = []
+        var offset = 0
         while true {
             let rows: [ListRow] = try await client.from("content_objects")
                 .select("id, kind, content_hash, byte_size, deleted_at")
                 .eq("owner_id", value: try await owner())
                 .order("id")
-                .range(from: records.count, to: records.count + Self.pageSize - 1)
+                .range(from: offset, to: offset + Self.pageSize - 1)
                 .execute()
                 .value
+            offset += rows.count
             records += rows.compactMap { row in
                 guard let kind = ContentKind(rawValue: row.kind) else { return nil }
-                let hash = row.deleted_at == nil ? row.content_hash.flatMap(Self.hex) : nil
+                if row.deleted_at != nil { return RemoteRecord(id: row.id, kind: kind, hash: nil, byteCount: 0) }
+                // Only a real tombstone means deleted. A live row with no hash is broken, not gone.
+                guard let hash = row.content_hash.flatMap(Self.hex) else { return nil }
                 return RemoteRecord(id: row.id, kind: kind, hash: hash, byteCount: row.byte_size ?? 0)
             }
             if rows.count < Self.pageSize { return records }
         }
     }
 
-    public func fetch(_ id: UUID) async throws -> SealedObject? {
+    public func fetch(_ id: UUID, reusing local: SealedObject?) async throws -> SealedObject? {
         let rows: [ObjectRow] = try await client.from("content_objects")
             .select("kind, meta_cipher, storage_key, deleted_at")
             .eq("id", value: id.uuidString)
@@ -67,17 +72,22 @@ public struct SupabaseSyncRemote: SyncRemote {
         guard let row = rows.first, row.deleted_at == nil, let kind = ContentKind(rawValue: row.kind),
               let meta = row.meta_cipher.flatMap(Self.bytes)
         else { return nil }
-        let body = try await row.storage_key.asyncMap { try await client.storage.from(Self.bucket).download(path: $0) }
+        let body = try await row.storage_key.asyncMap { key -> Data in
+            if let bodyHash = local?.bodyHash, let body = local?.body, key.hasSuffix("/\(bodyHash).body") { return body }
+            return try await client.storage.from(Self.bucket).download(path: key)
+        }
         return SealedObject(id: id, kind: kind, meta: meta, body: body)
     }
 
     public func upload(_ object: SealedObject, expected: String?, replacingDeleted: Bool) async throws {
+        if object.kind != .event, object.body == nil { throw AccountError.failed }
         let owner = try await owner()
         let previous = try await currentKey(of: object.id)
         var key: String?
-        if let body = object.body {
-            let path = "\(owner)/\(object.id.uuidString.lowercased())/\(object.hash).body"
-            try await store(body, at: path)
+        if let body = object.body, let bodyHash = object.bodyHash {
+            // Named for the body alone, so a change to the details doesn't move the whole file again.
+            let path = "\(owner)/\(object.id.uuidString.lowercased())/\(bodyHash).body"
+            if path != previous { try await store(body, at: path) }
             key = path
         }
         var row: [String: AnyJSON] = [
@@ -107,7 +117,10 @@ public struct SupabaseSyncRemote: SyncRemote {
             }
             let changed: [Inserted] = try await update.select("id").execute().value
             guard !changed.isEmpty else {
-                if let key, key != previous { _ = try? await client.storage.from(Self.bucket).remove(paths: [key]) }
+                // Another device may have landed the same body, so only clear it if nothing points at it.
+                if let key, key != previous, try await currentKey(of: object.id) != key {
+                    _ = try? await client.storage.from(Self.bucket).remove(paths: [key])
+                }
                 throw SyncError.changedOnServer
             }
         }

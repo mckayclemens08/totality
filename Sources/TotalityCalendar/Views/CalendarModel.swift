@@ -262,7 +262,18 @@ public final class CalendarModel {
         return await commit(saving: [event], needsReminders: draft.reminderMinutes != nil)
     }
 
+    /// What's on screen can be older than what a sync just brought in, and saving over it would quietly
+    /// undo that change. Returns false after reloading, so the person sees the latest first.
+    private func isCurrent(_ occurrence: EventOccurrence) async -> Bool {
+        let latest = try? await vault.event(occurrence.event.id)
+        guard latest?.updatedAt != occurrence.event.updatedAt else { return true }
+        await load()
+        notice = "This event changed on another device. Open it again to see the latest."
+        return false
+    }
+
     public func update(_ occurrence: EventOccurrence, with draft: EventDraft, scope: EditScope) async -> Bool {
+        guard await isCurrent(occurrence) else { return false }
         guard let times = times(from: draft, keeping: occurrence.event) else { return false }
         var series = occurrence.event
         if scope == .thisOccurrence, series.repeatRule != nil {
@@ -304,6 +315,7 @@ public final class CalendarModel {
     }
 
     public func delete(_ occurrence: EventOccurrence, scope: EditScope) async {
+        guard await isCurrent(occurrence) else { return }
         var event = occurrence.event
         do {
             if scope == .thisOccurrence, event.repeatRule != nil {

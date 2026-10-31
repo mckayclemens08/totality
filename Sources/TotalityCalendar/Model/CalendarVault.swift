@@ -16,7 +16,9 @@ public enum CalendarError: Error, Equatable {
 /// A person's own events. Each one is a single blob, and its name holds only the object ID.
 public actor CalendarVault {
     /// How each kind of blob is sealed, so a key change can reach them without knowing what they are.
-    public static let sealedPurposes: [String: KeyPurpose] = [".event": .event]
+    public static let sealedPurposes: [String: KeyPurpose] = [".event": .event, ".event.trash": .event]
+    /// How long something removed by another device stays recoverable here.
+    public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
 
     private let store: any BlobStore
     private let rootKey: ContentRootKey
@@ -94,19 +96,46 @@ extension CalendarVault: SyncArea {
         try store.read(name(id)).map { SealedObject(id: id, kind: .event, meta: $0, body: nil) }
     }
 
-    /// Checks before writing: only what opens under this device's key, and belongs under this ID, is kept.
-    public func store(_ object: SealedObject) throws {
+    public func verifiedObject(_ id: UUID) throws -> SealedObject? {
+        guard let object = try sealedObject(id) else { return nil }
+        _ = try opened(object)
+        return object
+    }
+
+    public func store(_ object: SealedObject, ifLocalHash expected: String?) throws {
         guard !isClosed else { throw CalendarError.closed }
+        guard try sealedHash(of: object.id) == expected else { throw SyncError.changedLocally }
+        if expected == nil, try store.read(deletionName(object.id)) != nil { throw SyncError.changedLocally }
         _ = try opened(object)
         try store.write(object.meta, as: name(object.id))
         hashes[object.id] = nil
     }
 
-    public func removeObject(_ id: UUID) throws {
+    public func removeObject(_ id: UUID, ifLocalHash expected: String) throws {
         guard !isClosed else { throw CalendarError.closed }
+        guard try sealedHash(of: id) == expected else { throw SyncError.changedLocally }
+        guard let sealed = try store.read(name(id)) else { return }
+        // The stamp goes first, so a crash can't leave trash that's never cleaned up.
+        try store.write(Data(ISO8601DateFormatter().string(from: Date()).utf8), as: trashStampName(id))
+        try store.write(sealed, as: name(id) + ".trash")
         try store.delete(name(id))
         hashes[id] = nil
     }
+
+    public func emptyOldTrash() throws {
+        guard !isClosed else { return }
+        let formatter = ISO8601DateFormatter()
+        for file in try store.names() where file.hasSuffix(".trashed") {
+            guard let id = UUID(uuidString: String(file.dropLast(".trashed".count))),
+                  let stamp = try store.read(file), let date = formatter.date(from: String(decoding: stamp, as: UTF8.self)),
+                  Date().timeIntervalSince(date) > Self.trashLifetime
+            else { continue }
+            try store.delete(name(id) + ".trash")
+            try store.delete(file)
+        }
+    }
+
+    private func trashStampName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).trashed" }
 
     public func deletedObjectIDs() throws -> Set<UUID> {
         Set(try store.names().compactMap { file in
@@ -128,12 +157,13 @@ extension CalendarVault: SyncArea {
         older.updatedAt = newer.updatedAt
         if older != newer {
             let copy = CalendarEvent(
+                id: UUID(derivedFrom: local.hash + remote.hash),
                 title: "\(older.displayTitle) (conflict copy)", location: older.location, notes: older.notes,
                 start: older.start, end: older.end, isAllDay: older.isAllDay, timeZoneID: older.timeZoneID,
                 repeatRule: older.repeatRule, skipped: older.skipped, reminderMinutes: older.reminderMinutes,
                 attachments: older.attachments
             )
-            try save(copy)
+            if try store.read(name(copy.id)) == nil { try save(copy) }
         }
         return keepMine ? .keepLocal : .keepRemote
     }
