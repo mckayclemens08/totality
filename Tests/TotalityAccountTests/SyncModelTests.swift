@@ -82,6 +82,26 @@ import TotalityCore
         #expect(sync.isProtected)
     }
 
+    @Test("The session ends only after a running sync has stopped")
+    func signOutStopsARunFirst() async {
+        let sync = fresh()
+        var stopped = false
+        var started = false
+        sync.run = { _ in
+            started = true
+            for _ in 0..<1000 where !Task.isCancelled { await Task.yield() }
+            stopped = Task.isCancelled
+            return self.report()
+        }
+        let account = AccountModel(service: FakeAccountService(username: "wren"), sync: sync)
+        await account.load()
+        let running = Task { await sync.syncNow() }
+        while !started { await Task.yield() }
+        await account.signOut()
+        #expect(stopped)
+        await running.value
+    }
+
     @Test("Signing out cuts a run short instead of waiting for it")
     func signOutCancelsARun() async {
         let model = fresh()
