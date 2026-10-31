@@ -331,6 +331,25 @@ struct LockedSecretVectorTests {
         #expect(try device.ring.owner() == "right")
     }
 
+    @Test("A key that opens one stray blob can't take a device whose content is under another key")
+    func oneBlobProvesNothing() throws {
+        let device = try device()
+        try device.ring.claim(for: "first")
+        let other = try ContentRootKey.generate()
+        try put("planted", id: UUID(), suffix: ".body", purpose: .content, key: other, in: device.blobs)
+        #expect(throws: ContentKeyError.keyDoesNotOpenContent) { try device.ring.reassign(to: "second", provenBy: other) }
+        #expect(try device.ring.owner() == "first")
+    }
+
+    @Test("On a device with no key, opening its content is the proof")
+    func keylessDeviceAcceptsContentProof() throws {
+        let device = try device()
+        try device.ring.claim(for: "wrong")
+        device.keys.secrets["content-root-key"] = nil
+        try device.ring.reassign(to: "right", provenBy: device.old)
+        #expect(try device.ring.owner() == "right")
+    }
+
     @Test("A key that opens nothing proves nothing")
     func unprovenKeyDoesNotReassign() throws {
         let device = try device()
@@ -362,6 +381,28 @@ struct LockedSecretVectorTests {
         #expect(try device.ring.owner() == nil)
         #expect(try device.ring.joinedBackup() == nil)
         #expect(try device.ring.current() != device.old)
+    }
+
+    @Test("An unrecognized file stops a reset, because empty has to mean empty")
+    func strangerFileStopsReset() throws {
+        let device = try device(notes: 0)
+        try device.blobs.write(Data("not ours".utf8), as: "unknown.bin")
+        #expect(throws: ContentKeyError.notAllowedNow) { try device.ring.resetEmptyDevice() }
+        #expect(try device.ring.current() == device.old)
+    }
+
+    @Test("System files in storage don't count as content, or jam a reset device")
+    func systemFilesAreIgnored() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = try FileBlobStore(directory: directory)
+        try Data().write(to: directory.appendingPathComponent(".DS_Store"))
+        #expect(try store.names().isEmpty)
+
+        let keys = Keys()
+        let ring = ContentKeyRing(keys: keys, areas: [SealedArea(store: store, purposes: purposes)])
+        let old = try ring.current()
+        try ring.resetEmptyDevice()
+        #expect(try ring.current() != old)
     }
 
     @Test("A device with any content can never be reset")

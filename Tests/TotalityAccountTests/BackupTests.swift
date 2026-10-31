@@ -473,6 +473,17 @@ actor FakeContentKeys: ContentKeyAccess {
         #expect(model.phase == .notSetUp)
     }
 
+    @Test("One account's yes doesn't carry over to the next account on this device")
+    func ownershipAnswerBelongsToOneAccount() async throws {
+        let (model, service, content) = try setUp()
+        await content.setSealedContent(true)
+        await model.load()
+        await model.confirmOwnership()
+        await service.set(account: "user-2")
+        await model.load()
+        #expect(model.phase == .confirmingOwnership)
+    }
+
     @Test("An empty device simply belongs to whoever signs in")
     func emptyDeviceIsClaimedAtSignIn() async throws {
         let (model, _, content) = try setUp()

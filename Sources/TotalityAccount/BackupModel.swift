@@ -45,8 +45,9 @@ public final class BackupModel {
     private let content: any ContentKeyAccess
     private var newKey: RecoveryKey?
     private var existing: FetchedBackup?
-    /// Only for this screen. A "yes" proves nothing, so the claim waits until setup or joining succeeds.
-    private var ownershipConfirmed = false
+    /// Which account said the content here is theirs. A "yes" proves nothing, so it's held only in
+    /// memory, the claim waits until setup or joining succeeds, and it never carries over to anyone else.
+    private var ownershipConfirmedBy: String?
 
     public init(service: any KeyBackupService, content: any ContentKeyAccess) {
         self.service = service
@@ -95,7 +96,7 @@ public final class BackupModel {
                 try await content.resetEmptyDevice()
             } else if try await content.keyOwner() == account {
                 canRelease = try await content.joinedBackup() == nil
-            } else if !ownershipConfirmed, hasContent {
+            } else if ownershipConfirmedBy != account, hasContent {
                 phase = .confirmingOwnership
                 return
             }
@@ -119,7 +120,7 @@ public final class BackupModel {
 
     /// Lets the screen carry on. Nothing is written, because an answer can be wrong.
     public func confirmOwnership() async {
-        ownershipConfirmed = true
+        ownershipConfirmedBy = await service.signedInAccountID()
         await load()
     }
 
@@ -133,7 +134,7 @@ public final class BackupModel {
         do {
             guard let account = await service.signedInAccountID() else { return }
             try await content.release(by: account)
-            ownershipConfirmed = false
+            ownershipConfirmedBy = nil
             await load()
         } catch {
             notice = "This device couldn't be released."
@@ -149,7 +150,7 @@ public final class BackupModel {
         }
         do {
             try await content.reassign(to: account, provenBy: try existing.backup.open(with: recovery))
-            ownershipConfirmed = true
+            ownershipConfirmedBy = account
             await enter(typed)
         } catch {
             notice = "That recovery key doesn't open what's on this device, so it stays as it is."

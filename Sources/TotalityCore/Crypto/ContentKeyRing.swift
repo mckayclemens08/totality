@@ -148,10 +148,16 @@ public struct ContentKeyRing: Sendable {
         try keys.save(Data(account.utf8), as: Slot.owner)
     }
 
-    /// Hands the device to `account`, which has proved the content is theirs: only someone holding its
-    /// key can make a key that opens it.
+    /// Hands the device to `account`, which has proved the content is theirs. The proof is holding this
+    /// device's own key. Opening a blob is only enough when no key is left to compare with, because one
+    /// planted blob would otherwise let someone take over everything else here.
     public func reassign(to account: String, provenBy key: ContentRootKey) throws {
-        guard try opensSomething(key) else { throw ContentKeyError.keyDoesNotOpenContent }
+        if try keys.load(Slot.incoming) != nil { _ = try finishMove() }
+        if let stored = try keys.load(Slot.current) {
+            guard stored == key.bytes else { throw ContentKeyError.keyDoesNotOpenContent }
+        } else {
+            guard try opensSomething(key) else { throw ContentKeyError.keyDoesNotOpenContent }
+        }
         try keys.save(Data(account.utf8), as: Slot.owner)
     }
 
@@ -166,7 +172,8 @@ public struct ContentKeyRing: Sendable {
     /// Clears a device with nothing on it, so a new account starts with a key of its own and the old
     /// one can't end up in the new account's backup. Refused if there's any content at all.
     public func resetEmptyDevice() throws {
-        guard try !hasSealedContent(), try keys.load(Slot.incoming) == nil else { throw ContentKeyError.notAllowedNow }
+        let isEmpty = try areas.allSatisfy { try $0.store.names().isEmpty }
+        guard isEmpty, try keys.load(Slot.incoming) == nil else { throw ContentKeyError.notAllowedNow }
         for slot in [Slot.current, Slot.previous, Slot.owner, Slot.backupFingerprint] {
             try keys.delete(slot)
         }
