@@ -194,6 +194,20 @@ import Testing
         return (ReaderModel(vault: try newVault(store: store), listen: ListenController(engine: engine)), engine)
     }
 
+    @Test("A note deleted while open opens the kept copy, so typing doesn't make another each pause")
+    func aKeptCopyOpens() async throws {
+        let (model, _) = try model()
+        let opened = try #require(await model.newNote())
+        await model.delete(opened)
+        let result = await model.saveNote(opened.id, title: "Plan", body: "still typing", basedOn: opened.updatedAt)
+        guard case .keptAsCopy(let copy) = result else {
+            Issue.record("Expected a copy")
+            return
+        }
+        #expect(model.requestedItem == copy.id)
+        #expect(model.notice != nil)
+    }
+
     @Test func groupsByCollectionWithLooseItemsFirst() async throws {
         let (model, _) = try model()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

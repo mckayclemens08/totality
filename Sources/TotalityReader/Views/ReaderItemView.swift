@@ -49,6 +49,7 @@ private struct NoteEditor: View {
     @State private var saved: Draft?
     /// The version the editor loaded, so a save can tell if the note moved on underneath it.
     @State private var version: Date?
+    @State private var isSaving = false
     @State private var failed = false
 
     private var draft: Draft {
@@ -114,17 +115,25 @@ private struct NoteEditor: View {
         }
     }
 
+    /// One at a time, because a second save sent from the same version would look like a conflict.
+    /// It loops so that anything typed while a save was running still lands.
     private func save() async {
-        let current = draft
-        guard let saved, let version, current != saved else { return }
-        switch await model.saveNote(item.id, title: current.title, body: current.body, basedOn: version) {
-        case .saved(let item):
-            self.saved = current
-            self.version = item.updatedAt
-        case .keptAsCopy:
-            await reload()
-        case nil:
-            break
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        while let saved, let version, draft != saved {
+            let current = draft
+            switch await model.saveNote(item.id, title: current.title, body: current.body, basedOn: version) {
+            case .saved(let item):
+                self.saved = current
+                self.version = item.updatedAt
+            case .keptAsCopy:
+                // The model opens the copy. Matching here stops this editor making another one.
+                self.saved = current
+                return
+            case nil:
+                return
+            }
         }
     }
 }

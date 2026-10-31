@@ -100,6 +100,8 @@ public enum SyncError: Error, Equatable {
 /// The server side of sync. Writes name the version they expect, so two devices can't overwrite each
 /// other unseen.
 public protocol SyncRemote: Sendable {
+    /// The same server, held to whoever is signed in now, so a whole sync stays in one account.
+    func forCurrentAccount() async throws -> any SyncRemote
     func list() async throws -> [RemoteRecord]
     /// `reusing` is what this device has. If the body hasn't changed, it needn't be downloaded again.
     func fetch(_ id: UUID, reusing local: SealedObject?) async throws -> SealedObject?
@@ -181,7 +183,11 @@ public actor SyncEngine {
         var agreed = try stateStore.load()
         let records = try await remote.list()
         let remoteByID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        report.byteCount = records.reduce(0) { $0 + $1.byteCount }
+        // A server picks these numbers, and plain addition would crash on huge ones.
+        report.byteCount = records.reduce(0) { total, record in
+            let (sum, overflowed) = total.addingReportingOverflow(max(0, record.byteCount))
+            return overflowed ? .max : sum
+        }
 
         let holdRemovals = try await removalsNeedAsking(remoteByID, agreed: agreed, allowed: allowLargeRemoval, report: &report)
 
@@ -189,11 +195,13 @@ public actor SyncEngine {
         for area in areas {
             let ids = Set(try await area.sealedObjectIDs()).union(try await area.deletedObjectIDs())
             for id in ids where seen.insert(id).inserted {
+                try Task.checkCancellation()
                 await settle(id, here: area, remote: remoteByID[id], holdRemovals: holdRemovals, agreed: &agreed, report: &report)
             }
         }
         for record in records where !seen.contains(record.id) {
             guard let area = area(for: record.kind) else { continue }
+            try Task.checkCancellation()
             await settle(record.id, here: area, remote: record, holdRemovals: holdRemovals, agreed: &agreed, report: &report)
         }
         for area in areas { try? await area.emptyOldTrash() }
@@ -332,7 +340,6 @@ public actor SyncEngine {
             report.downloaded += 1
             return incoming.hash
         }
-        guard local.hash == localHash else { throw SyncError.changedLocally }
         let resolution = try await area.resolveConflict(local: local, remote: incoming)
         report.conflicts += 1
         switch resolution {

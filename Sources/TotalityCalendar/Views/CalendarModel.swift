@@ -262,18 +262,13 @@ public final class CalendarModel {
         return await commit(saving: [event], needsReminders: draft.reminderMinutes != nil)
     }
 
-    /// What's on screen can be older than what a sync just brought in, and saving over it would quietly
-    /// undo that change. Returns false after reloading, so the person sees the latest first.
-    private func isCurrent(_ occurrence: EventOccurrence) async -> Bool {
-        let latest = try? await vault.event(occurrence.event.id)
-        guard latest?.updatedAt != occurrence.event.updatedAt else { return true }
+    /// What's on screen was older than what a sync brought in, so the latest shows first.
+    private func showLatest() async {
         await load()
         notice = "This event changed on another device. Open it again to see the latest."
-        return false
     }
 
     public func update(_ occurrence: EventOccurrence, with draft: EventDraft, scope: EditScope) async -> Bool {
-        guard await isCurrent(occurrence) else { return false }
         guard let times = times(from: draft, keeping: occurrence.event) else { return false }
         var series = occurrence.event
         if scope == .thisOccurrence, series.repeatRule != nil {
@@ -287,7 +282,7 @@ public final class CalendarModel {
             )
             series.skipped.insert(occurrence.start)
             series.updatedAt = now()
-            return await commit(saving: [single, series], needsReminders: draft.reminderMinutes != nil)
+            return await commit(saving: [single, series], basedOn: occurrence.event, needsReminders: draft.reminderMinutes != nil)
         }
 
         if series.repeatRule != nil, series.isAllDay == draft.isAllDay {
@@ -311,29 +306,38 @@ public final class CalendarModel {
         series.reminderMinutes = draft.reminderMinutes
         series.attachments = draft.attachments
         series.updatedAt = now()
-        return await commit(saving: [series], needsReminders: draft.reminderMinutes != nil)
+        return await commit(saving: [series], basedOn: occurrence.event, needsReminders: draft.reminderMinutes != nil)
     }
 
     public func delete(_ occurrence: EventOccurrence, scope: EditScope) async {
-        guard await isCurrent(occurrence) else { return }
         var event = occurrence.event
         do {
             if scope == .thisOccurrence, event.repeatRule != nil {
                 event.skipped.insert(occurrence.start)
                 event.updatedAt = now()
-                try await vault.save(event)
+                try await vault.save([event], ifStillAt: occurrence.event)
             } else {
-                try await vault.delete(event.id)
+                try await vault.delete(event.id, ifStillAt: occurrence.event)
             }
+        } catch CalendarError.changed, CalendarError.notFound {
+            await showLatest()
+            return
         } catch {
             notice = "\(event.displayTitle) couldn't be deleted."
         }
         await load()
     }
 
-    private func commit(saving changed: [CalendarEvent], needsReminders: Bool) async -> Bool {
+    private func commit(saving changed: [CalendarEvent], basedOn original: CalendarEvent? = nil, needsReminders: Bool) async -> Bool {
         do {
-            for event in changed { try await vault.save(event) }
+            if let original {
+                try await vault.save(changed, ifStillAt: original)
+            } else {
+                for event in changed { try await vault.save(event) }
+            }
+        } catch CalendarError.changed, CalendarError.notFound {
+            await showLatest()
+            return false
         } catch {
             notice = "That event wasn't saved. Try again."
             return false

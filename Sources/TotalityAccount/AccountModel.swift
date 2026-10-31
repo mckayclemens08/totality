@@ -92,15 +92,18 @@ public final class AccountModel {
     }
 
     public func signOut() async {
+        await sync?.stopForSignOut()
         await run {
             let result = try await service.signOut()
             phase = .signedOut
             deviceRegistered = false
             forgetProfile()
+            sync?.forget()
             if result == .serverNotReached {
                 notice = "You're signed out on this device, but the server couldn't be reached to end the session."
             }
         }
+        sync?.resume()
     }
 
     /// The account can change while this waits, and an answer for the old one must not land.

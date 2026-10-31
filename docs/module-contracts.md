@@ -70,7 +70,10 @@ Notes, files, and events move between one person's devices as sealed bytes. A ro
 - Nothing arrives without opening, and what's fetched must match the hash the list gave.
 - If both sides changed, the newest stays and the older is kept as a conflict copy, unless nothing a person would notice differs. The copy's ID comes from the two hashes, so a retry can't double it.
 - An edit against a delete keeps the edit, because a lost edit can't be undone.
-- An open editor saves against the version it loaded. A note that changed meanwhile keeps what was typed as a conflict copy. A stale calendar edit is refused and the screen reloads.
+- An open editor saves against the version it loaded, one save at a time. A note that changed meanwhile keeps what was typed as a conflict copy, which opens so typing carries on there. A stale calendar edit is refused in the vault, in one step, and the screen reloads.
+- A delete writes its `.deleted` record first. A crash partway is finished the next time sync lists the vault.
+- A sync stays in one account: the remote is tied to the account at the start of the run, and signing out cancels the run and clears what `SyncModel` knows.
+- Numbers from the server are distrusted: sizes are saturated, an oversized row is refused, and a list that never ends stops.
 - Screens may only say content is backed up once `SyncModel.isProtected` is true, which takes a sync that really finished cleanly.
 - The Reader caps imports at 49 MB, so anything that gets in fits under the bucket's 50 MB ceiling once sealed.
 - New sealed files need to be in `sealedPurposes`, including their `.trash` names, or a key move leaves them behind.
@@ -78,6 +81,9 @@ Notes, files, and events move between one person's devices as sealed bytes. A ro
 **Known limits, not yet closed:**
 
 - **Rollback and splicing.** A server can't read or forge an item, but it can replay an old sealed version, or pair one version's details with another's body. Hashes only prove the bytes match the list, and the list comes from the same server. Closing this takes a rising version number and the body's hash inside the sealed details, which goes in before Phase 2.
+- **Key moves leave sync state stale.** After a move every item looks edited, so the next run would re-upload everything and revive tombstoned items. It can't happen today, because moves only happen while joining, before a device has any state. Hashes must be remapped before key rotation exists.
+- **Listen position counts as an edit.** It lives in the sealed details, so a file deleted elsewhere comes back from a device that only listened to it. Nothing is lost. Moving positions out of the details fixes this.
+- **Blob and row races.** Storage and the row can't change in one step, so two devices racing on the same body can leave a row with no blob, and failed uploads can leave orphaned blobs that nothing counts or collects. Closing it takes a server-side swap.
 - **Deletes aren't authenticated.** A server can claim anything is deleted. The trash and the 5-removal hold limit the damage, and they don't prevent it.
 - **Trash has no screen yet.** It's recoverable by the app, not by the person. "Recently deleted" arrives with the Reader upgrade.
 

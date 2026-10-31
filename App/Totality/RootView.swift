@@ -144,7 +144,7 @@ struct RootView: View {
             guard await backup.deviceCanSync() else { return nil }
             prepareContent()
             guard !syncAreas.isEmpty else { return nil }
-            let engine = SyncEngine(areas: syncAreas, remote: remote, state: FileSyncState(file: try ContentSetup.syncStateFile()))
+            let engine = SyncEngine(areas: syncAreas, remote: try await remote.forCurrentAccount(), state: FileSyncState(file: try ContentSetup.syncStateFile()))
             return try await engine.sync(allowLargeRemoval: allowLargeRemoval)
         }
         sync.onFinished = { refreshRecoveryLabels() }

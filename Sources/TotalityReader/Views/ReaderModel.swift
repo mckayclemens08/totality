@@ -105,7 +105,7 @@ public final class ReaderModel {
     }
 
     /// For an open note. Returns the version now saved, or nil if the save failed. If the note changed
-    /// elsewhere, what was typed is kept as a copy and the editor should reload.
+    /// elsewhere, what was typed is kept as a copy, and that copy opens so typing carries on there.
     public func saveNote(_ id: UUID, title: String, body: String, basedOn: Date) async -> NoteSave? {
         do {
             let result = try await vault.saveNote(id, title: title, body: body, basedOn: basedOn)
@@ -113,6 +113,7 @@ public final class ReaderModel {
             await search()
             if case .keptAsCopy(let copy) = result {
                 notice = "This note changed on another device. What you typed is kept as \(copy.displayTitle)."
+                requestedItem = copy.id
             }
             return result
         } catch {

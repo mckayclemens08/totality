@@ -11,6 +11,7 @@ public enum CalendarError: Error, Equatable {
     case notFound
     case mismatched
     case closed
+    case changed
 }
 
 /// A person's own events. Each one is a single blob, and its name holds only the object ID.
@@ -43,6 +44,18 @@ public actor CalendarVault {
         hashes[event.id] = nil
         let key = rootKey.objectKey(for: event.id, purpose: .event)
         try store.write(try ContentCipher.seal(JSONEncoder().encode(event), key: key, objectID: event.id), as: name(event.id))
+    }
+
+    /// Saves only if `original` is still the version here, so a screen that fell behind a sync can't
+    /// undo what the sync brought in. Checked in one step, so nothing can land in between.
+    public func save(_ events: [CalendarEvent], ifStillAt original: CalendarEvent) throws {
+        guard try event(original.id).updatedAt == original.updatedAt else { throw CalendarError.changed }
+        for event in events { try save(event) }
+    }
+
+    public func delete(_ id: UUID, ifStillAt original: CalendarEvent) throws {
+        guard try event(original.id).updatedAt == original.updatedAt else { throw CalendarError.changed }
+        try delete(id)
     }
 
     public func event(_ id: UUID) throws -> CalendarEvent {
@@ -80,7 +93,14 @@ extension CalendarVault: SyncArea {
     public nonisolated var kinds: Set<ContentKind> { [.event] }
 
     public func sealedObjectIDs() throws -> [UUID] {
-        try store.names().compactMap { file in
+        // A crash can stop a delete halfway. The record says what was meant, so finish it.
+        if !isClosed {
+            for id in try deletedObjectIDs() where try store.read(name(id)) != nil {
+                try store.delete(name(id))
+                hashes[id] = nil
+            }
+        }
+        return try store.names().compactMap { file in
             file.hasSuffix(".event") ? UUID(uuidString: String(file.dropLast(".event".count))) : nil
         }
     }
@@ -157,7 +177,8 @@ extension CalendarVault: SyncArea {
         older.updatedAt = newer.updatedAt
         if older != newer {
             let copy = CalendarEvent(
-                id: UUID(derivedFrom: local.hash + remote.hash),
+                // Named for the version it preserves, so retries can't double it.
+                id: UUID(derivedFrom: (keepMine ? remote : local).hash),
                 title: "\(older.displayTitle) (conflict copy)", location: older.location, notes: older.notes,
                 start: older.start, end: older.end, isAllDay: older.isAllDay, timeZoneID: older.timeZoneID,
                 repeatRule: older.repeatRule, skipped: older.skipped, reminderMinutes: older.reminderMinutes,

@@ -8,6 +8,10 @@ import TotalityCore
 public struct SupabaseSyncRemote: SyncRemote {
     private static let bucket = "content"
     private static let pageSize = 1000
+    /// Far more than the free plan can hold, so reaching it means the server is misbehaving.
+    private static let rowLimit = 500_000
+    /// The bucket's own ceiling, with room for sealing.
+    private static let objectLimit = 52_428_800 + 1_048_576
 
     private struct ListRow: Decodable {
         let id: UUID
@@ -21,6 +25,7 @@ public struct SupabaseSyncRemote: SyncRemote {
         let kind: String
         let meta_cipher: String?
         let storage_key: String?
+        let byte_size: Int?
         let deleted_at: String?
     }
 
@@ -33,9 +38,15 @@ public struct SupabaseSyncRemote: SyncRemote {
     }
 
     private let client: SupabaseClient
+    private let account: String?
 
-    init(client: SupabaseClient) {
+    init(client: SupabaseClient, account: String? = nil) {
         self.client = client
+        self.account = account
+    }
+
+    public func forCurrentAccount() async throws -> any SyncRemote {
+        SupabaseSyncRemote(client: client, account: try await owner())
     }
 
     /// Reads page by page, because the server stops at a page of its own otherwise, and an item that
@@ -60,18 +71,20 @@ public struct SupabaseSyncRemote: SyncRemote {
                 return RemoteRecord(id: row.id, kind: kind, hash: hash, byteCount: row.byte_size ?? 0)
             }
             if rows.count < Self.pageSize { return records }
+            guard offset < Self.rowLimit else { throw AccountError.failed }
         }
     }
 
     public func fetch(_ id: UUID, reusing local: SealedObject?) async throws -> SealedObject? {
         let rows: [ObjectRow] = try await client.from("content_objects")
-            .select("kind, meta_cipher, storage_key, deleted_at")
+            .select("kind, meta_cipher, storage_key, byte_size, deleted_at")
             .eq("id", value: id.uuidString)
             .execute()
             .value
         guard let row = rows.first, row.deleted_at == nil, let kind = ContentKind(rawValue: row.kind),
               let meta = row.meta_cipher.flatMap(Self.bytes)
         else { return nil }
+        guard (row.byte_size ?? 0) <= Self.objectLimit else { throw AccountError.failed }
         let body = try await row.storage_key.asyncMap { key -> Data in
             if let bodyHash = local?.bodyHash, let body = local?.body, key.hasSuffix("/\(bodyHash).body") { return body }
             return try await client.storage.from(Self.bucket).download(path: key)
@@ -130,6 +143,7 @@ public struct SupabaseSyncRemote: SyncRemote {
     }
 
     public func delete(_ id: UUID, expected: String) async throws {
+        _ = try await owner()
         let previous = try await currentKey(of: id)
         let tombstone: [String: AnyJSON] = [
             "deleted_at": .string(ISO8601DateFormatter().string(from: Date())),
@@ -149,8 +163,11 @@ public struct SupabaseSyncRemote: SyncRemote {
         if let previous { _ = try? await client.storage.from(Self.bucket).remove(paths: [previous]) }
     }
 
+    /// Fails if the session changed partway through a sync, rather than writing as someone else.
     private func owner() async throws -> String {
-        try await client.auth.session.user.id.uuidString.lowercased()
+        let current = try await client.auth.session.user.id.uuidString.lowercased()
+        guard account == nil || account == current else { throw AccountError.failed }
+        return current
     }
 
     private func currentKey(of id: UUID) async throws -> String? {

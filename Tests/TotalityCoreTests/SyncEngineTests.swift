@@ -14,6 +14,9 @@ private actor Area: SyncArea {
     var damaged = Set<UUID>()
     /// Runs once, right before a store or removal, to stand in for a save landing mid-sync.
     var beforeWrite: (@Sendable (Area) async -> Void)?
+    /// Runs once, between sync reading an item's hash and acting on it.
+    var duringSettle: (@Sendable (Area) async -> Void)?
+    private var deletedReads = 0
     /// Stands in for a key that doesn't open what arrives.
     var refuseWith: (any Error)?
 
@@ -34,6 +37,10 @@ private actor Area: SyncArea {
         damaged.insert(id)
     }
     func setBeforeWrite(_ action: @escaping @Sendable (Area) async -> Void) { beforeWrite = action }
+    func setDuringSettle(_ action: @escaping @Sendable (Area) async -> Void) {
+        duringSettle = action
+        deletedReads = 0
+    }
 
     func sealedObjectIDs() async throws -> [UUID] { Array(objects.keys) }
     func sealedHash(of id: UUID) async throws -> String? { objects[id]?.hash }
@@ -62,7 +69,15 @@ private actor Area: SyncArea {
         objects[id] = nil
     }
     func emptyOldTrash() async throws { trashSweeps += 1 }
-    func deletedObjectIDs() async throws -> Set<UUID> { deletions }
+    func deletedObjectIDs() async throws -> Set<UUID> {
+        // Sync reads this once to list items, then again for each item after reading its hash.
+        deletedReads += 1
+        if deletedReads == 2, let action = duringSettle {
+            duringSettle = nil
+            await action(self)
+        }
+        return deletions
+    }
     func clearDeletion(_ id: UUID) async throws { deletions.remove(id) }
     func resolveConflict(local: SealedObject, remote: SealedObject) async throws -> ConflictResolution {
         conflicts += 1
@@ -78,6 +93,10 @@ private actor Server: SyncRemote {
     var failDeletes = false
     /// What `fetch` returns instead of the listed version, like a replayed old copy.
     var stale: [UUID: SealedObject] = [:]
+    /// Runs once at the next fetch, to stand in for a save landing mid-download.
+    var beforeFetch: (@Sendable () async -> Void)?
+    /// Sizes the server claims, whatever the real ones are.
+    var byteCounts: [UUID: Int] = [:]
     /// Rows the list leaves out, like a page that came back short.
     var hidden = Set<UUID>()
     private(set) var uploads = 0
@@ -94,10 +113,17 @@ private actor Server: SyncRemote {
     }
 
     func list() async throws -> [RemoteRecord] {
-        live.values.filter { !hidden.contains($0.id) }.map { RemoteRecord(id: $0.id, kind: $0.kind, hash: $0.hash, byteCount: $0.body?.count ?? 0) }
+        live.values.filter { !hidden.contains($0.id) }.map { RemoteRecord(id: $0.id, kind: $0.kind, hash: $0.hash, byteCount: byteCounts[$0.id] ?? $0.body?.count ?? 0) }
             + tombstones.map { RemoteRecord(id: $0.key, kind: $0.value, hash: nil, byteCount: 0) }
     }
+    func forCurrentAccount() async throws -> any SyncRemote { self }
+    func setBeforeFetch(_ action: @escaping @Sendable () async -> Void) { beforeFetch = action }
+    func setByteCount(_ count: Int, for id: UUID) { byteCounts[id] = count }
     func fetch(_ id: UUID, reusing local: SealedObject?) async throws -> SealedObject? {
+        if let action = beforeFetch {
+            beforeFetch = nil
+            await action()
+        }
         if failFetches { throw URLError(.notConnectedToInternet) }
         return stale[id] ?? live[id]
     }
@@ -287,6 +313,60 @@ private struct Device {
         await phone.area.setBeforeWrite { await $0.put(note(id, "typed just now")) }
         _ = try await phone.engine.sync()
         #expect(await phone.area.objects[id] == note(id, "typed just now"))
+    }
+
+    @Test("A save that lands during the download is never overwritten")
+    func aSaveDuringADownloadSurvives() async throws {
+        let (phone, mac) = (Device(server: server), Device(server: server))
+        let id = UUID()
+        await phone.area.put(note(id, "one"))
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        await mac.area.put(note(id, "from the mac"))
+        _ = try await mac.engine.sync()
+        let area = phone.area
+        await server.setBeforeFetch { await area.put(note(id, "typed just now")) }
+        _ = try await phone.engine.sync()
+        #expect(await phone.area.objects[id] == note(id, "typed just now"))
+    }
+
+    @Test("A save that lands after sync looked is never removed")
+    func aSaveAfterSyncLookedSurvives() async throws {
+        let (phone, mac) = (Device(server: server), Device(server: server))
+        let id = UUID()
+        await phone.area.put(note(id, "one"))
+        _ = try await phone.engine.sync()
+        _ = try await mac.engine.sync()
+        await mac.area.delete(id)
+        _ = try await mac.engine.sync()
+        await phone.area.setDuringSettle { await $0.put(note(id, "typed just now")) }
+        _ = try await phone.engine.sync()
+        #expect(await phone.area.objects[id] == note(id, "typed just now"))
+    }
+
+    @Test("Sizes a server makes up can't crash the app")
+    func hugeSizesDoNotCrash() async throws {
+        let phone = Device(server: server)
+        let (one, two) = (note("one"), note("two"))
+        await phone.area.put(one)
+        await phone.area.put(two)
+        _ = try await phone.engine.sync()
+        await server.setByteCount(.max, for: one.id)
+        await server.setByteCount(.max, for: two.id)
+        #expect(try await phone.engine.sync().byteCount == .max)
+    }
+
+    @Test("A cancelled sync stops")
+    func cancellingStops() async throws {
+        let phone = Device(server: server)
+        await phone.area.put(note("one"))
+        let engine = phone.engine
+        let run = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await engine.sync()
+        }
+        await #expect(throws: CancellationError.self) { _ = try await run.value }
+        #expect(await server.live.isEmpty)
     }
 
     @Test("A save that lands during a removal isn't thrown away")

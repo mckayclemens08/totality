@@ -698,6 +698,46 @@ enum Dates {
         #expect(model.notice != nil)
     }
 
+    @Test("A stale screen can't delete what a sync just changed")
+    func staleDeletesAreRefused() async throws {
+        let vault = CalendarVault(store: blobs, rootKey: try ContentRootKey.generate())
+        let model = CalendarModel(
+            vault: vault, devices: devices, reminders: reminders, startingMode: .agenda, display: Dates.calendar(),
+            defaults: UserDefaults(suiteName: "totality.tests.\(UUID().uuidString)")!, now: { Dates.date(2026, 10, 15, 8, 30) }
+        )
+        _ = await model.create(draft("Dentist"))
+        let stale = try onlyOccurrence(model, day: 15)
+        var newer = stale.event
+        newer.title = "Dentist moved"
+        newer.updatedAt = newer.updatedAt.addingTimeInterval(60)
+        try await vault.save(newer)
+        await model.delete(stale, scope: .allOccurrences)
+        #expect(try await vault.event(newer.id).title == "Dentist moved")
+        #expect(model.notice != nil)
+    }
+
+    @Test("Saving against an old version is refused in one step")
+    func vaultRefusesOldVersions() async throws {
+        let vault = CalendarVault(store: blobs, rootKey: try ContentRootKey.generate())
+        let event = Dates.event(Dates.date(2026, 10, 15, 9), title: "One")
+        try await vault.save(event)
+        var newer = event
+        newer.updatedAt = event.updatedAt.addingTimeInterval(60)
+        try await vault.save(newer)
+        await #expect(throws: CalendarError.changed) { try await vault.save([event], ifStillAt: event) }
+        await #expect(throws: CalendarError.changed) { try await vault.delete(event.id, ifStillAt: event) }
+    }
+
+    @Test("A crash partway through a delete is finished, not undone")
+    func interruptedDeletesFinish() async throws {
+        let vault = CalendarVault(store: blobs, rootKey: try ContentRootKey.generate())
+        let event = Dates.event(Dates.date(2026, 10, 15, 9))
+        try await vault.save(event)
+        try blobs.write(Data(), as: "\(event.id.uuidString.lowercased()).deleted")
+        #expect(try await vault.sealedObjectIDs().isEmpty)
+        #expect(try await vault.list().events.isEmpty)
+    }
+
     @Test("Device calendars stay away until permission is given")
     func deviceCalendarsNeedPermission() async throws {
         devices.available = [DeviceCalendar(id: "work", title: "Work", account: "Google")]

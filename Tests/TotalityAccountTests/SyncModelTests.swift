@@ -30,6 +30,75 @@ import TotalityCore
         #expect(model.isProtected)
     }
 
+    @Test("A sync that stops partway takes back what a clean one earlier said")
+    func aThrownRunEndsProtection() async {
+        let model = fresh()
+        model.run = { _ in self.report() }
+        await model.syncNow()
+        #expect(model.isProtected)
+        model.run = { _ in throw URLError(.notConnectedToInternet) }
+        await model.syncNow()
+        #expect(!model.isProtected)
+    }
+
+    @Test("A run with failures doesn't count as the last good sync")
+    func failuresDoNotMoveLastSynced() async {
+        let model = fresh()
+        model.run = { _ in self.report { $0.failed = 1 } }
+        await model.syncNow()
+        model.run = { _ in self.report { $0.rejected = 1 } }
+        await model.syncNow()
+        #expect(model.lastSynced == nil)
+    }
+
+    @Test("After sign-out it claims nothing, tells the screens, and keeps nothing for the next person")
+    func signingOutForgets() async {
+        let defaults = UserDefaults(suiteName: "totality.tests.\(UUID().uuidString)")!
+        let model = SyncModel(defaults: defaults)
+        var refreshed = 0
+        model.onFinished = { refreshed += 1 }
+        model.run = { _ in self.report() }
+        await model.syncNow()
+        #expect(model.isProtected)
+        let before = refreshed
+        model.forget()
+        #expect(!model.isProtected)
+        #expect(model.summary == nil)
+        #expect(refreshed == before + 1)
+        #expect(SyncModel(defaults: defaults).lastSynced == nil)
+    }
+
+    @Test("The account stops sync and clears it when someone signs out")
+    func accountSignOutClearsSync() async {
+        let sync = fresh()
+        sync.run = { _ in self.report() }
+        let account = AccountModel(service: FakeAccountService(username: "wren"), sync: sync)
+        await account.load()
+        await sync.syncNow()
+        #expect(sync.isProtected)
+        await account.signOut()
+        #expect(!sync.isProtected)
+        await sync.syncNow()
+        #expect(sync.isProtected)
+    }
+
+    @Test("Signing out cuts a run short instead of waiting for it")
+    func signOutCancelsARun() async {
+        let model = fresh()
+        var wasCancelled = false
+        model.run = { _ in
+            while !Task.isCancelled { await Task.yield() }
+            wasCancelled = true
+            return self.report()
+        }
+        let running = Task { await model.syncNow() }
+        await Task.yield()
+        await Task.yield()
+        await model.stopForSignOut()
+        await running.value
+        #expect(wasCancelled)
+    }
+
     @Test("A sync that keeps failing still says so, instead of showing nothing")
     func neverSyncedStillReports() async {
         let model = fresh()

@@ -235,7 +235,11 @@ extension ReaderVault: SyncArea {
     public nonisolated var kinds: Set<ContentKind> { [.note, .file] }
 
     public func sealedObjectIDs() throws -> [UUID] {
-        try store.names().compactMap { name in
+        // A crash can stop a delete halfway. The record says what was meant, so finish it.
+        if !isClosed {
+            for id in try deletedObjectIDs() where try store.read(metaName(id)) != nil { try removeBlobs(id) }
+        }
+        return try store.names().compactMap { name in
             name.hasSuffix(".meta") ? UUID(uuidString: String(name.dropLast(".meta".count))) : nil
         }
     }
@@ -320,7 +324,8 @@ extension ReaderVault: SyncArea {
             && mine.item.collection == theirs.item.collection
         if !same {
             let older = keepMine ? theirs : mine
-            try writeConflictCopy(of: older.item, body: older.body, id: UUID(derivedFrom: local.hash + remote.hash))
+            // Named for the version it preserves, so retries can't double it even if this device changes again.
+            try writeConflictCopy(of: older.item, body: older.body, id: UUID(derivedFrom: (keepMine ? remote : local).hash))
         }
         return keepMine ? .keepLocal : .keepRemote
     }

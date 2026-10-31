@@ -333,6 +333,60 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         #expect(try await first.list().items.contains { $0.title == "Older title (conflict copy)" })
     }
 
+    @Test("A crash partway through a delete is finished, not undone")
+    func interruptedDeletesFinish() async throws {
+        let store = MemoryBlobStore()
+        let vault = ReaderVault(store: store, rootKey: try ContentRootKey.generate())
+        let note = try await vault.createNote(title: "Delete me")
+        try store.write(Data(), as: "\(note.id.uuidString.lowercased()).deleted")
+        #expect(try await vault.sealedObjectIDs().isEmpty)
+        #expect(try await vault.list().items.isEmpty)
+        #expect(try await vault.deletedObjectIDs() == [note.id])
+    }
+
+    @Test("A closed vault changes nothing, even to finish a delete")
+    func closedVaultsStayPut() async throws {
+        let store = MemoryBlobStore()
+        let vault = ReaderVault(store: store, rootKey: try ContentRootKey.generate())
+        let note = try await vault.createNote(title: "Keep me")
+        try store.write(Data(), as: "\(note.id.uuidString.lowercased()).deleted")
+        await vault.close()
+        #expect(try await vault.sealedObjectIDs() == [note.id])
+    }
+
+    @Test("A conflict that keeps retrying as this device changes still makes one copy")
+    func conflictCopiesSurviveLocalChanges() async throws {
+        let (first, second, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: nil)
+        try await second.saveNote(note.id, title: "Plan", body: "from the mac")
+        let remote = try #require(try await second.sealedObject(note.id))
+        try await Task.sleep(for: .milliseconds(5))
+        try await first.saveNote(note.id, title: "Plan", body: "one")
+        _ = try await first.resolveConflict(local: try #require(try await first.sealedObject(note.id)), remote: remote)
+        try await Task.sleep(for: .milliseconds(5))
+        try await first.saveNote(note.id, title: "Plan", body: "two")
+        _ = try await first.resolveConflict(local: try #require(try await first.sealedObject(note.id)), remote: remote)
+        #expect(try await first.list().items.count == 2)
+    }
+
+    @Test("A retry leaves a conflict copy alone once someone has edited it")
+    func conflictRetriesKeepEdits() async throws {
+        let (first, second, _) = try pair()
+        let note = try await first.createNote(title: "Plan")
+        try await second.store(try #require(try await first.sealedObject(note.id)), ifLocalHash: nil)
+        try await first.saveNote(note.id, title: "Plan", body: "older")
+        try await Task.sleep(for: .milliseconds(5))
+        try await second.saveNote(note.id, title: "Plan", body: "newer")
+        let local = try #require(try await first.sealedObject(note.id))
+        let remote = try #require(try await second.sealedObject(note.id))
+        _ = try await first.resolveConflict(local: local, remote: remote)
+        let copy = try #require(try await first.list().items.first { $0.id != note.id })
+        try await first.saveNote(copy.id, title: copy.title, body: "edited the copy")
+        _ = try await first.resolveConflict(local: local, remote: remote)
+        #expect(String(decoding: try await first.body(of: copy.id), as: UTF8.self) == "edited the copy")
+    }
+
     @Test("A retried conflict doesn't make a second copy")
     func conflictCopiesDoNotDouble() async throws {
         let (first, second, _) = try pair()

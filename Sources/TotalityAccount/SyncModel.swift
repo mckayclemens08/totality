@@ -123,6 +123,23 @@ public final class SyncModel {
         onFinished?()
     }
 
+    /// Cuts a run short, because signing out shouldn't wait for a whole library to sync.
+    public func stopForSignOut() async {
+        isPaused = true
+        current?.cancel()
+        await current?.value
+    }
+
+    /// Nothing here describes the next person to sign in.
+    public func forget() {
+        isAvailable = false
+        status = .idle
+        lastSynced = nil
+        lastReport = nil
+        defaults.removeObject(forKey: Self.lastSuccessKey)
+        onFinished?()
+    }
+
     /// Stops new runs and waits for one in progress, so a key move has the files to itself.
     public func pause() async {
         isPaused = true
