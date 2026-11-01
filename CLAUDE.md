@@ -108,6 +108,7 @@ The project signs with the owner's free Personal Team, and command-line builds n
 `-allowProvisioningUpdates -allowProvisioningDeviceRegistration`. An ad-hoc Mac build gets `-34018` from
 the Keychain, so the Reader shows its key error by design: never fall back to a weaker keychain to get
 around that. `keychain-access-groups` is pinned in the entitlements so a team change cannot hide the key.
+The first app build on a Mac fetches Michael's voice pack from a GitHub release, so `gh` has to be signed in.
 
 ## The server
 

@@ -1,17 +1,15 @@
 import AVFoundation
 import FluidAudio
-@preconcurrency import Network
 
 /// Turns text into audio samples. Nothing here leaves the device: only the model is ever downloaded.
 protocol VoiceSynthesizer: Sendable {
-    var needsDownload: Bool { get }
     func prepare() async throws
     func samples(for text: String, speed: Double) async throws -> [Float]
 }
 
+/// Why the voice couldn't load, when that's something the listener can fix.
 enum VoiceLoadError: Error {
-    case waitingForWiFi
-    case badFile
+    case storageFull
 }
 
 /// Plays one run of samples at a time.
@@ -31,6 +29,8 @@ protocol VoiceOutput: AnyObject {
 final class NaturalSpeechEngine: SpeechEngine {
     /// The model gives no word timing, so the bar is moved by how much of the audio has played.
     private static let positionPause = Duration.milliseconds(250)
+    /// One failed sentence is about that sentence. Two in a row is about the voice.
+    private static let failuresBeforeNotice = 2
 
     var onFinish: (() -> Void)?
     var onWord: ((Int) -> Void)?
@@ -59,6 +59,7 @@ final class NaturalSpeechEngine: SpeechEngine {
     private var ahead: (request: Request, samples: Task<[Float], any Error>)?
     private var wanted: Request?
     private var position: Task<Void, Never>?
+    private var failuresInARow = 0
 
     init(synthesizer: any VoiceSynthesizer, output: any VoiceOutput) {
         self.synthesizer = synthesizer
@@ -78,17 +79,19 @@ final class NaturalSpeechEngine: SpeechEngine {
         loading = load
         if load != nil {
             isWaiting = true
-            onStatus?(synthesizer.needsDownload
-                ? "Downloading Michael's voice, about 390 MB. This can take a few minutes."
-                : "Getting the voice ready. This takes about a minute.")
+            onStatus?("Getting the voice ready.")
         }
         making = Task { [weak self] in
             do {
                 try await load?.value
+            } catch VoiceLoadError.storageFull {
+                self?.failed(text, notice: "Storage is almost full, so Michael can't run. Free up space, then reopen the app.", turn: current)
+                return
             } catch {
-                self?.failed(text, notice: Self.notice(for: error), turn: current)
+                self?.failed(text, notice: "Michael's voice didn't load, so this is the system voice.", turn: current)
                 return
             }
+            self?.isReady = true
             do {
                 let samples = if let held {
                     try await held.value
@@ -100,13 +103,6 @@ final class NaturalSpeechEngine: SpeechEngine {
                 self?.failed(text, notice: nil, turn: current)
             }
         }
-    }
-
-    private nonisolated static func notice(for error: any Error) -> String {
-        if case VoiceLoadError.waitingForWiFi = error {
-            return "Michael's voice is a 390 MB download, so it's waiting for Wi-Fi. This is the system voice for now."
-        }
-        return "Michael's voice didn't load, so this is the system voice."
     }
 
     func prepare(_ text: String?, speed: Double) {
@@ -167,9 +163,14 @@ final class NaturalSpeechEngine: SpeechEngine {
 
     private func made(_ samples: [Float], text: String, turn: Int) {
         guard turn == self.turn else { return }
-        isReady = true
         making = nil
         doneWaiting()
+        if failuresInARow >= Self.failuresBeforeNotice { onStatus?(nil) }
+        failuresInARow = 0
+        guard !samples.isEmpty else {
+            played(turn: turn)
+            return
+        }
         do {
             try output.play(samples) { [weak self] in self?.played(turn: turn) }
         } catch {
@@ -201,6 +202,10 @@ final class NaturalSpeechEngine: SpeechEngine {
         making = nil
         isPlaying = false
         doneWaiting()
+        failuresInARow += 1
+        if failuresInARow == Self.failuresBeforeNotice, notice == nil {
+            onStatus?("Michael isn't working right now, so this is the system voice.")
+        }
         onFailure?(text, notice)
     }
 
@@ -211,64 +216,97 @@ final class NaturalSpeechEngine: SpeechEngine {
     }
 }
 
-/// Kokoro, through a pinned FluidAudio release. `VoiceAssets` covers the files FluidAudio doesn't check.
+/// Kokoro, through a pinned FluidAudio release. The voice ships in the app, signed with it.
 @available(iOS 18, macOS 15, *)
 final class KokoroSynthesizer: VoiceSynthesizer {
-    static let downloadedMarker = "downloaded"
-    private let manager: KokoroAneManager
-    private let directory: URL
-    private let downloaded: URL
-    private let isMetered: @Sendable () async -> Bool
-    private let fetch: VoiceAssets.Fetch
+    private static let voice = "am_michael"
+    /// FluidAudio rewrites these two every time, so they can't be links into the read-only app.
+    private static let rewritten: Set<String> = ["manifest.json", "base-index-v3.json"]
+    /// Below this, a load that fails is put down to storage. Core ML writes each model's compiled form to disk.
+    private static let storageNeeded: Int64 = 1_000_000_000
+    /// Between them these run every model: the two short routes and the one for longer sentences.
+    private static let warmUp = [
+        "Hello there.",
+        "This short line is here to warm the voice up.",
+        "This longer line is here to warm the voice up, so the first long sentence doesn't have to wait for it.",
+    ]
 
-    init(
-        directory: URL,
-        isMetered: @escaping @Sendable () async -> Bool = KokoroSynthesizer.onMeteredNetwork,
-        fetch: @escaping VoiceAssets.Fetch = VoiceAssets.fromNetwork
-    ) {
-        self.fetch = fetch
-        self.directory = directory
-        downloaded = directory.appendingPathComponent(Self.downloadedMarker)
-        self.isMetered = isMetered
+    private let manager: KokoroAneManager
+    private let pack: URL
+    private let directory: URL
+
+    init(pack: URL, directory: URL) {
         // A word the model can't read is logged, so the log mustn't reach stderr. The system log keeps it private.
         AppLogger.mirrorsToConsole = false
+        // Everything is in the app, so a missing file should fail here, not go looking on the network.
+        ModelRegistry.baseURL = "https://voice.invalid"
+        self.pack = pack
+        self.directory = directory
         manager = KokoroAneManager(directory: directory, version: .v3)
     }
 
-    var needsDownload: Bool {
-        !FileManager.default.fileExists(atPath: downloaded.path)
-    }
-
-    /// The download never starts on cellular, a hotspot, or Low Data Mode.
     func prepare() async throws {
-        let firstTime = needsDownload
-        if firstTime {
-            if await isMetered() { throw VoiceLoadError.waitingForWiFi }
-            try await VoiceAssets.install(in: directory, fetch: fetch)
+        do {
+            try Self.link(pack, into: directory)
+            try await manager.initialize(preloadVoices: [Self.voice])
+        } catch {
+            throw isOutOfRoom ? VoiceLoadError.storageFull : error
         }
-        try await manager.initialize(preloadVoices: [VoiceAssets.voice])
-        if firstTime {
-            try VoiceAssets.checkVoice(in: directory)
-            FileManager.default.createFile(atPath: downloaded.path, contents: nil)
+        // Core ML finishes compiling a model the first time it runs. Doing that now keeps the wait out of
+        // the middle of a chapter. A locked screen can refuse this for now, so only a full disk ends it.
+        do {
+            for line in Self.warmUp {
+                _ = try await manager.synthesizeDetailed(text: line, voice: Self.voice, speed: 1)
+            }
+        } catch {
+            if isOutOfRoom { throw VoiceLoadError.storageFull }
         }
     }
 
-    @Sendable static func onMeteredNetwork() async -> Bool {
-        await withCheckedContinuation { continuation in
-            let monitor = NWPathMonitor()
-            // Serial, so clearing the handler means it can only answer once.
-            monitor.pathUpdateHandler = { path in
-                monitor.pathUpdateHandler = nil
-                monitor.cancel()
-                continuation.resume(returning: path.isExpensive || path.isConstrained)
+    static func isShortOfStorage(free: Int64?) -> Bool {
+        free.map { $0 < storageNeeded } ?? false
+    }
+
+    private var isOutOfRoom: Bool {
+        let key = URLResourceKey.volumeAvailableCapacityForImportantUsageKey
+        return Self.isShortOfStorage(free: (try? directory.resourceValues(forKeys: [key]))?.volumeAvailableCapacityForImportantUsage)
+    }
+
+    /// FluidAudio needs a folder it can write to, so it gets one made of links into the app, and the voice
+    /// isn't stored twice. The app's path changes with each update, so this is redone every launch. That
+    /// also clears the 390 MB download earlier builds left here.
+    static func link(_ pack: URL, into directory: URL) throws {
+        try? FileManager.default.removeItem(at: directory)
+        try mirror(pack, into: directory)
+    }
+
+    /// Only a compiled model or a file is linked, because FluidAudio can't list a folder that's a link.
+    private static func mirror(_ source: URL, into target: URL) throws {
+        let files = FileManager.default
+        try files.createDirectory(at: target, withIntermediateDirectories: true)
+        for name in try files.contentsOfDirectory(atPath: source.path) {
+            let from = source.appendingPathComponent(name)
+            let to = target.appendingPathComponent(name)
+            var isFolder: ObjCBool = false
+            files.fileExists(atPath: from.path, isDirectory: &isFolder)
+            if isFolder.boolValue, !name.hasSuffix(".mlmodelc") {
+                try mirror(from, into: to)
+            } else if rewritten.contains(name) {
+                try files.copyItem(at: from, to: to)
+            } else {
+                try files.createSymbolicLink(at: to, withDestinationURL: from)
             }
-            monitor.start(queue: DispatchQueue(label: "app.totality.voice-network"))
         }
     }
 
     func samples(for text: String, speed: Double) async throws -> [Float] {
-        let result = try await manager.synthesizeDetailed(text: text, voice: VoiceAssets.voice, speed: Float(speed))
-        return result.samples
+        do {
+            let spoken = SpokenText.prepared(text)
+            return SpokenAudio.trimmed(try await manager.synthesizeDetailed(text: spoken, voice: Self.voice, speed: Float(speed)).samples)
+        } catch KokoroAneError.inputProcessingFailed {
+            // Nothing in it can be said, like a line of emoji, so there's nothing to hand to another voice.
+            return []
+        }
     }
 }
 

@@ -4,27 +4,31 @@ import Testing
 
 /// Holds each sentence back until the test lets it through, the way a slow model would.
 private actor FakeVoice: VoiceSynthesizer {
-    nonisolated let needsDownload: Bool
     private(set) var prepared = 0
     private(set) var requests: [(text: String, speed: Double)] = []
-    private let loadError: (any Error)?
-    private let unreadable: String?
+    private let failsPreparing: Bool
+    private let storageFull: Bool
+    private let unreadable: Set<String>
+    private let silent: String?
     private var held: [String: CheckedContinuation<[Float], Never>] = [:]
 
-    init(failsPreparing: Bool = false, loadError: (any Error)? = nil, unreadable: String? = nil, needsDownload: Bool = false) {
-        self.loadError = failsPreparing ? CancellationError() : loadError
+    init(failsPreparing: Bool = false, storageFull: Bool = false, unreadable: Set<String> = [], silent: String? = nil) {
+        self.failsPreparing = failsPreparing
+        self.storageFull = storageFull
         self.unreadable = unreadable
-        self.needsDownload = needsDownload
+        self.silent = silent
     }
 
     func prepare() async throws {
         prepared += 1
-        if let loadError { throw loadError }
+        if storageFull { throw VoiceLoadError.storageFull }
+        if failsPreparing { throw CancellationError() }
     }
 
     func samples(for text: String, speed: Double) async throws -> [Float] {
         requests.append((text, speed))
-        if text == unreadable { throw CancellationError() }
+        if unreadable.contains(text) { throw CancellationError() }
+        if text == silent { return [] }
         return await withCheckedContinuation { held[text] = $0 }
     }
 
@@ -280,25 +284,6 @@ private func until(_ condition: () async -> Bool) async throws {
         #expect(notice != nil)
     }
 
-    @Test("The first run says how big the download is")
-    func downloadStatus() async throws {
-        let engine = engine(FakeVoice(needsDownload: true))
-        var seen: [String?] = []
-        engine.onStatus = { seen.append($0) }
-        engine.speak("One.", speed: 1)
-        let first = try #require(seen.compactMap { $0 }.first)
-        #expect(first.contains("390 MB"))
-    }
-
-    @Test func aLoadedVoiceSaysNothingAboutDownloading() async throws {
-        let engine = engine()
-        var seen: [String?] = []
-        engine.onStatus = { seen.append($0) }
-        engine.speak("One.", speed: 1)
-        let first = try #require(seen.compactMap { $0 }.first)
-        #expect(!first.contains("390 MB"))
-    }
-
     @Test func audioThatWontPlayCountsAsAFailure() async throws {
         output.refuses = true
         let engine = engine()
@@ -313,6 +298,42 @@ private func until(_ condition: () async -> Bool) async throws {
         await voice.release("One.")
         try await until { lost == ["One."] }
         #expect(notices == [nil])
+    }
+
+    @Test("A sentence that fails first doesn't bring the loading message back")
+    func theLoadingMessageShowsOnce() async throws {
+        let bad = FakeVoice(unreadable: ["One."])
+        let engine = engine(bad)
+        var seen: [String?] = []
+        engine.onStatus = { seen.append($0) }
+        var lost: [String] = []
+        engine.onFailure = { text, _ in lost.append(text) }
+        engine.speak("One.", speed: 1)
+        try await until { lost == ["One."] }
+        engine.speak("Two.", speed: 1)
+        try await until { await bad.isHeld("Two.") }
+        #expect(seen.count == 2)
+        #expect(seen.last == .some(nil))
+    }
+
+    @Test("A full phone is named as the reason, not a broken voice")
+    func storageGetsItsOwnNotice() async throws {
+        let engine = engine(FakeVoice(storageFull: true))
+        var notice: String?
+        engine.onFailure = { _, reason in notice = reason }
+        engine.speak("One.", speed: 1)
+        try await until { notice != nil }
+        #expect(notice?.contains("Storage") == true)
+    }
+
+    @Test("Under the amount the models need, storage is the likely reason", arguments: [
+        (Int64?.some(263_000_000), true),
+        (Int64?.some(5_000_000_000), false),
+        (Int64?.none, false),
+    ])
+    func shortOfStorage(free: Int64?, short: Bool) {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        #expect(KokoroSynthesizer.isShortOfStorage(free: free) == short)
     }
 }
 
@@ -417,9 +438,20 @@ private final class Finished {
         #expect(listen.status != nil)
     }
 
+    @Test("Text with nothing to say is skipped, with no voice change")
+    func nothingToSay() async throws {
+        let voices = voices(FakeVoice(silent: "🙂"))
+        var finished = 0
+        voices.onFinish = { finished += 1 }
+        voices.speak("🙂", speed: 1)
+        try await until { finished == 1 }
+        #expect(system.spoken.isEmpty)
+        #expect(output.played.isEmpty)
+    }
+
     @Test("Text the voice can't read goes to the system voice, and the voice carries on")
     func oneBadSentence() async throws {
-        let voices = voices(FakeVoice(unreadable: "•"))
+        let voices = voices(FakeVoice(unreadable: ["•"]))
         var statuses: [String?] = []
         voices.onStatus = { statuses.append($0) }
         voices.speak("•", speed: 1)
@@ -434,7 +466,7 @@ private final class Finished {
 
     @Test("Text that can't be made ahead still reaches the system voice in its turn")
     func oneBadSentenceMadeAhead() async throws {
-        let bad = FakeVoice(unreadable: "•")
+        let bad = FakeVoice(unreadable: ["•"])
         let voices = voices(bad)
         voices.speak("One.", speed: 1)
         try await until { await bad.isHeld("One.") }
@@ -446,19 +478,40 @@ private final class Finished {
         try await until { system.spoken == ["•"] }
     }
 
-    @Test("On cellular the download waits, the system voice reads, and it says why")
-    func waitsForWiFi() async throws {
-        let waiting = FakeVoice(loadError: VoiceLoadError.waitingForWiFi, needsDownload: true)
-        let voices = voices(waiting)
-        var statuses: [String?] = []
-        voices.onStatus = { statuses.append($0) }
-        voices.speak("One.", speed: 1)
+    @Test("Sentence after sentence failing says so, and Michael comes back by himself")
+    func repeatedFailuresAreSaidOutLoud() async throws {
+        let shaky = FakeVoice(unreadable: ["One.", "Two."])
+        let voices = voices(shaky)
+        let listen = ListenController(engine: voices)
+        let track = try #require(ListenTrack(id: UUID(), title: "Track", text: "One. Two. Three."))
+        listen.play(track)
         try await until { system.spoken == ["One."] }
-        let status = try #require(statuses.compactMap { $0 }.last)
-        #expect(status.contains("Wi-Fi"))
-        voices.speak("Two.", speed: 1)
+        #expect(listen.status == nil)
+        system.onFinish?()
+        try await until { system.spoken == ["One.", "Two."] }
+        #expect(listen.status != nil)
+        system.onFinish?()
+        try await until { await shaky.isHeld("Three.") }
+        await shaky.release("Three.")
+        try await until { listen.status == nil }
         #expect(system.spoken == ["One.", "Two."])
-        #expect(await waiting.prepared == 1)
+    }
+
+    @Test("Two odd lines apart aren't a failing voice")
+    func failuresOnlyCountInARow() async throws {
+        let odd = FakeVoice(unreadable: ["One.", "Three."])
+        let voices = voices(odd)
+        let listen = ListenController(engine: voices)
+        let track = try #require(ListenTrack(id: UUID(), title: "Track", text: "One. Two. Three."))
+        listen.play(track)
+        try await until { system.spoken == ["One."] }
+        system.onFinish?()
+        try await until { await odd.isHeld("Two.") }
+        await odd.release("Two.")
+        try await until { output.played.count == 1 }
+        output.onDone?()
+        try await until { system.spoken == ["One.", "Three."] }
+        #expect(listen.status == nil)
     }
 
     @Test func aVoiceThatWontLoadIsNotAskedForAnythingElse() async throws {
@@ -481,156 +534,196 @@ private final class Finished {
     }
 }
 
-@Suite struct VoiceDownloadTests {
-    private func directory() throws -> URL {
+@Suite struct VoicePackTests {
+    private let models = "kokoro-82m-coreml/ANE-v3/6c0750dd02ef9d981fb82f147d784a3f171755ee/en"
+
+    private func folder() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
 
-    @Test func theDownloadNeverStartsOnAMeteredNetwork() async throws {
-        guard #available(iOS 18, macOS 15, *) else { return }
-        let voice = KokoroSynthesizer(directory: try directory(), isMetered: { true })
-        #expect(voice.needsDownload)
-        await #expect(throws: VoiceLoadError.self) { try await voice.prepare() }
-        #expect(voice.needsDownload)
-    }
-
-    @Test("The checked files come first, so a failure stops the voice before FluidAudio downloads anything")
-    func checkedFilesComeFirst() async throws {
-        guard #available(iOS 18, macOS 15, *) else { return }
-        let folder = try directory()
-        let voice = KokoroSynthesizer(directory: folder, isMetered: { false }, fetch: { _ in Data("bad".utf8) })
-        await #expect(throws: VoiceLoadError.self) { try await voice.prepare() }
-        #expect(voice.needsDownload)
-    }
-
-    @Test func aDownloadedVoiceDoesNotAskAgain() throws {
-        guard #available(iOS 18, macOS 15, *) else { return }
-        let folder = try directory()
-        FileManager.default.createFile(atPath: folder.appendingPathComponent(KokoroSynthesizer.downloadedMarker).path, contents: nil)
-        #expect(!KokoroSynthesizer(directory: folder, isMetered: { true }).needsDownload)
-    }
-
-    @Test func theNetworkCheckAnswers() async {
-        guard #available(iOS 18, macOS 15, *) else { return }
-        _ = await KokoroSynthesizer.onMeteredNetwork()
-    }
-}
-
-@Suite struct VoiceAssetsTests {
-    private let good = Data("good".utf8)
-    private let goodHash = "770e607624d689265ca6c44884d0807d9b054d23c473c106c72be9de08b7376c"
-
-    private func directory() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
-    private func file(_ directory: URL) -> URL {
-        directory.appendingPathComponent("kokoro/folder/file.bin")
-    }
-
-    @Test func theRightFileIsSaved() async throws {
-        let folder = try directory()
-        let good = good
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in good }
-        #expect(try Data(contentsOf: file(folder)) == good)
-    }
-
-    @Test("A file that doesn't match its hash is refused and never reaches the disk")
-    func aWrongFileIsRefused() async throws {
-        let folder = try directory()
-        await #expect(throws: VoiceLoadError.self) {
-            try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in Data("bad".utf8) }
+    private func pack() throws -> URL {
+        let pack = try folder()
+        let files = FileManager.default
+        try files.createDirectory(at: pack.appendingPathComponent("kokoro"), withIntermediateDirectories: true)
+        try files.createDirectory(at: pack.appendingPathComponent("\(models)/base/Model.mlmodelc"), withIntermediateDirectories: true)
+        for name in ["manifest.json", "base-index-v3.json", "vocab.json"] {
+            try Data(name.utf8).write(to: pack.appendingPathComponent("\(models)/\(name)"))
         }
-        #expect(!FileManager.default.fileExists(atPath: file(folder).path))
+        return pack
     }
 
-    @Test func files_comeFromOneCommit() async throws {
-        let folder = try directory()
-        let good = good
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { url in
-            #expect(url.absoluteString.contains("/resolve/2568276a60ff6e7f312afce3dc9e3f07521cb48d/folder/file.bin"))
-            #expect(url.host() == "huggingface.co")
-            return good
+    @Test func theVoiceIsLinkedNotCopied() throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let pack = try pack()
+        let directory = try folder()
+        try KokoroSynthesizer.link(pack, into: directory)
+        let files = FileManager.default
+        for name in ["\(models)/base/Model.mlmodelc", "\(models)/vocab.json"] {
+            let link = try files.destinationOfSymbolicLink(atPath: directory.appendingPathComponent(name).path)
+            #expect(link == pack.appendingPathComponent(name).path)
         }
     }
 
-    @Test func aGoodFileIsntFetchedAgain() async throws {
-        let folder = try directory()
-        let good = good
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in good }
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in
-            Issue.record("fetched a file it already had")
-            return Data()
+    @Test("FluidAudio lists its folders, and it can't list a link")
+    func foldersAreRealFolders() throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let pack = try pack()
+        let directory = try folder()
+        try KokoroSynthesizer.link(pack, into: directory)
+        let base = directory.appendingPathComponent("\(models)/base")
+        #expect(try FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: nil).count == 1)
+        #expect(throws: (any Error).self) { try FileManager.default.destinationOfSymbolicLink(atPath: base.path) }
+    }
+
+    @Test("FluidAudio can rewrite its two files without touching the read-only app")
+    func theRewrittenFilesAreCopies() throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let pack = try pack()
+        let directory = try folder()
+        try KokoroSynthesizer.link(pack, into: directory)
+        for name in ["manifest.json", "base-index-v3.json"] {
+            let copy = directory.appendingPathComponent("\(models)/\(name)")
+            #expect(throws: (any Error).self) { try FileManager.default.destinationOfSymbolicLink(atPath: copy.path) }
+            try Data("new".utf8).write(to: copy)
+            #expect(try Data(contentsOf: pack.appendingPathComponent("\(models)/\(name)")) == Data(name.utf8))
         }
     }
 
-    @Test func aChangedFileIsReplaced() async throws {
-        let folder = try directory()
-        try FileManager.default.createDirectory(at: file(folder).deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("changed".utf8).write(to: file(folder))
-        let good = good
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in good }
-        #expect(try Data(contentsOf: file(folder)) == good)
+    @Test("An update moves the app, so the links follow, and the old download goes")
+    func linkingAgainStartsClean() throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let directory = try folder()
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("kokoro"), withIntermediateDirectories: true)
+        let oldDownload = directory.appendingPathComponent("kokoro/weight.bin")
+        try Data("old".utf8).write(to: oldDownload)
+        let first = try pack()
+        try KokoroSynthesizer.link(first, into: directory)
+        #expect(!FileManager.default.fileExists(atPath: oldDownload.path))
+        let moved = try pack()
+        try KokoroSynthesizer.link(moved, into: directory)
+        let vocab = "\(models)/vocab.json"
+        let link = try FileManager.default.destinationOfSymbolicLink(atPath: directory.appendingPathComponent(vocab).path)
+        #expect(link == moved.appendingPathComponent(vocab).path)
+        #expect(FileManager.default.fileExists(atPath: first.appendingPathComponent("\(models)/vocab.json").path))
     }
 
-    @Test("Everything FluidAudio would otherwise fetch unchecked is on the list")
-    func theListIsComplete() {
-        let paths = Set(VoiceAssets.files.map(\.path))
-        for bundle in ["G2PEncoder.mlmodelc", "G2PDecoder.mlmodelc"] {
-            for name in ["coremldata.bin", "metadata.json", "model.mil", "weights/weight.bin", "analytics/coremldata.bin"] {
-                #expect(paths.contains("\(bundle)/\(name)"))
-            }
-        }
-        #expect(paths.contains("g2p_vocab.json"))
-        #expect(paths.contains("us_lexicon_cache.json"))
-        #expect(VoiceAssets.files.allSatisfy { $0.sha256.count == 64 })
-    }
-
-    @Test func theBaseListingIsWrittenWhereFluidAudioReadsIt() async throws {
-        let folder = try directory()
-        try await VoiceAssets.install(in: folder, files: []) { _ in Data() }
-        let written = VoiceAssets.voiceFile(in: folder).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("base-index-v3.json")
-        let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: written)) as? [[String: Any]]
-        #expect(rows?.isEmpty == false)
-        #expect(rows?.allSatisfy { $0["path"] is String && $0["oid"] is String } == true)
-    }
-
-    @Test("A voice pack that doesn't match is thrown away")
-    func aWrongVoiceIsRefused() throws {
-        let folder = try directory()
-        let voice = VoiceAssets.voiceFile(in: folder)
-        try FileManager.default.createDirectory(at: voice.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("bad".utf8).write(to: voice)
-        #expect(throws: VoiceLoadError.self) { try VoiceAssets.checkVoice(in: folder) }
-        #expect(!FileManager.default.fileExists(atPath: voice.path))
-    }
-
-    /// Downloads the whole voice into a new folder, so it only runs when TOTALITY_VOICE_DOWNLOAD is set.
-    @Test func theRealVoiceInstallsAndSpeaks() async throws {
-        guard ProcessInfo.processInfo.environment["TOTALITY_VOICE_DOWNLOAD"] != nil,
+    /// Set TOTALITY_VOICE_PACK to an unpacked Voice folder. The network address is dead, so passing also
+    /// shows nothing was fetched.
+    @Test func theRealPackSpeaksWithoutTheNetwork() async throws {
+        guard let path = ProcessInfo.processInfo.environment["TOTALITY_VOICE_PACK"],
               #available(iOS 18, macOS 15, *) else { return }
-        let folder = try directory()
-        let lexicon = folder.appendingPathComponent("kokoro/us_lexicon_cache.json")
-        try await VoiceAssets.install(in: folder)
-        let installed = try lexicon.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-        let voice = KokoroSynthesizer(directory: folder, isMetered: { false })
+        let voice = KokoroSynthesizer(pack: URL(fileURLWithPath: path), directory: try folder())
         try await voice.prepare()
-        #expect(!voice.needsDownload)
-        #expect(try lexicon.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate == installed)
         #expect(try await voice.samples(for: "It works.", speed: 1).count > 1_000)
-
-        // A changed voice pack that FluidAudio would accept, on a fresh install.
-        try FileManager.default.removeItem(at: folder.appendingPathComponent(KokoroSynthesizer.downloadedMarker))
-        let file = VoiceAssets.voiceFile(in: folder)
-        try Data(count: try Data(contentsOf: file).count).write(to: file)
-        let changed = KokoroSynthesizer(directory: folder, isMetered: { false })
-        await #expect(throws: VoiceLoadError.self) { try await changed.prepare() }
-        #expect(changed.needsDownload)
     }
 }
 
+@Suite struct PDFTextTests {
+    private func sentences(_ text: String) -> [String] {
+        ListenScript(text: text).sentences.map(\.text)
+    }
+
+    @Test("A line break that only ran out of page doesn't end the sentence")
+    func wrappedLinesJoin() {
+        let text = "The port of Lisbon grew quickly after the ships of Gama came\nhome from India. It kept growing."
+        #expect(sentences(text) == ["The port of Lisbon grew quickly after the ships of Gama came home from India.", "It kept growing."])
+    }
+
+    @Test func aWordSplitAcrossLinesIsMended() {
+        let text = "The port of Lis-\nbon grew quickly after the fleet came home."
+        #expect(sentences(text) == ["The port of Lisbon grew quickly after the fleet came home."])
+    }
+
+    @Test func aRealHyphenStays() {
+        let text = "It was a well-known route.\nA self-\nMade trader."
+        #expect(sentences(text).first == "It was a well-known route.")
+        #expect(sentences(text).joined().contains("self-"))
+    }
+
+    @Test("Offsets still point at the original text")
+    func offsetsSurvive() {
+        let text = "The port of Lis-\nbon grew quickly after the fleet came home.\n\nNext one."
+        let script = ListenScript(text: text)
+        #expect(script.length == text.utf16.count)
+        let last = try! #require(script.sentences.last)
+        #expect(last.text == "Next one.")
+        let start = String.Index(utf16Offset: last.offset, in: text)
+        #expect(text[start...].trimmingCharacters(in: .whitespacesAndNewlines) == "Next one.")
+    }
+
+    @Test func aBlankLineEndsAParagraph() {
+        #expect(sentences("A heading\n\nThe body starts here.") == ["A heading", "The body starts here."])
+    }
+
+    @Test func headingsAndListsKeepTheirLines() {
+        #expect(sentences("CHAPTER IV\nTHE RIVER TRADE") == ["CHAPTER IV", "THE RIVER TRADE"])
+        let list = "These were the goods that the ships brought back to the city:\n• Pepper by the ton\n• Cloves"
+        #expect(sentences(list).count == 3)
+    }
+
+    @Test("Bullets, rules, page numbers, and table figures aren't read")
+    func nothingToRead() {
+        #expect(sentences("Words here.\n\n* * *\n\n43\n\n•\n\n1500   12   4,800\n\nMore words.") == ["Words here.", "More words."])
+    }
+
+    @Test("Abbreviations don't end a sentence", arguments: [
+        "St. Vincent's Day falls in January.",
+        "Fig. 3 shows the tonnage.",
+        "See vol. 2 of the set.",
+        "J. Silva wrote it in Lisbon.",
+        "1. Merchants read the ledgers daily.",
+    ])
+    func abbreviationsCarryOn(text: String) {
+        #expect(sentences(text) == [text])
+    }
+
+    @Test func aRealSentenceEndStillSplits() {
+        #expect(sentences("He said no. They left.").count == 2)
+    }
+}
+
+@Suite struct SpokenTextTests {
+    @Test("Each is rewritten for reading aloud", arguments: [
+        ("See Fig. 3 for the tonnage.", "See Figure 3 for the tonnage."),
+        ("It's on pp. 12 to 14, or p. 9.", "It's on pages 12 to 14, or page 9."),
+        ("Trade grew fast [12], then fell [3, 4].", "Trade grew fast, then fell."),
+        ("Cloves cost 2× as much.", "Cloves cost 2 times as much."),
+        ("• Pepper arrived.", "Pepper arrived."),
+        ("See https://www.example.org/lisbon?id=4 for more.", "See example.org for more."),
+    ])
+    func rewrites(text: String, spoken: String) {
+        #expect(SpokenText.prepared(text) == spoken)
+    }
+
+    @Test("Words that change sound with their use", arguments: [
+        ("They had read them yesterday.", "They had red them yesterday."),
+        ("They live near the docks.", "They liv near the docks."),
+        ("Merchants read the ledgers daily.", "Merchants read the ledgers daily."),
+        ("It was a live broadcast.", "It was a live broadcast."),
+        ("She gave him a present.", "She gave him a present."),
+        ("They will present the record.", "They will prezent the record."),
+    ])
+    func respells(text: String, spoken: String) {
+        // Only Michael uses this, and iOS 17 tags these sentences differently.
+        guard #available(iOS 18, macOS 15, *) else { return }
+        #expect(SpokenText.prepared(text) == spoken)
+    }
+
+    @Test("Silence around a sentence goes, and a short rest stays")
+    func trimsSilence() {
+        let rate = 24_000
+        let speech = [Float](repeating: 0.5, count: rate)
+        let padded = [Float](repeating: 0, count: rate / 2) + speech + [Float](repeating: 0, count: rate)
+        let trimmed = SpokenAudio.trimmed(padded)
+        #expect(trimmed.count == rate + Int(0.03 * 24_000) + Int(0.18 * 24_000))
+        #expect(trimmed.first == 0)
+        #expect(trimmed[Int(0.03 * 24_000)] == 0.5)
+    }
+
+    @Test func silenceAloneIsLeftAlone() {
+        let quiet = [Float](repeating: 0, count: 100)
+        #expect(SpokenAudio.trimmed(quiet) == quiet)
+    }
+}

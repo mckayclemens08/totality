@@ -70,6 +70,7 @@
 				A1B2C3D40000000000000004 /* Sources */,
 				A1B2C3D40000000000000005 /* Frameworks */,
 				A1B2C3D40000000000000006 /* Resources */,
+				A1B2C3D40000000000000090 /* Embed Voice Pack */,
 			);
 			buildRules = (
 			);
@@ -131,6 +132,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A1B2C3D40000000000000090 /* Embed Voice Pack */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Voice Pack";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/../scripts/embed-voice-pack.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A1B2C3D40000000000000004 /* Sources */ = {

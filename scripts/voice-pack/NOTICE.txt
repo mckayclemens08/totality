@@ -1,0 +1,7 @@
+Michael's voice is Kokoro-82M by hexgrad, as converted for Core ML by FluidInference.
+Both are licensed under the Apache License 2.0, a copy of which is in LICENSE.txt.
+
+https://huggingface.co/hexgrad/Kokoro-82M
+https://huggingface.co/FluidInference/kokoro-82m-coreml
+
+The source models were left out and only the compiled ones kept.

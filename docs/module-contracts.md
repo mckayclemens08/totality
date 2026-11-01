@@ -50,13 +50,22 @@ in `TotalityCore`, and Listen and music both play through it.
 
 ### The natural voice
 
-Listen has one voice, Michael, and no voice menu (owner, 2026-10-31). `ListenVoices` is the `SpeechEngine` the app uses: it sends speech to `NaturalSpeechEngine`, and the system voice is the backup, so `ListenController` doesn't know which is speaking. Michael is Kokoro-82M's `am_michael`, run on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. iOS 17 and macOS 14 use the system voice. Text stays on the device, and the only download is the model, about 390 MB.
+Listen has one voice, Michael, and no voice menu (owner, 2026-10-31). `ListenVoices` is the `SpeechEngine` the app uses: it sends speech to `NaturalSpeechEngine`, and the system voice is the backup, so `ListenController` doesn't know which is speaking. Michael is Kokoro-82M's `am_michael`, run on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. iOS 17 and macOS 14 use the system voice, and their apps still carry the pack. Text stays on the device.
 
-FluidAudio fetches some of the voice from a Hugging Face branch that can change, with no hash check, and it loads those files into the same process as decrypted reader content. So `VoiceAssets` fetches them first, from one commit, against hashes compiled into the app, and FluidAudio finds them on disk. The listing it checks its base models against is compiled in too, and Michael's voice pack is hashed when it arrives. The hashes are checked once per install, and all of this needs checking again whenever the FluidAudio pin moves.
+Michael ships in the app (owner, 2026-10-31), so Listen needs no download and works offline. The app is about 235 MB, of which the voice is 205 MB.
 
-- A voice that fails to load falls back to the system voice until the app restarts, and the bar says so.
-- The model can't read a lone bullet or emoji. That text goes to the system voice and Michael carries on, so a book doesn't change voice over one odd line.
-- The download only starts on an unmetered network. On cellular, a hotspot, or Low Data Mode the system voice reads, and the bar says why. It's tried again after the next launch.
+- The pack holds the compiled models, the two voice packs FluidAudio loads, the Apache-2.0 licence, and a notice. Its source models are left out.
+- It's too big for the repo, so it's the `voice-pack-1` asset of a GitHub release on this private repo. `scripts/embed-voice-pack.sh` runs in the Xcode build, checks it against one hash, and caches it. A new Mac needs `gh` signed in for its first build.
+- Being inside the app, the voice is covered by the app's code signature.
+- FluidAudio writes beside its models and the app is read-only, so `KokoroSynthesizer.link` builds a folder in Application Support made of links into the app, and the voice isn't stored twice. It's rebuilt each launch, because the app's path changes with every update.
+- FluidAudio's network address is set to a dead one, so a missing file fails instead of fetching. It always loads its default voice, Heart, which is why that's in the pack.
+- When the FluidAudio pin moves, rebuild the pack with `scripts/build-voice-pack.sh`, publish a new release, and update the tag and hash.
+
+- A voice that fails to load falls back to the system voice until the app restarts, and the bar says so. Below 1 GB free, the bar names storage as the reason.
+- Core ML finishes compiling each model the first time it runs, and that wait reached 18.8 s mid-chapter on the iPhone. `KokoroSynthesizer.prepare` runs three lines that between them use every model, so the wait comes during the load. A failure there ends the voice only when storage is short, because a locked screen may refuse it for the moment.
+- Core ML writes those compiled models to disk. On the iPhone with 263 MB free it failed with "No space left on device", and iOS had already cleared the app's cache, so each launch compiled again. Compiling added 282 MB to the cache and took 488 MB of free space in all, so the 1 GB line leaves some room.
+- Text with nothing to say is skipped. A sentence that fails for another reason goes to the system voice and Michael tries the next one. After two in a row the bar says so, until Michael speaks again.
+- `ListenScript` undoes a PDF's line wrapping, keeps abbreviations inside their sentence, and drops lines with no letters. `SpokenText` rewrites what reads badly aloud (a URL becomes its host, citation marks go, "Fig." becomes "Figure") and respells words that change sound with their use, like "read" and "present". `SpokenAudio` trims the second of silence the model leaves around each sentence.
 - The model gives no word timing, so the bar moves with the share of the audio played.
 - The next sentence is made ahead of time, one at a time, and the voice loads once however many calls wait on it.
 - FluidAudio can log a word it can't pronounce, so `KokoroSynthesizer` turns off its stderr copy. The system log keeps the text private.
@@ -66,15 +75,16 @@ Measured on 2026-10-31 with the Heart voice, since removed, on an iPhone 14 on i
 
 | Measure | Result |
 |---|---|
-| Voice load, after the download | 42 to 65 s |
+| First word, normal launch | 4.5 s |
+| First word, first launch after an install | 25 s |
 | Speed once warm | 8× real time |
-| Peak memory | 1,232 MB with Heart, 1,310 MB with Michael |
+| Peak memory | 1,428 MB with Michael |
 | Longest run | 1,000 sentences, 129 minutes of audio, no crash |
 | Heat | Reached "fair" with the model running flat out, never "serious" |
 | Cold sentences | Slower than real time: 15.3 s of audio took 30.5 s |
 | Unexplained stall | One 13 s sentence took 324 s, then one took 35 s. Heat fell during it, so the app may have been in the background |
 
-On the iPhone reading aloud with Michael for 2 minutes, with the next sentence made ahead: first audio 57 s, including the load, and worst gap between sentences 0.03 s. The voice loads again after every launch, so that first wait happens each time, not just once.
+On the iPhone with 18 GB free, reading PDF-style text aloud with the warm-up in place: worst gap between sentences 0.03 s on both launches, no failures, and peak memory 1,428 MB. The same phone with 263 MB free waited 38 to 69 s for the first word, paused up to 18.8 s, and peaked at 2,644 MB, because nothing compiled could be kept.
 
 On a Mac, reading aloud for 7 minutes with Heart: first audio 54 s, worst later gap 1.17 s, three gaps over a second, peak memory 2,604 MB.
 
