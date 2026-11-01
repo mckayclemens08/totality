@@ -257,15 +257,6 @@ struct TileLabel: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                .background(alignment: .bottomTrailing) {
-                    // A big tile with nothing to show still reads as its module from across the room.
-                    if size != nil, isQuiet {
-                        Image(systemName: module.systemImage)
-                            .font(.system(size: Space.s8))
-                            .foregroundStyle(theme.surfaceSunken.color)
-                            .accessibilityHidden(true)
-                    }
-                }
             }
         }
         .padding(Space.s4)
