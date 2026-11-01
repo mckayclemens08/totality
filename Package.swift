@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "TotalityUI", targets: ["TotalityUI"]),
         .library(name: "TotalityReader", targets: ["TotalityReader"]),
         .library(name: "TotalityCalendar", targets: ["TotalityCalendar"]),
+        .library(name: "TotalityWeb", targets: ["TotalityWeb"]),
         .library(name: "TotalityAccount", targets: ["TotalityAccount"]),
     ],
     dependencies: [
@@ -26,6 +27,7 @@ let package = Package(
             .product(name: "FluidAudio", package: "FluidAudio"),
         ]),
         .target(name: "TotalityCalendar", dependencies: ["TotalityCore", "TotalityUI"]),
+        .target(name: "TotalityWeb", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityAccount", dependencies: [
             "TotalityCore", "TotalityUI",
             .product(name: "Supabase", package: "supabase-swift"),
@@ -34,6 +36,7 @@ let package = Package(
         .testTarget(name: "TotalityUITests", dependencies: ["TotalityUI"]),
         .testTarget(name: "TotalityReaderTests", dependencies: ["TotalityReader"]),
         .testTarget(name: "TotalityCalendarTests", dependencies: ["TotalityCalendar"]),
+        .testTarget(name: "TotalityWebTests", dependencies: ["TotalityWeb"]),
         .testTarget(name: "TotalityAccountTests", dependencies: ["TotalityAccount"]),
     ]
 )

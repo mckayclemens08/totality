@@ -30,6 +30,6 @@ public struct ModuleEntry: Identifiable, Sendable, Equatable {
         .init(id: .money, name: "Money", systemImage: "dollarsign.circle"),
         .init(id: .calls, name: "Calls", systemImage: "phone"),
         .init(id: .social, name: "Social", systemImage: "person.2"),
-        .init(id: .web, name: "Web Search", systemImage: "globe"),
+        .init(id: .web, name: "Web", systemImage: "globe"),
     ]
 }
