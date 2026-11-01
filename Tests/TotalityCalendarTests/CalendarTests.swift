@@ -650,6 +650,52 @@ enum Dates {
         return draft
     }
 
+    @Test("The home tile says nothing until the Calendar has opened")
+    func glanceWaitsForLoad() async throws {
+        let model = try model()
+        #expect(model.glance == nil)
+        await model.load()
+        #expect(model.glance == ModuleGlance(lines: ["Nothing today"], isQuiet: true))
+    }
+
+    @Test("The home tile leads with what's next, then today's count and the rest of today")
+    func glanceShowsToday() async throws {
+        let model = try model()
+        _ = await model.create(draft("Standup", hour: 7))
+        _ = await model.create(draft("Dentist", hour: 9))
+        _ = await model.create(draft("Budget review", hour: 14))
+        var birthday = draft("Sam's birthday")
+        birthday.isAllDay = true
+        _ = await model.create(birthday)
+        let lines = try #require(model.glance?.lines)
+        #expect(lines.count == 4)
+        #expect(lines[0].hasPrefix("Dentist, "))
+        #expect(lines[1] == "4 things today")
+        // The standup ended before 8:30, so only the count still holds it.
+        #expect(lines[2] == "Sam's birthday")
+        #expect(lines[3].hasSuffix(" Budget review"))
+    }
+
+    @Test("Something already under way reads as now")
+    func glanceSaysNow() async throws {
+        let model = try model()
+        var workshop = draft("Workshop", hour: 8)
+        workshop.end = Dates.date(2026, 10, 15, 10)
+        _ = await model.create(workshop)
+        #expect(model.glance?.lines == ["Workshop, now", "1 thing today"])
+    }
+
+    @Test("A quiet day still names what's coming, with its date")
+    func glanceLooksAhead() async throws {
+        let model = try model()
+        _ = await model.create(draft("Flight to Lisbon", day: 20))
+        let lines = try #require(model.glance?.lines)
+        #expect(lines.count == 2)
+        #expect(lines[0].hasPrefix("Flight to Lisbon, Oct 20"))
+        #expect(lines[1] == "Nothing today")
+        #expect(model.glance?.isQuiet == false)
+    }
+
     private func onlyOccurrence(_ model: CalendarModel, day: Int) throws -> EventOccurrence {
         let entry = try #require(model.entries(on: CalendarDay(year: 2026, month: 10, day: day)).first)
         guard case .own(let occurrence) = entry.source else {

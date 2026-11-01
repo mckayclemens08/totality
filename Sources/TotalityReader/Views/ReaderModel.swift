@@ -10,6 +10,8 @@ public final class ReaderModel {
         case loading, ready, failed
     }
 
+    private static let glanceTitles = 5
+
     public private(set) var phase = Phase.loading
     public private(set) var library = ReaderLibrary()
     public private(set) var trash: [TrashedItem] = []
@@ -40,6 +42,17 @@ public final class ReaderModel {
 
     public var items: [ReaderItem] {
         library.items
+    }
+
+    /// For the home tile: what's playing, then what changed last. Nil until the library opens, so a
+    /// tile can't claim it's empty while it's loading.
+    public var glance: ModuleGlance? {
+        guard phase == .ready else { return nil }
+        guard !items.isEmpty else { return ModuleGlance(lines: ["Nothing saved yet"], isQuiet: true) }
+        let playing = listen.current
+        let recent = items.filter { $0.id != playing?.id }.sorted { $0.updatedAt > $1.updatedAt }.map(\.displayTitle)
+        let count = items.count == 1 ? "1 item" : "\(items.count) items"
+        return ModuleGlance(lines: (playing.map { ["Listening to \($0.title)"] } ?? []) + recent.prefix(Self.glanceTitles) + [count])
     }
 
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.

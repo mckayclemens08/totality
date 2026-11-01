@@ -231,6 +231,35 @@ public final class CalendarModel {
         return nil
     }
 
+    /// For the home tile: what's next, how much is on today, then the rest of today. Nil until the
+    /// Calendar opens, so a tile can't say nothing's on while it's loading.
+    public var glance: ModuleGlance? {
+        guard phase == .ready else { return nil }
+        let current = now()
+        let next = nextEntry
+        let todays = entries(on: today)
+        let count = switch todays.count {
+        case 0: "Nothing today"
+        case 1: "1 thing today"
+        default: "\(todays.count) things today"
+        }
+        let rest = todays.filter { $0.id != next?.id && ($0.isAllDay || $0.end > current) }.map { entry in
+            entry.isAllDay ? entry.title : "\(entry.start.formatted(date: .omitted, time: .shortened)) \(entry.title)"
+        }
+        return ModuleGlance(
+            lines: (next.map { [glanceLine(for: $0, at: current)] } ?? []) + [count] + rest,
+            isQuiet: next == nil && todays.isEmpty
+        )
+    }
+
+    private func glanceLine(for entry: CalendarEntry, at current: Date) -> String {
+        if entry.start <= current { return "\(entry.title), now" }
+        if CalendarDay(entry.start, in: display) == today {
+            return "\(entry.title), \(entry.start.formatted(date: .omitted, time: .shortened))"
+        }
+        return "\(entry.title), \(entry.start.formatted(.dateTime.month(.abbreviated).day().hour().minute()))"
+    }
+
     public func name(of mode: Mode) -> String {
         switch mode {
         case .month: "Month"
