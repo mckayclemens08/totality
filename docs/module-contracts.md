@@ -167,6 +167,29 @@ Spec: issue #12, and issue #23 for the redesign. An event is one sealed blob wit
 - Sealed events go into device backups as ciphertext, but the key doesn't, so a restore lands on the missing-key screen until key backup exists. That's why the screen doesn't say events stay on this device.
 - App-switcher snapshots can hold event text, the same as the Reader. Both need a privacy screen before Phase 3.
 
+## Web
+
+Spec: issue #15, agreed 2026-11-01. A browser on WebKit, with search through the owner's own SearXNG behind a small gateway.
+
+**The trial, 2026-11-01.** Twenty test searches chosen by the builder, not the owner, from the Oracle box: every one returned 30 to 50 results, 18 in about a second and two in about five, with relevant top hits. Results came from Brave (457), Google's CSE engine (400), and Bing (197), and Google's CSE engine ranked first most often (13 of 20). DuckDuckGo showed CAPTCHAs, and Google and Qwant refused, on all 20, so those three are off. Images gave 345 results, Videos 148, and News 24, the thinnest. A cloud server's address can be blocked at any time, so the fallback below stays.
+
+- The server runs SearXNG with no public path. `server/gateway/gateway.py` is the only way in: `POST /web/search` and `POST /web/image` on `usetotality.com`, each checking the Totality sign-in. The limits are 30 a minute and 1,000 a day per account, held in memory. SearXNG's log driver is `none`, because a failed engine logs a URL with the search in it.
+- Search goes in the request body, so it never appears in an address. Image thumbnails come through the gateway, signed by SearXNG, so image sites don't see the person's address.
+- When search can't answer, the screen offers the same search on DuckDuckGo's own site, in a tab, and says that site sees the person's address.
+- **Pages get no route into Totality.** There's no message handler or injected script. `WebPage` has one script, and it runs only on Save to Reader, in `WKContentWorld.defaultClient`, where a page's scripts can't see or change it. It reads shown text and never form fields. The tests run this in real WebKit, with typed text and a hostile page.
+- Bookmarks are one sealed blob each and sync through `SyncArea`, newest wins, with no conflict copy. History, open tabs, and settings are sealed too, stay on the device, and have no kind, so sync can't see them. Blob names hold only IDs.
+- Each account's cookies live in a `WKWebsiteDataStore` named by a UUID inside its sealed settings, and its downloads in a folder with the same name. Another account's key can't open those settings, so it gets its own store and folder. A page opened before the settings load gets a store that keeps nothing.
+- Cookies and site data are Apple's to protect, not the content key's, and Web Settings says so. Downloads stay on the device and aren't sealed. Opening one in the Reader is what seals it.
+- Private tabs each get a non-persistent store, keep no history, and aren't saved. A link opened from one stays private.
+- `blocklist.json` comes from `scripts/build-web-blocklist.py`: 91,539 whole-site rules from EasyList and EasyPrivacy, about 9.7 MB, which WebKit compiles in about 2 s on a Mac the first time and never again. It's adapted under CC BY-SA 3.0, credited in Web Settings, and only changes with an app update. The list of sites turned off is sealed, because site names count as content.
+- Rules are applied in the navigation decision, before the page starts, because WebKit fixes them as a load begins.
+- A download asks first, because a site can start one by itself. A site's suggested name can't reach outside the folder.
+- Save to Reader and Open in Reader go through `ContentReceiver` in `ModuleRegistry`, so Web doesn't know how the Reader keeps things.
+- Find uses Apple's bar on iPhone, because a selection doesn't show while the keyboard is in a field of ours. The Mac uses a bar of ours.
+- Camera, microphone, and location are WebKit's own prompts. Totality stores no answer, so closing the tab undoes it.
+- The home tile shows bookmarks and never history.
+- `content_kind_t` gained `bookmark`, so the enum changed on the live database even though no table did. Older apps skip kinds they don't know.
+
 ## Key backup
 
 Spec: issue #17. A device's content key is locked by a recovery key in Matrix's secret storage format, `m.secret_storage.v1.aes-hmac-sha2`, and stored as Matrix account data and in `key_backups`. Both copies are the same ciphertext. Only the recovery key opens them, and it's never written anywhere.

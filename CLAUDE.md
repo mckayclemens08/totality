@@ -116,6 +116,7 @@ The Oracle Always Free box runs the Matrix server behind a Cloudflare tunnel. It
 copied to `~/totality` and started with `docker compose`. Reach it with
 `ssh -i ~/.ssh/totality_server ubuntu@158.101.16.156`. Secrets stay on the server and never enter the repo.
 The only public paths are the ones in `server/cloudflared.yml`, and the only open port is SSH.
+SearXNG runs there too, reachable only through the gateway in `server/gateway/`, and neither one logs searches.
 Never upgrade the Oracle account to paid: that's the owner's decision under the cost rule.
 
 ## Working discipline
