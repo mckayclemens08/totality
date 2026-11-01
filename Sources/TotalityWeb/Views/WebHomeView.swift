@@ -327,6 +327,16 @@ public struct WebHomeView: View {
             control("chevron.backward", label: "Back", enabled: model.canGoBack, action: model.goBack)
             control("chevron.forward", label: "Forward", enabled: model.canGoForward, action: model.goForward)
             Spacer(minLength: 0)
+            if model.showsDownloadStatus {
+                Button {
+                    showingDownloads = true
+                } label: {
+                    WebDownloadStatus(progress: model.downloadProgress)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(model.downloadProgress == nil ? "Downloads" : "Downloads, in progress")
+                Spacer(minLength: 0)
+            }
             if let url = page?.url {
                 ShareLink(item: url) {
                     Image(systemName: "square.and.arrow.up")

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TotalityCore
 import WebKit
 
 /// One file from the web. Downloads stay on this device in a folder for this account, out of the device's
@@ -15,16 +16,29 @@ public final class WebDownload: NSObject, Identifiable {
     public let file: URL
     public private(set) var state: State
     public private(set) var progress = 0.0
+    /// How much has arrived, and how much there is. The total is zero when the site didn't say.
+    public private(set) var received: Int64 = 0
+    public private(set) var total: Int64 = 0
+    /// False until the person has looked at how this one ended, so the marker stays up till then.
+    var wasSeen = false
+    /// Where it went in the Reader, so opening it again doesn't add a copy.
+    @ObservationIgnored var inReader: ContentRef?
 
     @ObservationIgnored private var task: WKDownload?
     @ObservationIgnored private var watch: NSKeyValueObservation?
 
     public var filename: String { file.lastPathComponent }
 
+    public var sizeText: String {
+        let done = ByteCountFormatter.string(fromByteCount: received, countStyle: .file)
+        return total > 0 ? "\(done) of \(ByteCountFormatter.string(fromByteCount: total, countStyle: .file))" : done
+    }
+
     /// One already on disk from an earlier launch.
     init(finished file: URL) {
         self.file = file
         state = .finished
+        wasSeen = true
     }
 
     init(file: URL, task: WKDownload) {
@@ -33,9 +47,14 @@ public final class WebDownload: NSObject, Identifiable {
         state = .running
         super.init()
         task.delegate = self
-        watch = task.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
-            let fraction = progress.fractionCompleted
-            Task { @MainActor in self?.progress = fraction }
+        // The count moves even when the site didn't give a size, and the fraction doesn't.
+        watch = task.progress.observe(\.completedUnitCount) { [weak self] progress, _ in
+            let (fraction, received, total) = (progress.fractionCompleted, progress.completedUnitCount, progress.totalUnitCount)
+            Task { @MainActor in
+                self?.progress = fraction
+                self?.received = received
+                self?.total = max(0, total)
+            }
         }
     }
 

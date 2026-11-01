@@ -189,7 +189,9 @@ Spec: issue #15, agreed 2026-11-01. A browser on WebKit, with search through the
 - Save to Reader and Open in Reader go through `ContentReceiver` in `ModuleRegistry`, so Web doesn't know how the Reader keeps things.
 - Find uses Apple's bar on iPhone, because a selection doesn't show while the keyboard is in a field of ours. The Mac uses a bar of ours.
 - Camera, microphone, and location are WebKit's own prompts. Totality stores no answer, so closing the tab undoes it.
-- The home tile shows bookmarks and never history.
+- The big home tile shows bookmarks on a wall, a running download, and a count of open tabs, and never history. A bookmark's first letter stands in for the site's icon, because fetching one would tell the site. The tile is one button, so a tap opens Web rather than that bookmark.
+- A running download shows Safari's ring in the toolbar, and a finished one keeps a solid marker until the list has been looked at.
+- Open in Reader hands the file over through `ContentReceiver` and then opens the document. Opening it again in the same run goes back to the same document, unless `current` says it's gone. Save to Reader only saves.
 - `content_kind_t` gained `bookmark`, so the enum changed on the live database even though no table did. Older apps skip kinds they don't know.
 
 ## Key backup

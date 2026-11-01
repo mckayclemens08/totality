@@ -310,4 +310,16 @@ import TotalityCore
         #expect(WebPageFailure.of(NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)) == .offline)
         #expect(WebPageFailure.of(NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)) == .other)
     }
+
+    @Test("The tile counts normal tabs that hold something, and never private ones")
+    func tabCount() async throws {
+        let model = WebModel(client: nil)
+        await model.use(account: nil)
+        #expect(model.openTabCount == 0)
+        model.open(URL(string: "https://lisbon.example/trams")!)
+        model.newTab()
+        model.newTab(isPrivate: true)
+        model.open(URL(string: "https://lisbon.example/secret")!)
+        #expect(model.openTabCount == 1)
+    }
 }

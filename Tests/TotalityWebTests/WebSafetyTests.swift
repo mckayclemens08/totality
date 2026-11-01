@@ -175,11 +175,17 @@ private actor FakeReader: ContentReceiver {
     private(set) var notes: [(title: String, body: String)] = []
     private(set) var files: [(data: Data, name: String)] = []
     var refuses = false
+    private var kept: Set<UUID> = []
 
     func refuse() { refuses = true }
+    func forget() { kept = [] }
+
+    func attachable() -> [ContentRef] { [] }
+    func current(_ ref: ContentRef) -> ContentRef? { kept.contains(ref.id) ? ref : nil }
 
     private func ref(_ kind: ContentKind, _ title: String) -> ContentRef {
         let id = UUID()
+        kept.insert(id)
         return ContentRef(module: .reader, kind: kind, id: id, keyRef: .crk(objectID: id), preview: .init(title: title))
     }
 
@@ -439,6 +445,113 @@ private actor FakeReader: ContentReceiver {
         try await until { page.url?.fragment() == "lower" }
         _ = try await page.webView.evaluateJavaScript("location = '/two'; 1")
         try await until { page.url?.path() == "/two" && page.title == "Two" }
+    }
+
+    private func downloaded(_ root: URL, receiver: (any ContentReceiver)? = nil) async throws -> (WebModel, TotalityWeb.WebDownload) {
+        let site = try LocalSite(pages: ["/file": file])
+        let model = WebModel(client: nil, vault: WebVault(store: MemoryBlobStore(), rootKey: try .generate()), downloads: root, receiver: receiver)
+        await model.use(account: "user-1")
+        model.open(try await site.url("/file"))
+        let page = try #require(model.current.page)
+        try await until { page.dialog != nil }
+        page.answer(try #require(page.dialog), true)
+        try await until { model.downloads.first?.state == .finished }
+        return (model, try #require(model.downloads.first))
+    }
+
+    @Test("Open in Reader opens the document, and opening it again doesn't add a copy")
+    func opensInReader() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let reader = FakeReader()
+        let (model, download) = try await downloaded(root, receiver: reader)
+        var opened: [ContentRef] = []
+        model.onOpenInReader = { opened.append($0) }
+
+        await model.openInReader(download)
+        await model.openInReader(download)
+        #expect(opened.count == 2)
+        #expect(opened[0] == opened[1])
+        #expect(await reader.files.count == 1)
+        #expect(await reader.files.first?.data == Data("tram timetable".utf8))
+
+        await reader.forget()
+        await model.openInReader(download)
+        #expect(await reader.files.count == 2)
+        #expect(opened.last != opened.first)
+    }
+
+    @Test("A file the Reader refuses says so and goes nowhere")
+    func readerRefuses() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let reader = FakeReader()
+        await reader.refuse()
+        let (model, download) = try await downloaded(root, receiver: reader)
+        var opened = false
+        model.onOpenInReader = { _ in opened = true }
+        await model.openInReader(download)
+        #expect(!opened)
+        #expect(model.notice != nil)
+    }
+
+    @Test("The marker shows while a file comes in, and stays until its ending has been seen")
+    func downloadMarker() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let half: (type: String, extra: String, body: String) = ("application/octet-stream", "Content-Disposition: attachment; filename=\"tram.bin\"\r\n", String(repeating: "t", count: 4_000_000))
+        let site = try LocalSite(pages: ["/half": half], partial: ["/half"])
+        let model = try await downloadModel(root)
+        #expect(!model.showsDownloadStatus)
+        #expect(model.downloadProgress == nil)
+        model.open(try await site.url("/half"))
+        let page = try #require(model.current.page)
+        try await until { page.dialog != nil }
+        page.answer(try #require(page.dialog), true)
+        try await until { (model.downloads.first?.received ?? 0) > 0 }
+        let running = try #require(model.downloads.first)
+        #expect(model.showsDownloadStatus)
+        #expect(try #require(model.downloadProgress) > 0 && (model.downloadProgress ?? 1) < 1)
+        #expect(running.total == 4_000_000)
+        #expect(running.sizeText.contains(" of "))
+        model.downloadsSeen()
+        #expect(model.showsDownloadStatus)
+
+        site.finish()
+        try await until { running.state == .finished }
+        #expect(model.downloadProgress == nil)
+        #expect(model.showsDownloadStatus)
+        model.downloadsSeen()
+        #expect(!model.showsDownloadStatus)
+    }
+
+    @Test("Cancelling a running download takes the marker away")
+    func cancelledDownload() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let half: (type: String, extra: String, body: String) = ("application/octet-stream", "Content-Disposition: attachment; filename=\"tram.bin\"\r\n", String(repeating: "t", count: 4_000_000))
+        let site = try LocalSite(pages: ["/half": half], partial: ["/half"])
+        let model = try await downloadModel(root)
+        model.open(try await site.url("/half"))
+        let page = try #require(model.current.page)
+        try await until { page.dialog != nil }
+        page.answer(try #require(page.dialog), true)
+        try await until { !model.downloads.isEmpty }
+        model.remove(try #require(model.downloads.first))
+        #expect(!model.showsDownloadStatus)
+        #expect(model.downloadProgress == nil)
+    }
+
+    @Test("Downloads from an earlier launch don't raise the marker")
+    func oldDownloadsAreQuiet() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let mine = root.appendingPathComponent(WebVault.siteID(for: "user-1").uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: mine, withIntermediateDirectories: true)
+        try Data("one".utf8).write(to: mine.appendingPathComponent("tram.pdf"))
+        let model = try await downloadModel(root)
+        #expect(model.downloads.count == 1)
+        #expect(!model.showsDownloadStatus)
     }
 
     @Test("A page can't start a tab by itself, and a plain address shows as not secure")

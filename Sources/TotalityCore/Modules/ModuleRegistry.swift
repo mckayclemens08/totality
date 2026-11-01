@@ -13,8 +13,9 @@ public protocol ContentProvider: ContentHandler {
     func current(_ ref: ContentRef) async throws -> ContentRef?
 }
 
-/// A module that takes content another module hands it. The sender only gets a ref back.
-public protocol ContentReceiver: ContentHandler {
+/// A module that takes content another module hands it. The sender only gets a ref back, and `current`
+/// tells it whether that content is still there.
+public protocol ContentReceiver: ContentProvider {
     func receive(noteTitled title: String, body: String) async throws -> ContentRef
     func receive(file data: Data, named filename: String) async throws -> ContentRef
 }

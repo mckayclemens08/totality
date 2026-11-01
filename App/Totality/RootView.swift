@@ -150,6 +150,9 @@ struct RootView: View {
         case .calendar:
             guard let calendar, calendar.glance != nil else { return nil }
             return AnyView(CalendarHomeTile(model: calendar, size: size))
+        case .web:
+            guard let web, web.glance != nil else { return nil }
+            return AnyView(WebHomeTile(model: web, size: size))
         default:
             return nil
         }
@@ -187,6 +190,7 @@ struct RootView: View {
             calendar = content.calendar
             web = content.web
             web?.onSentToReader = { Task { await reader?.load() } }
+            web?.onOpenInReader = { show($0) }
             registry = content.registry
             syncAreas = content.areas
             refreshRecoveryLabels()

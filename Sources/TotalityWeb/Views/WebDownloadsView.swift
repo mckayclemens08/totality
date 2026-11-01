@@ -23,6 +23,41 @@ struct WebDownloadsView: View {
                 }
             }
         }
+        .onAppear(perform: model.downloadsSeen)
+        .onDisappear(perform: model.downloadsSeen)
+    }
+}
+
+/// Safari's marker: a ring that fills while a file comes in, then a solid arrow until it's been looked at.
+struct WebDownloadStatus: View {
+    /// Nil when nothing is running.
+    let progress: Double?
+
+    var body: some View {
+        let theme = Theme.current
+        Group {
+            if let progress {
+                ZStack {
+                    Circle()
+                        .stroke(theme.textSecondary.color.opacity(0.35), lineWidth: Space.hairline * 2)
+                    Circle()
+                        .trim(from: 0, to: max(progress, 0.04))
+                        .stroke(theme.accent.color, style: StrokeStyle(lineWidth: Space.hairline * 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Image(systemName: "arrow.down")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.accent.color)
+                }
+                .frame(width: Space.s5, height: Space.s5)
+            } else {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(Typeface.title)
+                    .foregroundStyle(theme.accent.color)
+            }
+        }
+        .frame(width: Space.s7, height: Space.s7)
+        .contentShape(Rectangle())
+        .animation(Motion.standard, value: progress)
     }
 }
 
@@ -53,6 +88,10 @@ private struct WebDownloadRow: View {
                 ProgressView(value: download.progress)
                     .tint(theme.accent.color)
                     .accessibilityLabel("Downloading")
+                Text(download.sizeText)
+                    .font(Typeface.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(theme.textSecondary.color)
             case .failed:
                 Text("This download didn't finish.")
                     .font(Typeface.caption)

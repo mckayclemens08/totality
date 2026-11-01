@@ -16,6 +16,8 @@ private struct Receiver: ContentReceiver {
         return ContentRef(module: module, kind: .note, id: id, keyRef: .crk(objectID: id), preview: .init(title: "Lease"))
     }
 
+    func attachable() async throws -> [ContentRef] { [] }
+    func current(_ ref: ContentRef) async throws -> ContentRef? { ref }
     func receive(noteTitled title: String, body: String) async throws -> ContentRef { ref() }
     func receive(file data: Data, named filename: String) async throws -> ContentRef { ref() }
 }

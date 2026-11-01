@@ -102,6 +102,8 @@ public final class WebModel {
     public var notice: String?
     /// Something reached the Reader, so its library has to look again.
     @ObservationIgnored public var onSentToReader: (() -> Void)?
+    /// A download is in the Reader and the person asked to go there.
+    @ObservationIgnored public var onOpenInReader: ((ContentRef) -> Void)?
 
     @ObservationIgnored private let client: WebSearchClient?
     @ObservationIgnored private let vault: WebVault?
@@ -410,16 +412,34 @@ public final class WebModel {
         }
     }
 
+    /// Hands the file over the first time, then opens it there. A file that's already in the Reader
+    /// goes back to the same document, unless it's been deleted there.
     public func openInReader(_ download: WebDownload) async {
         guard let receiver else { return }
         do {
-            let data = try Data(contentsOf: download.file)
-            _ = try await receiver.receive(file: data, named: download.filename)
-            onSentToReader?()
-            notice = "Added to Reader."
+            let kept = if let sent = download.inReader { try await receiver.current(sent) } else { nil as ContentRef? }
+            let ref = if let kept { kept } else { try await receiver.receive(file: Data(contentsOf: download.file), named: download.filename) }
+            download.inReader = ref
+            onOpenInReader?(ref)
         } catch {
             notice = "The Reader couldn't take this file."
         }
+    }
+
+    /// Every running download as one number, or nil when none is running.
+    public var downloadProgress: Double? {
+        let running = downloads.filter { $0.state == .running }
+        return running.isEmpty ? nil : running.map(\.progress).reduce(0, +) / Double(running.count)
+    }
+
+    /// True while there's a download to show, running or ended and not looked at yet.
+    public var showsDownloadStatus: Bool {
+        downloads.contains { $0.state == .running || !$0.wasSeen }
+    }
+
+    /// Anything still running keeps its marker, so its ending gets seen too.
+    public func downloadsSeen() {
+        for download in downloads where download.state != .running { download.wasSeen = true }
     }
 
     // MARK: Bookmarks
@@ -467,6 +487,11 @@ public final class WebModel {
         guard isLoaded else { return nil }
         guard !bookmarks.isEmpty else { return ModuleGlance(lines: ["No bookmarks yet"], isQuiet: true) }
         return ModuleGlance(lines: bookmarks.map(\.displayTitle))
+    }
+
+    /// Normal tabs with something in them. Only the number reaches the home page.
+    public var openTabCount: Int {
+        tabs.filter { !$0.isPrivate && $0.showing != .start }.count
     }
 
     public var current: WebTab {
