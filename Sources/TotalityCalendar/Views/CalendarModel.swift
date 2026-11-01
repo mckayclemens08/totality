@@ -219,6 +219,20 @@ public final class CalendarModel {
         entriesByDay[day] ?? []
     }
 
+    /// Today's week, starting where the device says weeks start.
+    public var thisWeek: [CalendarDay] {
+        let weekday = display.component(.weekday, from: today.start(in: display))
+        let first = today.adding(days: -((weekday - display.firstWeekday + 7) % 7), in: display)
+        return (0..<7).map { first.adding(days: $0, in: display) }
+    }
+
+    /// The weekday letters in the order the device starts its week.
+    public var weekdayLetters: [String] {
+        let symbols = display.veryShortStandaloneWeekdaySymbols
+        let first = display.firstWeekday - 1
+        return Array(symbols[first...] + symbols[..<first])
+    }
+
     /// Days from today on that have something on them.
     public var schedule: [(day: CalendarDay, entries: [CalendarEntry])] {
         let start = today
@@ -613,12 +627,13 @@ public final class CalendarModel {
 
     // MARK: Building the days
 
-    /// Wide enough for the month, the schedule, and any week around the selected day.
+    /// Wide enough for the month, the schedule, any week around the selected day, and the home tile,
+    /// which shows this month and this week wherever the Calendar was left.
     private var visibleWindow: (first: CalendarDay, last: CalendarDay) {
         let start = today
         let monthEnd = month.adding(months: 1, in: display).adding(days: -1, in: display)
         return (
-            min(start, month, selectedDay.adding(days: -7, in: display)),
+            min(start.adding(days: -6, in: display), start.firstOfMonth, month, selectedDay.adding(days: -7, in: display)),
             max(start.adding(days: Self.scheduleDays, in: display), monthEnd, selectedDay.adding(days: 7, in: display))
         )
     }

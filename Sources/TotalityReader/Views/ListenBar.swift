@@ -84,7 +84,7 @@ private struct TapTarget: ViewModifier {
 }
 
 /// Drawn from tokens so it matches the surface it sits on.
-private struct ListenProgress: View {
+struct ListenProgress: View {
     let value: Double
 
     var body: some View {

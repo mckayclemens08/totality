@@ -46,6 +46,24 @@ import TotalityCore
         #expect(try await ReaderModule(vault: second).search("tram").isEmpty)
     }
 
+    @MainActor
+    @Test("The home tile's shelf leads with what's playing, or else what was opened last")
+    func frontOfShelf() async throws {
+        let model = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
+        #expect(model.frontOfShelf == nil)
+        let first = try #require(await model.newNote())
+        await model.saveNote(first.id, title: "Lisbon trip", body: "Take the tram.")
+        let second = try #require(await model.newNote())
+        await model.saveNote(second.id, title: "Porto trip", body: "Cross the bridge.")
+        await model.markOpened(first.id)
+        #expect(model.frontOfShelf?.id == first.id)
+        await model.startListening(to: second.id)
+        #expect(model.frontOfShelf?.id == second.id)
+        model.listen.stop()
+        await model.markOpened(first.id)
+        #expect(model.frontOfShelf?.id == first.id)
+    }
+
     @Test("With no vault there's nothing to find")
     func noVault() async throws {
         #expect(try await ReaderModule().search("tram").isEmpty)
