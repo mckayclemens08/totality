@@ -59,6 +59,7 @@ public struct CalendarHomeView: View {
         .task {
             model.showFront()
             await model.load()
+            if let entry = model.takeRequestedEntry() { path = [entry] }
         }
     }
 
