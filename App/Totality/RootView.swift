@@ -18,6 +18,10 @@ struct RootView: View {
     @State private var contentKeys: DeviceContentKeys
     @State private var account: AccountModel?
     @State private var showingAccount = false
+    @State private var showingSearch = false
+    @AppStorage(HomeStyle.defaultKey) private var defaultHomeStyle = HomeStyle.tiles
+    // What the home page's button chose, until the app restarts or the default changes.
+    @State private var chosenHomeStyle: HomeStyle?
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -30,10 +34,12 @@ struct RootView: View {
         Group {
             switch open {
             case nil:
-                HomeView(center: recentModule) { module in
+                HomeView(center: recentModule, glances: glances, style: homeStyle) { module in
                     if module == .reader || module == .calendar { prepareContent() }
                     recentModule = module
                     open = module
+                } onSearch: {
+                    showingSearch = true
                 }
                 .overlay(alignment: .topLeading) { accountButton }
             case .reader:
@@ -70,13 +76,19 @@ struct RootView: View {
             contentKeys.didMove = { account?.sync?.resume() }
             await account?.backup?.settleDevice()
             connectSync()
+            await openContentForHome()
             await account?.sync?.syncNow()
         }
+        .onChange(of: defaultHomeStyle) { chosenHomeStyle = nil }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { await account?.sync?.syncNow() } }
         }
         .onChange(of: open) {
-            if open == nil { Task { await account?.sync?.syncNow() } }
+            guard open == nil else { return }
+            Task {
+                await openContentForHome()
+                await account?.sync?.syncNow()
+            }
         }
         .sheet(isPresented: $showingAccount) {
             if let account {
@@ -89,6 +101,30 @@ struct RootView: View {
                 ) { showingAccount = false }
             }
         }
+        .sheet(isPresented: $showingSearch) {
+            ModuleMessage(
+                systemImage: "magnifyingglass",
+                title: "Search",
+                detail: "Search across your modules isn't built yet."
+            ) { showingSearch = false }
+        }
+    }
+
+    private var homeStyle: Binding<HomeStyle> {
+        Binding {
+            chosenHomeStyle ?? defaultHomeStyle
+        } set: {
+            chosenHomeStyle = $0
+        }
+    }
+
+    /// Modules without a screen yet say so. A module that can't open shows no lines at all, because
+    /// the home page is no place to report a key problem. Opening the module does that.
+    private var glances: [ModuleID: ModuleGlance] {
+        var glances = Dictionary(uniqueKeysWithValues: ModuleEntry.all.map { ($0.id, ModuleGlance(lines: ["Not built yet"], isQuiet: true)) })
+        glances[.reader] = reader?.glance
+        glances[.calendar] = calendar?.glance
+        return glances
     }
 
     private var accountButton: some View {
@@ -128,6 +164,15 @@ struct RootView: View {
         } catch {
             contentProblem = .keyUnavailable
         }
+    }
+
+    /// The tiles show live content, so it opens with the home page. This has to come after the device
+    /// is settled, and it follows the same rules as opening a module.
+    private func openContentForHome() async {
+        guard reader == nil else { return }
+        prepareContent()
+        await reader?.load()
+        await calendar?.load()
     }
 
     /// Only a sync that really finished counts, so the screens can't claim safety too early.

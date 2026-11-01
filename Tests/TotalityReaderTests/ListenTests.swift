@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TotalityCore
 @testable import TotalityReader
 
 @Suite struct ListenScriptTests {
@@ -298,6 +299,51 @@ import Testing
     private func model(store: MemoryBlobStore = MemoryBlobStore()) throws -> (ReaderModel, FakeSpeechEngine) {
         let engine = FakeSpeechEngine()
         return (ReaderModel(vault: try newVault(store: store), listen: ListenController(engine: engine)), engine)
+    }
+
+    @Test("The home tile says nothing until the library has opened")
+    func glanceWaitsForLoad() async throws {
+        let (model, _) = try model()
+        #expect(model.glance == nil)
+        await model.load()
+        #expect(model.glance == ModuleGlance(lines: ["Nothing saved yet"], isQuiet: true))
+    }
+
+    @Test("The home tile lists the latest changes first, then how many there are")
+    func glanceListsRecent() async throws {
+        let (model, _) = try model()
+        for title in ["Lease", "Tax notes", "Trail map"] {
+            let note = try #require(await model.newNote())
+            #expect(await model.saveNote(note.id, title: title, body: "Notes on \(title)"))
+        }
+        await model.load()
+        #expect(model.glance?.lines == ["Trail map", "Tax notes", "Lease", "3 items"])
+    }
+
+    @Test("One item is one item, and the list stops at five titles")
+    func glanceCounts() async throws {
+        let (model, _) = try model()
+        let first = try #require(await model.newNote())
+        #expect(await model.saveNote(first.id, title: "Lease", body: "Rent is due on the first"))
+        await model.load()
+        #expect(model.glance?.lines == ["Lease", "1 item"])
+        for number in 1...6 {
+            let note = try #require(await model.newNote())
+            #expect(await model.saveNote(note.id, title: "Chapter \(number)", body: "Draft"))
+        }
+        await model.load()
+        #expect(model.glance?.lines.count == 6)
+        #expect(model.glance?.lines.last == "7 items")
+    }
+
+    @Test("What's playing comes first and isn't listed twice")
+    func glanceShowsListening() async throws {
+        let (model, _) = try model()
+        let note = try #require(await model.newNote())
+        #expect(await model.saveNote(note.id, title: "Lease", body: "Rent is due on the first"))
+        await model.load()
+        model.listen.play(try #require(ListenTrack(id: note.id, title: "Lease", text: "Rent is due on the first.")))
+        #expect(model.glance?.lines == ["Listening to Lease", "1 item"])
     }
 
     @Test("A note deleted while open opens the kept copy, so typing doesn't make another each pause")
