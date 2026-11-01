@@ -90,6 +90,18 @@ public final class WebPage: NSObject {
     @ObservationIgnored var onNewTab: ((WKWebViewConfiguration, URLRequest) -> WKWebView?)?
     /// The person chose to open a link in a new tab, and whether that tab is private.
     @ObservationIgnored var onOpenInTab: ((URL, Bool) -> Void)?
+    /// A link turned out to be a file, and the person agreed to keep it.
+    @ObservationIgnored var onDownload: ((WKDownload, String) -> URL?)?
+    /// Whether the person turned blocking off for this site.
+    @ObservationIgnored var isUnblocked: (String) -> Bool = { _ in false }
+    /// Ads and trackers to stop. Set once WebKit has compiled them.
+    @ObservationIgnored var rules: WKContentRuleList? {
+        didSet { applyRules(for: url) }
+    }
+    @ObservationIgnored private var rulesOn = false
+    var blockingIsOn: Bool { rulesOn }
+    /// Asks phones' sites for the full version on the next load.
+    public var wantsDesktopSite = false
 
     @ObservationIgnored private var watches: [NSKeyValueObservation] = []
 
@@ -163,6 +175,81 @@ public final class WebPage: NSObject {
     }
 
     public func stop() { webView.stopLoading() }
+
+    /// Must run before a page starts, because WebKit applies rules as a load begins.
+    func applyRules(for target: URL?) {
+        guard let rules else { return }
+        let wanted = !(WebSite.key(target).map(isUnblocked) ?? false)
+        guard wanted != rulesOn else { return }
+        let controller = webView.configuration.userContentController
+        if wanted { controller.add(rules) } else { controller.remove(rules) }
+        rulesOn = wanted
+    }
+
+    // MARK: Reading a page
+
+    private static let zooms: [CGFloat] = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
+
+    public func zoom(in larger: Bool) {
+        let now = webView.pageZoom
+        let next = larger ? Self.zooms.first { $0 > now } : Self.zooms.last { $0 < now }
+        if let next { webView.pageZoom = next }
+    }
+
+    /// Selects the next match, and says whether there was one.
+    public func find(_ text: String, backwards: Bool = false) async -> Bool {
+        guard !text.isEmpty else { return false }
+        let configuration = WKFindConfiguration()
+        configuration.backwards = backwards
+        configuration.wraps = true
+        return await withCheckedContinuation { done in
+            webView.find(text, configuration: configuration) { done.resume(returning: $0.matchFound) }
+        }
+    }
+
+    public func printPage() {
+        #if os(iOS)
+        let controller = UIPrintInteractionController.shared
+        controller.printFormatter = webView.viewPrintFormatter()
+        controller.present(animated: true)
+        #elseif os(macOS)
+        let operation = webView.printOperation(with: .shared)
+        operation.view?.frame = webView.bounds
+        operation.runModal(for: webView.window ?? NSWindow(), delegate: nil, didRun: nil, contextInfo: nil)
+        #endif
+    }
+
+    /// Runs only when the person presses Save to Reader, in a script world pages can't see or change.
+    /// It takes text the page shows and never form fields, so nothing typed into a page is read.
+    func readableText() async throws -> (title: String, body: String) {
+        let text = try await withCheckedThrowingContinuation { (done: CheckedContinuation<String, any Error>) in
+            webView.evaluateJavaScript(Self.readableScript, in: nil, in: .defaultClient) { result in
+                switch result {
+                case .success(let value): done.resume(returning: value as? String ?? "")
+                case .failure(let error): done.resume(throwing: error)
+                }
+            }
+        }
+        return (title, text)
+    }
+
+    static let readableScript = """
+    (() => {
+      const root = document.querySelector('article') || document.querySelector('main') || document.body;
+      if (!root) return '';
+      const noise = 'nav, aside, footer, form, button, [role=navigation], [aria-hidden=true]';
+      const blocks = 'h1, h2, h3, h4, h5, h6, p, li, blockquote, pre, figcaption';
+      const lines = [];
+      for (const block of root.querySelectorAll(blocks)) {
+        if (block.closest(noise) || block.querySelector(blocks) || !block.getClientRects().length) continue;
+        const line = block.innerText.trim();
+        if (line) lines.push(line);
+      }
+      const text = lines.join('\\n\\n');
+      if (text.length >= 200) return text;
+      return root.innerText.trim();
+    })()
+    """
     public func goBack() { failure = nil; webView.goBack() }
     public func goForward() { failure = nil; webView.goForward() }
 
@@ -184,14 +271,43 @@ public final class WebPage: NSObject {
 }
 
 extension WebPage: WKNavigationDelegate {
-    public func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
+    public func webView(
+        _ webView: WKWebView, decidePolicyFor action: WKNavigationAction, preferences: WKWebpagePreferences
+    ) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
+        preferences.preferredContentMode = wantsDesktopSite ? .desktop : .recommended
+        return (policy(for: action), preferences)
+    }
+
+    private func policy(for action: WKNavigationAction) -> WKNavigationActionPolicy {
         guard let target = action.request.url, let scheme = target.scheme?.lowercased() else { return .cancel }
         guard Self.pageSchemes.contains(scheme) else {
             // A site can't hand off to another app by itself. `file:` and the like are simply refused.
             if action.navigationType == .linkActivated, !["file", "ftp"].contains(scheme) { leaving = target }
             return .cancel
         }
-        return .allow
+        if action.targetFrame?.isMainFrame == true { applyRules(for: target) }
+        return action.shouldPerformDownload ? .download : .allow
+    }
+
+    /// Anything WebKit can't show becomes a download, along with whatever a site marks as one.
+    public func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        guard response.isForMainFrame else { return .allow }
+        let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")
+        if disposition?.lowercased().hasPrefix("attachment") == true { return .download }
+        return response.canShowMIMEType ? .allow : .download
+    }
+
+    public func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        ask(about: download)
+    }
+
+    public func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        ask(about: download)
+    }
+
+    /// A site can start a download by itself, so nothing is written until the person agrees.
+    private func ask(about download: WKDownload) {
+        download.delegate = self
     }
 
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -214,6 +330,18 @@ extension WebPage: WKNavigationDelegate {
     /// A crashed page would otherwise stay blank.
     public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         reload()
+    }
+}
+
+extension WebPage: WKDownloadDelegate {
+    public func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
+        // A page is waiting on the dialog showing now, and replacing it would hang that page.
+        guard dialog == nil else { return nil }
+        let name = WebDownloadFolder.safeName(suggestedFilename)
+        let agreed = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+            dialog = WebDialog(site: site, message: "Download \(name)?", kind: .confirm) { agreed, _ in done.resume(returning: agreed) }
+        }
+        return agreed ? onDownload?(download, name) : nil
     }
 }
 

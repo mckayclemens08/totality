@@ -27,7 +27,7 @@ let package = Package(
             .product(name: "FluidAudio", package: "FluidAudio"),
         ]),
         .target(name: "TotalityCalendar", dependencies: ["TotalityCore", "TotalityUI"]),
-        .target(name: "TotalityWeb", dependencies: ["TotalityCore", "TotalityUI"]),
+        .target(name: "TotalityWeb", dependencies: ["TotalityCore", "TotalityUI"], resources: [.copy("Resources/blocklist.json")]),
         .target(name: "TotalityAccount", dependencies: [
             "TotalityCore", "TotalityUI",
             .product(name: "Supabase", package: "supabase-swift"),

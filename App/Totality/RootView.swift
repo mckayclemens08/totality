@@ -186,6 +186,7 @@ struct RootView: View {
             reader = content.reader
             calendar = content.calendar
             web = content.web
+            web?.onSentToReader = { Task { await reader?.load() } }
             registry = content.registry
             syncAreas = content.areas
             refreshRecoveryLabels()

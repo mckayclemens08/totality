@@ -3,7 +3,6 @@ import Observation
 import TotalityCore
 import WebKit
 
-/// One tab's search.
 /// Something already on this device that matches what's being typed.
 public struct WebSuggestion: Equatable, Identifiable, Sendable {
     public let title: String
@@ -13,6 +12,7 @@ public struct WebSuggestion: Equatable, Identifiable, Sendable {
     public var id: URL { url }
 }
 
+/// One tab's search.
 public struct WebSearchState: Equatable, Sendable {
     public enum Phase: Equatable, Sendable {
         case searching, done
@@ -98,20 +98,34 @@ public final class WebModel {
     public private(set) var bookmarks: [WebBookmark] = []
     public private(set) var history: [WebVisit] = []
     public private(set) var isLoaded = false
+    public private(set) var downloads: [WebDownload] = []
     public var notice: String?
+    /// Something reached the Reader, so its library has to look again.
+    @ObservationIgnored public var onSentToReader: (() -> Void)?
 
     @ObservationIgnored private let client: WebSearchClient?
     @ObservationIgnored private let vault: WebVault?
+    @ObservationIgnored private let blocker: WebBlocker?
+    @ObservationIgnored private let downloadsRoot: URL?
+    @ObservationIgnored private let receiver: (any ContentReceiver)?
+    @ObservationIgnored private var folder: WebDownloadFolder?
+    @ObservationIgnored private var blockingStarted = false
     @ObservationIgnored private var searching: Task<Void, Never>?
-    @ObservationIgnored private var settings = WebSettings()
+    private var settings = WebSettings()
     @ObservationIgnored private var dataStore: WKWebsiteDataStore?
     @ObservationIgnored private var savingHistory: Task<Void, Never>?
     @ObservationIgnored private var savingTabs: Task<Void, Never>?
     @ObservationIgnored private let now: @Sendable () -> Date
 
-    public init(client: WebSearchClient?, vault: WebVault? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(
+        client: WebSearchClient?, vault: WebVault? = nil, blocker: WebBlocker? = nil, downloads: URL? = nil,
+        receiver: (any ContentReceiver)? = nil, now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.client = client
         self.vault = vault
+        self.blocker = blocker
+        self.downloadsRoot = downloads
+        self.receiver = receiver
         self.now = now
         let first = WebTab()
         tabs = [first]
@@ -121,6 +135,7 @@ public final class WebModel {
     /// Reads what's sealed on this device. Open tabs come back without loading, and each one loads when
     /// it's next looked at, so reopening the app doesn't fetch every site.
     public func load() async {
+        startBlocking()
         guard let vault else {
             isLoaded = true
             return
@@ -129,10 +144,24 @@ public final class WebModel {
             bookmarks = try await vault.bookmarks()
             history = try await vault.history()
             settings = try await vault.settings()
-            if !isLoaded { restoreTabs(try await vault.savedTabs()) }
+            if !isLoaded {
+                // The folder is named by a sealed ID, so another account on this device has its own.
+                folder = downloadsRoot.map { WebDownloadFolder(directory: $0.appendingPathComponent(settings.storeID.uuidString, isDirectory: true)) }
+                downloads = folder?.existing().map(WebDownload.init(finished:)) ?? []
+                restoreTabs(try await vault.savedTabs())
+            }
             isLoaded = true
         } catch {
             notice = "Your bookmarks and history couldn't be opened."
+        }
+    }
+
+    private func startBlocking() {
+        guard let blocker, !blockingStarted else { return }
+        blockingStarted = true
+        Task { [weak self] in
+            await blocker.prepare()
+            for tab in self?.tabs ?? [] { tab.page?.rules = blocker.rules }
         }
     }
 
@@ -289,6 +318,60 @@ public final class WebModel {
 
     private static let suggestionLimit = 6
 
+    // MARK: Blocking
+
+    public var unblockedSites: [String] { settings.unblockedSites.sorted() }
+
+    public func isBlocking(_ url: URL?) -> Bool {
+        WebSite.key(url).map { !settings.unblockedSites.contains($0) } ?? true
+    }
+
+    public func setBlocking(_ isOn: Bool, for site: String) {
+        if isOn { settings.unblockedSites.remove(site) } else { settings.unblockedSites.insert(site) }
+        Task { [vault, settings] in try? await vault?.saveSettings(settings) }
+        for tab in tabs where WebSite.key(tab.page?.url) == site {
+            tab.page?.applyRules(for: tab.page?.url)
+            tab.page?.reload()
+        }
+    }
+
+    // MARK: Downloads and the Reader
+
+    public func remove(_ download: WebDownload) {
+        download.cancel()
+        try? FileManager.default.removeItem(at: download.file)
+        downloads.removeAll { $0.id == download.id }
+    }
+
+    /// Goes through the registry, so Web hands over a note and never learns how the Reader keeps it.
+    public func saveToReader() async {
+        guard let page = current.page, let receiver else { return }
+        do {
+            let text = try await page.readableText()
+            guard !text.body.isEmpty else {
+                notice = "This page has no text to save."
+                return
+            }
+            _ = try await receiver.receive(noteTitled: text.title, body: text.body)
+            onSentToReader?()
+            notice = "Saved to Reader."
+        } catch {
+            notice = "This page wasn't saved."
+        }
+    }
+
+    public func openInReader(_ download: WebDownload) async {
+        guard let receiver else { return }
+        do {
+            let data = try Data(contentsOf: download.file)
+            _ = try await receiver.receive(file: data, named: download.filename)
+            onSentToReader?()
+            notice = "Added to Reader."
+        } catch {
+            notice = "The Reader couldn't take this file."
+        }
+    }
+
     // MARK: Bookmarks
 
     public var folders: [String] {
@@ -365,6 +448,13 @@ public final class WebModel {
 
     private func attach(_ page: WebPage, to tab: WebTab) {
         tab.page = page
+        page.isUnblocked = { [weak self] site in self?.settings.unblockedSites.contains(site) ?? false }
+        page.rules = blocker?.rules
+        page.onDownload = { [weak self] task, name in
+            guard let self, let file = try? self.folder?.destination(for: name) else { return nil }
+            self.downloads.insert(WebDownload(file: file, task: task), at: 0)
+            return file
+        }
         page.onVisit = { [weak self, weak tab] url, title in
             guard let self, let tab else { return }
             self.visited(url, title: title, in: tab)

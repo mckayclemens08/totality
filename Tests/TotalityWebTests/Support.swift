@@ -87,6 +87,14 @@ func until(_ done: @MainActor () -> Bool) async throws {
     throw CancellationError()
 }
 
+extension Bundle {
+    /// The target's own bundle isn't reachable by name from the tests, so this looks beside them.
+    static func module(named name: String) -> URL? {
+        let tests = Bundle(for: FakeGateway.self).bundleURL.deletingLastPathComponent()
+        return tests.appendingPathComponent("Totality_TotalityWeb.bundle/\(name).json")
+    }
+}
+
 final class MemoryBlobStore: BlobStore, @unchecked Sendable {
     private let lock = NSLock()
     private var blobs: [String: Data] = [:]

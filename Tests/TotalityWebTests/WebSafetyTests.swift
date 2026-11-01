@@ -1,0 +1,291 @@
+import Foundation
+import Testing
+import TotalityCore
+import WebKit
+@testable import TotalityWeb
+
+@MainActor
+@Suite struct WebBlockingTests {
+    private func listFile() throws -> URL {
+        try #require(Bundle.module(named: "blocklist"))
+    }
+
+    private func store() -> WKContentRuleListStore {
+        WKContentRuleListStore(url: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))
+    }
+
+    @Test("The list that ships is only whole-site block rules, within WebKit's limit")
+    func shippedList() throws {
+        let rules = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: listFile())) as? [[String: Any]])
+        #expect(rules.count > 50_000)
+        #expect(rules.count < 120_000)
+        let shape = /\^\[\^:\]\+:\/\/\+\(\[\^:\/\]\+\\\.\)\?[a-z0-9\\.-]+\[:\/\]/
+        for rule in rules {
+            #expect((rule["action"] as? [String: String]) == ["type": "block"])
+            let filter = try #require((rule["trigger"] as? [String: Any])?["url-filter"] as? String)
+            #expect(filter.wholeMatch(of: shape) != nil)
+        }
+    }
+
+    @Test("WebKit compiles the shipped list, and the second launch doesn't compile again")
+    func compiles() async throws {
+        let store = store()
+        let encoded = String(decoding: try Data(contentsOf: listFile()), as: UTF8.self)
+        let first = WebBlocker(store: store)
+        await first.prepare(encoded: encoded, identifier: "list-a")
+        #expect(first.rules != nil)
+        let second = WebBlocker(store: store)
+        await second.prepare(encoded: "not a list", identifier: "list-a")
+        #expect(second.rules != nil)
+    }
+
+    @Test("A broken list leaves pages working, unblocked")
+    func brokenList() async {
+        let blocker = WebBlocker(store: store())
+        await blocker.prepare(encoded: "not a list", identifier: "list-b")
+        #expect(blocker.rules == nil)
+    }
+
+    @Test("Blocking turns off for one site and comes back, and the choice is sealed")
+    func perSite() async throws {
+        let store = MemoryBlobStore()
+        let key = try ContentRootKey.generate()
+        let vault = WebVault(store: store, rootKey: key)
+        let model = WebModel(client: nil, vault: vault)
+        await model.load()
+        let site = URL(string: "https://www.lisbon.example/trams")!
+        #expect(model.isBlocking(site))
+        model.setBlocking(false, for: "lisbon.example")
+        #expect(!model.isBlocking(site))
+        #expect(model.isBlocking(URL(string: "https://porto.example")))
+        #expect(model.unblockedSites == ["lisbon.example"])
+        for _ in 0..<200 where try await vault.settings().unblockedSites.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let reopened = WebModel(client: nil, vault: WebVault(store: store, rootKey: key))
+        await reopened.load()
+        #expect(!reopened.isBlocking(site))
+        for name in try store.names() {
+            #expect(!String(decoding: try #require(try store.read(name)), as: UTF8.self).contains("lisbon"))
+        }
+    }
+
+    @Test("Rules come off a page only on a site that's turned off")
+    func rulesFollowTheSite() async throws {
+        let blocker = WebBlocker(store: store())
+        let rule = #"[{"trigger":{"url-filter":"tracker"},"action":{"type":"block"}}]"#
+        await blocker.prepare(encoded: rule, identifier: "list-c")
+        let rules = try #require(blocker.rules)
+        let page = WebPage(configuration: WebPage.configuration(isPrivate: false, store: .nonPersistent()), isPrivate: false)
+        page.isUnblocked = { $0 == "lisbon.example" }
+        page.rules = rules
+        #expect(page.blockingIsOn)
+        page.applyRules(for: URL(string: "https://www.lisbon.example"))
+        #expect(!page.blockingIsOn)
+        page.applyRules(for: URL(string: "https://porto.example"))
+        #expect(page.blockingIsOn)
+    }
+}
+
+@MainActor
+@Suite struct WebDownloadTests {
+    @Test("A site can't pick a name that reaches out of the folder", arguments: [
+        ("../../secrets.txt", "secrets.txt"),
+        ("..\\..\\boot.ini", "boot.ini"),
+        ("/etc/passwd", "passwd"),
+        (".hidden", "hidden"),
+        ("report\u{0}.pdf", "report.pdf"),
+        ("a:b*c?.pdf", "abc.pdf"),
+        ("..", "Download"),
+        ("", "Download"),
+    ])
+    func names(suggested: String, safe: String) {
+        #expect(WebDownloadFolder.safeName(suggested) == safe)
+    }
+
+    @Test("A long name is cut and keeps its type")
+    func longName() {
+        let name = WebDownloadFolder.safeName(String(repeating: "a", count: 400) + ".pdf")
+        #expect(name.count == WebDownloadFolder.nameLimit)
+        #expect(name.hasSuffix(".pdf"))
+    }
+
+    @Test("A second file with the same name doesn't overwrite the first")
+    func uniqueNames() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let folder = WebDownloadFolder(directory: directory)
+        let first = try folder.destination(for: "tram.pdf")
+        try Data("one".utf8).write(to: first)
+        #expect(try folder.destination(for: "tram.pdf").lastPathComponent == "tram 2.pdf")
+        #expect(folder.existing().map(\.lastPathComponent) == ["tram.pdf"])
+    }
+
+    @Test("Each account has its own downloads")
+    func perAccount() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MemoryBlobStore()
+        let keyOne = try ContentRootKey.generate()
+        let settings = try await WebVault(store: store, rootKey: keyOne).settings()
+        let mine = root.appendingPathComponent(settings.storeID.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: mine, withIntermediateDirectories: true)
+        try Data("one".utf8).write(to: mine.appendingPathComponent("tram.pdf"))
+
+        let owner = WebModel(client: nil, vault: WebVault(store: store, rootKey: keyOne), downloads: root)
+        await owner.load()
+        #expect(owner.downloads.map(\.filename) == ["tram.pdf"])
+        let other = WebModel(client: nil, vault: WebVault(store: MemoryBlobStore(), rootKey: try .generate()), downloads: root)
+        await other.load()
+        #expect(other.downloads.isEmpty)
+    }
+
+    @Test("Removing a download removes the file")
+    func removal() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vault = WebVault(store: MemoryBlobStore(), rootKey: try .generate())
+        let settings = try await vault.settings()
+        let mine = root.appendingPathComponent(settings.storeID.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: mine, withIntermediateDirectories: true)
+        let file = mine.appendingPathComponent("tram.pdf")
+        try Data("one".utf8).write(to: file)
+        let model = WebModel(client: nil, vault: vault, downloads: root)
+        await model.load()
+        model.remove(try #require(model.downloads.first))
+        #expect(model.downloads.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+}
+
+/// Stands in for the Reader, the way a real one is reached: through `ContentReceiver`.
+private actor FakeReader: ContentReceiver {
+    nonisolated let module = ModuleID.reader
+    nonisolated let kinds: Set<ContentKind> = [.note, .file]
+    private(set) var notes: [(title: String, body: String)] = []
+    private(set) var files: [(data: Data, name: String)] = []
+    var refuses = false
+
+    func refuse() { refuses = true }
+
+    private func ref(_ kind: ContentKind, _ title: String) -> ContentRef {
+        let id = UUID()
+        return ContentRef(module: .reader, kind: kind, id: id, keyRef: .crk(objectID: id), preview: .init(title: title))
+    }
+
+    func receive(noteTitled title: String, body: String) throws -> ContentRef {
+        if refuses { throw CancellationError() }
+        notes.append((title, body))
+        return ref(.note, title)
+    }
+
+    func receive(file data: Data, named filename: String) throws -> ContentRef {
+        if refuses { throw CancellationError() }
+        files.append((data, filename))
+        return ref(.file, filename)
+    }
+}
+
+@MainActor
+@Suite(.serialized) struct WebReadableTests {
+    private let html = """
+    <html><head><title>Tram 28</title></head><body>
+    <nav><ul><li>Home link</li></ul></nav>
+    <article>
+      <h1>Riding tram 28</h1>
+      <p>The yellow tram climbs through Alfama, and the first car of the morning leaves Martim Moniz before the crowds arrive at the stops along the hill.</p>
+      <p>Validate your card as you board, and hold on through the sharp turns near the cathedral, where the rails squeal and the driver rings the bell.</p>
+      <form><p>Newsletter sign-up</p><input id="box" value="typed by the person"><textarea id="note">typed in a note</textarea></form>
+      <p style="display:none">Hidden line</p>
+    </article>
+    <footer><p>Footer line</p></footer>
+    </body></html>
+    """
+
+    private func loaded(_ html: String) async throws -> WebPage {
+        let page = WebPage(configuration: WebPage.configuration(isPrivate: true, store: .nonPersistent()), isPrivate: true)
+        page.webView.loadHTMLString(html, baseURL: URL(string: "https://lisbon.example/trams"))
+        try await until { !page.webView.isLoading && page.webView.title?.isEmpty == false }
+        return page
+    }
+
+    @Test("Saving keeps the article and drops navigation, forms, and hidden text")
+    func cleans() async throws {
+        let page = try await loaded(html)
+        let text = try await page.readableText()
+        #expect(text.body.hasPrefix("Riding tram 28\n\nThe yellow tram"))
+        #expect(text.body.contains("Validate your card"))
+        for dropped in ["Home link", "Newsletter", "Hidden line", "Footer line"] {
+            #expect(!text.body.contains(dropped))
+        }
+    }
+
+    @Test("Nothing typed into a page is read, even on a short page")
+    func typedTextStays() async throws {
+        let page = try await loaded(#"<html><head><title>Sign in</title></head><body><p>Hello</p><input id="box"><textarea id="note"></textarea></body></html>"#)
+        _ = try await page.webView.evaluateJavaScript("document.getElementById('box').value = 'secret one'; document.getElementById('note').value = 'secret two'; 1")
+        let text = try await page.readableText()
+        #expect(text.body == "Hello")
+    }
+
+    @Test("A page's own script can't see or change the reader")
+    func pageCantInterfere() async throws {
+        let page = try await loaded("""
+        <html><head><title>Sly</title><script>
+        Element.prototype.querySelectorAll = () => { throw new Error('caught') };
+        Document.prototype.querySelector = () => { window.saw = true; return null };
+        </script></head><body><p>Plain words</p></body></html>
+        """)
+        let text = try await page.readableText()
+        #expect(text.body == "Plain words")
+        #expect(try await page.webView.evaluateJavaScript("window.saw === undefined") as? Bool == true)
+    }
+
+    @Test("Save to Reader goes through the registry's receiver")
+    func saves() async throws {
+        let reader = FakeReader()
+        let model = WebModel(client: nil, receiver: reader)
+        var told = 0
+        model.onSentToReader = { told += 1 }
+        model.open(URL(string: "https://lisbon.example")!)
+        let page = try #require(model.current.page)
+        page.webView.loadHTMLString(html, baseURL: URL(string: "https://lisbon.example/trams"))
+        try await until { !page.webView.isLoading && page.title == "Tram 28" }
+        await model.saveToReader()
+        let notes = await reader.notes
+        #expect(notes.first?.title == "Tram 28")
+        #expect(notes.first?.body.contains("yellow tram") == true)
+        #expect(model.notice == "Saved to Reader.")
+        #expect(told == 1)
+    }
+
+    @Test("A page with no text says so, and a refusal isn't called a save")
+    func failures() async throws {
+        let reader = FakeReader()
+        let model = WebModel(client: nil, receiver: reader)
+        model.open(URL(string: "https://lisbon.example")!)
+        let page = try #require(model.current.page)
+        page.webView.loadHTMLString("<html><head><title>Empty</title></head><body></body></html>", baseURL: nil)
+        try await until { !page.webView.isLoading && page.title == "Empty" }
+        await model.saveToReader()
+        #expect(model.notice == "This page has no text to save.")
+        page.webView.loadHTMLString("<html><head><title>Full</title></head><body><p>Words</p></body></html>", baseURL: nil)
+        try await until { !page.webView.isLoading && page.title == "Full" }
+        await reader.refuse()
+        await model.saveToReader()
+        #expect(model.notice == "This page wasn't saved.")
+    }
+
+    @Test("Find says whether the page has the words, and text size moves in steps")
+    func tools() async throws {
+        let page = try await loaded(html)
+        #expect(await page.find("Alfama"))
+        #expect(await !page.find("Porto"))
+        page.zoom(in: true)
+        #expect(page.webView.pageZoom == 1.1)
+        page.zoom(in: false)
+        page.zoom(in: false)
+        #expect(page.webView.pageZoom == 0.9)
+    }
+}

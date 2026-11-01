@@ -11,6 +11,12 @@ public struct WebHomeView: View {
     @State private var showingTabs = false
     @State private var showingLibrary = false
     @State private var showingSettings = false
+    @State private var showingDownloads = false
+    @State private var finding = false
+    @State private var findText = ""
+    @State private var findMissed = false
+    @FocusState private var isFinding: Bool
+    @Environment(\.openURL) private var openURL
     @AppStorage(SafeSearch.key) private var safety = SafeSearch.moderate.rawValue
 
     public init(model: WebModel, onClose: (() -> Void)? = nil) {
@@ -31,9 +37,19 @@ public struct WebHomeView: View {
                 if isTyping, !suggestions.isEmpty { suggestionList }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if finding { findBar }
             controls
         }
         .background(theme.bg.color)
+        .background(shortcuts)
+        .overlay(alignment: .bottom) { noticeBar }
+        .task(id: model.notice) {
+            guard model.notice != nil else { return }
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled { model.notice = nil }
+        }
+        .onChange(of: findText) { Task { await find() } }
+        .onChange(of: page?.url) { finding = false }
         .onChange(of: tab.id) { showAddress() }
         .onChange(of: page?.url) { showAddress() }
         .onChange(of: tab.showing) { showAddress() }
@@ -47,6 +63,88 @@ public struct WebHomeView: View {
         .sheet(isPresented: $showingTabs) { WebTabsView(model: model) { showingTabs = false } }
         .sheet(isPresented: $showingLibrary) { WebLibraryView(model: model) { showingLibrary = false } }
         .sheet(isPresented: $showingSettings) { WebSettingsView(model: model) { showingSettings = false } }
+        .sheet(isPresented: $showingDownloads) { WebDownloadsView(model: model) { showingDownloads = false } }
+    }
+
+    /// The Mac's usual keys, in one place. A keyboard on an iPhone gets them too.
+    private var shortcuts: some View {
+        ZStack {
+            Button("New Tab") { startTab() }.keyboardShortcut("t", modifiers: .command)
+            Button("New Private Tab") { startTab(isPrivate: true) }.keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("Close Tab") { model.close(tab) }.keyboardShortcut("w", modifiers: .command)
+            Button("Go to Address") { isTyping = true }.keyboardShortcut("l", modifiers: .command)
+            Button("Reload") { page?.reload() }.keyboardShortcut("r", modifiers: .command)
+            Button("Find on Page") { startFinding() }.keyboardShortcut("f", modifiers: .command)
+            Button("Back", action: model.goBack).keyboardShortcut("[", modifiers: .command)
+            Button("Forward", action: model.goForward).keyboardShortcut("]", modifiers: .command)
+            Button("Bookmarks and History") { showingLibrary = true }.keyboardShortcut("y", modifiers: .command)
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder private var noticeBar: some View {
+        let theme = Theme.current
+        if let notice = model.notice {
+            Text(notice)
+                .font(Typeface.callout)
+                .foregroundStyle(theme.textPrimary.color)
+                .padding(.horizontal, Space.s4)
+                .padding(.vertical, Space.s2)
+                .neumorphic(.raised, in: Capsule())
+                .padding(.bottom, Space.s8)
+        }
+    }
+
+    private func startFinding() {
+        guard page != nil else { return }
+        finding = true
+        isFinding = true
+    }
+
+    private func find(backwards: Bool = false) async {
+        guard let page, !findText.isEmpty else {
+            findMissed = false
+            return
+        }
+        findMissed = await !page.find(findText, backwards: backwards)
+    }
+
+    private var findBar: some View {
+        let theme = Theme.current
+        return HStack(spacing: Space.s2) {
+            HStack(spacing: Space.s2) {
+                TextField("Find on page", text: $findText)
+                    .font(Typeface.body)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                    .focused($isFinding)
+                    .onSubmit { Task { await find() } }
+                if findMissed {
+                    Text("No matches")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
+                }
+            }
+            .padding(.horizontal, Space.s4)
+            .frame(height: Space.s7)
+            .neumorphic(.pressed, in: Capsule())
+            control("chevron.up", label: "Previous match", enabled: !findText.isEmpty) { Task { await find(backwards: true) } }
+            control("chevron.down", label: "Next match", enabled: !findText.isEmpty) { Task { await find() } }
+            Button("Done") {
+                finding = false
+                findText = ""
+            }
+            .font(Typeface.callout)
+            .foregroundStyle(theme.accent.color)
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+        }
+        .foregroundStyle(theme.textPrimary.color)
+        .padding(.horizontal, Space.s3)
+        .padding(.vertical, Space.s1)
     }
 
     /// The site's name, until the box is tapped, when it's the whole address to edit.
@@ -103,12 +201,6 @@ public struct WebHomeView: View {
     private var addressBar: some View {
         let theme = Theme.current
         return HStack(spacing: Space.s2) {
-            // The usual way to reach the box from a keyboard.
-            Button("Go to address") { isTyping = true }
-                .keyboardShortcut("l", modifiers: .command)
-                .opacity(0)
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true)
             if let onClose {
                 Button(action: onClose) {
                     Image(systemName: "circle.hexagongrid")
@@ -169,7 +261,6 @@ public struct WebHomeView: View {
                             .foregroundStyle(theme.textSecondary.color)
                     }
                     .buttonStyle(.plain)
-                    .keyboardShortcut("r", modifiers: .command)
                     .accessibilityLabel(page.isLoading ? "Stop" : "Reload")
                 }
             }
@@ -221,9 +312,7 @@ public struct WebHomeView: View {
     private var controls: some View {
         HStack(spacing: 0) {
             control("chevron.backward", label: "Back", enabled: model.canGoBack, action: model.goBack)
-                .keyboardShortcut("[", modifiers: .command)
             control("chevron.forward", label: "Forward", enabled: model.canGoForward, action: model.goForward)
-                .keyboardShortcut("]", modifiers: .command)
             Spacer(minLength: 0)
             if let url = page?.url {
                 ShareLink(item: url) {
@@ -236,7 +325,6 @@ public struct WebHomeView: View {
                 Spacer(minLength: 0)
             }
             control("book", label: "Bookmarks and history", enabled: true) { showingLibrary = true }
-                .keyboardShortcut("y", modifiers: .command)
             Spacer(minLength: 0)
             Button {
                 showingTabs = true
@@ -257,23 +345,14 @@ public struct WebHomeView: View {
     private var menu: some View {
         Menu {
             Button("New Tab", systemImage: "plus.square") { startTab() }
-                .keyboardShortcut("t", modifiers: .command)
             Button("New Private Tab", systemImage: "eye.slash") { startTab(isPrivate: true) }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("Close Tab", systemImage: "xmark.square") { model.close(tab) }
-                .keyboardShortcut("w", modifiers: .command)
-            if let url = page?.url {
+            if let page, let url = page.url {
                 Divider()
-                if let saved = model.bookmark(for: url) {
-                    Button("Remove Bookmark", systemImage: "bookmark.slash") { Task { await model.remove(saved) } }
-                } else {
-                    Button("Add Bookmark", systemImage: "bookmark") {
-                        Task { await model.addBookmark(title: page?.title ?? "", url: url) }
-                    }
-                    .keyboardShortcut("d", modifiers: .command)
-                }
+                pageMenu(page, url: url)
             }
             Divider()
+            Button("Downloads", systemImage: "arrow.down.circle") { showingDownloads = true }
             Button("Web Settings", systemImage: "gearshape") { showingSettings = true }
         } label: {
             Image(systemName: "ellipsis.circle")
@@ -284,6 +363,36 @@ public struct WebHomeView: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityLabel("More")
+    }
+
+    @ViewBuilder private func pageMenu(_ page: WebPage, url: URL) -> some View {
+        if let saved = model.bookmark(for: url) {
+            Button("Remove Bookmark", systemImage: "bookmark.slash") { Task { await model.remove(saved) } }
+        } else {
+            Button("Add Bookmark", systemImage: "bookmark") {
+                Task { await model.addBookmark(title: page.title, url: url) }
+            }
+        }
+        Button("Save to Reader", systemImage: "text.book.closed") { Task { await model.saveToReader() } }
+        Button("Find on Page", systemImage: "magnifyingglass") { startFinding() }
+        Menu("Text Size", systemImage: "textformat.size") {
+            Button("Larger", systemImage: "plus") { page.zoom(in: true) }
+            Button("Smaller", systemImage: "minus") { page.zoom(in: false) }
+        }
+        #if os(iOS)
+        Button(page.wantsDesktopSite ? "Request Mobile Site" : "Request Desktop Site", systemImage: "desktopcomputer") {
+            page.wantsDesktopSite.toggle()
+            page.reload()
+        }
+        #endif
+        Button("Print", systemImage: "printer") { page.printPage() }
+        Button("Open in Safari", systemImage: "safari") { openURL(url) }
+        if let site = WebSite.key(url) {
+            let isOn = model.isBlocking(url)
+            Button(isOn ? "Turn Off Blocking Here" : "Turn On Blocking Here", systemImage: "shield.lefthalf.filled") {
+                model.setBlocking(!isOn, for: site)
+            }
+        }
     }
 
     private func startTab(isPrivate: Bool = false) {
