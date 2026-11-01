@@ -1,11 +1,5 @@
 import AVFoundation
 
-public struct ListenVoice: Identifiable, Sendable, Equatable, Hashable {
-    public let id: String
-    public let name: String
-    public let language: String
-}
-
 /// Speaks one piece of text at a time. Speech stays on the device.
 @MainActor
 public protocol SpeechEngine: AnyObject {
@@ -14,17 +8,16 @@ public protocol SpeechEngine: AnyObject {
     var onWord: ((Int) -> Void)? { get set }
     /// Something the person should see while speech can't start yet. Nil clears it.
     var onStatus: ((String?) -> Void)? { get set }
-    func speak(_ text: String, speed: Double, voice: String?)
+    func speak(_ text: String, speed: Double)
     /// A hint at what comes next, so it can start straight after this sentence. Nil drops anything held.
-    func prepare(_ text: String?, speed: Double, voice: String?)
+    func prepare(_ text: String?, speed: Double)
     func pause()
     func resume()
     func stop()
-    func voices() -> [ListenVoice]
 }
 
 public extension SpeechEngine {
-    func prepare(_ text: String?, speed: Double, voice: String?) {}
+    func prepare(_ text: String?, speed: Double) {}
 }
 
 @MainActor
@@ -43,7 +36,7 @@ public final class SystemSpeechEngine: NSObject, SpeechEngine, AVSpeechSynthesiz
         synthesizer.delegate = self
     }
 
-    public func speak(_ text: String, speed: Double, voice: String?) {
+    public func speak(_ text: String, speed: Double) {
         #if os(iOS)
         // Without this, the ring switch silences Listen.
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
@@ -52,7 +45,6 @@ public final class SystemSpeechEngine: NSObject, SpeechEngine, AVSpeechSynthesiz
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = Self.rate(forSpeed: speed)
         utterance.volume = volume
-        utterance.voice = voice.flatMap(AVSpeechSynthesisVoice.init(identifier:))
         self.utterance = utterance
         synthesizer.speak(utterance)
     }
@@ -72,12 +64,6 @@ public final class SystemSpeechEngine: NSObject, SpeechEngine, AVSpeechSynthesiz
     public func stop() {
         utterance = nil
         synthesizer.stopSpeaking(at: .immediate)
-    }
-
-    public func voices() -> [ListenVoice] {
-        AVSpeechSynthesisVoice.speechVoices()
-            .map { ListenVoice(id: $0.identifier, name: $0.name, language: $0.language) }
-            .sorted { ($0.language, $0.name) < ($1.language, $1.name) }
     }
 
     // The delegate can fire off the main actor, and after a stop has already moved on. The identity

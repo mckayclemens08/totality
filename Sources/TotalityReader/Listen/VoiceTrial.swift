@@ -45,7 +45,7 @@ public enum VoiceTrial {
             for call in 1...calls {
                 let text = sentences[call % sentences.count]
                 start = Date()
-                let samples = try await voice.samples(for: text, voice: "kokoro.af_heart", speed: 1)
+                let samples = try await voice.samples(for: text, speed: 1)
                 let took = Date().timeIntervalSince(start)
                 let seconds = Double(samples.count) / 24_000
                 audio += seconds
@@ -76,7 +76,6 @@ public enum VoiceTrial {
         guard let track = ListenTrack(id: UUID(), title: "Trial", text: book) else { return }
         let voices = TimedVoices()
         let listen = ListenController(engine: voices)
-        listen.setVoice("kokoro.af_heart")
         listen.play(track)
         say("listening, \(track.script.sentences.count) sentences")
         let end = Date().addingTimeInterval(Double(minutes) * 60)
@@ -135,19 +134,18 @@ public enum VoiceTrial {
             onWord?(offset)
         }
 
-        func speak(_ text: String, speed: Double, voice: String?) {
+        func speak(_ text: String, speed: Double) {
             asked = Date()
-            inner.speak(text, speed: speed, voice: voice)
+            inner.speak(text, speed: speed)
         }
 
-        func prepare(_ text: String?, speed: Double, voice: String?) {
-            inner.prepare(text, speed: speed, voice: voice)
+        func prepare(_ text: String?, speed: Double) {
+            inner.prepare(text, speed: speed)
         }
 
         func pause() { inner.pause() }
         func resume() { inner.resume() }
         func stop() { inner.stop() }
-        func voices() -> [ListenVoice] { inner.voices() }
     }
 
     /// Kept in a file too, so a dropped connection to the device doesn't lose the result.

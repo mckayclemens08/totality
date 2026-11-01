@@ -48,17 +48,17 @@ file, so there is nothing to refer to. Listen lives in `TotalityReader` as `List
 When the Player module starts, the transport (play, pause, skip, speed, queue) moves behind a protocol
 in `TotalityCore`, and Listen and music both play through it.
 
-### Natural voices (on trial)
+### The natural voice
 
-`ListenVoices` is the `SpeechEngine` the app uses. A voice ID starting `kokoro.` goes to `NaturalSpeechEngine`, and anything else goes to the system voice, so `ListenController` doesn't know which engine is speaking. Kokoro-82M runs on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. Text stays on the device, and the only download is the model, about 390 MB, checked against pinned hashes.
+Listen has one voice, Michael, and no voice menu (owner, 2026-10-31). `ListenVoices` is the `SpeechEngine` the app uses: it sends speech to `NaturalSpeechEngine`, and the system voice is the backup, so `ListenController` doesn't know which is speaking. Michael is Kokoro-82M's `am_michael`, run on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. iOS 17 and macOS 14 use the system voice. Text stays on the device, and the only download is the model, about 390 MB, checked against pinned hashes.
 
 - A voice that fails to load falls back to the system voice until the app restarts, and the bar says so.
 - The model gives no word timing, so the bar moves with the share of the audio played.
 - The next sentence is made ahead of time, one at a time, and the voice loads once however many calls wait on it.
 - FluidAudio can log a word it can't pronounce, so `KokoroSynthesizer` turns off its stderr copy. The system log keeps the text private.
-- FluidAudio warns of an uncatchable crash in Apple's audio library on iOS 26.4 and later, reported after 8 to 20 calls on some devices and 54 minutes into one listen. None appeared here, but it can't be ruled out, which is why the voice is opt-in.
+- FluidAudio warns of an uncatchable crash in Apple's audio library on iOS 26.4 and later, reported after 8 to 20 calls on some devices and 54 minutes into one listen. None appeared here, but it can't be ruled out, and the app can't catch it to fall back.
 
-Measured on 2026-10-31, on an iPhone 14 on iOS 26.7.1 and a Release build:
+Measured on 2026-10-31 with the Heart voice, since removed, on an iPhone 14 on iOS 26.7.1 and a Release build:
 
 | Measure | Result |
 |---|---|

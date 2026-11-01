@@ -1,11 +1,9 @@
 import Foundation
 
-/// The voices Listen can use. A natural voice is an ordinary voice ID with a prefix, so the controller
-/// doesn't need to know which engine is speaking.
+/// Listen's voice: the natural one, with the system voice as its backup, and the only voice on iOS 17
+/// and macOS 14. The controller doesn't know which is speaking.
 @MainActor
 public final class ListenVoices: SpeechEngine {
-    nonisolated static let naturalPrefix = "kokoro."
-
     public var onFinish: (() -> Void)?
     public var onWord: ((Int) -> Void)?
     public var onStatus: ((String?) -> Void)?
@@ -22,8 +20,7 @@ public final class ListenVoices: SpeechEngine {
         if #available(iOS 18, macOS 15, *), let directory = Self.voiceDirectory() {
             natural = NaturalSpeechEngine(
                 synthesizer: KokoroSynthesizer(directory: directory),
-                output: EngineVoiceOutput(),
-                voices: KokoroSynthesizer.voices
+                output: EngineVoiceOutput()
             )
         }
         self.init(system: SystemSpeechEngine(), natural: natural)
@@ -41,24 +38,19 @@ public final class ListenVoices: SpeechEngine {
         natural?.onFailure = { [weak self] text in self?.fellBack(text) }
     }
 
-    public func speak(_ text: String, speed: Double, voice: String?) {
+    public func speak(_ text: String, speed: Double) {
         self.speed = speed
-        if let voice, voice.hasPrefix(Self.naturalPrefix), let natural {
-            guard !naturalFailed else {
-                speaking = system
-                system.speak(text, speed: speed, voice: nil)
-                return
-            }
+        if let natural, !naturalFailed {
             speaking = natural
-            natural.speak(text, speed: speed, voice: voice)
+            natural.speak(text, speed: speed)
         } else {
             speaking = system
-            system.speak(text, speed: speed, voice: voice)
+            system.speak(text, speed: speed)
         }
     }
 
-    public func prepare(_ text: String?, speed: Double, voice: String?) {
-        natural?.prepare(naturalFailed ? nil : text, speed: speed, voice: voice)
+    public func prepare(_ text: String?, speed: Double) {
+        natural?.prepare(naturalFailed ? nil : text, speed: speed)
     }
 
     public func pause() {
@@ -75,16 +67,12 @@ public final class ListenVoices: SpeechEngine {
         speaking = nil
     }
 
-    public func voices() -> [ListenVoice] {
-        (natural?.voices() ?? []) + system.voices()
-    }
-
     /// Listening carries on in the system voice, because a voice that didn't load shouldn't end the book.
     private func fellBack(_ text: String) {
         naturalFailed = true
         onStatus?("The natural voice didn't load, so this is the system voice.")
         speaking = system
-        system.speak(text, speed: speed, voice: nil)
+        system.speak(text, speed: speed)
     }
 
     /// Not backed up, because the model can be downloaded again and holds nothing of this person's.

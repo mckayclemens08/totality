@@ -4,7 +4,7 @@ import FluidAudio
 /// Turns text into audio samples. Nothing here leaves the device: only the model is ever downloaded.
 protocol VoiceSynthesizer: Sendable {
     func prepare() async throws
-    func samples(for text: String, voice: String, speed: Double) async throws -> [Float]
+    func samples(for text: String, speed: Double) async throws -> [Float]
 }
 
 /// Plays one run of samples at a time.
@@ -33,7 +33,6 @@ final class NaturalSpeechEngine: SpeechEngine {
 
     private let synthesizer: any VoiceSynthesizer
     private let output: any VoiceOutput
-    private let voiceList: [ListenVoice]
     private var isReady = false
     /// Shared and never cancelled, because skipping during a load shouldn't start it again.
     private var loading: Task<Void, any Error>?
@@ -41,7 +40,6 @@ final class NaturalSpeechEngine: SpeechEngine {
     private struct Request: Equatable {
         let text: String
         let speed: Double
-        let voice: String
     }
 
     private var isPaused = false
@@ -54,17 +52,15 @@ final class NaturalSpeechEngine: SpeechEngine {
     private var wanted: Request?
     private var position: Task<Void, Never>?
 
-    init(synthesizer: any VoiceSynthesizer, output: any VoiceOutput, voices: [ListenVoice]) {
+    init(synthesizer: any VoiceSynthesizer, output: any VoiceOutput) {
         self.synthesizer = synthesizer
         self.output = output
-        self.voiceList = voices
     }
 
-    func speak(_ text: String, speed: Double, voice: String?) {
+    func speak(_ text: String, speed: Double) {
         stop()
-        guard let voice else { return }
         let current = turn
-        let request = Request(text: text, speed: speed, voice: voice)
+        let request = Request(text: text, speed: speed)
         let held = ahead?.request == request ? ahead?.samples : nil
         if held == nil { ahead?.samples.cancel() }
         ahead = nil
@@ -82,7 +78,7 @@ final class NaturalSpeechEngine: SpeechEngine {
                 let samples = if let held {
                     try await held.value
                 } else {
-                    try await synthesizer.samples(for: text, voice: voice, speed: speed)
+                    try await synthesizer.samples(for: text, speed: speed)
                 }
                 self?.made(samples, text: text, turn: current)
             } catch {
@@ -91,16 +87,14 @@ final class NaturalSpeechEngine: SpeechEngine {
         }
     }
 
-    func prepare(_ text: String?, speed: Double, voice: String?) {
-        let request = text.flatMap { text in
-            voice.map { Request(text: text, speed: speed, voice: $0) }
-        }
-        guard let request, request.voice.hasPrefix(ListenVoices.naturalPrefix) else {
+    func prepare(_ text: String?, speed: Double) {
+        guard let text else {
             ahead?.samples.cancel()
             ahead = nil
             wanted = nil
             return
         }
+        let request = Request(text: text, speed: speed)
         guard ahead?.request != request else { return }
         ahead?.samples.cancel()
         ahead = nil
@@ -114,7 +108,7 @@ final class NaturalSpeechEngine: SpeechEngine {
         self.wanted = nil
         let synthesizer = self.synthesizer
         ahead = (wanted, Task {
-            try await synthesizer.samples(for: wanted.text, voice: wanted.voice, speed: wanted.speed)
+            try await synthesizer.samples(for: wanted.text, speed: wanted.speed)
         })
     }
 
@@ -138,10 +132,6 @@ final class NaturalSpeechEngine: SpeechEngine {
         isPaused = false
         doneWaiting()
         output.stop()
-    }
-
-    func voices() -> [ListenVoice] {
-        voiceList
     }
 
     /// One sentence's position, worked out from the audio. Offsets are UTF-16, the same as speech's.
@@ -202,11 +192,7 @@ final class NaturalSpeechEngine: SpeechEngine {
 /// Kokoro, through a pinned FluidAudio release. Models are checked against pinned hashes when they arrive.
 @available(iOS 18, macOS 15, *)
 final class KokoroSynthesizer: VoiceSynthesizer {
-    static let voices = [
-        ListenVoice(id: "kokoro.af_heart", name: "Heart (natural)", language: "en-US"),
-        ListenVoice(id: "kokoro.af_bella", name: "Bella (natural)", language: "en-US"),
-        ListenVoice(id: "kokoro.am_michael", name: "Michael (natural)", language: "en-US"),
-    ]
+    private static let voice = "am_michael"
 
     private let manager: KokoroAneManager
 
@@ -220,9 +206,8 @@ final class KokoroSynthesizer: VoiceSynthesizer {
         try await manager.initialize()
     }
 
-    func samples(for text: String, voice: String, speed: Double) async throws -> [Float] {
-        let name = String(voice.dropFirst(ListenVoices.naturalPrefix.count))
-        let result = try await manager.synthesizeDetailed(text: text, voice: name, speed: Float(speed))
+    func samples(for text: String, speed: Double) async throws -> [Float] {
+        let result = try await manager.synthesizeDetailed(text: text, voice: Self.voice, speed: Float(speed))
         return result.samples
     }
 }

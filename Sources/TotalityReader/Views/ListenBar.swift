@@ -37,7 +37,6 @@ struct ListenBar: View {
                 control("goforward", label: "Next sentence") { listen.skip(by: 1) }
                 Spacer(minLength: 0)
                 speedMenu
-                voiceMenu
                 control("xmark", label: "Stop listening") { listen.stop() }
             }
             .foregroundStyle(theme.textPrimary.color)
@@ -65,20 +64,6 @@ struct ListenBar: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityLabel("Speed")
-    }
-
-    private var voiceMenu: some View {
-        Menu {
-            Button("System default") { listen.setVoice(nil) }
-            ForEach(listen.voices) { voice in
-                Button("\(voice.name) (\(voice.language))") { listen.setVoice(voice.id) }
-            }
-        } label: {
-            Image(systemName: "person.wave.2").modifier(TapTarget())
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .accessibilityLabel("Voice")
     }
 
     static func label(forSentence index: Int, of count: Int) -> String {

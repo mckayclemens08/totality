@@ -161,11 +161,11 @@ import Testing
         let listen = ListenController(engine: engine)
         listen.play(try track())
         listen.togglePause()
-        listen.setVoice("test.voice")
+        listen.setSpeed(1.5)
         #expect(engine.spoken == ["One."])
         listen.togglePause()
         #expect(engine.spoken == ["One.", "One."])
-        #expect(engine.voiceIDs.last == "test.voice")
+        #expect(engine.speeds.last == 1.5)
         #expect(engine.resumes == 0)
         #expect(!listen.isPaused)
     }
