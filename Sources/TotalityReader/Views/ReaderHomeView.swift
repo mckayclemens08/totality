@@ -29,22 +29,24 @@ public struct ReaderHomeView: View {
     }
 
     public var body: some View {
-        NavigationStack(path: $path) {
-            ReaderFolderView(folder: nil, model: model, path: $path, onClose: onClose)
-                .navigationDestination(for: ReaderRoute.self) { route in
-                    switch route {
-                    case .folder(let id):
-                        ReaderFolderView(folder: id, model: model, path: $path, onClose: nil)
-                    case .item(let item):
-                        ReaderItemView(item: item, model: model)
-                    case .trash:
-                        ReaderTrashView(model: model)
+        // Stacked, not a safe area inset: an inset never reaches a pushed page, so the end of a document
+        // stayed behind the bar.
+        VStack(spacing: 0) {
+            NavigationStack(path: $path) {
+                ReaderFolderView(folder: nil, model: model, path: $path, onClose: onClose)
+                    .navigationDestination(for: ReaderRoute.self) { route in
+                        switch route {
+                        case .folder(let id):
+                            ReaderFolderView(folder: id, model: model, path: $path, onClose: nil)
+                        case .item(let item):
+                            ReaderItemView(item: item, model: model)
+                        case .trash:
+                            ReaderTrashView(model: model)
+                        }
                     }
-                }
-                .searchable(text: $model.query, prompt: "Search titles and text")
-        }
-        .tint(Theme.current.accent.color)
-        .safeAreaInset(edge: .bottom) {
+                    .searchable(text: $model.query, prompt: "Search titles and text")
+            }
+            .tint(Theme.current.accent.color)
             if model.listen.current != nil {
                 ListenBar(listen: model.listen)
                     .padding(Space.s3)
