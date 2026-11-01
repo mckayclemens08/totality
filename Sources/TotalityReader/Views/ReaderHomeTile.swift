@@ -46,8 +46,7 @@ public struct ReaderHomeTile: View {
     private func frontBook(_ item: ReaderItem) -> some View {
         let theme = Theme.current
         let isPlaying = model.listen.current?.id == item.id
-        return VStack(alignment: .leading, spacing: Space.s2) {
-            // The book sits at the left of the tile, with its icon centred on its title.
+        return VStack(spacing: Space.s2) {
             VStack(spacing: Space.s1) {
                 BookIcon(systemImage: isPlaying ? "waveform" : item.systemImage, size: iconSize)
                     .padding(.bottom, Space.s1)
@@ -69,7 +68,7 @@ public struct ReaderHomeTile: View {
                 ListenProgress(value: model.listen.progress)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 }
 
