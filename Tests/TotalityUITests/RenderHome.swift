@@ -38,7 +38,7 @@ import TotalityCore
             ZStack(alignment: .top) {
                 Theme.current.bg.color
                 BentoGrid(
-                    layout: .constant(layout), modules: ModuleEntry.all, glances: glances, width: 361,
+                    layout: .constant(layout), modules: ModuleEntry.all, glances: glances, bigTile: { _, _ in nil }, width: 361,
                     isEditing: .constant(isEditing), onOpen: { _ in }
                 )
                 .padding(.top, Space.s4)

@@ -7,6 +7,7 @@ struct BentoGrid: View {
     @Binding var layout: HomeLayout
     let modules: [ModuleEntry]
     let glances: [ModuleID: ModuleGlance]
+    let bigTile: (ModuleID, BigTileSize) -> AnyView?
     let width: CGFloat
     @Binding var isEditing: Bool
     let onOpen: (ModuleID) -> Void
@@ -60,7 +61,11 @@ struct BentoGrid: View {
         return Button {
             if !isEditing { onOpen(module.id) }
         } label: {
-            TileLabel(module: module, glance: glances[module.id], isHero: layout.hero == module.id, isEditing: isEditing)
+            let size = layout.bigSize(of: module.id)
+            TileLabel(
+                module: module, glance: glances[module.id], size: size,
+                content: size.flatMap { bigTile(module.id, $0) }, isEditing: isEditing
+            )
         }
         #if os(iOS)
         .buttonStyle(TileButtonStyle(isEditing: isEditing, isDragged: dragged != nil, isTouched: touched == module.id))
@@ -221,7 +226,10 @@ private struct TileDrag {
 struct TileLabel: View {
     let module: ModuleEntry
     let glance: ModuleGlance?
-    let isHero: Bool
+    /// Nil on a small tile.
+    let size: BigTileSize?
+    /// The module's own view for a big tile. Without one, the tile shows its lines.
+    let content: AnyView?
     let isEditing: Bool
 
     var body: some View {
@@ -239,12 +247,26 @@ struct TileLabel: View {
             .padding(.trailing, isEditing ? Space.s6 : 0)
             .font(Typeface.callout)
             .foregroundStyle(theme.textSecondary.color)
-            ViewThatFits(in: .vertical) {
-                ForEach(Array(stride(from: lines.count, to: 0, by: -1)), id: \.self) { count in
-                    GlanceLines(lines: Array(lines.prefix(count)), isQuiet: isQuiet, isHero: isHero)
+            if let content {
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ViewThatFits(in: .vertical) {
+                    ForEach(Array(stride(from: lines.count, to: 0, by: -1)), id: \.self) { count in
+                        GlanceLines(lines: Array(lines.prefix(count)), isQuiet: isQuiet, isHero: size == .square)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .background(alignment: .bottomTrailing) {
+                    // A big tile with nothing to show still reads as its module from across the room.
+                    if size != nil, isQuiet {
+                        Image(systemName: module.systemImage)
+                            .font(.system(size: Space.s8))
+                            .foregroundStyle(theme.surfaceSunken.color)
+                            .accessibilityHidden(true)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
         .padding(Space.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

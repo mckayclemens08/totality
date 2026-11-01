@@ -19,6 +19,11 @@ public enum TileSize: String, Codable, Sendable, CaseIterable {
     }
 }
 
+/// The tiles with room for something of a module's own, like the Calendar's month.
+public enum BigTileSize: Sendable {
+    case medium, large, square
+}
+
 public struct HomeTile: Equatable, Sendable, Identifiable {
     public let id: ModuleID
     public var size: TileSize
@@ -111,6 +116,16 @@ public struct HomeLayout: Equatable, Sendable {
 
     public func size(of module: ModuleID) -> TileSize? {
         tiles.first { $0.id == module }?.size
+    }
+
+    /// Nil for a small tile, which has room only for its lines.
+    public func bigSize(of module: ModuleID) -> BigTileSize? {
+        if hero == module { return .square }
+        switch size(of: module) {
+        case .medium: return .medium
+        case .large: return .large
+        case .small, nil: return nil
+        }
     }
 
     /// Choosing a size for the big square takes it back to an ordinary tile.

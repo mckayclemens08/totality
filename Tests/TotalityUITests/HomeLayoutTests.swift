@@ -32,6 +32,20 @@ struct HomeLayoutTests {
         }
     }
 
+    @Test("Only a tile bigger than small gets a module's own view, and the big square says so")
+    func bigSizes() {
+        var layout = HomeLayout(modules: [.reader, .calendar, .photos])
+        layout.setSize(.small, of: .reader)
+        layout.setSize(.medium, of: .calendar)
+        layout.setSize(.large, of: .photos)
+        #expect(layout.bigSize(of: .reader) == nil)
+        #expect(layout.bigSize(of: .calendar) == .medium)
+        #expect(layout.bigSize(of: .photos) == .large)
+        layout.makeHero(.reader)
+        #expect(layout.bigSize(of: .reader) == .square)
+        #expect(layout.bigSize(of: .mail) == nil)
+    }
+
     @Test("A new install has every module once, with the big square left as a choice")
     func starting() {
         let layout = HomeLayout(modules: Self.modules)
