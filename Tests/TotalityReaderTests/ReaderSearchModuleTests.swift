@@ -132,6 +132,18 @@ import TotalityCore
         return note
     }
 
+    @Test("Read along only applies while the Listen bar is showing, so a note can always be edited")
+    func appliesWithTheBar() async throws {
+        let model = try model()
+        let note = try await note(in: model, "Take the tram.")
+        #expect(!ReaderItemView.appliesReadAlong(isOn: true, listen: model.listen))
+        await model.startListening(to: note.id)
+        #expect(ReaderItemView.appliesReadAlong(isOn: true, listen: model.listen))
+        #expect(!ReaderItemView.appliesReadAlong(isOn: false, listen: model.listen))
+        model.listen.stop()
+        #expect(!ReaderItemView.appliesReadAlong(isOn: true, listen: model.listen))
+    }
+
     @Test("Tapping a sentence with nothing playing starts Listen there")
     func starts() async throws {
         let model = try model()
