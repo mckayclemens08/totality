@@ -7,6 +7,11 @@ protocol VoiceSynthesizer: Sendable {
     func samples(for text: String, speed: Double) async throws -> [Float]
 }
 
+/// Why the voice couldn't load, when that's something the listener can fix.
+enum VoiceLoadError: Error {
+    case storageFull
+}
+
 /// Plays one run of samples at a time.
 @MainActor
 protocol VoiceOutput: AnyObject {
@@ -24,6 +29,8 @@ protocol VoiceOutput: AnyObject {
 final class NaturalSpeechEngine: SpeechEngine {
     /// The model gives no word timing, so the bar is moved by how much of the audio has played.
     private static let positionPause = Duration.milliseconds(250)
+    /// One failed sentence is about that sentence. Two in a row is about the voice.
+    private static let failuresBeforeNotice = 2
 
     var onFinish: (() -> Void)?
     var onWord: ((Int) -> Void)?
@@ -52,6 +59,7 @@ final class NaturalSpeechEngine: SpeechEngine {
     private var ahead: (request: Request, samples: Task<[Float], any Error>)?
     private var wanted: Request?
     private var position: Task<Void, Never>?
+    private var failuresInARow = 0
 
     init(synthesizer: any VoiceSynthesizer, output: any VoiceOutput) {
         self.synthesizer = synthesizer
@@ -76,10 +84,14 @@ final class NaturalSpeechEngine: SpeechEngine {
         making = Task { [weak self] in
             do {
                 try await load?.value
+            } catch VoiceLoadError.storageFull {
+                self?.failed(text, notice: "Storage is almost full, so Michael can't run. Free up space, then reopen the app.", turn: current)
+                return
             } catch {
                 self?.failed(text, notice: "Michael's voice didn't load, so this is the system voice.", turn: current)
                 return
             }
+            self?.isReady = true
             do {
                 let samples = if let held {
                     try await held.value
@@ -151,9 +163,10 @@ final class NaturalSpeechEngine: SpeechEngine {
 
     private func made(_ samples: [Float], text: String, turn: Int) {
         guard turn == self.turn else { return }
-        isReady = true
         making = nil
         doneWaiting()
+        if failuresInARow >= Self.failuresBeforeNotice { onStatus?(nil) }
+        failuresInARow = 0
         guard !samples.isEmpty else {
             played(turn: turn)
             return
@@ -189,6 +202,10 @@ final class NaturalSpeechEngine: SpeechEngine {
         making = nil
         isPlaying = false
         doneWaiting()
+        failuresInARow += 1
+        if failuresInARow == Self.failuresBeforeNotice, notice == nil {
+            onStatus?("Michael isn't working right now, so this is the system voice.")
+        }
         onFailure?(text, notice)
     }
 
@@ -205,6 +222,14 @@ final class KokoroSynthesizer: VoiceSynthesizer {
     private static let voice = "am_michael"
     /// FluidAudio rewrites these two every time, so they can't be links into the read-only app.
     private static let rewritten: Set<String> = ["manifest.json", "base-index-v3.json"]
+    /// Below this, a load that fails is put down to storage. Core ML writes each model's compiled form to disk.
+    private static let storageNeeded: Int64 = 1_000_000_000
+    /// Between them these run every model: the two short routes and the one for longer sentences.
+    private static let warmUp = [
+        "Hello there.",
+        "This short line is here to warm the voice up.",
+        "This longer line is here to warm the voice up, so the first long sentence doesn't have to wait for it.",
+    ]
 
     private let manager: KokoroAneManager
     private let pack: URL
@@ -221,8 +246,30 @@ final class KokoroSynthesizer: VoiceSynthesizer {
     }
 
     func prepare() async throws {
-        try Self.link(pack, into: directory)
-        try await manager.initialize(preloadVoices: [Self.voice])
+        do {
+            try Self.link(pack, into: directory)
+            try await manager.initialize(preloadVoices: [Self.voice])
+        } catch {
+            throw isOutOfRoom ? VoiceLoadError.storageFull : error
+        }
+        // Core ML finishes compiling a model the first time it runs. Doing that now keeps the wait out of
+        // the middle of a chapter. A locked screen can refuse this for now, so only a full disk ends it.
+        do {
+            for line in Self.warmUp {
+                _ = try await manager.synthesizeDetailed(text: line, voice: Self.voice, speed: 1)
+            }
+        } catch {
+            if isOutOfRoom { throw VoiceLoadError.storageFull }
+        }
+    }
+
+    static func isShortOfStorage(free: Int64?) -> Bool {
+        free.map { $0 < storageNeeded } ?? false
+    }
+
+    private var isOutOfRoom: Bool {
+        let key = URLResourceKey.volumeAvailableCapacityForImportantUsageKey
+        return Self.isShortOfStorage(free: (try? directory.resourceValues(forKeys: [key]))?.volumeAvailableCapacityForImportantUsage)
     }
 
     /// FluidAudio needs a folder it can write to, so it gets one made of links into the app, and the voice

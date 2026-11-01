@@ -61,8 +61,11 @@ Michael ships in the app (owner, 2026-10-31), so Listen needs no download and wo
 - FluidAudio's network address is set to a dead one, so a missing file fails instead of fetching. It always loads its default voice, Heart, which is why that's in the pack.
 - When the FluidAudio pin moves, rebuild the pack with `scripts/build-voice-pack.sh`, publish a new release, and update the tag and hash.
 
-- A voice that fails to load falls back to the system voice until the app restarts, and the bar says so.
-- The model can't read a lone bullet or emoji. That text goes to the system voice and Michael carries on, so a book doesn't change voice over one odd line.
+- A voice that fails to load falls back to the system voice until the app restarts, and the bar says so. Below 1 GB free, the bar names storage as the reason.
+- Core ML finishes compiling each model the first time it runs, and that wait reached 18.8 s mid-chapter on the iPhone. `KokoroSynthesizer.prepare` runs three lines that between them use every model, so the wait comes during the load. A failure there ends the voice only when storage is short, because a locked screen may refuse it for the moment.
+- Core ML writes those compiled models to disk. On the iPhone with 263 MB free it failed with "No space left on device", and iOS had already cleared the app's cache, so each launch compiled again. 1 GB is a working figure, not a measured need.
+- Text with nothing to say is skipped. A sentence that fails for another reason goes to the system voice and Michael tries the next one. After two in a row the bar says so, until Michael speaks again.
+- `ListenScript` undoes a PDF's line wrapping, keeps abbreviations inside their sentence, and drops lines with no letters. `SpokenText` rewrites what reads badly aloud (a URL becomes its host, citation marks go, "Fig." becomes "Figure") and respells words that change sound with their use, like "read" and "present". `SpokenAudio` trims the second of silence the model leaves around each sentence.
 - The model gives no word timing, so the bar moves with the share of the audio played.
 - The next sentence is made ahead of time, one at a time, and the voice loads once however many calls wait on it.
 - FluidAudio can log a word it can't pronounce, so `KokoroSynthesizer` turns off its stderr copy. The system log keeps the text private.

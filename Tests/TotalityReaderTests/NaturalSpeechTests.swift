@@ -7,24 +7,27 @@ private actor FakeVoice: VoiceSynthesizer {
     private(set) var prepared = 0
     private(set) var requests: [(text: String, speed: Double)] = []
     private let failsPreparing: Bool
-    private let unreadable: String?
+    private let storageFull: Bool
+    private let unreadable: Set<String>
     private let silent: String?
     private var held: [String: CheckedContinuation<[Float], Never>] = [:]
 
-    init(failsPreparing: Bool = false, unreadable: String? = nil, silent: String? = nil) {
+    init(failsPreparing: Bool = false, storageFull: Bool = false, unreadable: Set<String> = [], silent: String? = nil) {
         self.failsPreparing = failsPreparing
+        self.storageFull = storageFull
         self.unreadable = unreadable
         self.silent = silent
     }
 
     func prepare() async throws {
         prepared += 1
+        if storageFull { throw VoiceLoadError.storageFull }
         if failsPreparing { throw CancellationError() }
     }
 
     func samples(for text: String, speed: Double) async throws -> [Float] {
         requests.append((text, speed))
-        if text == unreadable { throw CancellationError() }
+        if unreadable.contains(text) { throw CancellationError() }
         if text == silent { return [] }
         return await withCheckedContinuation { held[text] = $0 }
     }
@@ -296,6 +299,42 @@ private func until(_ condition: () async -> Bool) async throws {
         try await until { lost == ["One."] }
         #expect(notices == [nil])
     }
+
+    @Test("A sentence that fails first doesn't bring the loading message back")
+    func theLoadingMessageShowsOnce() async throws {
+        let bad = FakeVoice(unreadable: ["One."])
+        let engine = engine(bad)
+        var seen: [String?] = []
+        engine.onStatus = { seen.append($0) }
+        var lost: [String] = []
+        engine.onFailure = { text, _ in lost.append(text) }
+        engine.speak("One.", speed: 1)
+        try await until { lost == ["One."] }
+        engine.speak("Two.", speed: 1)
+        try await until { await bad.isHeld("Two.") }
+        #expect(seen.count == 2)
+        #expect(seen.last == .some(nil))
+    }
+
+    @Test("A full phone is named as the reason, not a broken voice")
+    func storageGetsItsOwnNotice() async throws {
+        let engine = engine(FakeVoice(storageFull: true))
+        var notice: String?
+        engine.onFailure = { _, reason in notice = reason }
+        engine.speak("One.", speed: 1)
+        try await until { notice != nil }
+        #expect(notice?.contains("Storage") == true)
+    }
+
+    @Test("Under the amount the models need, storage is the likely reason", arguments: [
+        (Int64?.some(263_000_000), true),
+        (Int64?.some(5_000_000_000), false),
+        (Int64?.none, false),
+    ])
+    func shortOfStorage(free: Int64?, short: Bool) {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        #expect(KokoroSynthesizer.isShortOfStorage(free: free) == short)
+    }
 }
 
 @MainActor
@@ -412,7 +451,7 @@ private final class Finished {
 
     @Test("Text the voice can't read goes to the system voice, and the voice carries on")
     func oneBadSentence() async throws {
-        let voices = voices(FakeVoice(unreadable: "•"))
+        let voices = voices(FakeVoice(unreadable: ["•"]))
         var statuses: [String?] = []
         voices.onStatus = { statuses.append($0) }
         voices.speak("•", speed: 1)
@@ -427,7 +466,7 @@ private final class Finished {
 
     @Test("Text that can't be made ahead still reaches the system voice in its turn")
     func oneBadSentenceMadeAhead() async throws {
-        let bad = FakeVoice(unreadable: "•")
+        let bad = FakeVoice(unreadable: ["•"])
         let voices = voices(bad)
         voices.speak("One.", speed: 1)
         try await until { await bad.isHeld("One.") }
@@ -437,6 +476,42 @@ private final class Finished {
         try await until { await bad.requests.count == 2 }
         voices.speak("•", speed: 1)
         try await until { system.spoken == ["•"] }
+    }
+
+    @Test("Sentence after sentence failing says so, and Michael comes back by himself")
+    func repeatedFailuresAreSaidOutLoud() async throws {
+        let shaky = FakeVoice(unreadable: ["One.", "Two."])
+        let voices = voices(shaky)
+        let listen = ListenController(engine: voices)
+        let track = try #require(ListenTrack(id: UUID(), title: "Track", text: "One. Two. Three."))
+        listen.play(track)
+        try await until { system.spoken == ["One."] }
+        #expect(listen.status == nil)
+        system.onFinish?()
+        try await until { system.spoken == ["One.", "Two."] }
+        #expect(listen.status != nil)
+        system.onFinish?()
+        try await until { await shaky.isHeld("Three.") }
+        await shaky.release("Three.")
+        try await until { listen.status == nil }
+        #expect(system.spoken == ["One.", "Two."])
+    }
+
+    @Test("Two odd lines apart aren't a failing voice")
+    func failuresOnlyCountInARow() async throws {
+        let odd = FakeVoice(unreadable: ["One.", "Three."])
+        let voices = voices(odd)
+        let listen = ListenController(engine: voices)
+        let track = try #require(ListenTrack(id: UUID(), title: "Track", text: "One. Two. Three."))
+        listen.play(track)
+        try await until { system.spoken == ["One."] }
+        system.onFinish?()
+        try await until { await odd.isHeld("Two.") }
+        await odd.release("Two.")
+        try await until { output.played.count == 1 }
+        output.onDone?()
+        try await until { system.spoken == ["One.", "Three."] }
+        #expect(listen.status == nil)
     }
 
     @Test func aVoiceThatWontLoadIsNotAskedForAnythingElse() async throws {
@@ -631,6 +706,8 @@ private final class Finished {
         ("They will present the record.", "They will prezent the record."),
     ])
     func respells(text: String, spoken: String) {
+        // Only Michael uses this, and iOS 17 tags these sentences differently.
+        guard #available(iOS 18, macOS 15, *) else { return }
         #expect(SpokenText.prepared(text) == spoken)
     }
 
