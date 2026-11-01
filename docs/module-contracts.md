@@ -50,7 +50,9 @@ in `TotalityCore`, and Listen and music both play through it.
 
 ### The natural voice
 
-Listen has one voice, Michael, and no voice menu (owner, 2026-10-31). `ListenVoices` is the `SpeechEngine` the app uses: it sends speech to `NaturalSpeechEngine`, and the system voice is the backup, so `ListenController` doesn't know which is speaking. Michael is Kokoro-82M's `am_michael`, run on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. iOS 17 and macOS 14 use the system voice. Text stays on the device, and the only download is the model, about 390 MB, checked against pinned hashes.
+Listen has one voice, Michael, and no voice menu (owner, 2026-10-31). `ListenVoices` is the `SpeechEngine` the app uses: it sends speech to `NaturalSpeechEngine`, and the system voice is the backup, so `ListenController` doesn't know which is speaking. Michael is Kokoro-82M's `am_michael`, run on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. iOS 17 and macOS 14 use the system voice. Text stays on the device, and the only download is the model, about 390 MB.
+
+FluidAudio fetches some of the voice from a Hugging Face branch that can change, with no hash check, and it loads those files into the same process as decrypted reader content. So `VoiceAssets` fetches them first, from one commit, against hashes compiled into the app, and FluidAudio finds them on disk. The listing it checks its base models against is compiled in too, and Michael's voice pack is hashed when it arrives. The hashes are checked once per install, and all of this needs checking again whenever the FluidAudio pin moves.
 
 - A voice that fails to load falls back to the system voice until the app restarts, and the bar says so.
 - The model can't read a lone bullet or emoji. That text goes to the system voice and Michael carries on, so a book doesn't change voice over one odd line.

@@ -11,6 +11,7 @@ protocol VoiceSynthesizer: Sendable {
 
 enum VoiceLoadError: Error {
     case waitingForWiFi
+    case badFile
 }
 
 /// Plays one run of samples at a time.
@@ -210,17 +211,17 @@ final class NaturalSpeechEngine: SpeechEngine {
     }
 }
 
-/// Kokoro, through a pinned FluidAudio release. Models are checked against pinned hashes when they arrive.
+/// Kokoro, through a pinned FluidAudio release. `VoiceAssets` covers the files FluidAudio doesn't check.
 @available(iOS 18, macOS 15, *)
 final class KokoroSynthesizer: VoiceSynthesizer {
     static let downloadedMarker = "downloaded"
-    private static let voice = "am_michael"
-
     private let manager: KokoroAneManager
+    private let directory: URL
     private let downloaded: URL
     private let isMetered: @Sendable () async -> Bool
 
     init(directory: URL, isMetered: @escaping @Sendable () async -> Bool = KokoroSynthesizer.onMeteredNetwork) {
+        self.directory = directory
         downloaded = directory.appendingPathComponent(Self.downloadedMarker)
         self.isMetered = isMetered
         // A word the model can't read is logged, so the log mustn't reach stderr. The system log keeps it private.
@@ -234,9 +235,16 @@ final class KokoroSynthesizer: VoiceSynthesizer {
 
     /// The download never starts on cellular, a hotspot, or Low Data Mode.
     func prepare() async throws {
-        if needsDownload, await isMetered() { throw VoiceLoadError.waitingForWiFi }
-        try await manager.initialize()
-        FileManager.default.createFile(atPath: downloaded.path, contents: nil)
+        let firstTime = needsDownload
+        if firstTime {
+            if await isMetered() { throw VoiceLoadError.waitingForWiFi }
+            try await VoiceAssets.install(in: directory)
+        }
+        try await manager.initialize(preloadVoices: [VoiceAssets.voice])
+        if firstTime {
+            try VoiceAssets.checkVoice(in: directory)
+            FileManager.default.createFile(atPath: downloaded.path, contents: nil)
+        }
     }
 
     @Sendable static func onMeteredNetwork() async -> Bool {
@@ -253,7 +261,7 @@ final class KokoroSynthesizer: VoiceSynthesizer {
     }
 
     func samples(for text: String, speed: Double) async throws -> [Float] {
-        let result = try await manager.synthesizeDetailed(text: text, voice: Self.voice, speed: Float(speed))
+        let result = try await manager.synthesizeDetailed(text: text, voice: VoiceAssets.voice, speed: Float(speed))
         return result.samples
     }
 }
@@ -281,7 +289,7 @@ final class EngineVoiceOutput: VoiceOutput {
     }
 
     func play(_ samples: [Float], onDone: @escaping @MainActor @Sendable () -> Void) throws {
-        guard !samples.isEmpty, let format, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
+        guard let format, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
               let channel = buffer.floatChannelData?[0]
         else { throw AudioOutputError.noBuffer }
         buffer.frameLength = buffer.frameCapacity
