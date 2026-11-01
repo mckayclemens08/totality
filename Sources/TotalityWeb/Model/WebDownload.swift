@@ -2,8 +2,8 @@ import Foundation
 import Observation
 import WebKit
 
-/// One file from the web. Downloads stay on this device in a folder only this account's sealed settings
-/// name. They aren't sealed, so opening one in the Reader is what puts it under the content key.
+/// One file from the web. Downloads stay on this device in a folder for this account, out of the device's
+/// backups. They aren't sealed, so opening one in the Reader is what puts it under the content key.
 @MainActor
 @Observable
 public final class WebDownload: NSObject, Identifiable {
@@ -90,6 +90,10 @@ struct WebDownloadFolder: Sendable {
     /// Somewhere nothing is yet, because WebKit won't overwrite a file.
     func destination(for suggested: String) throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var folder = directory
+        try folder.setResourceValues(values)
         let name = Self.safeName(suggested)
         var file = directory.appendingPathComponent(name)
         var count = 1

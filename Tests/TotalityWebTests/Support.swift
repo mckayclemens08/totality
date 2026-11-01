@@ -112,9 +112,13 @@ final class LocalSite: @unchecked Sendable {
     private let lock = NSLock()
     private var paths: [String] = []
     private let pages: [String: (type: String, extra: String, body: String)]
+    /// Paths that never answer, like a server stalling on purpose.
+    private let silent: Set<String>
+    private var held: [NWConnection] = []
 
-    init(pages: [String: (type: String, extra: String, body: String)]) throws {
+    init(pages: [String: (type: String, extra: String, body: String)], silent: Set<String> = []) throws {
         self.pages = pages
+        self.silent = silent
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
         listener = try NWListener(using: parameters, on: .any)
@@ -141,6 +145,10 @@ final class LocalSite: @unchecked Sendable {
             let line = String(decoding: data, as: UTF8.self).split(separator: "\r\n").first ?? ""
             let path = String(line.split(separator: " ").dropFirst().first ?? "/")
             self.lock.withLock { self.paths.append(path) }
+            if self.silent.contains(path) {
+                self.lock.withLock { self.held.append(connection) }
+                return
+            }
             let page = self.pages[path] ?? ("text/plain", "", "ok")
             let head = "HTTP/1.1 200 OK\r\nContent-Type: \(page.type)\r\n\(page.extra)Content-Length: \(page.body.utf8.count)\r\nConnection: close\r\n\r\n"
             connection.send(content: Data((head + page.body).utf8), completion: .contentProcessed { _ in connection.cancel() })

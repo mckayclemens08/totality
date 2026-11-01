@@ -12,6 +12,8 @@ struct WebStartView: View {
             VStack(spacing: Space.s5) {
                 if isPrivate {
                     message("Private tab", image: "eye.slash", detail: WebCopy.privateTab)
+                } else if model.keepsNothing {
+                    message("Search the web", image: "globe", detail: WebCopy.keepsNothing)
                 } else if model.bookmarks.isEmpty {
                     message("Search the web", image: "globe", detail: "Type a search or an address above. Pages you bookmark appear here.")
                 } else {

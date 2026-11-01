@@ -76,8 +76,7 @@ struct WebSettingsView: View {
         .confirmationDialog("Sign out of all sites?", isPresented: $clearingSites, titleVisibility: .visible) {
             Button("Sign Out of All Sites", role: .destructive) {
                 Task {
-                    await model.clearSiteData()
-                    clearedSites = true
+                    clearedSites = await model.clearSiteData()
                 }
             }
         } message: {

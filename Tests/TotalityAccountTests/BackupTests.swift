@@ -484,6 +484,26 @@ actor FakeContentKeys: ContentKeyAccess {
         #expect(model.phase == .confirmingOwnership)
     }
 
+    @Test("Only the account that owns the device's key counts as its owner")
+    func deviceOwner() async throws {
+        let (model, service, content) = try setUp()
+        var changes = 0
+        model.onOwnerChanged = { changes += 1 }
+        #expect(await model.deviceOwner() == nil)
+
+        await model.accountSignedIn()
+        #expect(changes == 1)
+        #expect(await model.deviceOwner() == "user-1")
+
+        await service.set(account: "user-2")
+        #expect(await model.deviceOwner() == nil)
+        await service.set(account: nil)
+        await model.accountSignedOut()
+        #expect(changes == 2)
+        #expect(await model.deviceOwner() == nil)
+        #expect(try await content.keyOwner() == "user-1")
+    }
+
     @Test("An empty device simply belongs to whoever signs in")
     func emptyDeviceIsClaimedAtSignIn() async throws {
         let (model, _, content) = try setUp()

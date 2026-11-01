@@ -190,6 +190,7 @@ struct RootView: View {
             registry = content.registry
             syncAreas = content.areas
             refreshRecoveryLabels()
+            Task { await tellWebWhoIsHere() }
         } catch KeyStoreError.keyMissing {
             contentProblem = .keyMissing
         } catch {
@@ -204,7 +205,11 @@ struct RootView: View {
         prepareContent()
         await reader?.load()
         await calendar?.load()
-        await web?.load()
+        await tellWebWhoIsHere()
+    }
+
+    private func tellWebWhoIsHere() async {
+        await web?.use(account: await account?.backup?.deviceOwner())
     }
 
     /// Only a sync that really finished counts, so the screens can't claim safety too early.
@@ -231,6 +236,7 @@ struct RootView: View {
             await web?.load()
         }
         backup.onJoined = { await sync.syncNow() }
+        backup.onOwnerChanged = { await tellWebWhoIsHere() }
     }
 
     /// Only the Reader's content can be attached so far, so that's where a ref opens.

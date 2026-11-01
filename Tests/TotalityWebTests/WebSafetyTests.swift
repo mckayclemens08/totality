@@ -52,19 +52,19 @@ import WebKit
         let key = try ContentRootKey.generate()
         let vault = WebVault(store: store, rootKey: key)
         let model = WebModel(client: nil, vault: vault)
-        await model.load()
+        await model.use(account: "user-1")
         let site = URL(string: "https://www.lisbon.example/trams")!
         #expect(model.isBlocking(site))
         model.setBlocking(false, for: "lisbon.example")
         #expect(!model.isBlocking(site))
         #expect(model.isBlocking(URL(string: "https://porto.example")))
         #expect(model.unblockedSites == ["lisbon.example"])
-        for _ in 0..<200 where try await vault.settings().unblockedSites.isEmpty {
+        for _ in 0..<200 where try await vault.settings(for: "user-1").unblockedSites.isEmpty {
             try await Task.sleep(for: .milliseconds(10))
         }
 
         let reopened = WebModel(client: nil, vault: WebVault(store: store, rootKey: key))
-        await reopened.load()
+        await reopened.use(account: "user-1")
         #expect(!reopened.isBlocking(site))
         for name in try store.names() {
             #expect(!String(decoding: try #require(try store.read(name)), as: UTF8.self).contains("lisbon"))
@@ -127,18 +127,28 @@ import WebKit
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = MemoryBlobStore()
-        let keyOne = try ContentRootKey.generate()
-        let settings = try await WebVault(store: store, rootKey: keyOne).settings()
-        let mine = root.appendingPathComponent(settings.storeID.uuidString, isDirectory: true)
+        let key = try ContentRootKey.generate()
+        let mine = root.appendingPathComponent(WebVault.siteID(for: "user-1").uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: mine, withIntermediateDirectories: true)
         try Data("one".utf8).write(to: mine.appendingPathComponent("tram.pdf"))
 
-        let owner = WebModel(client: nil, vault: WebVault(store: store, rootKey: keyOne), downloads: root)
-        await owner.load()
-        #expect(owner.downloads.map(\.filename) == ["tram.pdf"])
-        let other = WebModel(client: nil, vault: WebVault(store: MemoryBlobStore(), rootKey: try .generate()), downloads: root)
-        await other.load()
-        #expect(other.downloads.isEmpty)
+        let model = WebModel(client: nil, vault: WebVault(store: store, rootKey: key), downloads: root)
+        await model.use(account: "user-1")
+        #expect(model.downloads.map(\.filename) == ["tram.pdf"])
+        await model.use(account: nil)
+        #expect(model.downloads.isEmpty)
+        await model.use(account: "user-1")
+        #expect(model.downloads.map(\.filename) == ["tram.pdf"])
+        await model.use(account: "user-2")
+        #expect(model.downloads.isEmpty)
+    }
+
+    @Test("Downloads stay out of the device's backups")
+    func outOfBackups() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = try WebDownloadFolder(directory: directory).destination(for: "tram.pdf")
+        #expect(try directory.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
     }
 
     @Test("Removing a download removes the file")
@@ -146,13 +156,12 @@ import WebKit
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let vault = WebVault(store: MemoryBlobStore(), rootKey: try .generate())
-        let settings = try await vault.settings()
-        let mine = root.appendingPathComponent(settings.storeID.uuidString, isDirectory: true)
+        let mine = root.appendingPathComponent(WebVault.siteID(for: "user-1").uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: mine, withIntermediateDirectories: true)
         let file = mine.appendingPathComponent("tram.pdf")
         try Data("one".utf8).write(to: file)
         let model = WebModel(client: nil, vault: vault, downloads: root)
-        await model.load()
+        await model.use(account: "user-1")
         model.remove(try #require(model.downloads.first))
         #expect(model.downloads.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: file.path))
@@ -227,6 +236,15 @@ private actor FakeReader: ContentReceiver {
         _ = try await page.webView.evaluateJavaScript("document.getElementById('box').value = 'secret one'; document.getElementById('note').value = 'secret two'; 1")
         let text = try await page.readableText()
         #expect(text.body == "Hello")
+    }
+
+    @Test("Text in an editable area isn't read, on a long page or a short one")
+    func editableAreasStay() async throws {
+        let filler = String(repeating: "The yellow tram climbs through Alfama before the crowds arrive. ", count: 5)
+        for body in ["<p>\(filler)</p><p contenteditable>my draft</p>", "<p>Hello</p><div contenteditable>my draft</div>", "<div contenteditable><p>\(filler)</p><p>my draft</p></div>"] {
+            let page = try await loaded("<html><head><title>Draft</title></head><body>\(body)</body></html>")
+            #expect(try await !page.readableText().body.contains("my draft"))
+        }
     }
 
     @Test("A page's own script can't see or change the reader")
@@ -322,7 +340,7 @@ private actor FakeReader: ContentReceiver {
 
     private func downloadModel(_ root: URL) async throws -> WebModel {
         let model = WebModel(client: nil, vault: WebVault(store: MemoryBlobStore(), rootKey: try .generate()), downloads: root)
-        await model.load()
+        await model.use(account: "user-1")
         return model
     }
 
@@ -363,6 +381,64 @@ private actor FakeReader: ContentReceiver {
         #expect(model.downloads.isEmpty)
         let written = FileManager.default.subpaths(atPath: root.path) ?? []
         #expect(!written.contains { $0.contains("tram") })
+    }
+
+    private func stalledPage() async throws -> (page: WebPage, shown: URL, stalled: URL, site: LocalSite) {
+        let site = try LocalSite(pages: ["/": ("text/html", "", "<html><head><title>Sign in</title></head><body>Hi</body></html>")], silent: ["/stalled"])
+        let page = WebPage(configuration: WebPage.configuration(isPrivate: false, store: .nonPersistent()), isPrivate: false)
+        let shown = try await site.url("/")
+        page.load(shown)
+        try await until { !page.isLoading && page.title == "Sign in" }
+        var other = try #require(URLComponents(url: try await site.url("/stalled"), resolvingAgainstBaseURL: false))
+        other.host = "localhost"
+        return (page, shown, try #require(other.url), site)
+    }
+
+    @Test("A site's name doesn't show until that site has answered")
+    func addressWaitsForTheSite() async throws {
+        let (page, shown, stalled, site) = try await stalledPage()
+        _ = try await page.webView.evaluateJavaScript("location = '\(stalled.absoluteString)'; 1")
+        try await until { site.requested.contains("/stalled") && page.webView.url == stalled }
+        #expect(page.url == shown)
+
+        // A dialog can't borrow the name either.
+        Task { _ = try? await page.webView.evaluateJavaScript("alert('Enter your password'); 1") }
+        try await until { page.dialog != nil }
+        #expect(page.dialog?.site == shown.host())
+        page.answer(try #require(page.dialog), true)
+        page.stop()
+    }
+
+    @Test("Where the person asked to go shows at once, a page's dialog keeps its own name, and stopping goes back")
+    func askedForAddressShows() async throws {
+        let (page, shown, stalled, site) = try await stalledPage()
+        page.load(stalled)
+        #expect(page.url == stalled)
+        try await until { site.requested.contains("/stalled") }
+        #expect(page.url == stalled)
+        Task { _ = try? await page.webView.evaluateJavaScript("alert('Enter your password'); 1") }
+        try await until { page.dialog != nil }
+        #expect(page.dialog?.site == shown.host())
+        page.answer(try #require(page.dialog), true)
+        page.stop()
+        try await until { page.url == shown }
+    }
+
+    @Test("Changes inside a page still show, and a page that does load takes over")
+    func addressFollowsThePage() async throws {
+        let site = try LocalSite(pages: [
+            "/": ("text/html", "", "<html><head><title>One</title></head><body>Hi</body></html>"),
+            "/two": ("text/html", "", "<html><head><title>Two</title></head><body>Hi</body></html>"),
+        ])
+        let page = WebPage(configuration: WebPage.configuration(isPrivate: false, store: .nonPersistent()), isPrivate: false)
+        page.load(try await site.url("/"))
+        try await until { !page.isLoading && page.title == "One" }
+        _ = try await page.webView.evaluateJavaScript("history.pushState({}, '', '/moved'); 1")
+        try await until { page.url?.path() == "/moved" }
+        _ = try await page.webView.evaluateJavaScript("location.hash = 'lower'; 1")
+        try await until { page.url?.fragment() == "lower" }
+        _ = try await page.webView.evaluateJavaScript("location = '/two'; 1")
+        try await until { page.url?.path() == "/two" && page.title == "Two" }
     }
 
     @Test("A page can't start a tab by itself, and a plain address shows as not secure")

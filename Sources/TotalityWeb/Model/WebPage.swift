@@ -72,6 +72,7 @@ public final class WebPage: NSObject {
     public let isPrivate: Bool
 
     public private(set) var title = ""
+    /// What the address box shows: the page on screen, or where the person just asked to go.
     public private(set) var url: URL?
     public private(set) var progress = 0.0
     public private(set) var isLoading = false
@@ -104,6 +105,9 @@ public final class WebPage: NSObject {
     public var wantsDesktopSite = false
 
     @ObservationIgnored private var watches: [NSKeyValueObservation] = []
+    /// The page really on screen. `webView.url` moves as a load starts, before the new site has answered,
+    /// so a page could wear another site's name while its own form stays live.
+    @ObservationIgnored private var committedURL: URL?
 
     public static func configuration(isPrivate: Bool, store: WKWebsiteDataStore) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
@@ -156,12 +160,17 @@ public final class WebPage: NSObject {
 
     private func refresh() {
         title = webView.title ?? ""
-        url = webView.url ?? url
+        if !webView.isLoading { commit() }
         progress = webView.estimatedProgress
         isLoading = webView.isLoading
         canGoBack = webView.canGoBack
         canGoForward = webView.canGoForward
         isSecure = webView.url == nil || webView.hasOnlySecureContent
+    }
+
+    private func commit() {
+        committedURL = webView.url ?? committedURL
+        url = webView.url ?? url
     }
 
     public func load(_ url: URL) {
@@ -228,7 +237,7 @@ public final class WebPage: NSObject {
     }
 
     /// Runs only when the person presses Save to Reader, in a script world pages can't see or change.
-    /// It takes text the page shows and never form fields, so nothing typed into a page is read.
+    /// It takes text the page shows and never form fields or editable areas, so nothing typed into a page is read.
     func readableText() async throws -> (title: String, body: String) {
         let text = try await withCheckedThrowingContinuation { (done: CheckedContinuation<String, any Error>) in
             webView.evaluateJavaScript(Self.readableScript, in: nil, in: .defaultClient) { result in
@@ -249,12 +258,12 @@ public final class WebPage: NSObject {
       const blocks = 'h1, h2, h3, h4, h5, h6, p, li, blockquote, pre, figcaption';
       const lines = [];
       for (const block of root.querySelectorAll(blocks)) {
-        if (block.closest(noise) || block.querySelector(blocks) || !block.getClientRects().length) continue;
+        if (block.closest(noise) || block.isContentEditable || block.querySelector(blocks) || !block.getClientRects().length) continue;
         const line = block.innerText.trim();
         if (line) lines.push(line);
       }
       const text = lines.join('\\n\\n');
-      if (text.length >= 200) return text;
+      if (text.length >= 200 || root.isContentEditable || root.querySelector('[contenteditable]')) return text;
       return root.innerText.trim();
     })()
     """
@@ -270,7 +279,7 @@ public final class WebPage: NSObject {
     private static let pageSchemes: Set<String> = ["http", "https", "about", "blob", "data"]
 
     private var site: String {
-        webView.url?.host()?.replacing(/^www\./, with: "") ?? "This page"
+        committedURL?.host()?.replacing(/^www\./, with: "") ?? "This page"
     }
 
     private func shown(_ error: any Error) {
@@ -320,6 +329,10 @@ extension WebPage: WKNavigationDelegate {
 
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         failure = nil
+    }
+
+    public func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        commit()
     }
 
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
