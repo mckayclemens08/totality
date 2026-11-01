@@ -22,7 +22,7 @@ public struct ReaderHomeTile: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
+        VStack(spacing: Space.s4) {
             if let front { frontBook(front) }
             if !shelf.isEmpty {
                 HStack(alignment: .top, spacing: Space.s3) {
@@ -32,34 +32,42 @@ public struct ReaderHomeTile: View {
                 }
             }
         }
-        .frame(maxHeight: .infinity, alignment: .bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var iconSize: CGFloat {
+        switch size {
+        case .medium: Space.s5
+        case .large: Space.s6
+        case .square: Space.s7
+        }
     }
 
     private func frontBook(_ item: ReaderItem) -> some View {
         let theme = Theme.current
         let isPlaying = model.listen.current?.id == item.id
-        return HStack(alignment: .center, spacing: Space.s3) {
-            BookCover(systemImage: isPlaying ? "waveform" : item.systemImage, width: Space.s7 + Space.s4)
-            VStack(alignment: .leading, spacing: Space.s1) {
-                if isPlaying {
-                    Text("Listening")
-                        .font(Typeface.caption)
-                        .foregroundStyle(theme.accent.color)
-                }
-                Text(item.displayTitle)
-                    .font(size == .medium ? Typeface.headline : Typeface.title)
-                    .foregroundStyle(theme.textPrimary.color)
-                    .lineLimit(2)
-                Text(item.typeName)
+        return VStack(spacing: Space.s1) {
+            BookIcon(systemImage: isPlaying ? "waveform" : item.systemImage, size: iconSize)
+                .padding(.bottom, Space.s1)
+            if isPlaying {
+                Text("Listening")
                     .font(Typeface.caption)
-                    .foregroundStyle(theme.textSecondary.color)
-                if isPlaying {
-                    ListenProgress(value: model.listen.progress)
-                        .padding(.top, Space.s1)
-                }
+                    .foregroundStyle(theme.accent.color)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(item.displayTitle)
+                .font(size == .medium ? Typeface.headline : Typeface.title)
+                .foregroundStyle(theme.textPrimary.color)
+                .lineLimit(size == .medium ? 1 : 2)
+            Text(item.typeName)
+                .font(Typeface.caption)
+                .foregroundStyle(theme.textSecondary.color)
+            if isPlaying {
+                ListenProgress(value: model.listen.progress)
+                    .padding(.top, Space.s1)
+            }
         }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -67,29 +75,26 @@ private struct SmallBook: View {
     let item: ReaderItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s1) {
-            BookCover(systemImage: item.systemImage, width: Space.s7)
+        VStack(spacing: Space.s1) {
+            BookIcon(systemImage: item.systemImage, size: Space.s5)
             Text(item.displayTitle)
                 .font(Typeface.micro)
                 .foregroundStyle(Theme.current.textSecondary.color)
                 .lineLimit(2)
+                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 }
 
-/// Shaped like a book, so the tile reads as a shelf even before anything on it does.
-private struct BookCover: View {
+private struct BookIcon: View {
     let systemImage: String
-    let width: CGFloat
+    let size: CGFloat
 
     var body: some View {
-        let theme = Theme.current
         Image(systemName: systemImage)
-            .font(Typeface.body)
-            .foregroundStyle(theme.textSecondary.color)
-            .frame(width: width, height: width * 4 / 3)
-            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            .font(.system(size: size))
+            .foregroundStyle(Theme.current.textSecondary.color)
             .accessibilityHidden(true)
     }
 }
