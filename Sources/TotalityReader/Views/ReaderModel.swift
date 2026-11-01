@@ -44,13 +44,13 @@ public final class ReaderModel {
         library.items
     }
 
-    /// For the home tile: what's playing, then what changed last. Nil until the library opens, so a
+    /// For the home tile: what's playing, then what was opened last. Nil until the library opens, so a
     /// tile can't claim it's empty while it's loading.
     public var glance: ModuleGlance? {
         guard phase == .ready else { return nil }
         guard !items.isEmpty else { return ModuleGlance(lines: ["Nothing saved yet"], isQuiet: true) }
         let playing = listen.current
-        let recent = items.filter { $0.id != playing?.id }.sorted { $0.updatedAt > $1.updatedAt }.map(\.displayTitle)
+        let recent = library.lastOpened.filter { $0.id != playing?.id }.map(\.displayTitle)
         let count = items.count == 1 ? "1 item" : "\(items.count) items"
         return ModuleGlance(lines: (playing.map { ["Listening to \($0.title)"] } ?? []) + recent.prefix(Self.glanceTitles) + [count])
     }
@@ -67,7 +67,7 @@ public final class ReaderModel {
             // Sync does this too, but "30 days" has to hold on a device that's offline.
             try? await vault.emptyOldTrash()
             let listing = try await vault.list()
-            library = ReaderLibrary(items: listing.items, folders: listing.folders)
+            library = ReaderLibrary(items: listing.items, folders: listing.folders, opened: listing.opened)
             trash = try await vault.trashed()
             unreadable = listing.unreadable
             phase = .ready
@@ -143,6 +143,13 @@ public final class ReaderModel {
         } catch {
             notice = failure
         }
+    }
+
+    /// Failing here only costs a place in the list, so it doesn't interrupt the person.
+    public func markOpened(_ id: UUID) async {
+        let date = Date()
+        guard (try? await vault.markOpened(id, at: date)) != nil else { return }
+        library = library.opening(id, at: date)
     }
 
     public func currentItem(_ id: UUID) async throws -> ReaderItem {

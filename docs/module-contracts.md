@@ -30,6 +30,14 @@ and the same name gives a different ID on every account. The brief's Speechify L
 removed on 2026-10-31 at the owner's request ("I don't want it anymore"): it only ever filled a folder,
 and any file can go in any folder.
 
+The library opens on most recently opened (owner, 2026-10-31), with recently added, recently edited,
+name, and type a menu away. When something was opened lives in a sealed `.opened` file of its own on
+each device, and sync never sees it. In the item's sealed details it would re-upload the whole body on
+every open, turn each read into a possible conflict, and show the server when someone reads. So each
+device has its own order. A change from another device still moves an item up, and anything never
+opened here goes by its last change. The file goes when the item does, because a stray one would make
+an empty device look like it has content.
+
 Deleted items stay sealed in Recently Deleted for 30 days, then they're removed the next time the
 Reader loads or syncs. A deleted folder takes what's inside it, and restoring it brings them back,
 including anything deleted from that folder earlier. Each device keeps its own Recently Deleted:
@@ -98,7 +106,7 @@ Not measured: battery use, a locked screen, and a real long PDF. The model did r
 - A module's tile content is a `ModuleGlance` in `TotalityCore`: short lines, most important first. `ReaderModel` and `CalendarModel` each build one, and `RootView` hands them to `HomeView`, so `TotalityUI` imports no module. A bigger tile shows more of the lines because it shows as many as fit. Glances come from private content, so they stay in memory.
 - A glance is nil until the module has opened, so a tile can't claim it's empty while it's loading. A module that can't open shows its icon and title, and opening it reports the key problem.
 - Content now opens with the home page, after the device is settled. It's the same step as opening a module, under the same key rules, and it writes nothing, so a fresh install still reads as empty when an account signs in.
-- On iPhone, holding a tile is a UIKit long press on the enclosing scroll view. SwiftUI's hold-then-drag gesture stopped the page scrolling on iOS 17. The Mac uses the SwiftUI gesture, because a mouse drag doesn't scroll.
+- On iPhone, one plain UIKit view on top of the tiles takes every tap and hold, because how a recognizer around a SwiftUI button competes with it changes between releases of iOS. A long press on the enclosing scroll view did nothing on iOS 26, `UIGestureRecognizerRepresentable` let the button win on iOS 18, and SwiftUI's hold-then-drag gesture stopped the page scrolling on iOS 17. The tile menus sit in a layer above it, and the tiles' own buttons remain for VoiceOver and a keyboard. The Mac uses the SwiftUI gesture, because a mouse drag doesn't scroll.
 - `HomeStyle.defaultKey` holds the default home page on this device. The home page's own button lasts until the app restarts.
 
 ## Attaching across modules

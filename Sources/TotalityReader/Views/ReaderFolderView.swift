@@ -9,7 +9,7 @@ struct ReaderFolderView: View {
     let onClose: (() -> Void)?
 
     // Which way this device likes to look at things. These hold no content.
-    @AppStorage("reader.sort") private var sort = ReaderSort.recent.rawValue
+    @AppStorage("reader.sort") private var sort = ReaderSort.opened
     @AppStorage("reader.grid") private var showsGrid = false
 
     @State private var importing = false
@@ -20,11 +20,10 @@ struct ReaderFolderView: View {
     @State private var deleting: ReaderItem?
 
     private var theme: Theme { .current }
-    private var sortOrder: ReaderSort { ReaderSort(rawValue: sort) ?? .recent }
     private var current: ReaderItem? { folder.flatMap { id in model.library.folders.first { $0.id == id } } }
     private var title: String { current?.displayTitle ?? "Reader" }
     private var contents: (folders: [ReaderItem], items: [ReaderItem]) {
-        model.library.contents(of: folder, sortedBy: sortOrder)
+        model.library.contents(of: folder, sortedBy: sort)
     }
 
     var body: some View {
@@ -104,9 +103,9 @@ struct ReaderFolderView: View {
         ToolbarItem(placement: .secondaryAction) {
             Menu {
                 Picker("Sort by", selection: $sort) {
-                    Text("Recent").tag(ReaderSort.recent.rawValue)
-                    Text("Name").tag(ReaderSort.name.rawValue)
-                    Text("Type").tag(ReaderSort.type.rawValue)
+                    ForEach(ReaderSort.allCases, id: \.self) { order in
+                        Text(order.label).tag(order)
+                    }
                 }
                 Picker("View", selection: $showsGrid) {
                     Label("List", systemImage: "list.bullet").tag(false)
@@ -243,8 +242,8 @@ struct ReaderFolderView: View {
         entry.kind == .folder ? .folder(entry.id) : .item(entry)
     }
 
-    private func detail(for entry: ReaderItem) -> String? {
-        guard entry.kind == .folder else { return nil }
+    private func detail(for entry: ReaderItem) -> String {
+        guard entry.kind == .folder else { return entry.detail(on: model.library.date(of: entry, sortedBy: sort)) }
         let count = insideCount(entry)
         return count == 1 ? "1 item" : "\(count) items"
     }
@@ -295,7 +294,7 @@ struct ReaderFolderView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: Space.s8 * 2 + Space.s5), spacing: Space.s4)], spacing: Space.s4) {
                     ForEach(contents.folders + contents.items) { entry in
                         NavigationLink(value: route(for: entry)) {
-                            ReaderTile(item: entry, detail: detail(for: entry) ?? entry.detail)
+                            ReaderTile(item: entry, detail: detail(for: entry))
                         }
                         .buttonStyle(.plain)
                         .contextMenu { actions(for: entry) }

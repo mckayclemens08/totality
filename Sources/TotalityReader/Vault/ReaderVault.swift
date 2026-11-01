@@ -4,6 +4,8 @@ import TotalityCore
 public struct ReaderListing: Sendable, Equatable {
     public let items: [ReaderItem]
     public let folders: [ReaderItem]
+    /// When this device last opened each item or folder.
+    public let opened: [UUID: Date]
     /// Items whose metadata would not decrypt. The UI says so instead of hiding them.
     public let unreadable: Int
 }
@@ -59,6 +61,7 @@ public actor ReaderVault {
     /// How each kind of blob is sealed, so a key change can reach them without knowing what they are.
     public static let sealedPurposes: [String: KeyPurpose] = [
         ".meta": .metadata, ".body": .content, ".meta.trash": .metadata, ".body.trash": .content,
+        ".opened": .metadata,
     ]
     /// How long anything deleted, here or on another device, stays recoverable.
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
@@ -78,6 +81,7 @@ public actor ReaderVault {
     private func metaName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).meta" }
     private func deletionName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).deleted" }
     private func bodyName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).body" }
+    private func openedName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).opened" }
 
     /// Refuses all further writes. A key move lists every blob once, so anything written after that,
     /// sealed under the old key, would be lost when the old key goes.
@@ -120,8 +124,19 @@ public actor ReaderVault {
         let sorted = items.sorted { $0.updatedAt > $1.updatedAt }
         return ReaderListing(
             items: sorted.filter { $0.kind != .folder }, folders: sorted.filter { $0.kind == .folder },
-            unreadable: unreadable
+            opened: try openedDates(), unreadable: unreadable
         )
+    }
+
+    /// A time that won't open only costs an item its place in the list.
+    private func openedDates() throws -> [UUID: Date] {
+        var dates: [UUID: Date] = [:]
+        for name in try store.names() where name.hasSuffix(".opened") {
+            guard let id = UUID(uuidString: String(name.dropLast(".opened".count))), let sealed = try store.read(name) else { continue }
+            let key = rootKey.objectKey(for: id, purpose: .metadata)
+            dates[id] = try? JSONDecoder().decode(Date.self, from: ContentCipher.open(sealed, key: key, objectID: id))
+        }
+        return dates
     }
 
     private func library() throws -> ReaderLibrary {
@@ -255,6 +270,16 @@ public actor ReaderVault {
         try ReadableText.document(body(of: id), mime: item(id).mime)
     }
 
+    /// Kept in its own file on this device. In the sealed details it would re-upload the item's whole
+    /// body on every open, and show the server when someone reads. Sync never sees this file.
+    public func markOpened(_ id: UUID, at date: Date) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        // Anything left behind would make an empty device look like it has content.
+        guard try store.read(metaName(id)) != nil else { throw ReaderError.notFound }
+        let key = rootKey.objectKey(for: id, purpose: .metadata)
+        try store.write(try ContentCipher.seal(JSONEncoder().encode(date), key: key, objectID: id), as: openedName(id))
+    }
+
     /// Listening is not editing, so `updatedAt` stays put.
     public func setListenPosition(_ offset: Int, of id: UUID) throws {
         var updated = try item(id)
@@ -360,6 +385,7 @@ public actor ReaderVault {
     private func removeBlobs(_ id: UUID) throws {
         try store.delete(metaName(id))
         try store.delete(bodyName(id))
+        try store.delete(openedName(id))
         textCache[id] = nil
         hashes[id] = nil
     }

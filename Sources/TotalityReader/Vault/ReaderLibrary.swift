@@ -1,7 +1,18 @@
 import Foundation
 
+/// Earlier builds stored "recent" for last edited. That no longer matches, so it becomes the default.
 public enum ReaderSort: String, CaseIterable, Sendable {
-    case recent, name, type
+    case opened, added, edited, name, type
+
+    public var label: String {
+        switch self {
+        case .opened: "Recently opened"
+        case .added: "Recently added"
+        case .edited: "Recently edited"
+        case .name: "Name"
+        case .type: "Type"
+        }
+    }
 }
 
 /// The folder tree, built from what's on the device. Sync can leave odd shapes: a folder deleted
@@ -14,10 +25,12 @@ public struct ReaderLibrary: Sendable, Equatable {
     private let looped: Set<UUID>
     private let foldersByParent: [UUID?: [ReaderItem]]
     private let itemsByParent: [UUID?: [ReaderItem]]
+    private let opened: [UUID: Date]
 
-    public init(items: [ReaderItem] = [], folders: [ReaderItem] = []) {
+    public init(items: [ReaderItem] = [], folders: [ReaderItem] = [], opened: [UUID: Date] = [:]) {
         self.items = items
         self.folders = folders
+        self.opened = opened
         let byID = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let looped = Self.loops(in: byID)
         let parent = { (entry: ReaderItem) in Self.parent(of: entry, folders: byID, looped: looped) }
@@ -52,8 +65,26 @@ public struct ReaderLibrary: Sendable, Equatable {
         return parent
     }
 
-    public func contents(of folder: UUID?, sortedBy sort: ReaderSort = .recent) -> (folders: [ReaderItem], items: [ReaderItem]) {
-        (Self.sorted(foldersByParent[folder] ?? [], by: sort), Self.sorted(itemsByParent[folder] ?? [], by: sort))
+    public func contents(of folder: UUID?, sortedBy sort: ReaderSort = .opened) -> (folders: [ReaderItem], items: [ReaderItem]) {
+        (sorted(foldersByParent[folder] ?? [], by: sort), sorted(itemsByParent[folder] ?? [], by: sort))
+    }
+
+    public func opening(_ id: UUID, at date: Date) -> ReaderLibrary {
+        ReaderLibrary(items: items, folders: folders, opened: opened.merging([id: date]) { _, new in new })
+    }
+
+    public var lastOpened: [ReaderItem] {
+        sorted(items, by: .opened)
+    }
+
+    /// The date a list in this order shows. Opening only counts on this device, so a change from
+    /// another device counts too: it means the item was opened there. So does anything never opened.
+    public func date(of entry: ReaderItem, sortedBy sort: ReaderSort) -> Date {
+        switch sort {
+        case .opened: max(opened[entry.id] ?? entry.updatedAt, entry.updatedAt)
+        case .added: entry.createdAt
+        case .edited, .name, .type: entry.updatedAt
+        }
     }
 
     /// Nil means the top level, including when the stored parent can't be reached.
@@ -89,10 +120,10 @@ public struct ReaderLibrary: Sendable, Equatable {
         return destination != entry.id && !path(to: destination).contains { $0.id == entry.id }
     }
 
-    private static func sorted(_ entries: [ReaderItem], by sort: ReaderSort) -> [ReaderItem] {
+    private func sorted(_ entries: [ReaderItem], by sort: ReaderSort) -> [ReaderItem] {
         switch sort {
-        case .recent:
-            entries.sorted { $0.updatedAt > $1.updatedAt }
+        case .opened, .added, .edited:
+            entries.sorted { date(of: $0, sortedBy: sort) > date(of: $1, sortedBy: sort) }
         case .name:
             entries.sorted { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
         case .type:
