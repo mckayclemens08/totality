@@ -46,4 +46,9 @@ public struct ModuleRegistry: Sendable {
     public func providers(for module: ModuleID) -> [any ContentProvider] {
         handlers.compactMap { $0 as? any ContentProvider }.filter { $0.module != module }
     }
+
+    /// Every module that can be searched, in the order they were registered.
+    public var searchers: [any ModuleSearcher] {
+        handlers.compactMap { $0 as? any ModuleSearcher }
+    }
 }

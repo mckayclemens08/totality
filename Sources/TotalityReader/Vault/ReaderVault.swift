@@ -65,7 +65,6 @@ public actor ReaderVault {
     ]
     /// How long anything deleted, here or on another device, stays recoverable.
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
-    private static let snippetRadius = 60
 
     private let store: any BlobStore
     private let rootKey: ContentRootKey
@@ -392,25 +391,17 @@ public actor ReaderVault {
 
     /// Every word must appear in the title or text. Files with no readable text match on title only.
     public func search(_ query: String) throws -> [ReaderSearchHit] {
-        let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        let terms = SearchText.terms(in: query)
         guard !terms.isEmpty else { return [] }
-        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
         return try list().items.compactMap { item in
+            // A newer search is waiting on this actor, so a stale one stops between items.
+            try Task.checkCancellation()
             let text = (try? text(of: item.id)) ?? ""
-            let found = terms.allSatisfy {
-                item.title.range(of: $0, options: options) != nil || text.range(of: $0, options: options) != nil
-            }
+            let found = terms.allSatisfy { SearchText.find($0, in: item.title) != nil || SearchText.find($0, in: text) != nil }
             guard found else { return nil }
-            let first = terms.lazy.compactMap { text.range(of: $0, options: options) }.first
-            return ReaderSearchHit(item: item, snippet: first.map { snippet(of: text, around: $0) })
+            let first = terms.lazy.compactMap { SearchText.find($0, in: text) }.first
+            return ReaderSearchHit(item: item, snippet: first.map { SearchText.excerpt(of: text, around: $0) })
         }
-    }
-
-    private func snippet(of text: String, around range: Range<String.Index>) -> String {
-        let start = text.index(range.lowerBound, offsetBy: -Self.snippetRadius, limitedBy: text.startIndex) ?? text.startIndex
-        let end = text.index(range.upperBound, offsetBy: Self.snippetRadius, limitedBy: text.endIndex) ?? text.endIndex
-        let excerpt = text[start..<end].split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return (start > text.startIndex ? "…" : "") + excerpt + (end < text.endIndex ? "…" : "")
     }
 
     /// Never wraps a key derived from the root: a grantee who kept it could read every later edit

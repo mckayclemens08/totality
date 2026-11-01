@@ -30,6 +30,7 @@ final class FakeDevices: DeviceCalendarSource, @unchecked Sendable {
     var available: [DeviceCalendar] = []
     var stored: [DeviceEvent] = []
     private(set) var askedFor: [Set<String>] = []
+    private(set) var askedBetween: (start: Date, end: Date)?
 
     func access() -> DeviceCalendarAccess { state }
     func requestAccess() async -> Bool {
@@ -39,6 +40,7 @@ final class FakeDevices: DeviceCalendarSource, @unchecked Sendable {
     func calendars() -> [DeviceCalendar] { state == .allowed ? available : [] }
     func events(from start: Date, to end: Date, calendarIDs: Set<String>) -> [DeviceEvent] {
         askedFor.append(calendarIDs)
+        askedBetween = (start, end)
         return state == .allowed && !calendarIDs.isEmpty ? stored : []
     }
 }

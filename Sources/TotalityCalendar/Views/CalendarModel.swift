@@ -136,7 +136,7 @@ public final class CalendarModel {
 
     public static let reminderChoices: [Int?] = [nil, 0, 5, 10, 15, 30, 60, 1_440]
     private static let scheduleDays = 90
-    private static let hiddenKey = "calendar.hiddenDeviceCalendars"
+    private nonisolated static let hiddenKey = "calendar.hiddenDeviceCalendars"
     /// Seven columns can't be read on a phone.
     public nonisolated static var platformWeekSpan: Int {
         #if os(macOS)
@@ -159,6 +159,8 @@ public final class CalendarModel {
     public var notice: String?
     /// True once this device syncs, which decides what the screen can truthfully say about recovery.
     public var isSynced = false
+    /// A search result to open. The home screen takes it from here.
+    public var requestedHit: SearchHit?
 
     public let display: Calendar
     public let weekSpan: Int
@@ -190,8 +192,12 @@ public final class CalendarModel {
         let today = CalendarDay(now(), in: display)
         month = today.firstOfMonth
         selectedDay = today
-        // Opaque IDs from the system, not calendar names.
-        hiddenCalendars = Set(defaults.stringArray(forKey: Self.hiddenKey) ?? [])
+        hiddenCalendars = Self.hiddenCalendars(in: defaults)
+    }
+
+    /// Opaque IDs from the system, not calendar names.
+    public nonisolated static func hiddenCalendars(in defaults: UserDefaults) -> Set<String> {
+        Set(defaults.stringArray(forKey: hiddenKey) ?? [])
     }
 
     public nonisolated static var personalCalendar: Calendar {
@@ -366,6 +372,20 @@ public final class CalendarModel {
         selectedDay = day
         month = day.firstOfMonth
         fillIn()
+    }
+
+    /// Goes to the day of the requested result and hands back its event. It can be gone by now,
+    /// because results are only as fresh as the moment they were found.
+    public func takeRequestedEntry() -> CalendarEntry? {
+        guard let hit = requestedHit else { return nil }
+        requestedHit = nil
+        if let date = hit.date {
+            let day = CalendarDay(date, in: display)
+            select(day)
+            if let entry = entries(on: day).first(where: { $0.id == hit.itemID }) { return entry }
+        }
+        notice = "This event is no longer here."
+        return nil
     }
 
     /// In Month, the first tap picks a day and the second opens it.

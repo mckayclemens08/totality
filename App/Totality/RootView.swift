@@ -13,6 +13,7 @@ struct RootView: View {
     @AppStorage("home.recentModule") private var recentModule = ModuleID.reader
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
+    @State private var registry: ModuleRegistry?
     @State private var syncAreas: [any SyncArea] = []
     @State private var contentProblem: ContentProblem?
     @State private var contentKeys: DeviceContentKeys
@@ -39,6 +40,7 @@ struct RootView: View {
                     recentModule = module
                     open = module
                 } onSearch: {
+                    prepareContent()
                     showingSearch = true
                 }
                 .overlay(alignment: .topLeading) { accountButton }
@@ -46,13 +48,13 @@ struct RootView: View {
                 if let reader {
                     ReaderHomeView(model: reader) { open = nil }
                 } else {
-                    contentMessage
+                    contentMessage { open = nil }
                 }
             case .calendar:
                 if let calendar {
                     CalendarHomeView(model: calendar, onClose: { open = nil }, onOpen: show)
                 } else {
-                    contentMessage
+                    contentMessage { open = nil }
                 }
             case .some(let module):
                 ModuleMessage(
@@ -70,6 +72,7 @@ struct RootView: View {
                 await calendar?.stopForKeyChange()
                 reader = nil
                 calendar = nil
+                registry = nil
                 syncAreas = []
                 contentProblem = nil
             }
@@ -102,11 +105,11 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $showingSearch) {
-            ModuleMessage(
-                systemImage: "magnifyingglass",
-                title: "Search",
-                detail: "Search across your modules isn't built yet."
-            ) { showingSearch = false }
+            if let registry {
+                SearchView(search: UniversalSearch(searchers: registry.searchers), onOpen: show) { showingSearch = false }
+            } else {
+                contentMessage { showingSearch = false }
+            }
         }
     }
 
@@ -142,9 +145,9 @@ struct RootView: View {
         .accessibilityLabel("Account")
     }
 
-    private var contentMessage: some View {
+    private func contentMessage(onClose: @escaping () -> Void) -> some View {
         let problem = contentProblem ?? .keyUnavailable
-        return ModuleMessage(systemImage: "lock.slash", title: problem.title, detail: problem.detail) { open = nil }
+        return ModuleMessage(systemImage: "lock.slash", title: problem.title, detail: problem.detail, onClose: onClose)
     }
 
     private func prepareContent() {
@@ -157,6 +160,7 @@ struct RootView: View {
             let content = try ContentSetup.makeModels()
             reader = content.reader
             calendar = content.calendar
+            registry = content.registry
             syncAreas = content.areas
             refreshRecoveryLabels()
         } catch KeyStoreError.keyMissing {
@@ -206,6 +210,18 @@ struct RootView: View {
         reader?.requestedItem = ref.id
         recentModule = .reader
         open = .reader
+    }
+
+    /// Only the module that found a result knows what its ID means, so it goes back there to open.
+    private func show(_ hit: SearchHit) {
+        showingSearch = false
+        switch hit.module {
+        case .reader: reader?.requestedItem = UUID(uuidString: hit.itemID)
+        case .calendar: calendar?.requestedHit = hit
+        default: return
+        }
+        recentModule = hit.module
+        open = hit.module
     }
 }
 
