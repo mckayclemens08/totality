@@ -8,11 +8,13 @@ private actor FakeVoice: VoiceSynthesizer {
     private(set) var requests: [(text: String, speed: Double)] = []
     private let failsPreparing: Bool
     private let unreadable: String?
+    private let silent: String?
     private var held: [String: CheckedContinuation<[Float], Never>] = [:]
 
-    init(failsPreparing: Bool = false, unreadable: String? = nil) {
+    init(failsPreparing: Bool = false, unreadable: String? = nil, silent: String? = nil) {
         self.failsPreparing = failsPreparing
         self.unreadable = unreadable
+        self.silent = silent
     }
 
     func prepare() async throws {
@@ -23,6 +25,7 @@ private actor FakeVoice: VoiceSynthesizer {
     func samples(for text: String, speed: Double) async throws -> [Float] {
         requests.append((text, speed))
         if text == unreadable { throw CancellationError() }
+        if text == silent { return [] }
         return await withCheckedContinuation { held[text] = $0 }
     }
 
@@ -396,6 +399,17 @@ private final class Finished {
         #expect(listen.status != nil)
     }
 
+    @Test("Text with nothing to say is skipped, with no voice change")
+    func nothingToSay() async throws {
+        let voices = voices(FakeVoice(silent: "🙂"))
+        var finished = 0
+        voices.onFinish = { finished += 1 }
+        voices.speak("🙂", speed: 1)
+        try await until { finished == 1 }
+        #expect(system.spoken.isEmpty)
+        #expect(output.played.isEmpty)
+    }
+
     @Test("Text the voice can't read goes to the system voice, and the voice carries on")
     func oneBadSentence() async throws {
         let voices = voices(FakeVoice(unreadable: "•"))
@@ -528,5 +542,111 @@ private final class Finished {
         let voice = KokoroSynthesizer(pack: URL(fileURLWithPath: path), directory: try folder())
         try await voice.prepare()
         #expect(try await voice.samples(for: "It works.", speed: 1).count > 1_000)
+    }
+}
+
+@Suite struct PDFTextTests {
+    private func sentences(_ text: String) -> [String] {
+        ListenScript(text: text).sentences.map(\.text)
+    }
+
+    @Test("A line break that only ran out of page doesn't end the sentence")
+    func wrappedLinesJoin() {
+        let text = "The port of Lisbon grew quickly after the ships of Gama came\nhome from India. It kept growing."
+        #expect(sentences(text) == ["The port of Lisbon grew quickly after the ships of Gama came home from India.", "It kept growing."])
+    }
+
+    @Test func aWordSplitAcrossLinesIsMended() {
+        let text = "The port of Lis-\nbon grew quickly after the fleet came home."
+        #expect(sentences(text) == ["The port of Lisbon grew quickly after the fleet came home."])
+    }
+
+    @Test func aRealHyphenStays() {
+        let text = "It was a well-known route.\nA self-\nMade trader."
+        #expect(sentences(text).first == "It was a well-known route.")
+        #expect(sentences(text).joined().contains("self-"))
+    }
+
+    @Test("Offsets still point at the original text")
+    func offsetsSurvive() {
+        let text = "The port of Lis-\nbon grew quickly after the fleet came home.\n\nNext one."
+        let script = ListenScript(text: text)
+        #expect(script.length == text.utf16.count)
+        let last = try! #require(script.sentences.last)
+        #expect(last.text == "Next one.")
+        let start = String.Index(utf16Offset: last.offset, in: text)
+        #expect(text[start...].trimmingCharacters(in: .whitespacesAndNewlines) == "Next one.")
+    }
+
+    @Test func aBlankLineEndsAParagraph() {
+        #expect(sentences("A heading\n\nThe body starts here.") == ["A heading", "The body starts here."])
+    }
+
+    @Test func headingsAndListsKeepTheirLines() {
+        #expect(sentences("CHAPTER IV\nTHE RIVER TRADE") == ["CHAPTER IV", "THE RIVER TRADE"])
+        let list = "These were the goods that the ships brought back to the city:\n• Pepper by the ton\n• Cloves"
+        #expect(sentences(list).count == 3)
+    }
+
+    @Test("Bullets, rules, page numbers, and table figures aren't read")
+    func nothingToRead() {
+        #expect(sentences("Words here.\n\n* * *\n\n43\n\n•\n\n1500   12   4,800\n\nMore words.") == ["Words here.", "More words."])
+    }
+
+    @Test("Abbreviations don't end a sentence", arguments: [
+        "St. Vincent's Day falls in January.",
+        "Fig. 3 shows the tonnage.",
+        "See vol. 2 of the set.",
+        "J. Silva wrote it in Lisbon.",
+        "1. Merchants read the ledgers daily.",
+    ])
+    func abbreviationsCarryOn(text: String) {
+        #expect(sentences(text) == [text])
+    }
+
+    @Test func aRealSentenceEndStillSplits() {
+        #expect(sentences("He said no. They left.").count == 2)
+    }
+}
+
+@Suite struct SpokenTextTests {
+    @Test("Each is rewritten for reading aloud", arguments: [
+        ("See Fig. 3 for the tonnage.", "See Figure 3 for the tonnage."),
+        ("It's on pp. 12 to 14, or p. 9.", "It's on pages 12 to 14, or page 9."),
+        ("Trade grew fast [12], then fell [3, 4].", "Trade grew fast, then fell."),
+        ("Cloves cost 2× as much.", "Cloves cost 2 times as much."),
+        ("• Pepper arrived.", "Pepper arrived."),
+        ("See https://www.example.org/lisbon?id=4 for more.", "See example.org for more."),
+    ])
+    func rewrites(text: String, spoken: String) {
+        #expect(SpokenText.prepared(text) == spoken)
+    }
+
+    @Test("Words that change sound with their use", arguments: [
+        ("They had read them yesterday.", "They had red them yesterday."),
+        ("They live near the docks.", "They liv near the docks."),
+        ("Merchants read the ledgers daily.", "Merchants read the ledgers daily."),
+        ("It was a live broadcast.", "It was a live broadcast."),
+        ("She gave him a present.", "She gave him a present."),
+        ("They will present the record.", "They will prezent the record."),
+    ])
+    func respells(text: String, spoken: String) {
+        #expect(SpokenText.prepared(text) == spoken)
+    }
+
+    @Test("Silence around a sentence goes, and a short rest stays")
+    func trimsSilence() {
+        let rate = 24_000
+        let speech = [Float](repeating: 0.5, count: rate)
+        let padded = [Float](repeating: 0, count: rate / 2) + speech + [Float](repeating: 0, count: rate)
+        let trimmed = SpokenAudio.trimmed(padded)
+        #expect(trimmed.count == rate + Int(0.03 * 24_000) + Int(0.18 * 24_000))
+        #expect(trimmed.first == 0)
+        #expect(trimmed[Int(0.03 * 24_000)] == 0.5)
+    }
+
+    @Test func silenceAloneIsLeftAlone() {
+        let quiet = [Float](repeating: 0, count: 100)
+        #expect(SpokenAudio.trimmed(quiet) == quiet)
     }
 }

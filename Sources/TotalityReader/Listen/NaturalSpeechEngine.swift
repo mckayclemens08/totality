@@ -154,6 +154,10 @@ final class NaturalSpeechEngine: SpeechEngine {
         isReady = true
         making = nil
         doneWaiting()
+        guard !samples.isEmpty else {
+            played(turn: turn)
+            return
+        }
         do {
             try output.play(samples) { [weak self] in self?.played(turn: turn) }
         } catch {
@@ -249,8 +253,13 @@ final class KokoroSynthesizer: VoiceSynthesizer {
     }
 
     func samples(for text: String, speed: Double) async throws -> [Float] {
-        let result = try await manager.synthesizeDetailed(text: text, voice: Self.voice, speed: Float(speed))
-        return result.samples
+        do {
+            let spoken = SpokenText.prepared(text)
+            return SpokenAudio.trimmed(try await manager.synthesizeDetailed(text: spoken, voice: Self.voice, speed: Float(speed)).samples)
+        } catch KokoroAneError.inputProcessingFailed {
+            // Nothing in it can be said, like a line of emoji, so there's nothing to hand to another voice.
+            return []
+        }
     }
 }
 
