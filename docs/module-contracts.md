@@ -109,6 +109,18 @@ Not measured: battery use, a locked screen, and a real long PDF. The model did r
 - On iPhone, one plain UIKit view on top of the tiles takes every tap and hold, because how a recognizer around a SwiftUI button competes with it changes between releases of iOS. A long press on the enclosing scroll view did nothing on iOS 26, `UIGestureRecognizerRepresentable` let the button win on iOS 18, and SwiftUI's hold-then-drag gesture stopped the page scrolling on iOS 17. The tile menus sit in a layer above it and leave while a tile is carried, or they'd show through it. The tiles' own buttons remain for VoiceOver and a keyboard. The Mac uses the SwiftUI gesture, because a mouse drag doesn't scroll.
 - `HomeStyle.defaultKey` holds the default home page on this device. The home page's own button lasts until the app restarts.
 
+## Search inside Totality
+
+Spec: issue #14. The magnifying glass on the home page opens one screen that asks every module at once.
+
+- A module joins by conforming to `ModuleSearcher` in `TotalityCore`. `ModuleRegistry.searchers` lists them and `UniversalSearch` runs them side by side. One that fails is named on screen and the others still show. Modules never import each other, and `TotalityUI` knows only `SearchHit`.
+- `SearchText` is the one definition of a match: every word has to appear, in any order and across any of the fields, ignoring case and accents. The Reader's search moved onto it.
+- `SearchHit.itemID` means something only to the module that found it. `RootView` hands a tapped hit back to that module: the Reader takes a `requestedItem`, and the Calendar takes a `requestedHit` and goes to that day. A result is only as fresh as the moment it was found, so the Calendar says so if the event has gone.
+- The Calendar searches titles, locations, notes, and the names of attachments. A repeating event shows once, at its next occurrence within a year, then its latest in the past year, then its first ever. Device events are read for a year either side of today, from the calendars turned on in Calendar, and repeats fold by title, location, and calendar. `CalendarEntry.id` is the item ID, so a result opens the same occurrence it showed.
+- Searching happens on the device. `SearchModel` lives in the sheet and writes nothing, so there is no history, and the box has autocorrect off. There is no index, because a plain-text one would break the encryption rule. Each search decrypts in memory, the same as reading does.
+- A search caches each item's text in the Reader's `textCache`, as the Reader's own search always has, so one search leaves the library's text in memory until the app quits or the key moves. A results screen can also land in the app-switcher snapshot, which is the privacy screen already owed before Phase 3.
+- Speed, without an index: 1,000 notes of about 2,700 characters took 0.83 s the first time and 0.44 s after that, in a debug build on the Mac, reading sealed files from disk. `ReaderSearchModuleTests.speed` fails past 10 s. Not measured on a phone. If it gets slow, the fix is an encrypted index on the device, as its own piece of work.
+
 ## Attaching across modules
 
 A module offers content through `ContentProvider`, and `ModuleRegistry.providers(for:)` lists what a module can attach, which is everything except its own. Only a `ContentRef` crosses over, so Calendar never imports the Reader. A ref's preview title lives inside the sealed event. `current(_:)` re-reads it, so a renamed item shows its new title and a deleted one says it's gone instead of leaving a dead link. The app opens a ref by handing its ID to the owning module.
