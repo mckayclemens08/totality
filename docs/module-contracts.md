@@ -64,15 +64,17 @@ Measured on 2026-10-31 with the Heart voice, since removed, on an iPhone 14 on i
 |---|---|
 | Voice load, after the download | 42 to 65 s |
 | Speed once warm | 8× real time |
-| Peak memory | 1,232 MB |
-| Longest run | 896 sentences, 116 minutes of audio, no crash |
+| Peak memory | 1,232 MB with Heart, 1,310 MB with Michael |
+| Longest run | 1,000 sentences, 129 minutes of audio, no crash |
 | Heat | Reached "fair" with the model running flat out, never "serious" |
 | Cold sentences | Slower than real time: 15.3 s of audio took 30.5 s |
 | Unexplained stall | One 13 s sentence took 324 s, then one took 35 s. Heat fell during it, so the app may have been in the background |
 
-On a Mac, reading aloud for 7 minutes: first audio 54 s, worst later gap 1.17 s, three gaps over a second, peak memory 2,604 MB.
+On the iPhone reading aloud with Michael for 2 minutes, with the next sentence made ahead: first audio 57 s, including the load, and worst gap between sentences 0.03 s. The voice loads again after every launch, so that first wait happens each time, not just once.
 
-Not measured: battery use, a locked screen, a real long PDF, and listening on an iPhone with the next sentence made ahead.
+On a Mac, reading aloud for 7 minutes with Heart: first audio 54 s, worst later gap 1.17 s, three gaps over a second, peak memory 2,604 MB.
+
+Not measured: battery use, a locked screen, and a real long PDF.
 
 ## Attaching across modules
 
