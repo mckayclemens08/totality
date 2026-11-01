@@ -35,14 +35,15 @@ struct BentoGrid: View {
                 .frame(width: width, height: metrics.height(of: placements))
                 .zIndex(2)
             #endif
-            if isEditing {
-                // Above the touch area, or it would take their taps.
+            if isEditing, drag == nil {
+                // Above the touch area, or it would take their taps. That's above the tiles too, so
+                // they leave while one is carried, or they'd show through it.
                 ForEach(placements) { placement in
                     if let module = modules.first(where: { $0.id == placement.id }) {
                         let frame = metrics.frame(of: placement)
                         TileMenu(module: module, layout: $layout)
                             .frame(width: frame.width, height: frame.height, alignment: .topTrailing)
-                            .position(position(of: module.id, at: frame))
+                            .position(x: frame.midX, y: frame.midY)
                     }
                 }
                 .zIndex(3)
@@ -54,27 +55,23 @@ struct BentoGrid: View {
         .sensoryFeedback(.selection, trigger: holds)
     }
 
-    private func position(of id: ModuleID, at frame: CGRect) -> CGPoint {
-        drag?.id == id ? drag?.position ?? .zero : CGPoint(x: frame.midX, y: frame.midY)
-    }
-
     private func tile(_ module: ModuleEntry, at frame: CGRect, metrics: BentoMetrics) -> some View {
-        let isDragged = drag?.id == module.id
+        let dragged = drag?.id == module.id ? drag : nil
         return Button {
             if !isEditing { onOpen(module.id) }
         } label: {
-            TileLabel(module: module, glance: glances[module.id], isHero: layout.hero == module.id)
+            TileLabel(module: module, glance: glances[module.id], isHero: layout.hero == module.id, isEditing: isEditing)
         }
         #if os(iOS)
-        .buttonStyle(TileButtonStyle(isEditing: isEditing, isDragged: isDragged, isTouched: touched == module.id))
+        .buttonStyle(TileButtonStyle(isEditing: isEditing, isDragged: dragged != nil, isTouched: touched == module.id))
         #else
-        .buttonStyle(TileButtonStyle(isEditing: isEditing, isDragged: isDragged, isTouched: false))
+        .buttonStyle(TileButtonStyle(isEditing: isEditing, isDragged: dragged != nil, isTouched: false))
         .simultaneousGesture(mouseHold(metrics: metrics))
         #endif
         .accessibilityAction(named: "Edit home") { isEditing = true }
         .frame(width: frame.width, height: frame.height)
-        .position(position(of: module.id, at: frame))
-        .zIndex(isDragged ? 1 : 0)
+        .position(dragged?.position ?? CGPoint(x: frame.midX, y: frame.midY))
+        .zIndex(dragged == nil ? 0 : 1)
     }
 
     #if os(iOS)
@@ -225,6 +222,7 @@ struct TileLabel: View {
     let module: ModuleEntry
     let glance: ModuleGlance?
     let isHero: Bool
+    let isEditing: Bool
 
     var body: some View {
         let theme = Theme.current
@@ -237,6 +235,8 @@ struct TileLabel: View {
                 Text(module.name)
                     .lineLimit(1)
             }
+            // Clears the tile's menu, which shares this corner.
+            .padding(.trailing, isEditing ? Space.s6 : 0)
             .font(Typeface.callout)
             .foregroundStyle(theme.textSecondary.color)
             ViewThatFits(in: .vertical) {
