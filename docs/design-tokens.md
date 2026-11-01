@@ -62,7 +62,9 @@ Generous radii are part of the neumorphic read. Nothing in the app is square-cor
 
 ## Spacing — 4pt base
 
-`space1` 4 · `space2` 8 · `space3` 12 · `space4` 16 · `space5` 24 · `space6` 32 · `space7` 48 · `space8` 64
+`space1` 4 · `space2` 8 · `space3` 12 · `space4` 16 · `space5` 24 · `space6` 32 · `space7` 48 · `space8` 64 · `hairline` 1
+
+`hairline` is for rules on a timeline, which sit in the surface in `surfaceSunken`. It isn't a border.
 
 Default screen gutter is `space4` (16). Default stack gap is `space3` (12).
 

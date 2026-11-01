@@ -44,17 +44,12 @@ enum ContentSetup {
         let readerVault = ReaderVault(store: stores.reader, rootKey: rootKey)
         let calendarVault = CalendarVault(store: stores.calendar, rootKey: rootKey)
         let registry = try ModuleRegistry(handlers: [ReaderModule(vault: readerVault), CalendarModule()])
-        #if os(iOS)
-        let startingMode = CalendarModel.Mode.agenda
-        #else
-        let startingMode = CalendarModel.Mode.month
-        #endif
         return (
             ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices())),
             CalendarModel(
                 vault: calendarVault,
                 devices: SystemCalendarSource(), reminders: SystemReminders(),
-                registry: registry, startingMode: startingMode
+                registry: registry
             ),
             [readerVault, calendarVault]
         )
