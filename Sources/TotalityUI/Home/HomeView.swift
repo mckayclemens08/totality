@@ -1,42 +1,116 @@
 import SwiftUI
 import TotalityCore
 
-/// The launcher: the most recently used module in the centre, with the others in a ring around it.
-/// The list holds the same modules for anyone who finds it faster.
+/// The home page: a dashboard of tiles, or the flower for anyone who prefers it. The arrangement is
+/// saved on this device.
 public struct HomeView: View {
     private let modules: [ModuleEntry]
     private let center: ModuleID
+    private let glances: [ModuleID: ModuleGlance]
+    @Binding private var style: HomeStyle
     private let onOpen: (ModuleID) -> Void
-    @State private var showsList = false
+    private let onSearch: () -> Void
+    // Module names and sizes, never content.
+    @AppStorage("home.layout") private var savedLayout = Data()
+    @State private var isEditing = false
 
-    public init(modules: [ModuleEntry] = ModuleEntry.all, center: ModuleID = .reader, onOpen: @escaping (ModuleID) -> Void) {
+    private static let topBarHeight = Space.s4 + Space.s7
+
+    public init(
+        modules: [ModuleEntry] = ModuleEntry.all,
+        center: ModuleID = .reader,
+        glances: [ModuleID: ModuleGlance] = [:],
+        style: Binding<HomeStyle> = .constant(.tiles),
+        onOpen: @escaping (ModuleID) -> Void,
+        onSearch: @escaping () -> Void = {}
+    ) {
         self.modules = modules
         self.center = center
+        self.glances = glances
+        _style = style
         self.onOpen = onOpen
+        self.onSearch = onSearch
+    }
+
+    private var layout: Binding<HomeLayout> {
+        Binding {
+            HomeLayout(saved: savedLayout, modules: modules.map(\.id))
+        } set: {
+            savedLayout = $0.saved
+        }
     }
 
     public var body: some View {
-        let arranged = ModuleEntry.arranged(modules, around: center)
-        ZStack(alignment: .topTrailing) {
+        ZStack(alignment: .top) {
             Theme.current.bg.color.ignoresSafeArea()
-            if showsList {
-                ModuleListView(modules: arranged, onOpen: onOpen)
-            } else {
-                FlowerView(modules: arranged, onOpen: onOpen)
+            switch style {
+            case .tiles:
+                GeometryReader { proxy in
+                    ScrollView {
+                        BentoGrid(
+                            layout: layout, modules: modules, glances: glances,
+                            width: min(proxy.size.width - Space.s4 * 2, Space.s8 * 8),
+                            isEditing: $isEditing, onOpen: onOpen
+                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, Self.topBarHeight + Space.s4)
+                        .padding(.bottom, Space.s6)
+                    }
+                }
+            case .flower:
+                FlowerView(modules: ModuleEntry.arranged(modules, around: center), onOpen: onOpen)
             }
-            Button {
-                showsList.toggle()
-            } label: {
-                Image(systemName: showsList ? "circle.hexagongrid" : "list.bullet")
-                    .font(Typeface.body)
-                    .foregroundStyle(Theme.current.textPrimary.color)
-                    .frame(width: Space.s7, height: Space.s7)
-                    .neumorphic(.subtle, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .padding(Space.s4)
-            .accessibilityLabel(showsList ? "Show ring" : "Show list")
+            topBar
         }
+    }
+
+    /// Floats over the page, so tiles fade out under it instead of stopping at a hard edge.
+    private var topBar: some View {
+        let background = Theme.current.bg.color
+        return HStack(spacing: Space.s3) {
+            Spacer()
+            if isEditing {
+                Button("Done") { isEditing = false }
+                    .font(Typeface.callout)
+                    .foregroundStyle(Theme.current.accent.color)
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, Space.s4)
+                    .frame(height: Space.s7)
+                    .neumorphic(.subtle, in: Capsule())
+            } else {
+                Button(action: onSearch) {
+                    TopBarIcon(systemImage: "magnifyingglass")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Search")
+                Button {
+                    style = style == .tiles ? .flower : .tiles
+                } label: {
+                    TopBarIcon(systemImage: style == .tiles ? "circle.hexagongrid" : "square.grid.2x2")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(style == .tiles ? "Show flower" : "Show tiles")
+            }
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s4)
+        .background {
+            LinearGradient(colors: [background, background.opacity(0)], startPoint: .center, endPoint: .bottom)
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+private struct TopBarIcon: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(Typeface.body)
+            .foregroundStyle(Theme.current.textPrimary.color)
+            .frame(width: Space.s7, height: Space.s7)
+            .neumorphic(.subtle, in: Circle())
     }
 }
 
@@ -86,49 +160,5 @@ private struct BubbleButtonStyle: ButtonStyle {
             .neumorphic(configuration.isPressed ? .pressed : .raised, in: Circle())
             .contentShape(Circle())
             .animation(Motion.instant, value: configuration.isPressed)
-    }
-}
-
-struct ModuleListView: View {
-    let modules: [ModuleEntry]
-    let onOpen: (ModuleID) -> Void
-
-    var body: some View {
-        ScrollView {
-            ModuleRows(modules: modules, onOpen: onOpen)
-                .padding(.horizontal, Space.s4)
-                .padding(.top, Space.s8)
-                .padding(.bottom, Space.s4)
-        }
-    }
-}
-
-struct ModuleRows: View {
-    let modules: [ModuleEntry]
-    let onOpen: (ModuleID) -> Void
-
-    var body: some View {
-        let theme = Theme.current
-        LazyVStack(spacing: Space.s3) {
-            ForEach(modules) { module in
-                Button {
-                    onOpen(module.id)
-                } label: {
-                    HStack(spacing: Space.s3) {
-                        Image(systemName: module.systemImage)
-                            .frame(width: 32)
-                            .accessibilityHidden(true)
-                        Text(module.name)
-                            .font(Typeface.headline)
-                        Spacer()
-                    }
-                    .foregroundStyle(theme.textPrimary.color)
-                    .padding(Space.s4)
-                    .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 }

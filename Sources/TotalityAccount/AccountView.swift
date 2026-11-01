@@ -111,6 +111,8 @@ public struct AccountView: View {
                 model.notice = nil
             }
             .font(Typeface.callout)
+            HomeStyleSetting()
+                .padding(.top, Space.s4)
         case .signedIn:
             ProfileSummary(model: model) { editing = true }
         }

@@ -170,12 +170,33 @@ private struct ProfileField: ViewModifier {
     }
 }
 
+/// Which home page Totality opens on. It's on this device and needs no account.
+struct HomeStyleSetting: View {
+    @AppStorage(HomeStyle.defaultKey) private var defaultHome = HomeStyle.tiles
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text("Home page")
+                .font(Typeface.callout)
+                .foregroundStyle(Theme.current.textPrimary.color)
+            Picker("Home page", selection: $defaultHome) {
+                ForEach(HomeStyle.allCases) { style in
+                    Text(style.name).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+    }
+}
+
 struct AccountSettingsView: View {
     let model: AccountModel
 
     var body: some View {
         let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s4) {
+            HomeStyleSetting()
             if case .signedIn(let username) = model.phase {
                 AccountDetail(text: "Signed in as \(username).")
             }
