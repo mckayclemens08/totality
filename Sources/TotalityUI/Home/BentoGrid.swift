@@ -12,7 +12,9 @@ struct BentoGrid: View {
     let onOpen: (ModuleID) -> Void
     @State private var drag: TileDrag?
     @State private var holds = 0
-    #if os(macOS)
+    #if os(iOS)
+    @State private var touched: ModuleID?
+    #else
     @State private var isHolding = false
     #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -28,37 +30,67 @@ struct BentoGrid: View {
                     tile(module, at: metrics.frame(of: placement), metrics: metrics)
                 }
             }
+            #if os(iOS)
+            touchArea(metrics: metrics)
+                .frame(width: width, height: metrics.height(of: placements))
+                .zIndex(2)
+            #endif
+            if isEditing {
+                // Above the touch area, or it would take their taps.
+                ForEach(placements) { placement in
+                    if let module = modules.first(where: { $0.id == placement.id }) {
+                        let frame = metrics.frame(of: placement)
+                        TileMenu(module: module, layout: $layout)
+                            .frame(width: frame.width, height: frame.height, alignment: .topTrailing)
+                            .position(position(of: module.id, at: frame))
+                    }
+                }
+                .zIndex(3)
+            }
         }
         .frame(width: width, height: metrics.height(of: placements), alignment: .topLeading)
         .coordinateSpace(.named(Self.space))
         .animation(reduceMotion ? nil : Motion.standard, value: layout)
         .sensoryFeedback(.selection, trigger: holds)
-        #if os(iOS)
-        .background { TileHoldWatcher { held($0, metrics: metrics) } }
-        #endif
+    }
+
+    private func position(of id: ModuleID, at frame: CGRect) -> CGPoint {
+        drag?.id == id ? drag?.position ?? .zero : CGPoint(x: frame.midX, y: frame.midY)
     }
 
     private func tile(_ module: ModuleEntry, at frame: CGRect, metrics: BentoMetrics) -> some View {
-        let dragged = drag?.id == module.id ? drag : nil
+        let isDragged = drag?.id == module.id
         return Button {
             if !isEditing { onOpen(module.id) }
         } label: {
             TileLabel(module: module, glance: glances[module.id], isHero: layout.hero == module.id)
         }
-        .buttonStyle(TileButtonStyle(isEditing: isEditing, isDragged: dragged != nil))
-        #if os(macOS)
+        #if os(iOS)
+        .buttonStyle(TileButtonStyle(isEditing: isEditing, isDragged: isDragged, isTouched: touched == module.id))
+        #else
+        .buttonStyle(TileButtonStyle(isEditing: isEditing, isDragged: isDragged, isTouched: false))
         .simultaneousGesture(mouseHold(metrics: metrics))
         #endif
-        .overlay(alignment: .topTrailing) {
-            if isEditing { TileMenu(module: module, layout: $layout) }
-        }
         .accessibilityAction(named: "Edit home") { isEditing = true }
         .frame(width: frame.width, height: frame.height)
-        .position(dragged?.position ?? CGPoint(x: frame.midX, y: frame.midY))
-        .zIndex(dragged == nil ? 0 : 1)
+        .position(position(of: module.id, at: frame))
+        .zIndex(isDragged ? 1 : 0)
     }
 
-    #if os(macOS)
+    #if os(iOS)
+    private func touchArea(metrics: BentoMetrics) -> some View {
+        let tile = { (point: CGPoint) in metrics.placement(at: point, among: layout.placements)?.id }
+        return TileTouchArea { point in
+            touched = point.flatMap(tile)
+        } onTap: { point in
+            if !isEditing, let id = tile(point) { onOpen(id) }
+        } onHold: {
+            held($0, metrics: metrics)
+        }
+        // The tiles' own buttons remain for VoiceOver and a keyboard.
+        .accessibilityHidden(true)
+    }
+    #else
     /// A mouse drag doesn't scroll, so SwiftUI's own gestures work here.
     private func mouseHold(metrics: BentoMetrics) -> some Gesture {
         LongPressGesture()
@@ -112,37 +144,59 @@ enum TileHold {
 }
 
 #if os(iOS)
-/// Watches for a held tile from the scroll view that holds the grid. UIKit settles a hold against a
-/// swipe by itself: a finger that moves first scrolls, and one that stays still takes the touch.
-/// SwiftUI's hold-then-drag gesture stopped the page scrolling at all.
-private struct TileHoldWatcher: UIViewRepresentable {
+/// Takes every touch on the tiles in one plain UIKit view on top of them. A recognizer around the
+/// tiles' buttons has to compete with them, and how that goes changes between releases of iOS. On
+/// iOS 26 holding did nothing, and handing SwiftUI the recognizer on iOS 18 let the button win.
+/// SwiftUI's own hold-then-drag gesture stopped the page scrolling at all. Here UIKit settles a hold
+/// against a swipe by itself: a finger that moves first scrolls, and one that stays still takes the touch.
+private struct TileTouchArea: UIViewRepresentable {
+    let onPress: (CGPoint?) -> Void
+    let onTap: (CGPoint) -> Void
     let onHold: (TileHold) -> Void
 
-    func makeUIView(context: Context) -> TileHoldView {
-        let view = TileHoldView()
-        view.isUserInteractionEnabled = false
-        return view
+    func makeUIView(context: Context) -> TileTouchView {
+        TileTouchView()
     }
 
-    func updateUIView(_ view: TileHoldView, context: Context) {
+    func updateUIView(_ view: TileTouchView, context: Context) {
+        view.onPress = onPress
+        view.onTap = onTap
         view.onHold = onHold
     }
 }
 
-private final class TileHoldView: UIView {
+private final class TileTouchView: UIView {
+    var onPress: (CGPoint?) -> Void = { _ in }
+    var onTap: (CGPoint) -> Void = { _ in }
     var onHold: (TileHold) -> Void = { _ in }
-    private var recognizer: UILongPressGestureRecognizer?
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if let recognizer { recognizer.view?.removeGestureRecognizer(recognizer) }
-        recognizer = nil
-        guard window != nil,
-              let scrollView = sequence(first: superview, next: { $0?.superview }).first(where: { $0 is UIScrollView }) ?? nil
-        else { return }
-        let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(held))
-        scrollView.addGestureRecognizer(recognizer)
-        self.recognizer = recognizer
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
+        addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(held)))
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("Made in code")
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        onPress(touches.first?.location(in: self))
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        onPress(nil)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        onPress(nil)
+    }
+
+    @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
+        onTap(recognizer.location(in: self))
     }
 
     @objc private func held(_ recognizer: UILongPressGestureRecognizer) {
@@ -229,6 +283,7 @@ private struct GlanceLines: View {
 private struct TileButtonStyle: ButtonStyle {
     let isEditing: Bool
     let isDragged: Bool
+    let isTouched: Bool
 
     private func depth(isPressed: Bool) -> Elevation {
         if isEditing { return isDragged ? .raised : .subtle }
@@ -237,8 +292,8 @@ private struct TileButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .neumorphic(depth(isPressed: configuration.isPressed), in: tileShape)
-            .animation(Motion.instant, value: configuration.isPressed)
+            .neumorphic(depth(isPressed: configuration.isPressed || isTouched), in: tileShape)
+            .animation(Motion.instant, value: configuration.isPressed || isTouched)
     }
 }
 
