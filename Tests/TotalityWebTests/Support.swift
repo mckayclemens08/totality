@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import TotalityCore
 @testable import TotalityWeb
 
@@ -103,4 +104,46 @@ final class MemoryBlobStore: BlobStore, @unchecked Sendable {
     func read(_ name: String) throws -> Data? { lock.withLock { blobs[name] } }
     func write(_ data: Data, as name: String) throws { lock.withLock { blobs[name] = data } }
     func delete(_ name: String) throws { _ = lock.withLock { blobs.removeValue(forKey: name) } }
+}
+
+/// A real web server on this machine, so tests can watch what WebKit actually fetches.
+final class LocalSite: @unchecked Sendable {
+    private let listener: NWListener
+    private let lock = NSLock()
+    private var paths: [String] = []
+    private let pages: [String: (type: String, extra: String, body: String)]
+
+    init(pages: [String: (type: String, extra: String, body: String)]) throws {
+        self.pages = pages
+        let parameters = NWParameters.tcp
+        parameters.requiredInterfaceType = .loopback
+        listener = try NWListener(using: parameters, on: .any)
+        listener.newConnectionHandler = { [weak self] connection in self?.serve(connection) }
+        listener.start(queue: .global())
+    }
+
+    deinit { listener.cancel() }
+
+    var requested: [String] { lock.withLock { paths } }
+
+    func url(_ path: String) async throws -> URL {
+        for _ in 0..<200 {
+            if let port = listener.port?.rawValue { return URL(string: "http://127.0.0.1:\(port)\(path)")! }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw CancellationError()
+    }
+
+    private func serve(_ connection: NWConnection) {
+        connection.start(queue: .global())
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8_192) { [weak self] data, _, _, _ in
+            guard let self, let data else { return connection.cancel() }
+            let line = String(decoding: data, as: UTF8.self).split(separator: "\r\n").first ?? ""
+            let path = String(line.split(separator: " ").dropFirst().first ?? "/")
+            self.lock.withLock { self.paths.append(path) }
+            let page = self.pages[path] ?? ("text/plain", "", "ok")
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: \(page.type)\r\n\(page.extra)Content-Length: \(page.body.utf8.count)\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data((head + page.body).utf8), completion: .contentProcessed { _ in connection.cancel() })
+        }
+    }
 }

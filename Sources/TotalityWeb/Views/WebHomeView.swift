@@ -98,9 +98,13 @@ public struct WebHomeView: View {
     }
 
     private func startFinding() {
-        guard page != nil else { return }
+        guard let page else { return }
+        #if os(iOS)
+        page.showFindBar()
+        #else
         finding = true
         isFinding = true
+        #endif
     }
 
     private func find(backwards: Bool = false) async {

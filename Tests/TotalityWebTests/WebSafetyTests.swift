@@ -289,3 +289,91 @@ private actor FakeReader: ContentReceiver {
         #expect(page.webView.pageZoom == 0.9)
     }
 }
+
+/// Through a real page and a real server, because a rule that looks applied can still load too late.
+@MainActor
+@Suite(.serialized) struct WebLiveTests {
+    private let store = WKContentRuleListStore(url: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true))!
+
+    private func blocked() async throws -> WKContentRuleList {
+        let blocker = WebBlocker(store: store)
+        await blocker.prepare(encoded: #"[{"trigger":{"url-filter":"tracker"},"action":{"type":"block"}}]"#, identifier: "live")
+        return try #require(blocker.rules)
+    }
+
+    private let html = #"<html><head><title>Trams</title></head><body><img src="/tracker.png"><img src="/tram.png"></body></html>"#
+
+    @Test("A blocked resource is never fetched, and turning a site off lets it through")
+    func blocking() async throws {
+        let site = try LocalSite(pages: ["/": ("text/html", "", html)])
+        let page = WebPage(configuration: WebPage.configuration(isPrivate: true, store: .nonPersistent()), isPrivate: true)
+        var off = false
+        page.isUnblocked = { _ in off }
+        page.rules = try await blocked()
+
+        page.load(try await site.url("/"))
+        try await until { !page.isLoading && page.title == "Trams" && site.requested.contains("/tram.png") }
+        #expect(!site.requested.contains("/tracker.png"))
+
+        off = true
+        page.reload()
+        try await until { site.requested.contains("/tracker.png") }
+    }
+
+    private func downloadModel(_ root: URL) async throws -> WebModel {
+        let model = WebModel(client: nil, vault: WebVault(store: MemoryBlobStore(), rootKey: try .generate()), downloads: root)
+        await model.load()
+        return model
+    }
+
+    private let file: (type: String, extra: String, body: String) = ("application/octet-stream", "Content-Disposition: attachment; filename=\"../../tram.bin\"\r\n", "tram timetable")
+
+    @Test("A download asks first, then lands in the folder under a safe name")
+    func download() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let site = try LocalSite(pages: ["/file": file])
+        let model = try await downloadModel(root)
+        model.open(try await site.url("/file"))
+        let page = try #require(model.current.page)
+        try await until { page.dialog != nil }
+        #expect(model.downloads.isEmpty)
+        #expect(page.dialog?.message.hasSuffix("tram.bin?") == true)
+        page.answer(try #require(page.dialog), true)
+        try await until { model.downloads.first?.state == .finished }
+        let done = try #require(model.downloads.first)
+        // WebKit cleans the name before we see it, and `safeName` is checked on its own above.
+        #expect(done.filename.hasSuffix("tram.bin"))
+        #expect(!done.filename.contains("/"))
+        #expect(try String(contentsOf: done.file, encoding: .utf8) == "tram timetable")
+        #expect(done.file.path.hasPrefix(root.path) || done.file.standardizedFileURL.path.contains(root.lastPathComponent))
+    }
+
+    @Test("Saying no to a download writes nothing")
+    func refusedDownload() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let site = try LocalSite(pages: ["/file": file])
+        let model = try await downloadModel(root)
+        model.open(try await site.url("/file"))
+        let page = try #require(model.current.page)
+        try await until { page.dialog != nil }
+        page.answer(try #require(page.dialog), false)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(model.downloads.isEmpty)
+        let written = FileManager.default.subpaths(atPath: root.path) ?? []
+        #expect(!written.contains { $0.contains("tram") })
+    }
+
+    @Test("A page can't start a tab by itself, and a plain address shows as not secure")
+    func popups() async throws {
+        let html = #"<html><head><title>Popup</title><script>window.open('/other')</script></head><body>Hi</body></html>"#
+        let site = try LocalSite(pages: ["/": ("text/html", "", html)])
+        let model = try await downloadModel(FileManager.default.temporaryDirectory)
+        model.open(try await site.url("/"))
+        let page = try #require(model.current.page)
+        try await until { !page.isLoading && page.title == "Popup" }
+        #expect(model.tabs.count == 1)
+        #expect(!page.isSecure)
+    }
+}

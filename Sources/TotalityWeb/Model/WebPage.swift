@@ -134,6 +134,7 @@ public final class WebPage: NSObject {
             refresh?.endRefreshing()
         }, for: .valueChanged)
         webView.scrollView.refreshControl = refresh
+        webView.isFindInteractionEnabled = true
         #endif
         watch()
     }
@@ -195,6 +196,13 @@ public final class WebPage: NSObject {
         let next = larger ? Self.zooms.first { $0 > now } : Self.zooms.last { $0 < now }
         if let next { webView.pageZoom = next }
     }
+
+    #if os(iOS)
+    /// Apple's own find bar, because a selection doesn't show while the keyboard is in a field of ours.
+    public func showFindBar() {
+        webView.findInteraction?.presentFindNavigator(showingReplace: false)
+    }
+    #endif
 
     /// Selects the next match, and says whether there was one.
     public func find(_ text: String, backwards: Bool = false) async -> Bool {
