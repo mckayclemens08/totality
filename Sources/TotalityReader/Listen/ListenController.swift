@@ -18,7 +18,7 @@ public struct ListenTrack: Identifiable, Sendable, Equatable {
     }
 }
 
-/// Play, pause, speed, voice, queue, and resume position for Listen. It moves behind a shared player
+/// Play, pause, speed, queue, and resume position for Listen. It moves behind a shared player
 /// protocol when the Player module starts (docs/module-contracts.md).
 @MainActor
 @Observable
@@ -33,7 +33,8 @@ public final class ListenController {
     public private(set) var spoken = 0
     public private(set) var isPaused = false
     public private(set) var speed = 1.0
-    public private(set) var voice: String?
+    /// Why speech hasn't started, such as a voice still downloading.
+    public private(set) var status: String?
 
     /// Called with the offset to resume from whenever that changes.
     public var onPosition: ((UUID, Int) -> Void)?
@@ -45,9 +46,8 @@ public final class ListenController {
         self.engine = engine
         engine.onFinish = { [weak self] in self?.sentenceFinished() }
         engine.onWord = { [weak self] in self?.spoken = $0 }
+        engine.onStatus = { [weak self] in self?.status = $0 }
     }
-
-    public var voices: [ListenVoice] { engine.voices() }
 
     public var progress: Double {
         current?.script.progress(at: sentence, spoken: spoken) ?? 0
@@ -87,13 +87,9 @@ public final class ListenController {
         settingChanged()
     }
 
-    public func setVoice(_ voice: String?) {
-        self.voice = voice
-        settingChanged()
-    }
-
     public func stop() {
         engine.stop()
+        engine.prepare(nil, speed: speed)
         reportPosition()
         current = nil
         queue = []
@@ -107,6 +103,7 @@ public final class ListenController {
         queue.removeAll { $0.id == id }
         guard current?.id == id else { return }
         engine.stop()
+        engine.prepare(nil, speed: speed)
         current = nil
         sentence = 0
         isPaused = false
@@ -127,7 +124,9 @@ public final class ListenController {
         spoken = 0
         engine.stop()
         reportPosition()
-        engine.speak(track.script.sentences[sentence].text, speed: speed, voice: voice)
+        engine.speak(track.script.sentences[sentence].text, speed: speed)
+        let next = sentence + 1 < track.script.sentences.count ? track.script.sentences[sentence + 1].text : nil
+        engine.prepare(next, speed: speed)
     }
 
     private func reportPosition() {

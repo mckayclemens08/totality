@@ -21,19 +21,19 @@ func newVault(store: any BlobStore = MemoryBlobStore()) throws -> ReaderVault {
 final class FakeSpeechEngine: SpeechEngine {
     var onFinish: (() -> Void)?
     var onWord: ((Int) -> Void)?
+    var onStatus: ((String?) -> Void)?
     private(set) var spoken: [String] = []
     private(set) var speeds: [Double] = []
-    private(set) var voiceIDs: [String?] = []
+    private(set) var prepared: [String?] = []
     private(set) var pauses = 0
     private(set) var resumes = 0
 
-    func speak(_ text: String, speed: Double, voice: String?) {
+    func speak(_ text: String, speed: Double) {
         spoken.append(text)
         speeds.append(speed)
-        voiceIDs.append(voice)
     }
+    func prepare(_ text: String?, speed: Double) { prepared.append(text) }
     func pause() { pauses += 1 }
     func resume() { resumes += 1 }
     func stop() {}
-    func voices() -> [ListenVoice] { [ListenVoice(id: "test.voice", name: "Test", language: "en-US")] }
 }

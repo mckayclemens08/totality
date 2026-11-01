@@ -14,13 +14,17 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.9.1"),
         .package(url: "https://github.com/supabase/supabase-swift.git", exact: "2.49.0"),
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.18.0"),
     ],
     targets: [
         .target(name: "TotalityCore", dependencies: [
             .product(name: "Sodium", package: "swift-sodium"),
         ]),
         .target(name: "TotalityUI", dependencies: ["TotalityCore"]),
-        .target(name: "TotalityReader", dependencies: ["TotalityCore", "TotalityUI"]),
+        .target(name: "TotalityReader", dependencies: [
+            "TotalityCore", "TotalityUI",
+            .product(name: "FluidAudio", package: "FluidAudio"),
+        ]),
         .target(name: "TotalityCalendar", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityAccount", dependencies: [
             "TotalityCore", "TotalityUI",

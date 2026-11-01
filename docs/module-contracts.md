@@ -48,6 +48,40 @@ file, so there is nothing to refer to. Listen lives in `TotalityReader` as `List
 When the Player module starts, the transport (play, pause, skip, speed, queue) moves behind a protocol
 in `TotalityCore`, and Listen and music both play through it.
 
+### The natural voice
+
+Listen has one voice, Michael, and no voice menu (owner, 2026-10-31). `ListenVoices` is the `SpeechEngine` the app uses: it sends speech to `NaturalSpeechEngine`, and the system voice is the backup, so `ListenController` doesn't know which is speaking. Michael is Kokoro-82M's `am_michael`, run on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. iOS 17 and macOS 14 use the system voice. Text stays on the device, and the only download is the model, about 390 MB.
+
+FluidAudio fetches some of the voice from a Hugging Face branch that can change, with no hash check, and it loads those files into the same process as decrypted reader content. So `VoiceAssets` fetches them first, from one commit, against hashes compiled into the app, and FluidAudio finds them on disk. The listing it checks its base models against is compiled in too, and Michael's voice pack is hashed when it arrives. The hashes are checked once per install, and all of this needs checking again whenever the FluidAudio pin moves.
+
+- A voice that fails to load falls back to the system voice until the app restarts, and the bar says so.
+- The model can't read a lone bullet or emoji. That text goes to the system voice and Michael carries on, so a book doesn't change voice over one odd line.
+- The download only starts on an unmetered network. On cellular, a hotspot, or Low Data Mode the system voice reads, and the bar says why. It's tried again after the next launch.
+- The model gives no word timing, so the bar moves with the share of the audio played.
+- The next sentence is made ahead of time, one at a time, and the voice loads once however many calls wait on it.
+- FluidAudio can log a word it can't pronounce, so `KokoroSynthesizer` turns off its stderr copy. The system log keeps the text private.
+- FluidAudio warns of an uncatchable crash in Apple's audio library on iOS 26.4 and later, reported after 8 to 20 calls on some devices and 54 minutes into one listen. None appeared here, but it can't be ruled out, and the app can't catch it to fall back.
+
+Measured on 2026-10-31 with the Heart voice, since removed, on an iPhone 14 on iOS 26.7.1 and a Release build:
+
+| Measure | Result |
+|---|---|
+| Voice load, after the download | 42 to 65 s |
+| Speed once warm | 8× real time |
+| Peak memory | 1,232 MB with Heart, 1,310 MB with Michael |
+| Longest run | 1,000 sentences, 129 minutes of audio, no crash |
+| Heat | Reached "fair" with the model running flat out, never "serious" |
+| Cold sentences | Slower than real time: 15.3 s of audio took 30.5 s |
+| Unexplained stall | One 13 s sentence took 324 s, then one took 35 s. Heat fell during it, so the app may have been in the background |
+
+On the iPhone reading aloud with Michael for 2 minutes, with the next sentence made ahead: first audio 57 s, including the load, and worst gap between sentences 0.03 s. The voice loads again after every launch, so that first wait happens each time, not just once.
+
+On a Mac, reading aloud for 7 minutes with Heart: first audio 54 s, worst later gap 1.17 s, three gaps over a second, peak memory 2,604 MB.
+
+With a screen locked, generating speech may be refused. If so, each sentence goes to the system voice and Michael returns when the app is back in front. That reasoning hasn't been tried on a device.
+
+Not measured: battery use, a locked screen, and a real long PDF. The model did read 30 kinds of awkward text, from URLs to a 3,000-character run, with a bullet, emoji, and blank text as the only failures.
+
 ## Attaching across modules
 
 A module offers content through `ContentProvider`, and `ModuleRegistry.providers(for:)` lists what a module can attach, which is everything except its own. Only a `ContentRef` crosses over, so Calendar never imports the Reader. A ref's preview title lives inside the sealed event. `current(_:)` re-reads it, so a renamed item shows its new title and a deleted one says it's gone instead of leaving a dead link. The app opens a ref by handing its ID to the owning module.

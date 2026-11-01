@@ -50,7 +50,7 @@ enum ContentSetup {
         let startingMode = CalendarModel.Mode.month
         #endif
         return (
-            ReaderModel(vault: readerVault, listen: ListenController(engine: SystemSpeechEngine())),
+            ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices())),
             CalendarModel(
                 vault: calendarVault,
                 devices: SystemCalendarSource(), reminders: SystemReminders(),
