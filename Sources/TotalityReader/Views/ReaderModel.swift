@@ -83,6 +83,8 @@ public final class ReaderModel {
         }
         do {
             hits = try await vault.search(query)
+        } catch is CancellationError {
+            // The person kept typing, and the newer search takes over.
         } catch {
             notice = "Search didn't finish. Try again."
         }

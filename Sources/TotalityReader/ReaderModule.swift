@@ -31,3 +31,14 @@ public struct ReaderModule: ContentProvider {
         )
     }
 }
+
+extension ReaderModule: ModuleSearcher {
+    public func search(_ query: String) async throws -> [SearchHit] {
+        try await vault?.search(query).map { hit in
+            SearchHit(
+                module: .reader, itemID: hit.item.id.uuidString, title: hit.item.displayTitle,
+                detail: hit.item.detail, snippet: hit.snippet, date: hit.item.updatedAt
+            )
+        } ?? []
+    }
+}
