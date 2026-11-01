@@ -138,9 +138,127 @@ import TotalityCore
         var pdf = entry("A book", kind: .file, age: 50)
         pdf.mime = "application/pdf"
         let library = ReaderLibrary(items: [old, new, pdf])
-        #expect(library.contents(of: nil, sortedBy: .recent).items == [new, pdf, old])
+        #expect(library.contents(of: nil, sortedBy: .edited).items == [new, pdf, old])
         #expect(library.contents(of: nil, sortedBy: .name).items == [pdf, new, old])
         #expect(library.contents(of: nil, sortedBy: .type).items == [new, old, pdf])
+    }
+
+    @Test("Opening moves an item up, and only in the order that's about opening")
+    func openedOrder() {
+        let schedule = entry("Climbing team schedule", kind: .note, age: 100)
+        let lease = entry("Lisbon lease", kind: .note)
+        let library = ReaderLibrary(items: [schedule, lease])
+        // Nothing opened yet, so the newest change leads, the same as before this order existed.
+        #expect(library.contents(of: nil, sortedBy: .opened).items == [lease, schedule])
+
+        let opened = library.opening(schedule.id, at: Date(timeIntervalSince1970: 1_793_000_500))
+        #expect(opened.contents(of: nil, sortedBy: .opened).items == [schedule, lease])
+        #expect(opened.lastOpened == [schedule, lease])
+        #expect(opened.contents(of: nil, sortedBy: .edited).items == [lease, schedule])
+        #expect(opened.contents(of: nil, sortedBy: .name).items == [schedule, lease])
+    }
+
+    @Test("A folder moves up when it's opened, and folders stay ahead of items")
+    func openedFolders() {
+        let trips = entry("Trips")
+        let work = entry("Work", age: 100)
+        let note = entry("Lisbon lease", kind: .note)
+        let library = ReaderLibrary(items: [note], folders: [trips, work])
+        #expect(library.contents(of: nil).folders == [trips, work])
+        let opened = library.opening(work.id, at: Date(timeIntervalSince1970: 1_793_000_500))
+        #expect(opened.contents(of: nil).folders == [work, trips])
+    }
+
+    @Test("An edit from another device counts as opening it there")
+    func editElsewhereLeadsAnOlderOpen() {
+        let lease = entry("Lisbon lease", kind: .note)
+        let schedule = entry("Climbing team schedule", kind: .note, age: 50)
+        let library = ReaderLibrary(items: [lease, schedule])
+            .opening(lease.id, at: lease.updatedAt.addingTimeInterval(-500))
+            .opening(schedule.id, at: schedule.updatedAt.addingTimeInterval(10))
+        #expect(library.date(of: lease, sortedBy: .opened) == lease.updatedAt)
+        #expect(library.contents(of: nil, sortedBy: .opened).items == [lease, schedule])
+    }
+
+    @Test("Recently added goes by when it arrived, however it's changed since")
+    func addedOrder() {
+        let older = ReaderItem(
+            id: UUID(), kind: .note, title: "Lisbon lease", collection: nil, mime: nil, byteCount: 0,
+            createdAt: Date(timeIntervalSince1970: 1_000), updatedAt: Date(timeIntervalSince1970: 9_000), listenPosition: 0
+        )
+        let newer = ReaderItem(
+            id: UUID(), kind: .note, title: "Trail map", collection: nil, mime: nil, byteCount: 0,
+            createdAt: Date(timeIntervalSince1970: 5_000), updatedAt: Date(timeIntervalSince1970: 5_000), listenPosition: 0
+        )
+        let library = ReaderLibrary(items: [older, newer])
+        #expect(library.contents(of: nil, sortedBy: .added).items == [newer, older])
+        #expect(library.contents(of: nil, sortedBy: .edited).items == [older, newer])
+        #expect(library.date(of: older, sortedBy: .added) == older.createdAt)
+    }
+
+    @Test("The order an older build stored gives way to the new default")
+    func oldStoredOrder() {
+        #expect(ReaderSort(rawValue: "recent") == nil)
+        #expect(ReaderSort.allCases.first == .opened)
+    }
+
+    @Test("Opening survives a restart, under the key")
+    func openedStays() async throws {
+        let store = MemoryBlobStore()
+        let key = try ContentRootKey.generate()
+        let vault = ReaderVault(store: store, rootKey: key)
+        let note = try await vault.createNote(title: "Lisbon lease")
+        let date = Date(timeIntervalSince1970: 1_793_000_500)
+        try await vault.markOpened(note.id, at: date)
+
+        #expect(try await ReaderVault(store: store, rootKey: key).list().opened == [note.id: date])
+        // Under another key the time can't be read, and it isn't a reason to hide the item.
+        let other = try await ReaderVault(store: store, rootKey: try ContentRootKey.generate()).list()
+        #expect(other.opened.isEmpty)
+    }
+
+    @Test("Opening changes nothing sync can see, so reading never re-uploads a file")
+    func openedStaysOffTheServer() async throws {
+        let vault = try newVault()
+        let note = try await vault.createNote(title: "Lisbon lease")
+        let hash = try await vault.sealedHash(of: note.id)
+        let object = try await vault.sealedObject(note.id)
+        try await vault.markOpened(note.id, at: Date())
+
+        #expect(try await vault.sealedHash(of: note.id) == hash)
+        #expect(try await vault.sealedObject(note.id) == object)
+        #expect(try await vault.sealedObjectIDs() == [note.id])
+        #expect(try await vault.item(note.id).updatedAt == note.updatedAt)
+    }
+
+    @Test("Every file an open leaves is one a key move knows about")
+    func openedMovesWithTheKey() async throws {
+        let store = MemoryBlobStore()
+        let vault = try newVault(store: store)
+        let note = try await vault.createNote(title: "Lisbon lease")
+        try await vault.markOpened(note.id, at: Date())
+
+        let names = try store.names()
+        #expect(names.contains { $0.hasSuffix(".opened") })
+        for name in names {
+            #expect(ReaderVault.sealedPurposes.keys.contains { name.hasSuffix($0) })
+        }
+    }
+
+    @Test("Deleting takes the time with it, and a gone item leaves none behind")
+    func openedLeavesWithTheItem() async throws {
+        let store = MemoryBlobStore()
+        let vault = try newVault(store: store)
+        let note = try await vault.createNote(title: "Lisbon lease")
+        try await vault.markOpened(note.id, at: Date())
+        try await vault.delete(note.id)
+        #expect(try store.names().allSatisfy { !$0.hasSuffix(".opened") })
+
+        // Opened and deleted at nearly the same moment. A stray file would make an empty device look full.
+        await #expect(throws: ReaderError.notFound) {
+            try await vault.markOpened(note.id, at: Date())
+        }
+        #expect(try store.names().allSatisfy { !$0.hasSuffix(".opened") })
     }
 
     @Test("A named folder's ID depends on the key, so the server can't recognise the name")

@@ -309,7 +309,7 @@ import TotalityCore
         #expect(model.glance == ModuleGlance(lines: ["Nothing saved yet"], isQuiet: true))
     }
 
-    @Test("The home tile lists the latest changes first, then how many there are")
+    @Test("With nothing opened, the home tile lists the latest changes, then how many there are")
     func glanceListsRecent() async throws {
         let (model, _) = try model()
         for title in ["Lease", "Tax notes", "Trail map"] {
@@ -318,6 +318,22 @@ import TotalityCore
         }
         await model.load()
         #expect(model.glance?.lines == ["Trail map", "Tax notes", "Lease", "3 items"])
+    }
+
+    @Test("The home tile puts what was opened last ahead of what changed last")
+    func glanceFollowsOpening() async throws {
+        let (model, _) = try model()
+        var first: UUID?
+        for title in ["Lease", "Tax notes", "Trail map"] {
+            let note = try #require(await model.newNote())
+            #expect(await model.saveNote(note.id, title: title, body: "Notes on \(title)"))
+            first = first ?? note.id
+        }
+        await model.load()
+        await model.markOpened(try #require(first))
+        #expect(model.glance?.lines == ["Lease", "Trail map", "Tax notes", "3 items"])
+        await model.load()
+        #expect(model.glance?.lines == ["Lease", "Trail map", "Tax notes", "3 items"])
     }
 
     @Test("One item is one item, and the list stops at five titles")

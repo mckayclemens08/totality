@@ -5,6 +5,14 @@ enum ReaderRoute: Hashable {
     case folder(UUID)
     case item(ReaderItem)
     case trash
+
+    var opens: UUID? {
+        switch self {
+        case .folder(let id): id
+        case .item(let item): item.id
+        case .trash: nil
+        }
+    }
 }
 
 /// The Reader's front door: the top of the library, and everything that outlives one screen.
@@ -49,6 +57,10 @@ public struct ReaderHomeView: View {
             Text(model.notice ?? "")
         }
         .task { await model.load() }
+        .onChange(of: path) {
+            guard let id = path.last?.opens else { return }
+            Task { await model.markOpened(id) }
+        }
         .task(id: model.requestedItem) {
             guard let id = model.requestedItem else { return }
             model.requestedItem = nil
@@ -84,7 +96,11 @@ extension ReaderItem {
 
     /// The quiet line under a name.
     var detail: String {
-        let date = updatedAt.formatted(date: .abbreviated, time: .omitted)
+        detail(on: updatedAt)
+    }
+
+    func detail(on date: Date) -> String {
+        let date = date.formatted(date: .abbreviated, time: .omitted)
         return kind == .note ? date : "\(typeName) · \(date)"
     }
 }

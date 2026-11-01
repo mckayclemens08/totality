@@ -149,6 +149,43 @@ struct HomeLayoutTests {
         #expect(layout.tiles.map(\.id) == [.player, .calendar, .reader, .mail])
     }
 
+    @Test("A wide tile rises above two small tiles, whichever of them it's dragged onto", arguments: [ModuleID.messages, .mail])
+    func wideTileRises(onto target: ModuleID) throws {
+        var layout = HomeLayout(modules: [.messages, .mail, .ai])
+        #expect(try place(layout, .ai).row > place(layout, .messages).row)
+
+        layout.move(.ai, to: target)
+
+        #expect(try place(layout, .ai).row == 0)
+        #expect(try place(layout, .messages).row == place(layout, .mail).row)
+        #expect(try place(layout, .messages).row > 0)
+        #expect(!overlaps(layout))
+    }
+
+    @Test("It rises under a tile that isn't moving, too")
+    func wideTileRisesUnderATile() throws {
+        var layout = HomeLayout(modules: [.reader, .messages, .mail, .ai])
+        layout.move(.ai, to: .mail)
+        #expect(layout.tiles.map(\.id) == [.reader, .ai, .messages, .mail])
+    }
+
+    @Test("A wide tile drops below two small tiles the same way", arguments: [ModuleID.messages, .mail])
+    func wideTileDrops(onto target: ModuleID) throws {
+        var layout = HomeLayout(modules: [.messages, .mail, .ai])
+        layout.move(.ai, to: .messages)
+        let top = try place(layout, .ai)
+        layout.move(.ai, to: target)
+        #expect(try place(layout, .ai) != top)
+        #expect(try place(layout, .ai).row > place(layout, .messages).row)
+    }
+
+    @Test("Passing tiles stops as soon as the tile has moved")
+    func moveStopsWhenMoved() {
+        var layout = HomeLayout(modules: [.messages, .mail, .player, .photos])
+        layout.move(.photos, to: .mail)
+        #expect(layout.tiles.map(\.id) == [.messages, .photos, .mail, .player])
+    }
+
     @Test("Move earlier and later follow what's on screen")
     func steps() {
         var layout = layout([(.reader, .small), (.calendar, .small), (.mail, .small)])
