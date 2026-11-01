@@ -59,9 +59,9 @@ struct FlowerLayoutTests {
         #expect(abs(top.x) < 0.001 && top.y < 0)
     }
 
-    @Test("Ten modules stay tappable on the smallest iPhone")
+    @Test("Eleven modules stay tappable on the smallest iPhone")
     func bubblesStayTappable() {
-        #expect(FlowerLayout(ringCount: 9, in: Self.sizes[0]).diameter >= 44)
+        #expect(FlowerLayout(ringCount: 10, in: Self.sizes[0]).diameter >= 44)
     }
 
     @Test func oneModuleSitsAloneInTheCentre() {

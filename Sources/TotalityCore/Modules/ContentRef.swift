@@ -10,7 +10,7 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {
-    case reader, calendar, mail, player, photos, money, ai, messages, calls, social
+    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web
 }
 
 /// Where an object's key lives, matching `content_objects.key_ref`.
