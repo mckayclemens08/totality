@@ -48,6 +48,32 @@ file, so there is nothing to refer to. Listen lives in `TotalityReader` as `List
 When the Player module starts, the transport (play, pause, skip, speed, queue) moves behind a protocol
 in `TotalityCore`, and Listen and music both play through it.
 
+### Natural voices (on trial)
+
+`ListenVoices` is the `SpeechEngine` the app uses. A voice ID starting `kokoro.` goes to `NaturalSpeechEngine`, and anything else goes to the system voice, so `ListenController` doesn't know which engine is speaking. Kokoro-82M runs on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. Text stays on the device, and the only download is the model, about 390 MB, checked against pinned hashes.
+
+- A voice that fails to load falls back to the system voice until the app restarts, and the bar says so.
+- The model gives no word timing, so the bar moves with the share of the audio played.
+- The next sentence is made ahead of time, one at a time, and the voice loads once however many calls wait on it.
+- FluidAudio can log a word it can't pronounce, so `KokoroSynthesizer` turns off its stderr copy. The system log keeps the text private.
+- FluidAudio warns of an uncatchable crash in Apple's audio library on iOS 26.4 and later, reported after 8 to 20 calls on some devices and 54 minutes into one listen. None appeared here, but it can't be ruled out, which is why the voice is opt-in.
+
+Measured on 2026-10-31, on an iPhone 14 on iOS 26.7.1 and a Release build:
+
+| Measure | Result |
+|---|---|
+| Voice load, after the download | 42 to 65 s |
+| Speed once warm | 8× real time |
+| Peak memory | 1,232 MB |
+| Longest run | 896 sentences, 116 minutes of audio, no crash |
+| Heat | Reached "fair" with the model running flat out, never "serious" |
+| Cold sentences | Slower than real time: 15.3 s of audio took 30.5 s |
+| Unexplained stall | One 13 s sentence took 324 s, then one took 35 s. Heat fell during it, so the app may have been in the background |
+
+On a Mac, reading aloud for 7 minutes: first audio 54 s, worst later gap 1.17 s, three gaps over a second, peak memory 2,604 MB.
+
+Not measured: battery use, a locked screen, a real long PDF, and listening on an iPhone with the next sentence made ahead.
+
 ## Attaching across modules
 
 A module offers content through `ContentProvider`, and `ModuleRegistry.providers(for:)` lists what a module can attach, which is everything except its own. Only a `ContentRef` crosses over, so Calendar never imports the Reader. A ref's preview title lives inside the sealed event. `current(_:)` re-reads it, so a renamed item shows its new title and a deleted one says it's gone instead of leaving a dead link. The app opens a ref by handing its ID to the owning module.
