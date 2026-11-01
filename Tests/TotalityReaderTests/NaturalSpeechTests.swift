@@ -4,22 +4,20 @@ import Testing
 
 /// Holds each sentence back until the test lets it through, the way a slow model would.
 private actor FakeVoice: VoiceSynthesizer {
-    nonisolated let needsDownload: Bool
     private(set) var prepared = 0
     private(set) var requests: [(text: String, speed: Double)] = []
-    private let loadError: (any Error)?
+    private let failsPreparing: Bool
     private let unreadable: String?
     private var held: [String: CheckedContinuation<[Float], Never>] = [:]
 
-    init(failsPreparing: Bool = false, loadError: (any Error)? = nil, unreadable: String? = nil, needsDownload: Bool = false) {
-        self.loadError = failsPreparing ? CancellationError() : loadError
+    init(failsPreparing: Bool = false, unreadable: String? = nil) {
+        self.failsPreparing = failsPreparing
         self.unreadable = unreadable
-        self.needsDownload = needsDownload
     }
 
     func prepare() async throws {
         prepared += 1
-        if let loadError { throw loadError }
+        if failsPreparing { throw CancellationError() }
     }
 
     func samples(for text: String, speed: Double) async throws -> [Float] {
@@ -280,25 +278,6 @@ private func until(_ condition: () async -> Bool) async throws {
         #expect(notice != nil)
     }
 
-    @Test("The first run says how big the download is")
-    func downloadStatus() async throws {
-        let engine = engine(FakeVoice(needsDownload: true))
-        var seen: [String?] = []
-        engine.onStatus = { seen.append($0) }
-        engine.speak("One.", speed: 1)
-        let first = try #require(seen.compactMap { $0 }.first)
-        #expect(first.contains("390 MB"))
-    }
-
-    @Test func aLoadedVoiceSaysNothingAboutDownloading() async throws {
-        let engine = engine()
-        var seen: [String?] = []
-        engine.onStatus = { seen.append($0) }
-        engine.speak("One.", speed: 1)
-        let first = try #require(seen.compactMap { $0 }.first)
-        #expect(!first.contains("390 MB"))
-    }
-
     @Test func audioThatWontPlayCountsAsAFailure() async throws {
         output.refuses = true
         let engine = engine()
@@ -446,21 +425,6 @@ private final class Finished {
         try await until { system.spoken == ["•"] }
     }
 
-    @Test("On cellular the download waits, the system voice reads, and it says why")
-    func waitsForWiFi() async throws {
-        let waiting = FakeVoice(loadError: VoiceLoadError.waitingForWiFi, needsDownload: true)
-        let voices = voices(waiting)
-        var statuses: [String?] = []
-        voices.onStatus = { statuses.append($0) }
-        voices.speak("One.", speed: 1)
-        try await until { system.spoken == ["One."] }
-        let status = try #require(statuses.compactMap { $0 }.last)
-        #expect(status.contains("Wi-Fi"))
-        voices.speak("Two.", speed: 1)
-        #expect(system.spoken == ["One.", "Two."])
-        #expect(await waiting.prepared == 1)
-    }
-
     @Test func aVoiceThatWontLoadIsNotAskedForAnythingElse() async throws {
         let broken = FakeVoice(failsPreparing: true)
         let voices = voices(broken)
@@ -481,156 +445,88 @@ private final class Finished {
     }
 }
 
-@Suite struct VoiceDownloadTests {
-    private func directory() throws -> URL {
+@Suite struct VoicePackTests {
+    private let models = "kokoro-82m-coreml/ANE-v3/6c0750dd02ef9d981fb82f147d784a3f171755ee/en"
+
+    private func folder() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
 
-    @Test func theDownloadNeverStartsOnAMeteredNetwork() async throws {
-        guard #available(iOS 18, macOS 15, *) else { return }
-        let voice = KokoroSynthesizer(directory: try directory(), isMetered: { true })
-        #expect(voice.needsDownload)
-        await #expect(throws: VoiceLoadError.self) { try await voice.prepare() }
-        #expect(voice.needsDownload)
-    }
-
-    @Test("The checked files come first, so a failure stops the voice before FluidAudio downloads anything")
-    func checkedFilesComeFirst() async throws {
-        guard #available(iOS 18, macOS 15, *) else { return }
-        let folder = try directory()
-        let voice = KokoroSynthesizer(directory: folder, isMetered: { false }, fetch: { _ in Data("bad".utf8) })
-        await #expect(throws: VoiceLoadError.self) { try await voice.prepare() }
-        #expect(voice.needsDownload)
-    }
-
-    @Test func aDownloadedVoiceDoesNotAskAgain() throws {
-        guard #available(iOS 18, macOS 15, *) else { return }
-        let folder = try directory()
-        FileManager.default.createFile(atPath: folder.appendingPathComponent(KokoroSynthesizer.downloadedMarker).path, contents: nil)
-        #expect(!KokoroSynthesizer(directory: folder, isMetered: { true }).needsDownload)
-    }
-
-    @Test func theNetworkCheckAnswers() async {
-        guard #available(iOS 18, macOS 15, *) else { return }
-        _ = await KokoroSynthesizer.onMeteredNetwork()
-    }
-}
-
-@Suite struct VoiceAssetsTests {
-    private let good = Data("good".utf8)
-    private let goodHash = "770e607624d689265ca6c44884d0807d9b054d23c473c106c72be9de08b7376c"
-
-    private func directory() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
-    private func file(_ directory: URL) -> URL {
-        directory.appendingPathComponent("kokoro/folder/file.bin")
-    }
-
-    @Test func theRightFileIsSaved() async throws {
-        let folder = try directory()
-        let good = good
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in good }
-        #expect(try Data(contentsOf: file(folder)) == good)
-    }
-
-    @Test("A file that doesn't match its hash is refused and never reaches the disk")
-    func aWrongFileIsRefused() async throws {
-        let folder = try directory()
-        await #expect(throws: VoiceLoadError.self) {
-            try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in Data("bad".utf8) }
+    private func pack() throws -> URL {
+        let pack = try folder()
+        let files = FileManager.default
+        try files.createDirectory(at: pack.appendingPathComponent("kokoro"), withIntermediateDirectories: true)
+        try files.createDirectory(at: pack.appendingPathComponent("\(models)/base/Model.mlmodelc"), withIntermediateDirectories: true)
+        for name in ["manifest.json", "base-index-v3.json", "vocab.json"] {
+            try Data(name.utf8).write(to: pack.appendingPathComponent("\(models)/\(name)"))
         }
-        #expect(!FileManager.default.fileExists(atPath: file(folder).path))
+        return pack
     }
 
-    @Test func files_comeFromOneCommit() async throws {
-        let folder = try directory()
-        let good = good
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { url in
-            #expect(url.absoluteString.contains("/resolve/2568276a60ff6e7f312afce3dc9e3f07521cb48d/folder/file.bin"))
-            #expect(url.host() == "huggingface.co")
-            return good
+    @Test func theVoiceIsLinkedNotCopied() throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let pack = try pack()
+        let directory = try folder()
+        try KokoroSynthesizer.link(pack, into: directory)
+        let files = FileManager.default
+        for name in ["\(models)/base/Model.mlmodelc", "\(models)/vocab.json"] {
+            let link = try files.destinationOfSymbolicLink(atPath: directory.appendingPathComponent(name).path)
+            #expect(link == pack.appendingPathComponent(name).path)
         }
     }
 
-    @Test func aGoodFileIsntFetchedAgain() async throws {
-        let folder = try directory()
-        let good = good
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in good }
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in
-            Issue.record("fetched a file it already had")
-            return Data()
+    @Test("FluidAudio lists its folders, and it can't list a link")
+    func foldersAreRealFolders() throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let pack = try pack()
+        let directory = try folder()
+        try KokoroSynthesizer.link(pack, into: directory)
+        let base = directory.appendingPathComponent("\(models)/base")
+        #expect(try FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: nil).count == 1)
+        #expect(throws: (any Error).self) { try FileManager.default.destinationOfSymbolicLink(atPath: base.path) }
+    }
+
+    @Test("FluidAudio can rewrite its two files without touching the read-only app")
+    func theRewrittenFilesAreCopies() throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let pack = try pack()
+        let directory = try folder()
+        try KokoroSynthesizer.link(pack, into: directory)
+        for name in ["manifest.json", "base-index-v3.json"] {
+            let copy = directory.appendingPathComponent("\(models)/\(name)")
+            #expect(throws: (any Error).self) { try FileManager.default.destinationOfSymbolicLink(atPath: copy.path) }
+            try Data("new".utf8).write(to: copy)
+            #expect(try Data(contentsOf: pack.appendingPathComponent("\(models)/\(name)")) == Data(name.utf8))
         }
     }
 
-    @Test func aChangedFileIsReplaced() async throws {
-        let folder = try directory()
-        try FileManager.default.createDirectory(at: file(folder).deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("changed".utf8).write(to: file(folder))
-        let good = good
-        try await VoiceAssets.install(in: folder, files: [("folder/file.bin", goodHash)]) { _ in good }
-        #expect(try Data(contentsOf: file(folder)) == good)
+    @Test("An update moves the app, so the links follow, and the old download goes")
+    func linkingAgainStartsClean() throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let directory = try folder()
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("kokoro"), withIntermediateDirectories: true)
+        let oldDownload = directory.appendingPathComponent("kokoro/weight.bin")
+        try Data("old".utf8).write(to: oldDownload)
+        let first = try pack()
+        try KokoroSynthesizer.link(first, into: directory)
+        #expect(!FileManager.default.fileExists(atPath: oldDownload.path))
+        let moved = try pack()
+        try KokoroSynthesizer.link(moved, into: directory)
+        let vocab = "\(models)/vocab.json"
+        let link = try FileManager.default.destinationOfSymbolicLink(atPath: directory.appendingPathComponent(vocab).path)
+        #expect(link == moved.appendingPathComponent(vocab).path)
+        #expect(FileManager.default.fileExists(atPath: first.appendingPathComponent("\(models)/vocab.json").path))
     }
 
-    @Test("Everything FluidAudio would otherwise fetch unchecked is on the list")
-    func theListIsComplete() {
-        let paths = Set(VoiceAssets.files.map(\.path))
-        for bundle in ["G2PEncoder.mlmodelc", "G2PDecoder.mlmodelc"] {
-            for name in ["coremldata.bin", "metadata.json", "model.mil", "weights/weight.bin", "analytics/coremldata.bin"] {
-                #expect(paths.contains("\(bundle)/\(name)"))
-            }
-        }
-        #expect(paths.contains("g2p_vocab.json"))
-        #expect(paths.contains("us_lexicon_cache.json"))
-        #expect(VoiceAssets.files.allSatisfy { $0.sha256.count == 64 })
-    }
-
-    @Test func theBaseListingIsWrittenWhereFluidAudioReadsIt() async throws {
-        let folder = try directory()
-        try await VoiceAssets.install(in: folder, files: []) { _ in Data() }
-        let written = VoiceAssets.voiceFile(in: folder).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("base-index-v3.json")
-        let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: written)) as? [[String: Any]]
-        #expect(rows?.isEmpty == false)
-        #expect(rows?.allSatisfy { $0["path"] is String && $0["oid"] is String } == true)
-    }
-
-    @Test("A voice pack that doesn't match is thrown away")
-    func aWrongVoiceIsRefused() throws {
-        let folder = try directory()
-        let voice = VoiceAssets.voiceFile(in: folder)
-        try FileManager.default.createDirectory(at: voice.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("bad".utf8).write(to: voice)
-        #expect(throws: VoiceLoadError.self) { try VoiceAssets.checkVoice(in: folder) }
-        #expect(!FileManager.default.fileExists(atPath: voice.path))
-    }
-
-    /// Downloads the whole voice into a new folder, so it only runs when TOTALITY_VOICE_DOWNLOAD is set.
-    @Test func theRealVoiceInstallsAndSpeaks() async throws {
-        guard ProcessInfo.processInfo.environment["TOTALITY_VOICE_DOWNLOAD"] != nil,
+    /// Set TOTALITY_VOICE_PACK to an unpacked Voice folder. The network address is dead, so passing also
+    /// shows nothing was fetched.
+    @Test func theRealPackSpeaksWithoutTheNetwork() async throws {
+        guard let path = ProcessInfo.processInfo.environment["TOTALITY_VOICE_PACK"],
               #available(iOS 18, macOS 15, *) else { return }
-        let folder = try directory()
-        let lexicon = folder.appendingPathComponent("kokoro/us_lexicon_cache.json")
-        try await VoiceAssets.install(in: folder)
-        let installed = try lexicon.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-        let voice = KokoroSynthesizer(directory: folder, isMetered: { false })
+        let voice = KokoroSynthesizer(pack: URL(fileURLWithPath: path), directory: try folder())
         try await voice.prepare()
-        #expect(!voice.needsDownload)
-        #expect(try lexicon.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate == installed)
         #expect(try await voice.samples(for: "It works.", speed: 1).count > 1_000)
-
-        // A changed voice pack that FluidAudio would accept, on a fresh install.
-        try FileManager.default.removeItem(at: folder.appendingPathComponent(KokoroSynthesizer.downloadedMarker))
-        let file = VoiceAssets.voiceFile(in: folder)
-        try Data(count: try Data(contentsOf: file).count).write(to: file)
-        let changed = KokoroSynthesizer(directory: folder, isMetered: { false })
-        await #expect(throws: VoiceLoadError.self) { try await changed.prepare() }
-        #expect(changed.needsDownload)
     }
 }
-

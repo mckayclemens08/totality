@@ -1,17 +1,10 @@
 import AVFoundation
 import FluidAudio
-@preconcurrency import Network
 
 /// Turns text into audio samples. Nothing here leaves the device: only the model is ever downloaded.
 protocol VoiceSynthesizer: Sendable {
-    var needsDownload: Bool { get }
     func prepare() async throws
     func samples(for text: String, speed: Double) async throws -> [Float]
-}
-
-enum VoiceLoadError: Error {
-    case waitingForWiFi
-    case badFile
 }
 
 /// Plays one run of samples at a time.
@@ -78,15 +71,13 @@ final class NaturalSpeechEngine: SpeechEngine {
         loading = load
         if load != nil {
             isWaiting = true
-            onStatus?(synthesizer.needsDownload
-                ? "Downloading Michael's voice, about 390 MB. This can take a few minutes."
-                : "Getting the voice ready. This takes about a minute.")
+            onStatus?("Getting the voice ready. This takes about a minute.")
         }
         making = Task { [weak self] in
             do {
                 try await load?.value
             } catch {
-                self?.failed(text, notice: Self.notice(for: error), turn: current)
+                self?.failed(text, notice: "Michael's voice didn't load, so this is the system voice.", turn: current)
                 return
             }
             do {
@@ -100,13 +91,6 @@ final class NaturalSpeechEngine: SpeechEngine {
                 self?.failed(text, notice: nil, turn: current)
             }
         }
-    }
-
-    private nonisolated static func notice(for error: any Error) -> String {
-        if case VoiceLoadError.waitingForWiFi = error {
-            return "Michael's voice is a 390 MB download, so it's waiting for Wi-Fi. This is the system voice for now."
-        }
-        return "Michael's voice didn't load, so this is the system voice."
     }
 
     func prepare(_ text: String?, speed: Double) {
@@ -211,63 +195,61 @@ final class NaturalSpeechEngine: SpeechEngine {
     }
 }
 
-/// Kokoro, through a pinned FluidAudio release. `VoiceAssets` covers the files FluidAudio doesn't check.
+/// Kokoro, through a pinned FluidAudio release. The voice ships in the app, signed with it.
 @available(iOS 18, macOS 15, *)
 final class KokoroSynthesizer: VoiceSynthesizer {
-    static let downloadedMarker = "downloaded"
-    private let manager: KokoroAneManager
-    private let directory: URL
-    private let downloaded: URL
-    private let isMetered: @Sendable () async -> Bool
-    private let fetch: VoiceAssets.Fetch
+    private static let voice = "am_michael"
+    /// FluidAudio rewrites these two every time, so they can't be links into the read-only app.
+    private static let rewritten: Set<String> = ["manifest.json", "base-index-v3.json"]
 
-    init(
-        directory: URL,
-        isMetered: @escaping @Sendable () async -> Bool = KokoroSynthesizer.onMeteredNetwork,
-        fetch: @escaping VoiceAssets.Fetch = VoiceAssets.fromNetwork
-    ) {
-        self.fetch = fetch
-        self.directory = directory
-        downloaded = directory.appendingPathComponent(Self.downloadedMarker)
-        self.isMetered = isMetered
+    private let manager: KokoroAneManager
+    private let pack: URL
+    private let directory: URL
+
+    init(pack: URL, directory: URL) {
         // A word the model can't read is logged, so the log mustn't reach stderr. The system log keeps it private.
         AppLogger.mirrorsToConsole = false
+        // Everything is in the app, so a missing file should fail here, not go looking on the network.
+        ModelRegistry.baseURL = "https://voice.invalid"
+        self.pack = pack
+        self.directory = directory
         manager = KokoroAneManager(directory: directory, version: .v3)
     }
 
-    var needsDownload: Bool {
-        !FileManager.default.fileExists(atPath: downloaded.path)
-    }
-
-    /// The download never starts on cellular, a hotspot, or Low Data Mode.
     func prepare() async throws {
-        let firstTime = needsDownload
-        if firstTime {
-            if await isMetered() { throw VoiceLoadError.waitingForWiFi }
-            try await VoiceAssets.install(in: directory, fetch: fetch)
-        }
-        try await manager.initialize(preloadVoices: [VoiceAssets.voice])
-        if firstTime {
-            try VoiceAssets.checkVoice(in: directory)
-            FileManager.default.createFile(atPath: downloaded.path, contents: nil)
-        }
+        try Self.link(pack, into: directory)
+        try await manager.initialize(preloadVoices: [Self.voice])
     }
 
-    @Sendable static func onMeteredNetwork() async -> Bool {
-        await withCheckedContinuation { continuation in
-            let monitor = NWPathMonitor()
-            // Serial, so clearing the handler means it can only answer once.
-            monitor.pathUpdateHandler = { path in
-                monitor.pathUpdateHandler = nil
-                monitor.cancel()
-                continuation.resume(returning: path.isExpensive || path.isConstrained)
+    /// FluidAudio needs a folder it can write to, so it gets one made of links into the app, and the voice
+    /// isn't stored twice. The app's path changes with each update, so this is redone every launch. That
+    /// also clears the 390 MB download earlier builds left here.
+    static func link(_ pack: URL, into directory: URL) throws {
+        try? FileManager.default.removeItem(at: directory)
+        try mirror(pack, into: directory)
+    }
+
+    /// Only a compiled model or a file is linked, because FluidAudio can't list a folder that's a link.
+    private static func mirror(_ source: URL, into target: URL) throws {
+        let files = FileManager.default
+        try files.createDirectory(at: target, withIntermediateDirectories: true)
+        for name in try files.contentsOfDirectory(atPath: source.path) {
+            let from = source.appendingPathComponent(name)
+            let to = target.appendingPathComponent(name)
+            var isFolder: ObjCBool = false
+            files.fileExists(atPath: from.path, isDirectory: &isFolder)
+            if isFolder.boolValue, !name.hasSuffix(".mlmodelc") {
+                try mirror(from, into: to)
+            } else if rewritten.contains(name) {
+                try files.copyItem(at: from, to: to)
+            } else {
+                try files.createSymbolicLink(at: to, withDestinationURL: from)
             }
-            monitor.start(queue: DispatchQueue(label: "app.totality.voice-network"))
         }
     }
 
     func samples(for text: String, speed: Double) async throws -> [Float] {
-        let result = try await manager.synthesizeDetailed(text: text, voice: VoiceAssets.voice, speed: Float(speed))
+        let result = try await manager.synthesizeDetailed(text: text, voice: Self.voice, speed: Float(speed))
         return result.samples
     }
 }

@@ -17,9 +17,10 @@ public final class ListenVoices: SpeechEngine {
 
     public convenience init() {
         var natural: NaturalSpeechEngine?
-        if #available(iOS 18, macOS 15, *), let directory = Self.voiceDirectory() {
+        if #available(iOS 18, macOS 15, *), let pack = Bundle.main.url(forResource: "Voice", withExtension: nil),
+           let directory = Self.voiceDirectory() {
             natural = NaturalSpeechEngine(
-                synthesizer: KokoroSynthesizer(directory: directory),
+                synthesizer: KokoroSynthesizer(pack: pack, directory: directory),
                 output: EngineVoiceOutput()
             )
         }
@@ -78,16 +79,8 @@ public final class ListenVoices: SpeechEngine {
         system.speak(text, speed: speed)
     }
 
-    /// Not backed up, because the model can be downloaded again and holds nothing of this person's.
-    nonisolated static func voiceDirectory() -> URL? {
-        guard var directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        directory.appendPathComponent("Voices", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        try? directory.setResourceValues(values)
-        return directory
+    private nonisolated static func voiceDirectory() -> URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Voices", isDirectory: true)
     }
 }

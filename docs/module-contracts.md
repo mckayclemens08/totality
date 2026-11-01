@@ -50,13 +50,19 @@ in `TotalityCore`, and Listen and music both play through it.
 
 ### The natural voice
 
-Listen has one voice, Michael, and no voice menu (owner, 2026-10-31). `ListenVoices` is the `SpeechEngine` the app uses: it sends speech to `NaturalSpeechEngine`, and the system voice is the backup, so `ListenController` doesn't know which is speaking. Michael is Kokoro-82M's `am_michael`, run on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. iOS 17 and macOS 14 use the system voice. Text stays on the device, and the only download is the model, about 390 MB.
+Listen has one voice, Michael, and no voice menu (owner, 2026-10-31). `ListenVoices` is the `SpeechEngine` the app uses: it sends speech to `NaturalSpeechEngine`, and the system voice is the backup, so `ListenController` doesn't know which is speaking. Michael is Kokoro-82M's `am_michael`, run on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. iOS 17 and macOS 14 use the system voice, and their apps still carry the pack. Text stays on the device.
 
-FluidAudio fetches some of the voice from a Hugging Face branch that can change, with no hash check, and it loads those files into the same process as decrypted reader content. So `VoiceAssets` fetches them first, from one commit, against hashes compiled into the app, and FluidAudio finds them on disk. The listing it checks its base models against is compiled in too, and Michael's voice pack is hashed when it arrives. The hashes are checked once per install, and all of this needs checking again whenever the FluidAudio pin moves.
+Michael ships in the app (owner, 2026-10-31), so Listen needs no download and works offline. The app is about 235 MB, of which the voice is 205 MB.
+
+- The pack holds the compiled models, the two voice packs FluidAudio loads, the Apache-2.0 licence, and a notice. Its source models are left out.
+- It's too big for the repo, so it's the `voice-pack-1` asset of a GitHub release on this private repo. `scripts/embed-voice-pack.sh` runs in the Xcode build, checks it against one hash, and caches it. A new Mac needs `gh` signed in for its first build.
+- Being inside the app, the voice is covered by the app's code signature.
+- FluidAudio writes beside its models and the app is read-only, so `KokoroSynthesizer.link` builds a folder in Application Support made of links into the app, and the voice isn't stored twice. It's rebuilt each launch, because the app's path changes with every update.
+- FluidAudio's network address is set to a dead one, so a missing file fails instead of fetching. It always loads its default voice, Heart, which is why that's in the pack.
+- When the FluidAudio pin moves, rebuild the pack with `scripts/build-voice-pack.sh`, publish a new release, and update the tag and hash.
 
 - A voice that fails to load falls back to the system voice until the app restarts, and the bar says so.
 - The model can't read a lone bullet or emoji. That text goes to the system voice and Michael carries on, so a book doesn't change voice over one odd line.
-- The download only starts on an unmetered network. On cellular, a hotspot, or Low Data Mode the system voice reads, and the bar says why. It's tried again after the next launch.
 - The model gives no word timing, so the bar moves with the share of the audio played.
 - The next sentence is made ahead of time, one at a time, and the voice loads once however many calls wait on it.
 - FluidAudio can log a word it can't pronounce, so `KokoroSynthesizer` turns off its stderr copy. The system log keeps the text private.
