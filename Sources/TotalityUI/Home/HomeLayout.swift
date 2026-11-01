@@ -125,12 +125,21 @@ public struct HomeLayout: Equatable, Sendable {
         hero = module
     }
 
-    /// Takes `target`'s place.
+    /// Takes `target`'s place. That alone can change nothing on screen: a wide tile can't share a row,
+    /// so the small tile it passed slides back into the gap beside its neighbour. So this carries on in
+    /// the same direction until the tile really moves.
     public mutating func move(_ module: ModuleID, to target: ModuleID) {
         guard module != target, let from = tiles.firstIndex(where: { $0.id == module }),
               let to = tiles.firstIndex(where: { $0.id == target })
         else { return }
+        let place = placement(of: module)
+        let step = to < from ? -1 : 1
         tiles.insert(tiles.remove(at: from), at: to)
+        var index = to
+        while placement(of: module) == place, tiles.indices.contains(index + step) {
+            tiles.swapAt(index, index + step)
+            index += step
+        }
     }
 
     public func canMove(_ module: ModuleID, by step: Int) -> Bool {
