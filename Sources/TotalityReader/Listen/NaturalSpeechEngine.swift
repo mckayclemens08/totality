@@ -79,7 +79,7 @@ final class NaturalSpeechEngine: SpeechEngine {
         loading = load
         if load != nil {
             isWaiting = true
-            onStatus?("Getting the voice ready. This takes about a minute.")
+            onStatus?("Getting the voice ready.")
         }
         making = Task { [weak self] in
             do {

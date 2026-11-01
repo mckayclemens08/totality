@@ -63,7 +63,7 @@ Michael ships in the app (owner, 2026-10-31), so Listen needs no download and wo
 
 - A voice that fails to load falls back to the system voice until the app restarts, and the bar says so. Below 1 GB free, the bar names storage as the reason.
 - Core ML finishes compiling each model the first time it runs, and that wait reached 18.8 s mid-chapter on the iPhone. `KokoroSynthesizer.prepare` runs three lines that between them use every model, so the wait comes during the load. A failure there ends the voice only when storage is short, because a locked screen may refuse it for the moment.
-- Core ML writes those compiled models to disk. On the iPhone with 263 MB free it failed with "No space left on device", and iOS had already cleared the app's cache, so each launch compiled again. 1 GB is a working figure, not a measured need.
+- Core ML writes those compiled models to disk. On the iPhone with 263 MB free it failed with "No space left on device", and iOS had already cleared the app's cache, so each launch compiled again. Compiling added 282 MB to the cache and took 488 MB of free space in all, so the 1 GB line leaves some room.
 - Text with nothing to say is skipped. A sentence that fails for another reason goes to the system voice and Michael tries the next one. After two in a row the bar says so, until Michael speaks again.
 - `ListenScript` undoes a PDF's line wrapping, keeps abbreviations inside their sentence, and drops lines with no letters. `SpokenText` rewrites what reads badly aloud (a URL becomes its host, citation marks go, "Fig." becomes "Figure") and respells words that change sound with their use, like "read" and "present". `SpokenAudio` trims the second of silence the model leaves around each sentence.
 - The model gives no word timing, so the bar moves with the share of the audio played.
@@ -75,15 +75,16 @@ Measured on 2026-10-31 with the Heart voice, since removed, on an iPhone 14 on i
 
 | Measure | Result |
 |---|---|
-| Voice load, after the download | 42 to 65 s |
+| First word, normal launch | 4.5 s |
+| First word, first launch after an install | 25 s |
 | Speed once warm | 8× real time |
-| Peak memory | 1,232 MB with Heart, 1,310 MB with Michael |
+| Peak memory | 1,428 MB with Michael |
 | Longest run | 1,000 sentences, 129 minutes of audio, no crash |
 | Heat | Reached "fair" with the model running flat out, never "serious" |
 | Cold sentences | Slower than real time: 15.3 s of audio took 30.5 s |
 | Unexplained stall | One 13 s sentence took 324 s, then one took 35 s. Heat fell during it, so the app may have been in the background |
 
-On the iPhone reading aloud with Michael for 2 minutes, with the next sentence made ahead: first audio 57 s, including the load, and worst gap between sentences 0.03 s. The voice loads again after every launch, so that first wait happens each time, not just once.
+On the iPhone with 18 GB free, reading PDF-style text aloud with the warm-up in place: worst gap between sentences 0.03 s on both launches, no failures, and peak memory 1,428 MB. The same phone with 263 MB free waited 38 to 69 s for the first word, paused up to 18.8 s, and peaked at 2,644 MB, because nothing compiled could be kept.
 
 On a Mac, reading aloud for 7 minutes with Heart: first audio 54 s, worst later gap 1.17 s, three gaps over a second, peak memory 2,604 MB.
 
