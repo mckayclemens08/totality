@@ -92,6 +92,15 @@ With a screen locked, generating speech may be refused. If so, each sentence goe
 
 Not measured: battery use, a locked screen, and a real long PDF. The model did read 30 kinds of awkward text, from URLs to a 3,000-character run, with a bullet, emoji, and blank text as the only failures.
 
+## Home page
+
+- `HomeLayout` is the tiles' order and sizes and the optional big square, saved on the device under `home.layout`. It holds module names and sizes, never content, and it isn't synced. Tiles for modules that no longer exist drop out and new modules join the end, so an update can't lose a tile.
+- A module's tile content is a `ModuleGlance` in `TotalityCore`: short lines, most important first. `ReaderModel` and `CalendarModel` each build one, and `RootView` hands them to `HomeView`, so `TotalityUI` imports no module. A bigger tile shows more of the lines because it shows as many as fit. Glances come from private content, so they stay in memory.
+- A glance is nil until the module has opened, so a tile can't claim it's empty while it's loading. A module that can't open shows its icon and title, and opening it reports the key problem.
+- Content now opens with the home page, after the device is settled. It's the same step as opening a module, under the same key rules, and it writes nothing, so a fresh install still reads as empty when an account signs in.
+- On iPhone, holding a tile is a UIKit long press on the enclosing scroll view. SwiftUI's hold-then-drag gesture stopped the page scrolling on iOS 17. The Mac uses the SwiftUI gesture, because a mouse drag doesn't scroll.
+- `HomeStyle.defaultKey` holds the default home page on this device. The home page's own button lasts until the app restarts.
+
 ## Attaching across modules
 
 A module offers content through `ContentProvider`, and `ModuleRegistry.providers(for:)` lists what a module can attach, which is everything except its own. Only a `ContentRef` crosses over, so Calendar never imports the Reader. A ref's preview title lives inside the sealed event. `current(_:)` re-reads it, so a renamed item shows its new title and a deleted one says it's gone instead of leaving a dead link. The app opens a ref by handing its ID to the owning module.
