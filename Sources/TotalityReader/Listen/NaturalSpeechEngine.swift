@@ -4,7 +4,7 @@ import FluidAudio
 /// Turns text into audio samples. Nothing here leaves the device: only the model is ever downloaded.
 protocol VoiceSynthesizer: Sendable {
     func prepare() async throws
-    func samples(for text: String, speed: Double) async throws -> [Float]
+    func speech(for text: String, speed: Double) async throws -> VoiceSpeech
 }
 
 /// Why the voice couldn't load, when that's something the listener can fix.
@@ -27,8 +27,8 @@ protocol VoiceOutput: AnyObject {
 /// phone, so the next one is made ahead of time. Otherwise every sentence would end in a long pause.
 @MainActor
 final class NaturalSpeechEngine: SpeechEngine {
-    /// The model gives no word timing, so the bar is moved by how much of the audio has played.
-    private static let positionPause = Duration.milliseconds(250)
+    /// Short enough for a word highlight to keep up at twice the speed.
+    private static let positionPause = Duration.milliseconds(50)
     /// One failed sentence is about that sentence. Two in a row is about the voice.
     private static let failuresBeforeNotice = 2
 
@@ -56,9 +56,12 @@ final class NaturalSpeechEngine: SpeechEngine {
     /// Moves on with every speak and stop, so work that finishes late can see it's out of date.
     private var turn = 0
     private var making: Task<Void, Never>?
-    private var ahead: (request: Request, samples: Task<[Float], any Error>)?
+    private var ahead: (request: Request, speech: Task<VoiceSpeech, any Error>)?
     private var wanted: Request?
     private var position: Task<Void, Never>?
+    /// What's playing, and the last place reported, so a place is only reported when it changes.
+    private var playing: (length: Int, marks: [VoiceMark]) = (0, [])
+    private var lastOffset: Int?
     private var failuresInARow = 0
 
     init(synthesizer: any VoiceSynthesizer, output: any VoiceOutput) {
@@ -70,8 +73,8 @@ final class NaturalSpeechEngine: SpeechEngine {
         stop()
         let current = turn
         let request = Request(text: text, speed: speed)
-        let held = ahead?.request == request ? ahead?.samples : nil
-        if held == nil { ahead?.samples.cancel() }
+        let held = ahead?.request == request ? ahead?.speech : nil
+        if held == nil { ahead?.speech.cancel() }
         ahead = nil
         wanted = nil
         let synthesizer = self.synthesizer
@@ -93,12 +96,12 @@ final class NaturalSpeechEngine: SpeechEngine {
             }
             self?.isReady = true
             do {
-                let samples = if let held {
+                let speech = if let held {
                     try await held.value
                 } else {
-                    try await synthesizer.samples(for: text, speed: speed)
+                    try await synthesizer.speech(for: text, speed: speed)
                 }
-                self?.made(samples, text: text, turn: current)
+                self?.made(speech, text: text, turn: current)
             } catch {
                 self?.failed(text, notice: nil, turn: current)
             }
@@ -107,14 +110,14 @@ final class NaturalSpeechEngine: SpeechEngine {
 
     func prepare(_ text: String?, speed: Double) {
         guard let text else {
-            ahead?.samples.cancel()
+            ahead?.speech.cancel()
             ahead = nil
             wanted = nil
             return
         }
         let request = Request(text: text, speed: speed)
         guard ahead?.request != request else { return }
-        ahead?.samples.cancel()
+        ahead?.speech.cancel()
         ahead = nil
         wanted = request
         makeAhead()
@@ -126,7 +129,7 @@ final class NaturalSpeechEngine: SpeechEngine {
         self.wanted = nil
         let synthesizer = self.synthesizer
         ahead = (wanted, Task {
-            try await synthesizer.samples(for: wanted.text, speed: wanted.speed)
+            try await synthesizer.speech(for: wanted.text, speed: wanted.speed)
         })
     }
 
@@ -152,37 +155,44 @@ final class NaturalSpeechEngine: SpeechEngine {
         output.stop()
     }
 
-    /// One sentence's position, worked out from the audio. Offsets are UTF-16, the same as speech's.
-    static func offset(forFraction fraction: Double, inTextOfLength length: Int) -> Int {
-        Int(min(max(fraction, 0), 1) * Double(length))
+    /// One sentence's position: the word that's started, or without marks an estimate from the audio
+    /// played. Offsets are UTF-16, the same as speech's.
+    static func offset(forFraction fraction: Double, inTextOfLength length: Int, marks: [VoiceMark] = []) -> Int {
+        let played = min(max(fraction, 0), 1)
+        guard !marks.isEmpty else { return Int(played * Double(length)) }
+        return marks.last { $0.fraction <= played }?.offset ?? marks[0].offset
     }
 
-    func reportPosition(textLength: Int) {
-        onWord?(Self.offset(forFraction: output.playedFraction, inTextOfLength: textLength))
+    func reportPosition() {
+        let offset = Self.offset(forFraction: output.playedFraction, inTextOfLength: playing.length, marks: playing.marks)
+        guard offset != lastOffset else { return }
+        lastOffset = offset
+        onWord?(offset)
     }
 
-    private func made(_ samples: [Float], text: String, turn: Int) {
+    private func made(_ speech: VoiceSpeech, text: String, turn: Int) {
         guard turn == self.turn else { return }
         making = nil
         doneWaiting()
         if failuresInARow >= Self.failuresBeforeNotice { onStatus?(nil) }
         failuresInARow = 0
-        guard !samples.isEmpty else {
+        guard !speech.samples.isEmpty else {
             played(turn: turn)
             return
         }
         do {
-            try output.play(samples) { [weak self] in self?.played(turn: turn) }
+            try output.play(speech.samples) { [weak self] in self?.played(turn: turn) }
         } catch {
             failed(text, notice: nil, turn: turn)
             return
         }
         isPlaying = true
         if isPaused { output.pause() }
-        let length = text.utf16.count
+        playing = (text.utf16.count, speech.marks)
+        lastOffset = nil
         position = Task { [weak self] in
             while !Task.isCancelled {
-                self?.reportPosition(textLength: length)
+                self?.reportPosition()
                 try? await Task.sleep(for: Self.positionPause)
             }
         }
@@ -299,13 +309,19 @@ final class KokoroSynthesizer: VoiceSynthesizer {
         }
     }
 
-    func samples(for text: String, speed: Double) async throws -> [Float] {
+    func speech(for text: String, speed: Double) async throws -> VoiceSpeech {
         do {
             let spoken = SpokenText.prepared(text)
-            return SpokenAudio.trimmed(try await manager.synthesizeDetailed(text: spoken, voice: Self.voice, speed: Float(speed)).samples)
+            let result = try await manager.synthesizeDetailed(text: spoken, voice: Self.voice, speed: Float(speed))
+            let kept = SpokenAudio.kept(result.samples)
+            let marks = VoiceTiming.marks(
+                text: text, said: result.normalizedText, phonemes: result.phonemes,
+                durations: result.predictedDurations.map(Int.init), kept: kept
+            )
+            return VoiceSpeech(samples: Array(result.samples[kept]), marks: marks)
         } catch KokoroAneError.inputProcessingFailed {
             // Nothing in it can be said, like a line of emoji, so there's nothing to hand to another voice.
-            return []
+            return VoiceSpeech(samples: [])
         }
     }
 }
