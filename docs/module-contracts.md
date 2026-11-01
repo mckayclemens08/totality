@@ -74,7 +74,7 @@ Michael ships in the app (owner, 2026-10-31), so Listen needs no download and wo
 - Core ML writes those compiled models to disk. On the iPhone with 263 MB free it failed with "No space left on device", and iOS had already cleared the app's cache, so each launch compiled again. Compiling added 282 MB to the cache and took 488 MB of free space in all, so the 1 GB line leaves some room.
 - Text with nothing to say is skipped. A sentence that fails for another reason goes to the system voice and Michael tries the next one. After two in a row the bar says so, until Michael speaks again.
 - `ListenScript` undoes a PDF's line wrapping, keeps abbreviations inside their sentence, and drops lines with no letters. `SpokenText` rewrites what reads badly aloud (a URL becomes its host, citation marks go, "Fig." becomes "Figure") and respells words that change sound with their use, like "read" and "present". `SpokenAudio` trims the second of silence the model leaves around each sentence.
-- The model gives no word timing, so the bar moves with the share of the audio played.
+- The bar moves with the share of the audio played. Word places come from the model's own timing, under Read along below.
 - The next sentence is made ahead of time, one at a time, and the voice loads once however many calls wait on it.
 - FluidAudio can log a word it can't pronounce, so `KokoroSynthesizer` turns off its stderr copy. The system log keeps the text private.
 - FluidAudio warns of an uncatchable crash in Apple's audio library on iOS 26.4 and later, reported after 8 to 20 calls on some devices and 54 minutes into one listen. None appeared here, but it can't be ruled out, and the app can't catch it to fall back.
@@ -99,6 +99,31 @@ On a Mac, reading aloud for 7 minutes with Heart: first audio 54 s, worst later 
 With a screen locked, generating speech may be refused. If so, each sentence goes to the system voice and Michael returns when the app is back in front. That reasoning hasn't been tried on a device.
 
 Not measured: battery use, a locked screen, and a real long PDF. The model did read 30 kinds of awkward text, from URLs to a 3,000-character run, with a bullet, emoji, and blank text as the only failures.
+
+### Read along
+
+Read along follows Listen on the page and lets a tap on a sentence move Listen there (owner, 2026-11-01). The spec is issue 30. It's a toolbar button on every document, off until it's turned on, and `reader.readAlong` remembers it on that device for every document. It holds only on or off, and nothing here touches the network or stores any content.
+
+- Notes, Word, EPUB, Markdown, and plain text open as `ReadAlongView` while it's on. A tap means "go here", so nothing can be edited or selected there, and a note saves as it switches. Its paragraphs and headings come from `ReadAlongPage`, cut up off the main thread because a long book takes seconds.
+- PDFs keep their real pages, with the marks drawn as `highlightedSelections`. Listen reads `PDFDocument.string`, which is the pages joined by a newline, so `PDFPageMap` finds each page in it in order and turns places in the text into places on a page and back. All 16 pages of the founding brief lined up. A PDF with no text says so on the page.
+- Every sentence is a link to `totality-read-along://sentence/N`, and `ReadAlongView` handles that scheme itself, so nothing opens outside the app. Sentence text is plain, so a document's own links can't reach this. On iOS 17 the links never received a tap in that scroll view until the text also had a tap gesture of its own, which is why `ReadAlongParagraph` has an empty one.
+- `ListenScript` keeps each sentence's place in the document's own text, so a place survives the tidying `ListenScript` and `SpokenText` do for speech. `range(ofSentence:)` and `range(ofWordIn:spoken:)` give the marks.
+- The marks show only when the `ListenScript.fingerprint` of what's playing matches this page. So a document that isn't playing stays unmarked, and so does a note edited since Listen started. A tap then starts Listen on this text. The fingerprint is `hashValue`, which changes every launch, and it's never stored.
+- `ScrollWatch` tells the person scrolling from the page following Listen, and "Back to reading" appears once they've scrolled.
+- The Listen bar is stacked below the navigation stack. It used to be a safe area inset, which never reached a pushed page, so the end of a document stayed behind the bar.
+
+Sentences are exact with both voices, because Listen speaks one sentence at a time. The system voice reports each word as it speaks. Michael doesn't, but the model reports how many frames it gives each sound (600 samples a frame, or 25 ms at 24 kHz). `VoiceTiming` finds where each word starts from the spaces in the phonemes, and lines up the words the model said with the words on the page, because the text was rewritten for speech. `NaturalSpeechEngine` reports the place every 50 ms. A rewritten word shares its place with its neighbours, so the word mark waits there, and a sentence of over about 510 sounds is split by the model and has no marks, so it moves with the share of the audio played instead.
+
+Measured on 2026-11-01 on a Mac, on 60 sentences of the founding brief (162 commas), by comparing where the timing puts each comma with the quietest point of the audio within 400 ms of it:
+
+| Timing | Speed | Median miss | Within 100 ms |
+|---|---|---|---|
+| Michael's timing | 1× | 75 ms | 60% |
+| Counting letters, the plan before this | 1× | 375 ms | 12% |
+
+The misses over 100 ms aren't all timing errors, because a comma isn't always the quietest point nearby: the search reaches other gaps, and the worst results sit at its 400 ms limit. 59 of the 60 sentences got marks, and the other was too long. 1,377 of 1,472 written words got a mark of their own. Whether it looks right on a real document on the iPhone is still the owner's call.
+
+Speed happens in playback, through `AVAudioUnitTimePitch`, and Michael is always made at the model's own pace. The model's speed setting squeezes every sound, so at 2× Michael slurred his words (owner, 2026-11-01). That setting is now always 1, so the marks above hold at every speed, each miss shrinks with the speed, and a speed change keeps the sentence made ahead. At 1× the unit is bypassed, so that audio is exactly what the model made. The player's clock follows the speed: on a Mac and in the iOS simulator, a 3 s buffer at 0.75× to 2× reported its progress at the right pace and finished within 0.2 s of the expected time, the same margin as 1×. The system voice keeps its own rate.
 
 ## Home page
 

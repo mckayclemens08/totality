@@ -5,14 +5,19 @@ import Testing
 /// Holds each sentence back until the test lets it through, the way a slow model would.
 private actor FakeVoice: VoiceSynthesizer {
     private(set) var prepared = 0
-    private(set) var requests: [(text: String, speed: Double)] = []
+    private(set) var requests: [String] = []
     private let failsPreparing: Bool
     private let storageFull: Bool
     private let unreadable: Set<String>
     private let silent: String?
+    private let marks: [String: [VoiceMark]]
     private var held: [String: CheckedContinuation<[Float], Never>] = [:]
 
-    init(failsPreparing: Bool = false, storageFull: Bool = false, unreadable: Set<String> = [], silent: String? = nil) {
+    init(
+        failsPreparing: Bool = false, storageFull: Bool = false, unreadable: Set<String> = [], silent: String? = nil,
+        marks: [String: [VoiceMark]] = [:]
+    ) {
+        self.marks = marks
         self.failsPreparing = failsPreparing
         self.storageFull = storageFull
         self.unreadable = unreadable
@@ -25,11 +30,11 @@ private actor FakeVoice: VoiceSynthesizer {
         if failsPreparing { throw CancellationError() }
     }
 
-    func samples(for text: String, speed: Double) async throws -> [Float] {
-        requests.append((text, speed))
+    func speech(for text: String) async throws -> VoiceSpeech {
+        requests.append(text)
         if unreadable.contains(text) { throw CancellationError() }
-        if text == silent { return [] }
-        return await withCheckedContinuation { held[text] = $0 }
+        if text == silent { return VoiceSpeech(samples: []) }
+        return VoiceSpeech(samples: await withCheckedContinuation { held[text] = $0 }, marks: marks[text] ?? [])
     }
 
     func release(_ text: String) {
@@ -45,15 +50,17 @@ private actor FakeVoice: VoiceSynthesizer {
 private final class FakeOutput: VoiceOutput {
     var playedFraction = 0.0
     var played: [[Float]] = []
+    var rates: [Double] = []
     var pauses = 0
     var resumes = 0
     var stops = 0
     var refuses = false
     var onDone: (@MainActor @Sendable () -> Void)?
 
-    func play(_ samples: [Float], onDone: @escaping @MainActor @Sendable () -> Void) throws {
+    func play(_ samples: [Float], rate: Double, onDone: @escaping @MainActor @Sendable () -> Void) throws {
         if refuses { throw CancellationError() }
         played.append(samples)
+        rates.append(rate)
         self.onDone = onDone
     }
 
@@ -122,26 +129,38 @@ private func until(_ condition: () async -> Bool) async throws {
     func aheadIsUsed() async throws {
         let engine = engine()
         try await speakAndPlay(engine, "One.")
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
         try await until { await voice.isHeld("Two.") }
         engine.stop()
         engine.speak("Two.", speed: 1)
         await voice.release("Two.")
         try await until { output.played.count == 2 }
-        #expect(await voice.requests.map(\.text) == ["One.", "Two."])
+        #expect(await voice.requests == ["One.", "Two."])
     }
 
-    @Test("A speed or sentence change throws away what was made ahead")
+    @Test("A different sentence throws away what was made ahead")
     func aheadIsDropped() async throws {
         let engine = engine()
         try await speakAndPlay(engine, "One.")
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
         try await until { await voice.isHeld("Two.") }
-        engine.speak("Two.", speed: 1.5)
-        try await until { await voice.requests.count == 3 }
+        engine.speak("Three.", speed: 1)
+        try await until { await voice.isHeld("Three.") }
         await voice.release("Two.")
-        let request = try #require(await voice.requests.last)
-        #expect(request.speed == 1.5)
+        #expect(await voice.requests == ["One.", "Two.", "Three."])
+    }
+
+    @Test("Speed goes to playback, so a new speed keeps what was made ahead")
+    func speedIsNotTheModels() async throws {
+        let engine = engine()
+        try await speakAndPlay(engine, "One.")
+        engine.prepare("Two.")
+        try await until { await voice.isHeld("Two.") }
+        engine.speak("Two.", speed: 2)
+        await voice.release("Two.")
+        try await until { output.played.count == 2 }
+        #expect(await voice.requests == ["One.", "Two."])
+        #expect(output.rates == [1, 2])
     }
 
     @Test("Skipping while the voice loads doesn't load it again")
@@ -157,10 +176,10 @@ private func until(_ condition: () async -> Bool) async throws {
     func aheadWaitsItsTurn() async throws {
         let engine = engine()
         engine.speak("One.", speed: 1)
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
         try await until { await voice.isHeld("One.") }
         try await Task.sleep(for: .milliseconds(30))
-        #expect(await voice.requests.map(\.text) == ["One."])
+        #expect(await voice.requests == ["One."])
         await voice.release("One.")
         try await until { await voice.requests.count == 2 }
         #expect(await voice.prepared == 1)
@@ -171,17 +190,17 @@ private func until(_ condition: () async -> Bool) async throws {
         let engine = engine()
         try await speakAndPlay(engine, "One.")
         engine.speak("Two.", speed: 1)
-        engine.prepare("Three.", speed: 1)
+        engine.prepare("Three.")
         try await until { await voice.isHeld("Two.") }
         try await Task.sleep(for: .milliseconds(30))
-        #expect(await voice.requests.map(\.text) == ["One.", "Two."])
+        #expect(await voice.requests == ["One.", "Two."])
         await voice.release("Two.")
         try await until { await voice.isHeld("Three.") }
     }
 
     @Test func aHintBeforeTheVoiceHasLoadedMakesNothing() async throws {
         let engine = engine()
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
         try await Task.sleep(for: .milliseconds(30))
         #expect(await voice.requests.isEmpty)
         #expect(await voice.prepared == 0)
@@ -190,8 +209,8 @@ private func until(_ condition: () async -> Bool) async throws {
     @Test func aRepeatedHintOnlyMakesItOnce() async throws {
         let engine = engine()
         try await speakAndPlay(engine, "One.")
-        engine.prepare("Two.", speed: 1)
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
+        engine.prepare("Two.")
         try await until { await voice.isHeld("Two.") }
         try await Task.sleep(for: .milliseconds(30))
         #expect(await voice.requests.count == 2)
@@ -260,13 +279,52 @@ private func until(_ condition: () async -> Bool) async throws {
         let engine = engine()
         var offsets: [Int] = []
         engine.onWord = { offsets.append($0) }
+        try await speakAndPlay(engine, String(repeating: "Lisbon ", count: 6))
         output.playedFraction = 0.5
-        engine.reportPosition(textLength: 40)
+        engine.reportPosition()
         output.playedFraction = 1.5
-        engine.reportPosition(textLength: 40)
+        engine.reportPosition()
         output.playedFraction = -1
-        engine.reportPosition(textLength: 40)
-        #expect(offsets == [20, 40, 0])
+        engine.reportPosition()
+        #expect(offsets.suffix(3) == [21, 42, 0])
+    }
+
+    @Test("With marks, the position is the word that's started, and it's reported once")
+    func positionFollowsTheMarks() async throws {
+        let sentence = "Take the tram."
+        let marks = [VoiceMark(fraction: 0.1, offset: 0), VoiceMark(fraction: 0.4, offset: 5), VoiceMark(fraction: 0.7, offset: 9)]
+        let marked = FakeVoice(marks: [sentence: marks])
+        let engine = engine(marked)
+        var offsets: [Int] = []
+        engine.onWord = { offsets.append($0) }
+        engine.speak(sentence, speed: 1)
+        try await until { await marked.isHeld(sentence) }
+        await marked.release(sentence)
+        try await until { !output.played.isEmpty }
+        for fraction in [0.05, 0.2, 0.3, 0.45, 0.69, 0.71, 1] {
+            output.playedFraction = fraction
+            engine.reportPosition()
+        }
+        #expect(offsets == [0, 5, 9])
+    }
+
+    @Test("A new sentence reports its first word, even at the same place as the last sentence's")
+    func positionStartsAgainEachSentence() async throws {
+        let first = [VoiceMark(fraction: 0, offset: 0)]
+        let marked = FakeVoice(marks: ["One.": first, "Two.": first])
+        let engine = engine(marked)
+        var offsets: [Int] = []
+        engine.onWord = { offsets.append($0) }
+        for sentence in ["One.", "Two."] {
+            let played = output.played.count
+            engine.speak(sentence, speed: 1)
+            try await until { await marked.isHeld(sentence) }
+            await marked.release(sentence)
+            try await until { output.played.count > played }
+            output.playedFraction = 0.5
+            engine.reportPosition()
+        }
+        #expect(offsets == [0, 0])
     }
 
     @Test("A voice that fails passes its sentence on instead of going quiet")
@@ -345,7 +403,7 @@ private final class Finished {
 @MainActor
 @Suite struct RealVoiceOutputTests {
     @Test func emptyAudioIsRefused() {
-        #expect(throws: (any Error).self) { try EngineVoiceOutput().play([]) {} }
+        #expect(throws: (any Error).self) { try EngineVoiceOutput().play([], rate: 1) {} }
     }
 
     /// Runs the real audio engine when TOTALITY_SPEECH_TEST is set. Its finish callback arrives on
@@ -354,7 +412,7 @@ private final class Finished {
         guard ProcessInfo.processInfo.environment["TOTALITY_SPEECH_TEST"] != nil else { return }
         let output = EngineVoiceOutput()
         let finished = Finished()
-        try output.play([Float](repeating: 0, count: 4_800)) { finished.value = true }
+        try output.play([Float](repeating: 0, count: 4_800), rate: 2) { finished.value = true }
         try await until { finished.value }
     }
 }
@@ -379,8 +437,9 @@ private final class Finished {
         listen.play(try #require(ListenTrack(id: UUID(), title: "Track", text: "One. Two.")))
         try await until { await voice.isHeld("One.") }
         #expect(system.spoken.isEmpty)
-        let request = try #require(await voice.requests.first)
-        #expect(request.speed == 1.5)
+        await voice.release("One.")
+        try await until { !output.played.isEmpty }
+        #expect(output.rates == [1.5])
     }
 
     @Test func theNextSentenceIsHintedAndTheHintEndsWithTheTrack() throws {
@@ -472,7 +531,7 @@ private final class Finished {
         try await until { await bad.isHeld("One.") }
         await bad.release("One.")
         try await until { output.played.count == 1 }
-        voices.prepare("•", speed: 1)
+        voices.prepare("•")
         try await until { await bad.requests.count == 2 }
         voices.speak("•", speed: 1)
         try await until { system.spoken == ["•"] }
@@ -519,7 +578,7 @@ private final class Finished {
         let voices = voices(broken)
         voices.speak("One.", speed: 1)
         try await until { system.spoken == ["One."] }
-        voices.prepare("Two.", speed: 1)
+        voices.prepare("Two.")
         try await Task.sleep(for: .milliseconds(30))
         #expect(await broken.requests.isEmpty)
         #expect(await broken.prepared == 1)
@@ -616,7 +675,9 @@ private final class Finished {
               #available(iOS 18, macOS 15, *) else { return }
         let voice = KokoroSynthesizer(pack: URL(fileURLWithPath: path), directory: try folder())
         try await voice.prepare()
-        #expect(try await voice.samples(for: "It works.", speed: 1).count > 1_000)
+        let speech = try await voice.speech(for: "It cost $45 at the door, which was fair.")
+        #expect(speech.samples.count > 1_000)
+        #expect(speech.marks.map(\.offset) == [0, 3, 8, 12, 15, 19, 25, 31, 35])
     }
 }
 
@@ -716,7 +777,7 @@ private final class Finished {
         let rate = 24_000
         let speech = [Float](repeating: 0.5, count: rate)
         let padded = [Float](repeating: 0, count: rate / 2) + speech + [Float](repeating: 0, count: rate)
-        let trimmed = SpokenAudio.trimmed(padded)
+        let trimmed = Array(padded[SpokenAudio.kept(padded)])
         #expect(trimmed.count == rate + Int(0.03 * 24_000) + Int(0.18 * 24_000))
         #expect(trimmed.first == 0)
         #expect(trimmed[Int(0.03 * 24_000)] == 0.5)
@@ -724,6 +785,117 @@ private final class Finished {
 
     @Test func silenceAloneIsLeftAlone() {
         let quiet = [Float](repeating: 0, count: 100)
-        #expect(SpokenAudio.trimmed(quiet) == quiet)
+        #expect(Array(quiet[SpokenAudio.kept(quiet)]) == quiet)
+    }
+}
+
+/// The phonemes and durations here are shaped like the model's, which was run to check them.
+@Suite struct VoiceTimingTests {
+    /// One frame for each sound, with the start and end frames the model adds around a sentence.
+    private func marks(_ text: String, said: String? = nil, phonemes: String, lead: Int = 0, kept: Range<Int>? = nil) -> [VoiceMark] {
+        let durations = [lead] + phonemes.unicodeScalars.map { _ in 1 } + [0]
+        let total = durations.reduce(0, +) * 600
+        return VoiceTiming.marks(text: text, said: said, phonemes: phonemes, durations: durations, kept: kept ?? 0..<total)
+    }
+
+    @Test("Each word starts where the model put its first sound")
+    func words() {
+        let found = marks("Take the tram.", phonemes: "tAk ði tɹæm.")
+        #expect(found.map(\.offset) == [0, 5, 9])
+        #expect(found.map(\.fraction) == [0, 4.0 / 12.0, 7.0 / 12.0])
+    }
+
+    @Test("A long sound moves the next word, which a count of letters couldn't")
+    func durations() {
+        let found = VoiceTiming.marks(
+            text: "Wait, go.", said: nil, phonemes: "wAt, ɡO.", durations: [0, 1, 1, 1, 1, 12, 1, 1, 1, 0], kept: 0..<(20 * 600)
+        )
+        #expect(found.map(\.fraction) == [0, 0.8])
+    }
+
+    @Test("Marks are measured from where the kept audio starts")
+    func trimmedStart() {
+        let found = marks("Take the tram.", phonemes: "tAk ði tɹæm.", lead: 18, kept: (18 * 600)..<(30 * 600))
+        #expect(found.map(\.fraction) == [0, 4.0 / 12.0, 7.0 / 12.0])
+    }
+
+    @Test("Audio trimmed from the front can't put a word before the start")
+    func cutIntoTheFirstWord() {
+        let found = marks("Take the tram.", phonemes: "tAk ði tɹæm.", kept: (2 * 600)..<(12 * 600))
+        #expect(found.first == VoiceMark(fraction: 0, offset: 0))
+    }
+
+    @Test("A number read out loud stays on the one written word")
+    func spelledOut() {
+        let found = marks(
+            "It cost $45 at the door.", said: "It cost forty five dollars at the door.",
+            phonemes: "ɪt kɔst fɔɹTi fIv dɑləɹz æt ði dɔɹ."
+        )
+        #expect(found.map(\.offset) == [0, 3, 8, 12, 15, 19])
+    }
+
+    @Test("A written word that isn't read is passed over")
+    func notRead() {
+        let found = marks("See the map [12] for more.", said: "See the map for more.", phonemes: "si ði mæp fɔɹ mɔɹ.")
+        #expect(found.map(\.offset) == [0, 4, 8, 17, 21])
+    }
+
+    @Test("A respelled word lines up with what's written")
+    func respelled() {
+        let found = marks("See Fig. 3 today.", said: "See Figure three today.", phonemes: "si fɪɡjəɹ θɹi tədA.")
+        #expect(found.map(\.offset) == [0, 4, 9, 11])
+    }
+
+    @Test("A hyphenated word is two words to the model")
+    func hyphenated() {
+        let found = marks("We were well-known here.", phonemes: "wi wɜɹ wɛl nOn hɪɹ.")
+        #expect(found.map(\.offset) == [0, 3, 8, 13, 19])
+    }
+
+    @Test("Offsets count UTF-16, so an emoji can't shift the words after it")
+    func emoji() {
+        let found = marks("Send 🧗 now.", said: "Send now.", phonemes: "sɛnd naʊ.")
+        #expect(found.map(\.offset) == [0, 8])
+    }
+
+    @Test("When sounds and words don't match, the marks stay in order and in range")
+    func uneven() {
+        let text = "One two three four."
+        let found = marks(text, phonemes: "wʌn tu θɹi fɔɹ fIv sɪks.")
+        #expect(found.map(\.offset) == found.map(\.offset).sorted())
+        #expect(Set(found.map(\.offset)).count == found.count)
+        #expect(found.allSatisfy { $0.offset < text.utf16.count })
+    }
+
+    @Test("A sentence the model made in pieces has no marks, so the estimate takes over")
+    func pieces() {
+        #expect(VoiceTiming.marks(text: "Take the tram.", said: nil, phonemes: "tAk ði tɹæm.", durations: [1, 2, 3], kept: 0..<600).isEmpty)
+    }
+
+    @Test("A sentence with too many sounds' timings has no marks either")
+    func tooManyDurations() {
+        let durations = Array(repeating: 1, count: 16)
+        #expect(VoiceTiming.marks(text: "Take the tram.", said: nil, phonemes: "tAk ði tɹæm.", durations: durations, kept: 0..<9600).isEmpty)
+    }
+
+    @Test("Spoken words find written ones whatever their case")
+    func caseDoesNotMatter() {
+        let found = marks("Take the [12] tram.", said: "TAKE THE TRAM.", phonemes: "tAk ði tɹæm.")
+        #expect(found.map(\.offset) == [0, 5, 14])
+    }
+
+    @Test("No text or no audio has no marks")
+    func nothing() {
+        #expect(marks("", phonemes: "").isEmpty)
+        #expect(marks("Take the tram.", phonemes: "tAk ði tɹæm.", kept: 0..<0).isEmpty)
+    }
+
+    @MainActor
+    @Test("Before the first mark, the position is the first word")
+    func beforeTheFirstMark() {
+        let marks = [VoiceMark(fraction: 0.2, offset: 4), VoiceMark(fraction: 0.5, offset: 9)]
+        #expect(NaturalSpeechEngine.offset(forFraction: 0.1, inTextOfLength: 20, marks: marks) == 4)
+        #expect(NaturalSpeechEngine.offset(forFraction: 0.6, inTextOfLength: 20, marks: marks) == 9)
+        #expect(NaturalSpeechEngine.offset(forFraction: 0.6, inTextOfLength: 20) == 12)
     }
 }

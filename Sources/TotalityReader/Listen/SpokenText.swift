@@ -62,12 +62,12 @@ enum SpokenAudio {
     private static let keptAfter = 0.18
 
     /// The model pads each sentence with about a second of silence, which makes reading drag.
-    static func trimmed(_ samples: [Float]) -> [Float] {
+    static func kept(_ samples: [Float]) -> Range<Int> {
         guard let first = samples.firstIndex(where: { abs($0) > quiet }),
               let last = samples.lastIndex(where: { abs($0) > quiet })
-        else { return samples }
+        else { return samples.indices }
         let start = max(0, first - Int(keptBefore * sampleRate))
         let end = min(samples.count, last + 1 + Int(keptAfter * sampleRate))
-        return Array(samples[start..<end])
+        return start..<end
     }
 }

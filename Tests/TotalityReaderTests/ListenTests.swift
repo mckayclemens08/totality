@@ -52,6 +52,87 @@ import TotalityCore
     }
 }
 
+@Suite struct ListenPlacesTests {
+    private func mark(_ range: Range<Int>?, in text: String) -> String? {
+        guard let range else { return nil }
+        return (text as NSString).substring(with: NSRange(location: range.lowerBound, length: range.count))
+    }
+
+    @Test("A sentence's place leaves out the spaces around it")
+    func sentence() {
+        let text = "One here.   Two here.\nThree here."
+        let script = ListenScript(text: text)
+        #expect(script.sentences.indices.map { mark(script.range(ofSentence: $0), in: text) } == ["One here.", "Two here.", "Three here."])
+        #expect(script.range(ofSentence: 3) == nil)
+        #expect(script.range(ofSentence: -1) == nil)
+    }
+
+    @Test("A word is found wherever speech lands inside it")
+    func word() {
+        let text = "Take the tram to Belém."
+        let script = ListenScript(text: text)
+        #expect(mark(script.range(ofWordIn: 0, spoken: 0), in: text) == "Take")
+        #expect(mark(script.range(ofWordIn: 0, spoken: 9), in: text) == "tram")
+        #expect(mark(script.range(ofWordIn: 0, spoken: 11), in: text) == "tram")
+        #expect(mark(script.range(ofWordIn: 0, spoken: 22), in: text) == "Belém.")
+    }
+
+    @Test("Landing on a space stays on the word before it, and a place past the end stays on the last")
+    func edges() {
+        let text = "Take the tram."
+        let script = ListenScript(text: text)
+        #expect(mark(script.range(ofWordIn: 0, spoken: 4), in: text) == "Take")
+        #expect(mark(script.range(ofWordIn: 0, spoken: 900), in: text) == "tram.")
+        #expect(mark(script.range(ofWordIn: 0, spoken: -3), in: text) == "Take")
+        #expect(script.range(ofWordIn: 2, spoken: 0) == nil)
+    }
+
+    @Test("Words after a doubled space or a wrapped line are still found in the document")
+    func tidied() {
+        let text = "We took   the long walk upriver along the bank of the\nTagus to the old town."
+        let script = ListenScript(text: text)
+        #expect(script.sentences.count == 1)
+        let spoken = script.sentences[0].text
+        let tagus = (spoken as NSString).range(of: "Tagus").location
+        #expect(mark(script.range(ofWordIn: 0, spoken: tagus), in: text) == "Tagus")
+        #expect(mark(script.range(ofWordIn: 0, spoken: (spoken as NSString).range(of: "the long").location), in: text) == "the")
+    }
+
+    @Test("A word hyphenated across a line is marked in both parts on the page")
+    func splitWord() {
+        let text = "The bridge was an extraordi-\nnary thing to cross at dusk."
+        let script = ListenScript(text: text)
+        let spoken = script.sentences[0].text
+        #expect(spoken.contains("extraordinary"))
+        let place = (spoken as NSString).range(of: "extraordinary").location
+        #expect(mark(script.range(ofWordIn: 0, spoken: place), in: text) == "extraordi-\nnary")
+    }
+
+    @Test("An emoji doesn't shift the words after it")
+    func emoji() {
+        let text = "Send 🧗 now. Next sentence."
+        let script = ListenScript(text: text)
+        #expect(mark(script.range(ofWordIn: 0, spoken: 8), in: text) == "now.")
+        #expect(mark(script.range(ofSentence: 1), in: text) == "Next sentence.")
+    }
+
+    @Test("A long sentence cut into pieces keeps each piece's place")
+    func longPieces() {
+        let text = String(repeating: "word ", count: 300)
+        let script = ListenScript(text: text)
+        #expect(script.sentences.count > 1)
+        for index in script.sentences.indices {
+            #expect(mark(script.range(ofSentence: index), in: text) == script.sentences[index].text)
+        }
+    }
+
+    @Test("Two versions of a text have different fingerprints, and the same text the same one")
+    func fingerprint() {
+        #expect(ListenScript(text: "One. Two.").fingerprint == ListenScript(text: "One. Two.").fingerprint)
+        #expect(ListenScript(text: "One. Two.").fingerprint != ListenScript(text: "One. Three.").fingerprint)
+    }
+}
+
 @MainActor
 @Suite struct ListenControllerTests {
     private func track(_ text: String = "One. Two. Three.", startOffset: Int = 0) throws -> ListenTrack {
@@ -145,6 +226,46 @@ import TotalityCore
         #expect(!listen.isPaused)
         #expect(engine.pauses == 1 && engine.resumes == 1)
         #expect(engine.spoken == ["One."])
+    }
+
+    @Test("Jumping reads from that sentence, moves the bar, and saves the place")
+    func jump() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        var saved: [Int] = []
+        listen.onPosition = { saved.append($1) }
+        listen.play(try track())
+        engine.onWord?(2)
+        listen.jump(to: 2)
+        #expect(engine.spoken == ["One.", "Three."])
+        #expect(listen.sentence == 2)
+        #expect(listen.spoken == 0)
+        #expect(listen.progress == 10.0 / 16.0)
+        #expect(saved.last == 10)
+    }
+
+    @Test("A jump past either end stays in the track, and with nothing playing it does nothing")
+    func jumpEdges() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        listen.jump(to: 1)
+        #expect(engine.spoken.isEmpty)
+        listen.play(try track())
+        listen.jump(to: 99)
+        #expect(listen.sentence == 2)
+        listen.jump(to: -5)
+        #expect(listen.sentence == 0)
+    }
+
+    @Test("A jump while paused plays, because that's what tapping a sentence asks for")
+    func jumpWhilePaused() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        listen.play(try track())
+        listen.togglePause()
+        listen.jump(to: 1)
+        #expect(!listen.isPaused)
+        #expect(engine.spoken == ["One.", "Two."])
     }
 
     @Test func speedChangeRestartsTheSentence() throws {

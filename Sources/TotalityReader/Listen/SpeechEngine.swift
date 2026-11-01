@@ -10,14 +10,14 @@ public protocol SpeechEngine: AnyObject {
     var onStatus: ((String?) -> Void)? { get set }
     func speak(_ text: String, speed: Double)
     /// A hint at what comes next, so it can start straight after this sentence. Nil drops anything held.
-    func prepare(_ text: String?, speed: Double)
+    func prepare(_ text: String?)
     func pause()
     func resume()
     func stop()
 }
 
 public extension SpeechEngine {
-    func prepare(_ text: String?, speed: Double) {}
+    func prepare(_ text: String?) {}
 }
 
 @MainActor

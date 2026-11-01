@@ -77,8 +77,13 @@ public final class ListenController {
     }
 
     public func skip(by count: Int) {
+        jump(to: sentence + count)
+    }
+
+    /// Reads from a sentence, playing if it was paused, because that's what tapping one asks for.
+    public func jump(to index: Int) {
         guard let track = current else { return }
-        sentence = min(max(0, sentence + count), track.script.sentences.count - 1)
+        sentence = min(max(0, index), track.script.sentences.count - 1)
         speakCurrent()
     }
 
@@ -89,7 +94,7 @@ public final class ListenController {
 
     public func stop() {
         engine.stop()
-        engine.prepare(nil, speed: speed)
+        engine.prepare(nil)
         reportPosition()
         current = nil
         queue = []
@@ -103,7 +108,7 @@ public final class ListenController {
         queue.removeAll { $0.id == id }
         guard current?.id == id else { return }
         engine.stop()
-        engine.prepare(nil, speed: speed)
+        engine.prepare(nil)
         current = nil
         sentence = 0
         isPaused = false
@@ -126,7 +131,7 @@ public final class ListenController {
         reportPosition()
         engine.speak(track.script.sentences[sentence].text, speed: speed)
         let next = sentence + 1 < track.script.sentences.count ? track.script.sentences[sentence + 1].text : nil
-        engine.prepare(next, speed: speed)
+        engine.prepare(next)
     }
 
     private func reportPosition() {

@@ -261,11 +261,21 @@ public final class ReaderModel {
         if let track = await track(for: id) { listen.enqueue(track) }
     }
 
-    private func track(for id: UUID) async -> ListenTrack? {
+    /// Reading from a place on the page: `script` is the text the page shows. If Listen is reading
+    /// something else, or an older version of this, it starts over from there.
+    public func listen(to id: UUID, from offset: Int, on script: ListenScript) async {
+        if listen.current?.id == id, listen.current?.script.fingerprint == script.fingerprint {
+            listen.jump(to: script.index(at: offset))
+        } else if let track = await track(for: id, from: offset) {
+            listen.play(track)
+        }
+    }
+
+    private func track(for id: UUID, from offset: Int? = nil) async -> ListenTrack? {
         do {
             let item = try await vault.item(id)
             let text = try await vault.text(of: id)
-            guard let track = ListenTrack(id: id, title: item.displayTitle, text: text, startOffset: item.listenPosition) else {
+            guard let track = ListenTrack(id: id, title: item.displayTitle, text: text, startOffset: offset ?? item.listenPosition) else {
                 notice = "There's nothing to read aloud here yet."
                 return nil
             }

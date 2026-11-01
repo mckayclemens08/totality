@@ -43,13 +43,15 @@ public struct Theme: Sendable, Equatable {
     public let shadowLight, shadowDark: ColorToken
     public let textPrimary, textSecondary, textTertiary: ColorToken
     public let accent, accentOn, danger, success: ColorToken
+    public let highlight, highlightStrong: ColorToken
 
     /// Totality has one look. The owner removed dark mode on 2026-10-31.
     public static let current = Theme(
         bg: .init(0xE8EBEF), surface: .init(0xEDEFF2), surfaceSunken: .init(0xE2E5EA),
         shadowLight: .init(0xFFFFFF, opacity: 0.9), shadowDark: .init(0xC3C9D3, opacity: 0.7),
         textPrimary: .init(0x15181D), textSecondary: .init(0x555C68), textTertiary: .init(0x7D8592),
-        accent: .init(0x1F5FBF), accentOn: .init(0xFFFFFF), danger: .init(0xB3261E), success: .init(0x1E6F4C)
+        accent: .init(0x1F5FBF), accentOn: .init(0xFFFFFF), danger: .init(0xB3261E), success: .init(0x1E6F4C),
+        highlight: .init(0xD3E0F4), highlightStrong: .init(0xA9C5EE)
     )
 }
 
