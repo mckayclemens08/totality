@@ -53,6 +53,8 @@ in `TotalityCore`, and Listen and music both play through it.
 Listen has one voice, Michael, and no voice menu (owner, 2026-10-31). `ListenVoices` is the `SpeechEngine` the app uses: it sends speech to `NaturalSpeechEngine`, and the system voice is the backup, so `ListenController` doesn't know which is speaking. Michael is Kokoro-82M's `am_michael`, run on the device through FluidAudio 0.18.0, pinned exactly, on iOS 18 and macOS 15 only. iOS 17 and macOS 14 use the system voice. Text stays on the device, and the only download is the model, about 390 MB, checked against pinned hashes.
 
 - A voice that fails to load falls back to the system voice until the app restarts, and the bar says so.
+- The model can't read a lone bullet or emoji. That text goes to the system voice and Michael carries on, so a book doesn't change voice over one odd line.
+- The download only starts on an unmetered network. On cellular, a hotspot, or Low Data Mode the system voice reads, and the bar says why. It's tried again after the next launch.
 - The model gives no word timing, so the bar moves with the share of the audio played.
 - The next sentence is made ahead of time, one at a time, and the voice loads once however many calls wait on it.
 - FluidAudio can log a word it can't pronounce, so `KokoroSynthesizer` turns off its stderr copy. The system log keeps the text private.
@@ -74,7 +76,9 @@ On the iPhone reading aloud with Michael for 2 minutes, with the next sentence m
 
 On a Mac, reading aloud for 7 minutes with Heart: first audio 54 s, worst later gap 1.17 s, three gaps over a second, peak memory 2,604 MB.
 
-Not measured: battery use, a locked screen, and a real long PDF.
+With a screen locked, generating speech may be refused. If so, each sentence goes to the system voice and Michael returns when the app is back in front. That reasoning hasn't been tried on a device.
+
+Not measured: battery use, a locked screen, and a real long PDF. The model did read 30 kinds of awkward text, from URLs to a 3,000-character run, with a bullet, emoji, and blank text as the only failures.
 
 ## Attaching across modules
 

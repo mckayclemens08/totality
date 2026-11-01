@@ -12,7 +12,7 @@ public final class ListenVoices: SpeechEngine {
     private let natural: NaturalSpeechEngine?
     private var speaking: (any SpeechEngine)?
     private var speed = 1.0
-    /// Stays set until the app restarts, so a failed voice isn't tried again on every sentence.
+    /// Stays set until the app restarts, so a voice that won't load isn't tried on every sentence.
     private var naturalFailed = false
 
     public convenience init() {
@@ -35,7 +35,7 @@ public final class ListenVoices: SpeechEngine {
             engine.onWord = { [weak self] in self?.onWord?($0) }
             engine.onStatus = { [weak self] in self?.onStatus?($0) }
         }
-        natural?.onFailure = { [weak self] text in self?.fellBack(text) }
+        natural?.onFailure = { [weak self] text, notice in self?.fellBack(text, notice: notice) }
     }
 
     public func speak(_ text: String, speed: Double) {
@@ -67,10 +67,13 @@ public final class ListenVoices: SpeechEngine {
         speaking = nil
     }
 
-    /// Listening carries on in the system voice, because a voice that didn't load shouldn't end the book.
-    private func fellBack(_ text: String) {
-        naturalFailed = true
-        onStatus?("The natural voice didn't load, so this is the system voice.")
+    /// Listening carries on in the system voice, because a failed voice shouldn't end the book. Text
+    /// the voice can't read, like a lone bullet, only sends that text there.
+    private func fellBack(_ text: String, notice: String?) {
+        if let notice {
+            naturalFailed = true
+            onStatus?(notice)
+        }
         speaking = system
         system.speak(text, speed: speed)
     }

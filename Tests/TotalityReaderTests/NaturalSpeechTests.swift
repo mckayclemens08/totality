@@ -4,22 +4,27 @@ import Testing
 
 /// Holds each sentence back until the test lets it through, the way a slow model would.
 private actor FakeVoice: VoiceSynthesizer {
+    nonisolated let needsDownload: Bool
     private(set) var prepared = 0
     private(set) var requests: [(text: String, speed: Double)] = []
-    var failsPreparing = false
+    private let loadError: (any Error)?
+    private let unreadable: String?
     private var held: [String: CheckedContinuation<[Float], Never>] = [:]
 
-    init(failsPreparing: Bool = false) {
-        self.failsPreparing = failsPreparing
+    init(failsPreparing: Bool = false, loadError: (any Error)? = nil, unreadable: String? = nil, needsDownload: Bool = false) {
+        self.loadError = failsPreparing ? CancellationError() : loadError
+        self.unreadable = unreadable
+        self.needsDownload = needsDownload
     }
 
     func prepare() async throws {
         prepared += 1
-        if failsPreparing { throw CancellationError() }
+        if let loadError { throw loadError }
     }
 
-    func samples(for text: String, speed: Double) async -> [Float] {
+    func samples(for text: String, speed: Double) async throws -> [Float] {
         requests.append((text, speed))
+        if text == unreadable { throw CancellationError() }
         return await withCheckedContinuation { held[text] = $0 }
     }
 
@@ -244,20 +249,49 @@ private func until(_ condition: () async -> Bool) async throws {
         let broken = FakeVoice(failsPreparing: true)
         let engine = engine(broken)
         var lost: [String] = []
-        engine.onFailure = { lost.append($0) }
+        var notice: String?
+        engine.onFailure = { text, reason in
+            lost.append(text)
+            notice = reason
+        }
         engine.speak("One.", speed: 1)
         try await until { lost == ["One."] }
+        #expect(notice != nil)
+    }
+
+    @Test("The first run says how big the download is")
+    func downloadStatus() async throws {
+        let engine = engine(FakeVoice(needsDownload: true))
+        var seen: [String?] = []
+        engine.onStatus = { seen.append($0) }
+        engine.speak("One.", speed: 1)
+        let first = try #require(seen.compactMap { $0 }.first)
+        #expect(first.contains("390 MB"))
+    }
+
+    @Test func aLoadedVoiceSaysNothingAboutDownloading() async throws {
+        let engine = engine()
+        var seen: [String?] = []
+        engine.onStatus = { seen.append($0) }
+        engine.speak("One.", speed: 1)
+        let first = try #require(seen.compactMap { $0 }.first)
+        #expect(!first.contains("390 MB"))
     }
 
     @Test func audioThatWontPlayCountsAsAFailure() async throws {
         output.refuses = true
         let engine = engine()
         var lost: [String] = []
-        engine.onFailure = { lost.append($0) }
+        var notices: [String?] = []
+        engine.onFailure = { text, notice in
+            lost.append(text)
+            notices.append(notice)
+        }
         engine.speak("One.", speed: 1)
         try await until { await voice.isHeld("One.") }
         await voice.release("One.")
         try await until { lost == ["One."] }
+        #expect(notices == [nil])
     }
 }
 
@@ -268,6 +302,10 @@ private final class Finished {
 
 @MainActor
 @Suite struct RealVoiceOutputTests {
+    @Test func emptyAudioIsRefused() {
+        #expect(throws: (any Error).self) { try EngineVoiceOutput().play([]) {} }
+    }
+
     /// Runs the real audio engine when TOTALITY_SPEECH_TEST is set. Its finish callback arrives on
     /// the audio queue, which only the real engine can show.
     @Test func realPlaybackFinishesOffTheMainThreadWithoutTrapping() async throws {
@@ -358,11 +396,83 @@ private final class Finished {
         #expect(listen.status != nil)
     }
 
+    @Test("Text the voice can't read goes to the system voice, and the voice carries on")
+    func oneBadSentence() async throws {
+        let voices = voices(FakeVoice(unreadable: "•"))
+        var statuses: [String?] = []
+        voices.onStatus = { statuses.append($0) }
+        voices.speak("•", speed: 1)
+        try await until { system.spoken == ["•"] }
+        #expect(statuses.last == .some(nil))
+        voices.speak("Two.", speed: 1)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(system.spoken == ["•"])
+        voices.pause()
+        #expect(system.pauses == 0)
+    }
+
+    @Test("Text that can't be made ahead still reaches the system voice in its turn")
+    func oneBadSentenceMadeAhead() async throws {
+        let bad = FakeVoice(unreadable: "•")
+        let voices = voices(bad)
+        voices.speak("One.", speed: 1)
+        try await until { await bad.isHeld("One.") }
+        await bad.release("One.")
+        try await until { output.played.count == 1 }
+        voices.prepare("•", speed: 1)
+        try await until { await bad.requests.count == 2 }
+        voices.speak("•", speed: 1)
+        try await until { system.spoken == ["•"] }
+    }
+
+    @Test("On cellular the download waits, the system voice reads, and it says why")
+    func waitsForWiFi() async throws {
+        let waiting = FakeVoice(loadError: VoiceLoadError.waitingForWiFi, needsDownload: true)
+        let voices = voices(waiting)
+        var statuses: [String?] = []
+        voices.onStatus = { statuses.append($0) }
+        voices.speak("One.", speed: 1)
+        try await until { system.spoken == ["One."] }
+        let status = try #require(statuses.compactMap { $0 }.last)
+        #expect(status.contains("Wi-Fi"))
+        voices.speak("Two.", speed: 1)
+        #expect(system.spoken == ["One.", "Two."])
+        #expect(await waiting.prepared == 1)
+    }
+
     @Test func theSameSpeedCarriesOverWhenItFallsBack() async throws {
         let broken = FakeVoice(failsPreparing: true)
         let voices = voices(broken)
         voices.speak("One.", speed: 1.5)
         try await until { system.spoken == ["One."] }
         #expect(system.speeds == [1.5])
+    }
+}
+
+@Suite struct VoiceDownloadTests {
+    private func directory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    @Test func theDownloadNeverStartsOnAMeteredNetwork() async throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let voice = KokoroSynthesizer(directory: try directory(), isMetered: { true })
+        #expect(voice.needsDownload)
+        await #expect(throws: VoiceLoadError.self) { try await voice.prepare() }
+        #expect(voice.needsDownload)
+    }
+
+    @Test func aDownloadedVoiceDoesNotAskAgain() throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let folder = try directory()
+        FileManager.default.createFile(atPath: folder.appendingPathComponent(KokoroSynthesizer.downloadedMarker).path, contents: nil)
+        #expect(!KokoroSynthesizer(directory: folder, isMetered: { true }).needsDownload)
+    }
+
+    @Test func theNetworkCheckAnswers() async {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        _ = await KokoroSynthesizer.onMeteredNetwork()
     }
 }

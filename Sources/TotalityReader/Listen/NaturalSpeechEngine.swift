@@ -1,10 +1,16 @@
 import AVFoundation
 import FluidAudio
+@preconcurrency import Network
 
 /// Turns text into audio samples. Nothing here leaves the device: only the model is ever downloaded.
 protocol VoiceSynthesizer: Sendable {
+    var needsDownload: Bool { get }
     func prepare() async throws
     func samples(for text: String, speed: Double) async throws -> [Float]
+}
+
+enum VoiceLoadError: Error {
+    case waitingForWiFi
 }
 
 /// Plays one run of samples at a time.
@@ -28,8 +34,9 @@ final class NaturalSpeechEngine: SpeechEngine {
     var onFinish: (() -> Void)?
     var onWord: ((Int) -> Void)?
     var onStatus: ((String?) -> Void)?
-    /// Called when speech couldn't be made, with the text that was lost.
-    var onFailure: ((String) -> Void)?
+    /// Called with text that couldn't be spoken. The notice is there when the voice itself didn't load,
+    /// and it's nil when only this text failed, as a lone bullet does.
+    var onFailure: ((_ text: String, _ notice: String?) -> Void)?
 
     private let synthesizer: any VoiceSynthesizer
     private let output: any VoiceOutput
@@ -70,11 +77,18 @@ final class NaturalSpeechEngine: SpeechEngine {
         loading = load
         if load != nil {
             isWaiting = true
-            onStatus?("Getting the voice ready. This takes about a minute, or a few the first time.")
+            onStatus?(synthesizer.needsDownload
+                ? "Downloading Michael's voice, about 390 MB. This can take a few minutes."
+                : "Getting the voice ready. This takes about a minute.")
         }
         making = Task { [weak self] in
             do {
                 try await load?.value
+            } catch {
+                self?.failed(text, notice: Self.notice(for: error), turn: current)
+                return
+            }
+            do {
                 let samples = if let held {
                     try await held.value
                 } else {
@@ -82,9 +96,16 @@ final class NaturalSpeechEngine: SpeechEngine {
                 }
                 self?.made(samples, text: text, turn: current)
             } catch {
-                self?.failed(text, turn: current)
+                self?.failed(text, notice: nil, turn: current)
             }
         }
+    }
+
+    private nonisolated static func notice(for error: any Error) -> String {
+        if case VoiceLoadError.waitingForWiFi = error {
+            return "Michael's voice is a 390 MB download, so it's waiting for Wi-Fi. This is the system voice for now."
+        }
+        return "Michael's voice didn't load, so this is the system voice."
     }
 
     func prepare(_ text: String?, speed: Double) {
@@ -151,7 +172,7 @@ final class NaturalSpeechEngine: SpeechEngine {
         do {
             try output.play(samples) { [weak self] in self?.played(turn: turn) }
         } catch {
-            failed(text, turn: turn)
+            failed(text, notice: nil, turn: turn)
             return
         }
         isPlaying = true
@@ -174,12 +195,12 @@ final class NaturalSpeechEngine: SpeechEngine {
         onFinish?()
     }
 
-    private func failed(_ text: String, turn: Int) {
+    private func failed(_ text: String, notice: String?, turn: Int) {
         guard turn == self.turn, !Task.isCancelled else { return }
         making = nil
         isPlaying = false
         doneWaiting()
-        onFailure?(text)
+        onFailure?(text, notice)
     }
 
     private func doneWaiting() {
@@ -192,18 +213,43 @@ final class NaturalSpeechEngine: SpeechEngine {
 /// Kokoro, through a pinned FluidAudio release. Models are checked against pinned hashes when they arrive.
 @available(iOS 18, macOS 15, *)
 final class KokoroSynthesizer: VoiceSynthesizer {
+    static let downloadedMarker = "downloaded"
     private static let voice = "am_michael"
 
     private let manager: KokoroAneManager
+    private let downloaded: URL
+    private let isMetered: @Sendable () async -> Bool
 
-    init(directory: URL) {
+    init(directory: URL, isMetered: @escaping @Sendable () async -> Bool = KokoroSynthesizer.onMeteredNetwork) {
+        downloaded = directory.appendingPathComponent(Self.downloadedMarker)
+        self.isMetered = isMetered
         // A word the model can't read is logged, so the log mustn't reach stderr. The system log keeps it private.
         AppLogger.mirrorsToConsole = false
         manager = KokoroAneManager(directory: directory, version: .v3)
     }
 
+    var needsDownload: Bool {
+        !FileManager.default.fileExists(atPath: downloaded.path)
+    }
+
+    /// The download never starts on cellular, a hotspot, or Low Data Mode.
     func prepare() async throws {
+        if needsDownload, await isMetered() { throw VoiceLoadError.waitingForWiFi }
         try await manager.initialize()
+        FileManager.default.createFile(atPath: downloaded.path, contents: nil)
+    }
+
+    @Sendable static func onMeteredNetwork() async -> Bool {
+        await withCheckedContinuation { continuation in
+            let monitor = NWPathMonitor()
+            // Serial, so clearing the handler means it can only answer once.
+            monitor.pathUpdateHandler = { path in
+                monitor.pathUpdateHandler = nil
+                monitor.cancel()
+                continuation.resume(returning: path.isExpensive || path.isConstrained)
+            }
+            monitor.start(queue: DispatchQueue(label: "app.totality.voice-network"))
+        }
     }
 
     func samples(for text: String, speed: Double) async throws -> [Float] {
@@ -235,7 +281,7 @@ final class EngineVoiceOutput: VoiceOutput {
     }
 
     func play(_ samples: [Float], onDone: @escaping @MainActor @Sendable () -> Void) throws {
-        guard let format, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
+        guard !samples.isEmpty, let format, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)),
               let channel = buffer.floatChannelData?[0]
         else { throw AudioOutputError.noBuffer }
         buffer.frameLength = buffer.frameCapacity
