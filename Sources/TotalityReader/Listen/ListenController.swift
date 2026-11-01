@@ -94,7 +94,7 @@ public final class ListenController {
 
     public func stop() {
         engine.stop()
-        engine.prepare(nil, speed: speed)
+        engine.prepare(nil)
         reportPosition()
         current = nil
         queue = []
@@ -108,7 +108,7 @@ public final class ListenController {
         queue.removeAll { $0.id == id }
         guard current?.id == id else { return }
         engine.stop()
-        engine.prepare(nil, speed: speed)
+        engine.prepare(nil)
         current = nil
         sentence = 0
         isPaused = false
@@ -131,7 +131,7 @@ public final class ListenController {
         reportPosition()
         engine.speak(track.script.sentences[sentence].text, speed: speed)
         let next = sentence + 1 < track.script.sentences.count ? track.script.sentences[sentence + 1].text : nil
-        engine.prepare(next, speed: speed)
+        engine.prepare(next)
     }
 
     private func reportPosition() {

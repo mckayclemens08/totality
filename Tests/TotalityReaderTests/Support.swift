@@ -32,7 +32,7 @@ final class FakeSpeechEngine: SpeechEngine {
         spoken.append(text)
         speeds.append(speed)
     }
-    func prepare(_ text: String?, speed: Double) { prepared.append(text) }
+    func prepare(_ text: String?) { prepared.append(text) }
     func pause() { pauses += 1 }
     func resume() { resumes += 1 }
     func stop() {}

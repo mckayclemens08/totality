@@ -5,7 +5,7 @@ import Testing
 /// Holds each sentence back until the test lets it through, the way a slow model would.
 private actor FakeVoice: VoiceSynthesizer {
     private(set) var prepared = 0
-    private(set) var requests: [(text: String, speed: Double)] = []
+    private(set) var requests: [String] = []
     private let failsPreparing: Bool
     private let storageFull: Bool
     private let unreadable: Set<String>
@@ -30,8 +30,8 @@ private actor FakeVoice: VoiceSynthesizer {
         if failsPreparing { throw CancellationError() }
     }
 
-    func speech(for text: String, speed: Double) async throws -> VoiceSpeech {
-        requests.append((text, speed))
+    func speech(for text: String) async throws -> VoiceSpeech {
+        requests.append(text)
         if unreadable.contains(text) { throw CancellationError() }
         if text == silent { return VoiceSpeech(samples: []) }
         return VoiceSpeech(samples: await withCheckedContinuation { held[text] = $0 }, marks: marks[text] ?? [])
@@ -50,15 +50,17 @@ private actor FakeVoice: VoiceSynthesizer {
 private final class FakeOutput: VoiceOutput {
     var playedFraction = 0.0
     var played: [[Float]] = []
+    var rates: [Double] = []
     var pauses = 0
     var resumes = 0
     var stops = 0
     var refuses = false
     var onDone: (@MainActor @Sendable () -> Void)?
 
-    func play(_ samples: [Float], onDone: @escaping @MainActor @Sendable () -> Void) throws {
+    func play(_ samples: [Float], rate: Double, onDone: @escaping @MainActor @Sendable () -> Void) throws {
         if refuses { throw CancellationError() }
         played.append(samples)
+        rates.append(rate)
         self.onDone = onDone
     }
 
@@ -127,26 +129,38 @@ private func until(_ condition: () async -> Bool) async throws {
     func aheadIsUsed() async throws {
         let engine = engine()
         try await speakAndPlay(engine, "One.")
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
         try await until { await voice.isHeld("Two.") }
         engine.stop()
         engine.speak("Two.", speed: 1)
         await voice.release("Two.")
         try await until { output.played.count == 2 }
-        #expect(await voice.requests.map(\.text) == ["One.", "Two."])
+        #expect(await voice.requests == ["One.", "Two."])
     }
 
-    @Test("A speed or sentence change throws away what was made ahead")
+    @Test("A different sentence throws away what was made ahead")
     func aheadIsDropped() async throws {
         let engine = engine()
         try await speakAndPlay(engine, "One.")
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
         try await until { await voice.isHeld("Two.") }
-        engine.speak("Two.", speed: 1.5)
-        try await until { await voice.requests.count == 3 }
+        engine.speak("Three.", speed: 1)
+        try await until { await voice.isHeld("Three.") }
         await voice.release("Two.")
-        let request = try #require(await voice.requests.last)
-        #expect(request.speed == 1.5)
+        #expect(await voice.requests == ["One.", "Two.", "Three."])
+    }
+
+    @Test("Speed goes to playback, so a new speed keeps what was made ahead")
+    func speedIsNotTheModels() async throws {
+        let engine = engine()
+        try await speakAndPlay(engine, "One.")
+        engine.prepare("Two.")
+        try await until { await voice.isHeld("Two.") }
+        engine.speak("Two.", speed: 2)
+        await voice.release("Two.")
+        try await until { output.played.count == 2 }
+        #expect(await voice.requests == ["One.", "Two."])
+        #expect(output.rates == [1, 2])
     }
 
     @Test("Skipping while the voice loads doesn't load it again")
@@ -162,10 +176,10 @@ private func until(_ condition: () async -> Bool) async throws {
     func aheadWaitsItsTurn() async throws {
         let engine = engine()
         engine.speak("One.", speed: 1)
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
         try await until { await voice.isHeld("One.") }
         try await Task.sleep(for: .milliseconds(30))
-        #expect(await voice.requests.map(\.text) == ["One."])
+        #expect(await voice.requests == ["One."])
         await voice.release("One.")
         try await until { await voice.requests.count == 2 }
         #expect(await voice.prepared == 1)
@@ -176,17 +190,17 @@ private func until(_ condition: () async -> Bool) async throws {
         let engine = engine()
         try await speakAndPlay(engine, "One.")
         engine.speak("Two.", speed: 1)
-        engine.prepare("Three.", speed: 1)
+        engine.prepare("Three.")
         try await until { await voice.isHeld("Two.") }
         try await Task.sleep(for: .milliseconds(30))
-        #expect(await voice.requests.map(\.text) == ["One.", "Two."])
+        #expect(await voice.requests == ["One.", "Two."])
         await voice.release("Two.")
         try await until { await voice.isHeld("Three.") }
     }
 
     @Test func aHintBeforeTheVoiceHasLoadedMakesNothing() async throws {
         let engine = engine()
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
         try await Task.sleep(for: .milliseconds(30))
         #expect(await voice.requests.isEmpty)
         #expect(await voice.prepared == 0)
@@ -195,8 +209,8 @@ private func until(_ condition: () async -> Bool) async throws {
     @Test func aRepeatedHintOnlyMakesItOnce() async throws {
         let engine = engine()
         try await speakAndPlay(engine, "One.")
-        engine.prepare("Two.", speed: 1)
-        engine.prepare("Two.", speed: 1)
+        engine.prepare("Two.")
+        engine.prepare("Two.")
         try await until { await voice.isHeld("Two.") }
         try await Task.sleep(for: .milliseconds(30))
         #expect(await voice.requests.count == 2)
@@ -389,7 +403,7 @@ private final class Finished {
 @MainActor
 @Suite struct RealVoiceOutputTests {
     @Test func emptyAudioIsRefused() {
-        #expect(throws: (any Error).self) { try EngineVoiceOutput().play([]) {} }
+        #expect(throws: (any Error).self) { try EngineVoiceOutput().play([], rate: 1) {} }
     }
 
     /// Runs the real audio engine when TOTALITY_SPEECH_TEST is set. Its finish callback arrives on
@@ -398,7 +412,7 @@ private final class Finished {
         guard ProcessInfo.processInfo.environment["TOTALITY_SPEECH_TEST"] != nil else { return }
         let output = EngineVoiceOutput()
         let finished = Finished()
-        try output.play([Float](repeating: 0, count: 4_800)) { finished.value = true }
+        try output.play([Float](repeating: 0, count: 4_800), rate: 2) { finished.value = true }
         try await until { finished.value }
     }
 }
@@ -423,8 +437,9 @@ private final class Finished {
         listen.play(try #require(ListenTrack(id: UUID(), title: "Track", text: "One. Two.")))
         try await until { await voice.isHeld("One.") }
         #expect(system.spoken.isEmpty)
-        let request = try #require(await voice.requests.first)
-        #expect(request.speed == 1.5)
+        await voice.release("One.")
+        try await until { !output.played.isEmpty }
+        #expect(output.rates == [1.5])
     }
 
     @Test func theNextSentenceIsHintedAndTheHintEndsWithTheTrack() throws {
@@ -516,7 +531,7 @@ private final class Finished {
         try await until { await bad.isHeld("One.") }
         await bad.release("One.")
         try await until { output.played.count == 1 }
-        voices.prepare("•", speed: 1)
+        voices.prepare("•")
         try await until { await bad.requests.count == 2 }
         voices.speak("•", speed: 1)
         try await until { system.spoken == ["•"] }
@@ -563,7 +578,7 @@ private final class Finished {
         let voices = voices(broken)
         voices.speak("One.", speed: 1)
         try await until { system.spoken == ["One."] }
-        voices.prepare("Two.", speed: 1)
+        voices.prepare("Two.")
         try await Task.sleep(for: .milliseconds(30))
         #expect(await broken.requests.isEmpty)
         #expect(await broken.prepared == 1)
@@ -660,7 +675,7 @@ private final class Finished {
               #available(iOS 18, macOS 15, *) else { return }
         let voice = KokoroSynthesizer(pack: URL(fileURLWithPath: path), directory: try folder())
         try await voice.prepare()
-        let speech = try await voice.speech(for: "It cost $45 at the door, which was fair.", speed: 1)
+        let speech = try await voice.speech(for: "It cost $45 at the door, which was fair.")
         #expect(speech.samples.count > 1_000)
         #expect(speech.marks.map(\.offset) == [0, 3, 8, 12, 15, 19, 25, 31, 35])
     }

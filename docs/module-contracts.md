@@ -112,7 +112,7 @@ Read along follows Listen on the page and lets a tap on a sentence move Listen t
 - `ScrollWatch` tells the person scrolling from the page following Listen, and "Back to reading" appears once they've scrolled.
 - The Listen bar is stacked below the navigation stack. It used to be a safe area inset, which never reached a pushed page, so the end of a document stayed behind the bar.
 
-Sentences are exact with both voices, because Listen speaks one sentence at a time. The system voice reports each word as it speaks. Michael doesn't, but the model reports how many frames it gives each sound (600 samples a frame, or 25 ms at 24 kHz), and that's already scaled for speed. `VoiceTiming` finds where each word starts from the spaces in the phonemes, and lines up the words the model said with the words on the page, because the text was rewritten for speech. `NaturalSpeechEngine` reports the place every 50 ms. A rewritten word shares its place with its neighbours, so the word mark waits there, and a sentence of over about 510 sounds is split by the model and has no marks, so it moves with the share of the audio played instead.
+Sentences are exact with both voices, because Listen speaks one sentence at a time. The system voice reports each word as it speaks. Michael doesn't, but the model reports how many frames it gives each sound (600 samples a frame, or 25 ms at 24 kHz). `VoiceTiming` finds where each word starts from the spaces in the phonemes, and lines up the words the model said with the words on the page, because the text was rewritten for speech. `NaturalSpeechEngine` reports the place every 50 ms. A rewritten word shares its place with its neighbours, so the word mark waits there, and a sentence of over about 510 sounds is split by the model and has no marks, so it moves with the share of the audio played instead.
 
 Measured on 2026-11-01 on a Mac, on 60 sentences of the founding brief (162 commas), by comparing where the timing puts each comma with the quietest point of the audio within 400 ms of it:
 
@@ -120,10 +120,10 @@ Measured on 2026-11-01 on a Mac, on 60 sentences of the founding brief (162 comm
 |---|---|---|---|
 | Michael's timing | 1× | 75 ms | 60% |
 | Counting letters, the plan before this | 1× | 375 ms | 12% |
-| Michael's timing | 1.5× | 100 ms | 51% |
-| Counting letters | 1.5× | 225 ms | 27% |
 
 The misses over 100 ms aren't all timing errors, because a comma isn't always the quietest point nearby: the search reaches other gaps, and the worst results sit at its 400 ms limit. 59 of the 60 sentences got marks, and the other was too long. 1,377 of 1,472 written words got a mark of their own. Whether it looks right on a real document on the iPhone is still the owner's call.
+
+Speed happens in playback, through `AVAudioUnitTimePitch`, and Michael is always made at the model's own pace. The model's speed setting squeezes every sound, so at 2× Michael slurred his words (owner, 2026-11-01). That setting is now always 1, so the marks above hold at every speed, each miss shrinks with the speed, and a speed change keeps the sentence made ahead. At 1× the unit is bypassed, so that audio is exactly what the model made. The player's clock follows the speed: on a Mac and in the iOS simulator, a 3 s buffer at 0.75× to 2× reported its progress at the right pace and finished within 0.2 s of the expected time, the same margin as 1×. The system voice keeps its own rate.
 
 ## Home page
 

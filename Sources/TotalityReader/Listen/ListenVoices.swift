@@ -50,8 +50,8 @@ public final class ListenVoices: SpeechEngine {
         }
     }
 
-    public func prepare(_ text: String?, speed: Double) {
-        natural?.prepare(text, speed: speed)
+    public func prepare(_ text: String?) {
+        natural?.prepare(text)
     }
 
     public func pause() {
