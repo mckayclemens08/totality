@@ -43,16 +43,19 @@ public struct CalendarHomeTile: View {
         let theme = Theme.current
         let days = model.today.monthGrid(in: model.display)
         let weeks = stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<min($0 + 7, days.count)]) }
-        return VStack(alignment: .leading, spacing: Space.s1) {
+        // The rows share what's left, which is how a six-week month still fits under the title's space.
+        return VStack(alignment: .leading, spacing: 0) {
             Text(model.written(model.today, .dateTime.month(.wide)))
                 .font(Typeface.headline)
                 .foregroundStyle(theme.textPrimary.color)
+                .padding(.bottom, Space.s4)
             HStack(spacing: 0) {
                 ForEach(Array(model.weekdayLetters.enumerated()), id: \.offset) { _, letter in
                     WeekdayLetter(letter: letter)
                         .frame(maxWidth: .infinity)
                 }
             }
+            .padding(.bottom, Space.s1)
             ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
                 HStack(spacing: 0) {
                     ForEach(Array(week.enumerated()), id: \.offset) { _, day in
