@@ -22,6 +22,16 @@ enum ReadableText {
         return text
     }
 
+    /// Where each page's text sits in the text Listen reads. It's a new copy of the file, so this can run
+    /// away from the main thread while the pages are on screen.
+    static func pageMap(_ data: Data) -> PDFPageMap {
+        guard let document = PDFDocument(data: data) else { return PDFPageMap(whole: "", pages: []) }
+        return PDFPageMap(
+            whole: document.string ?? "",
+            pages: (0..<document.pageCount).map { document.page(at: $0)?.string ?? "" }
+        )
+    }
+
     /// EPUB and Word have structure worth keeping. Anything else is one section of paragraphs.
     static func document(_ data: Data, mime: String?) throws -> ReadableDocument {
         switch mime {
