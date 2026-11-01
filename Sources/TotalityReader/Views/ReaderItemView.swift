@@ -7,31 +7,32 @@ struct ReaderItemView: View {
     /// Holds only whether it's on, and it stays with the device.
     static let readAlongKey = "reader.readAlong"
 
+    /// Its button is on the Listen bar, so it only applies while that bar is showing. Otherwise a note
+    /// left with it on couldn't be edited, and nothing on the page could turn it off.
+    static func appliesReadAlong(isOn: Bool, listen: ListenController) -> Bool {
+        isOn && listen.current != nil
+    }
+
     let item: ReaderItem
     let model: ReaderModel
 
     @AppStorage(Self.readAlongKey) private var readAlong = false
 
     var body: some View {
+        let along = Self.appliesReadAlong(isOn: readAlong, listen: model.listen)
         Group {
             if item.kind == .note {
-                NoteEditor(item: item, model: model, readAlong: readAlong)
+                NoteEditor(item: item, model: model, readAlong: along)
             } else if item.mime == "application/pdf" {
-                PDFReader(item: item, model: model, readAlong: readAlong)
+                PDFReader(item: item, model: model, readAlong: along)
             } else {
-                FileReader(item: item, model: model, readAlong: readAlong)
+                FileReader(item: item, model: model, readAlong: along)
             }
         }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Toggle(isOn: $readAlong) {
-                    Label("Read along", systemImage: "text.line.first.and.arrowtriangle.forward")
-                }
-                .toggleStyle(.button)
-            }
             ToolbarItem(placement: .primaryAction) {
                 Button("Listen", systemImage: "headphones") {
                     Task { await model.startListening(to: item.id) }

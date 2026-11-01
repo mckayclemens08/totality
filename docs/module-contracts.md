@@ -102,7 +102,7 @@ Not measured: battery use, a locked screen, and a real long PDF. The model did r
 
 ### Read along
 
-Read along follows Listen on the page and lets a tap on a sentence move Listen there (owner, 2026-11-01). The spec is issue 30. It's a toolbar button on every document, off until it's turned on, and `reader.readAlong` remembers it on that device for every document. It holds only on or off, and nothing here touches the network or stores any content.
+Read along follows Listen on the page and lets a tap on a sentence move Listen there (owner, 2026-11-01). The spec is issue 30. It's a button on the Listen bar (owner, 2026-11-01), off until it's turned on, and `reader.readAlong` remembers it on that device for every document. It only applies while the bar is showing, because a note left in Read along couldn't be edited and nothing on the page could turn it off. It holds only on or off, and nothing here touches the network or stores any content.
 
 - Notes, Word, EPUB, Markdown, and plain text open as `ReadAlongView` while it's on. A tap means "go here", so nothing can be edited or selected there, and a note saves as it switches. Its paragraphs and headings come from `ReadAlongPage`, cut up off the main thread because a long book takes seconds.
 - PDFs keep their real pages, with the marks drawn as `highlightedSelections`. Listen reads `PDFDocument.string`, which is the pages joined by a newline, so `PDFPageMap` finds each page in it in order and turns places in the text into places on a page and back. All 16 pages of the founding brief lined up. A PDF with no text says so on the page.

@@ -5,6 +5,8 @@ import TotalityUI
 struct ListenBar: View {
     let listen: ListenController
 
+    @AppStorage(ReaderItemView.readAlongKey) private var readAlong = false
+
     var body: some View {
         let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s2) {
@@ -36,6 +38,8 @@ struct ListenBar: View {
                 }
                 control("goforward", label: "Next sentence") { listen.skip(by: 1) }
                 Spacer(minLength: 0)
+                readAlongToggle
+                Spacer(minLength: 0)
                 speedMenu
                 control("xmark", label: "Stop listening") { listen.stop() }
             }
@@ -51,6 +55,23 @@ struct ListenBar: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+    }
+
+    /// Pressed in as well as coloured, so on and off don't differ by colour alone.
+    private var readAlongToggle: some View {
+        Button {
+            readAlong.toggle()
+        } label: {
+            Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                .foregroundStyle(readAlong ? Theme.current.accent.color : Theme.current.textPrimary.color)
+                .modifier(TapTarget())
+                .background {
+                    if readAlong { Color.clear.neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm)) }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Read along")
+        .accessibilityValue(readAlong ? "On" : "Off")
     }
 
     private var speedMenu: some View {
