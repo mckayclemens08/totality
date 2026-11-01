@@ -219,8 +219,14 @@ final class KokoroSynthesizer: VoiceSynthesizer {
     private let directory: URL
     private let downloaded: URL
     private let isMetered: @Sendable () async -> Bool
+    private let fetch: VoiceAssets.Fetch
 
-    init(directory: URL, isMetered: @escaping @Sendable () async -> Bool = KokoroSynthesizer.onMeteredNetwork) {
+    init(
+        directory: URL,
+        isMetered: @escaping @Sendable () async -> Bool = KokoroSynthesizer.onMeteredNetwork,
+        fetch: @escaping VoiceAssets.Fetch = VoiceAssets.fromNetwork
+    ) {
+        self.fetch = fetch
         self.directory = directory
         downloaded = directory.appendingPathComponent(Self.downloadedMarker)
         self.isMetered = isMetered
@@ -238,7 +244,7 @@ final class KokoroSynthesizer: VoiceSynthesizer {
         let firstTime = needsDownload
         if firstTime {
             if await isMetered() { throw VoiceLoadError.waitingForWiFi }
-            try await VoiceAssets.install(in: directory)
+            try await VoiceAssets.install(in: directory, fetch: fetch)
         }
         try await manager.initialize(preloadVoices: [VoiceAssets.voice])
         if firstTime {

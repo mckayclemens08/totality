@@ -496,6 +496,15 @@ private final class Finished {
         #expect(voice.needsDownload)
     }
 
+    @Test("The checked files come first, so a failure stops the voice before FluidAudio downloads anything")
+    func checkedFilesComeFirst() async throws {
+        guard #available(iOS 18, macOS 15, *) else { return }
+        let folder = try directory()
+        let voice = KokoroSynthesizer(directory: folder, isMetered: { false }, fetch: { _ in Data("bad".utf8) })
+        await #expect(throws: VoiceLoadError.self) { try await voice.prepare() }
+        #expect(voice.needsDownload)
+    }
+
     @Test func aDownloadedVoiceDoesNotAskAgain() throws {
         guard #available(iOS 18, macOS 15, *) else { return }
         let folder = try directory()
@@ -614,6 +623,14 @@ private final class Finished {
         #expect(!voice.needsDownload)
         #expect(try lexicon.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate == installed)
         #expect(try await voice.samples(for: "It works.", speed: 1).count > 1_000)
+
+        // A changed voice pack that FluidAudio would accept, on a fresh install.
+        try FileManager.default.removeItem(at: folder.appendingPathComponent(KokoroSynthesizer.downloadedMarker))
+        let file = VoiceAssets.voiceFile(in: folder)
+        try Data(count: try Data(contentsOf: file).count).write(to: file)
+        let changed = KokoroSynthesizer(directory: folder, isMetered: { false })
+        await #expect(throws: VoiceLoadError.self) { try await changed.prepare() }
+        #expect(changed.needsDownload)
     }
 }
 

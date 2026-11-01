@@ -6,6 +6,7 @@ import Foundation
 /// in, and FluidAudio finds it on disk and leaves it alone. Check all of this when the FluidAudio pin moves.
 enum VoiceAssets {
     typealias Fetch = @Sendable (URL) async throws -> Data
+    static let fromNetwork: Fetch = { try await URLSession.shared.data(from: $0).0 }
 
     static let voice = "am_michael"
     private static let voiceHash = "1d1f21dd8da39c30705cd4c75d039d265e9bc4a2a93ed09bc9e1b1225eb95ba1"
@@ -31,7 +32,7 @@ enum VoiceAssets {
     static func install(
         in directory: URL,
         files: [(path: String, sha256: String)] = files,
-        fetch: Fetch = { try await URLSession.shared.data(from: $0).0 }
+        fetch: Fetch = fromNetwork
     ) async throws {
         for file in files {
             let local = directory.appendingPathComponent("kokoro/\(file.path)")
