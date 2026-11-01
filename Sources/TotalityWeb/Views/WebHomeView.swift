@@ -202,6 +202,8 @@ public struct WebHomeView: View {
         .background(theme.bg.color)
     }
 
+    private static let prompt = "Search or enter address"
+
     private var addressBar: some View {
         let theme = Theme.current
         return HStack(spacing: Space.s2) {
@@ -230,7 +232,7 @@ public struct WebHomeView: View {
                         .foregroundStyle(theme.textSecondary.color)
                         .accessibilityLabel("Not secure")
                 }
-                TextField("Search or enter address", text: $typed)
+                TextField(Self.prompt, text: $typed)
                     .font(Typeface.body)
                     .foregroundStyle(theme.textPrimary.color)
                     .textFieldStyle(.plain)
@@ -245,7 +247,14 @@ public struct WebHomeView: View {
                         model.submit(typed)
                         isTyping = false
                     }
-                    .accessibilityLabel("Search or enter address")
+                    .accessibilityLabel(Self.prompt)
+                    #if os(iOS)
+                    // What's there is selected, so typing replaces it as it does in any browser.
+                    .onReceive(NotificationCenter.default.publisher(for: UITextField.textDidBeginEditingNotification)) { note in
+                        guard let field = note.object as? UITextField, field.placeholder == Self.prompt else { return }
+                        Task { @MainActor in field.selectAll(nil) }
+                    }
+                    #endif
                 if isTyping, !typed.isEmpty {
                     Button {
                         typed = ""
