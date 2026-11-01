@@ -22,7 +22,7 @@ public struct ReaderHomeTile: View {
     }
 
     public var body: some View {
-        VStack(spacing: Space.s4) {
+        VStack(spacing: Space.s6) {
             if let front { frontBook(front) }
             if !shelf.isEmpty {
                 HStack(alignment: .top, spacing: Space.s3) {
@@ -46,28 +46,30 @@ public struct ReaderHomeTile: View {
     private func frontBook(_ item: ReaderItem) -> some View {
         let theme = Theme.current
         let isPlaying = model.listen.current?.id == item.id
-        return VStack(spacing: Space.s1) {
-            BookIcon(systemImage: isPlaying ? "waveform" : item.systemImage, size: iconSize)
-                .padding(.bottom, Space.s1)
-            if isPlaying {
-                Text("Listening")
+        return VStack(alignment: .leading, spacing: Space.s2) {
+            // The book sits at the left of the tile, with its icon centred on its title.
+            VStack(spacing: Space.s1) {
+                BookIcon(systemImage: isPlaying ? "waveform" : item.systemImage, size: iconSize)
+                    .padding(.bottom, Space.s1)
+                if isPlaying {
+                    Text("Listening")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.accent.color)
+                }
+                Text(item.displayTitle)
+                    .font(size == .medium ? Typeface.headline : Typeface.title)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .lineLimit(size == .medium ? 1 : 2)
+                Text(item.typeName)
                     .font(Typeface.caption)
-                    .foregroundStyle(theme.accent.color)
+                    .foregroundStyle(theme.textSecondary.color)
             }
-            Text(item.displayTitle)
-                .font(size == .medium ? Typeface.headline : Typeface.title)
-                .foregroundStyle(theme.textPrimary.color)
-                .lineLimit(size == .medium ? 1 : 2)
-            Text(item.typeName)
-                .font(Typeface.caption)
-                .foregroundStyle(theme.textSecondary.color)
+            .multilineTextAlignment(.center)
             if isPlaying {
                 ListenProgress(value: model.listen.progress)
-                    .padding(.top, Space.s1)
             }
         }
-        .multilineTextAlignment(.center)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
