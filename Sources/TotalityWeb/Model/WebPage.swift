@@ -88,6 +88,8 @@ public final class WebPage: NSObject {
     @ObservationIgnored var onVisit: ((URL, String) -> Void)?
     /// A tap on a page asked for a new tab. Returns its web view, which has to use this configuration.
     @ObservationIgnored var onNewTab: ((WKWebViewConfiguration, URLRequest) -> WKWebView?)?
+    /// The person chose to open a link in a new tab, and whether that tab is private.
+    @ObservationIgnored var onOpenInTab: ((URL, Bool) -> Void)?
 
     @ObservationIgnored private var watches: [NSKeyValueObservation] = []
 
@@ -245,6 +247,37 @@ extension WebPage: WKUIDelegate {
             }
         }
     }
+
+    #if os(iOS)
+    /// Holding a link. The menu's actions are all the person's own, so a page can't trigger them.
+    public func webView(_ webView: WKWebView, contextMenuConfigurationFor elementInfo: WKContextMenuElementInfo) async -> UIContextMenuConfiguration? {
+        guard let url = elementInfo.linkURL else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            UIMenu(children: [
+                UIAction(title: "Open in New Tab", image: UIImage(systemName: "plus.square.on.square")) { _ in
+                    self?.onOpenInTab?(url, false)
+                },
+                UIAction(title: "Open in Private Tab", image: UIImage(systemName: "eye.slash")) { _ in
+                    self?.onOpenInTab?(url, true)
+                },
+                UIAction(title: "Copy Link", image: UIImage(systemName: "doc.on.doc")) { _ in
+                    UIPasteboard.general.url = url
+                },
+                UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { _ in
+                    self?.share(url)
+                },
+            ])
+        }
+    }
+
+    private func share(_ url: URL) {
+        let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        sheet.popoverPresentationController?.sourceView = webView
+        var top = webView.window?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        top?.present(sheet, animated: true)
+    }
+    #endif
 
     #if os(macOS)
     public func webView(

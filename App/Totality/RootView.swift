@@ -78,6 +78,7 @@ struct RootView: View {
                 await account?.sync?.pause()
                 await reader?.stopForKeyChange()
                 await calendar?.stopForKeyChange()
+                await web?.stopForKeyChange()
                 reader = nil
                 calendar = nil
                 web = nil
@@ -136,6 +137,7 @@ struct RootView: View {
         var glances = Dictionary(uniqueKeysWithValues: ModuleEntry.all.map { ($0.id, ModuleGlance(lines: ["Not built yet"], isQuiet: true)) })
         glances[.reader] = reader?.glance
         glances[.calendar] = calendar?.glance
+        glances[.web] = web?.glance
         return glances
     }
 
@@ -201,6 +203,7 @@ struct RootView: View {
         prepareContent()
         await reader?.load()
         await calendar?.load()
+        await web?.load()
     }
 
     /// Only a sync that really finished counts, so the screens can't claim safety too early.
@@ -224,6 +227,7 @@ struct RootView: View {
         sync.onChanged = {
             await reader?.load()
             await calendar?.load()
+            await web?.load()
         }
         backup.onJoined = { await sync.syncNow() }
     }

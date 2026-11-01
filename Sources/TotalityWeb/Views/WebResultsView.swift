@@ -210,4 +210,5 @@ private struct WebThumbnailView: View {
 
 enum WebCopy {
     static let notEncrypted = "Web searches aren't end-to-end encrypted. They go to your server through Cloudflare, and your server keeps no record of them."
+    static let privateTab = "This tab keeps no history, cookies, or site data once it's closed. Sites you open still see your device's address."
 }

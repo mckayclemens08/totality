@@ -1,4 +1,5 @@
 import Foundation
+import TotalityCore
 @testable import TotalityWeb
 
 /// Answers requests in place of the gateway, and remembers what it was sent.
@@ -84,4 +85,14 @@ func until(_ done: @MainActor () -> Bool) async throws {
         try await Task.sleep(for: .milliseconds(10))
     }
     throw CancellationError()
+}
+
+final class MemoryBlobStore: BlobStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var blobs: [String: Data] = [:]
+
+    func names() throws -> [String] { lock.withLock { Array(blobs.keys) } }
+    func read(_ name: String) throws -> Data? { lock.withLock { blobs[name] } }
+    func write(_ data: Data, as name: String) throws { lock.withLock { blobs[name] = data } }
+    func delete(_ name: String) throws { _ = lock.withLock { blobs.removeValue(forKey: name) } }
 }

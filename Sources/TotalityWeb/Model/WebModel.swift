@@ -4,6 +4,15 @@ import TotalityCore
 import WebKit
 
 /// One tab's search.
+/// Something already on this device that matches what's being typed.
+public struct WebSuggestion: Equatable, Identifiable, Sendable {
+    public let title: String
+    public let url: URL
+    public let isBookmark: Bool
+
+    public var id: URL { url }
+}
+
 public struct WebSearchState: Equatable, Sendable {
     public enum Phase: Equatable, Sendable {
         case searching, done
@@ -51,24 +60,280 @@ public final class WebTab: Identifiable {
     }
 }
 
+/// How far back Clear History reaches.
+public enum WebClearing: CaseIterable, Sendable, Identifiable {
+    case lastHour, lastDay, everything
+
+    public var id: Self { self }
+
+    public var label: String {
+        switch self {
+        case .lastHour: "The last hour"
+        case .lastDay: "The last day"
+        case .everything: "Everything"
+        }
+    }
+
+    var reach: TimeInterval? {
+        switch self {
+        case .lastHour: 60 * 60
+        case .lastDay: 24 * 60 * 60
+        case .everything: nil
+        }
+    }
+}
+
 /// The browser's state. Nothing here is logged, and a search is only ever sent to the gateway.
 @MainActor
 @Observable
 public final class WebModel {
+    /// The most kept on the device. The oldest go first.
+    static let historyLimit = 2_000
+    /// Lets a burst of pages settle, so the sealed file isn't rewritten for each one.
+    private static let savePause = Duration.milliseconds(800)
+
     public private(set) var tabs: [WebTab]
     public private(set) var currentID: UUID
     public var safety = SafeSearch.moderate
+    public private(set) var bookmarks: [WebBookmark] = []
+    public private(set) var history: [WebVisit] = []
+    public private(set) var isLoaded = false
+    public var notice: String?
 
     @ObservationIgnored private let client: WebSearchClient?
+    @ObservationIgnored private let vault: WebVault?
     @ObservationIgnored private var searching: Task<Void, Never>?
-    @ObservationIgnored private let store: () -> WKWebsiteDataStore
+    @ObservationIgnored private var settings = WebSettings()
+    @ObservationIgnored private var dataStore: WKWebsiteDataStore?
+    @ObservationIgnored private var savingHistory: Task<Void, Never>?
+    @ObservationIgnored private var savingTabs: Task<Void, Never>?
+    @ObservationIgnored private let now: @Sendable () -> Date
 
-    public init(client: WebSearchClient?, store: @escaping () -> WKWebsiteDataStore = { .default() }) {
+    public init(client: WebSearchClient?, vault: WebVault? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
         self.client = client
-        self.store = store
+        self.vault = vault
+        self.now = now
         let first = WebTab()
         tabs = [first]
         currentID = first.id
+    }
+
+    /// Reads what's sealed on this device. Open tabs come back without loading, and each one loads when
+    /// it's next looked at, so reopening the app doesn't fetch every site.
+    public func load() async {
+        guard let vault else {
+            isLoaded = true
+            return
+        }
+        do {
+            bookmarks = try await vault.bookmarks()
+            history = try await vault.history()
+            settings = try await vault.settings()
+            if !isLoaded { restoreTabs(try await vault.savedTabs()) }
+            isLoaded = true
+        } catch {
+            notice = "Your bookmarks and history couldn't be opened."
+        }
+    }
+
+    private func restoreTabs(_ saved: WebSavedTabs) {
+        guard !saved.tabs.isEmpty, tabs.count == 1, tabs[0].showing == .start else { return }
+        tabs = saved.tabs.map { tab in
+            let restored = WebTab(id: tab.id)
+            restored.address = tab.url
+            restored.savedTitle = tab.title
+            restored.showing = .page
+            return restored
+        }
+        currentID = saved.tabs.first { $0.id == saved.current }?.id ?? tabs[0].id
+        wakeCurrent()
+    }
+
+    /// Stops writing under a key that's about to change.
+    public func stopForKeyChange() async {
+        savingHistory?.cancel()
+        savingTabs?.cancel()
+        await vault?.close()
+    }
+
+    private func wakeCurrent() {
+        let tab = current
+        guard tab.showing == .page, tab.page == nil, let address = tab.address else { return }
+        page(for: tab).load(address)
+    }
+
+    /// Each account has its own store of cookies and site data, so one person's sign-ins can't reach another's.
+    private func store() -> WKWebsiteDataStore {
+        if let dataStore { return dataStore }
+        // Until the sealed settings open there's no store ID, and a page mustn't make one up.
+        guard vault == nil || isLoaded else { return .nonPersistent() }
+        let store = vault == nil ? WKWebsiteDataStore.nonPersistent() : WKWebsiteDataStore(forIdentifier: settings.storeID)
+        dataStore = store
+        return store
+    }
+
+    // MARK: Tabs
+
+    public func newTab(isPrivate: Bool = false) {
+        let tab = WebTab(isPrivate: isPrivate)
+        tabs.append(tab)
+        currentID = tab.id
+        tabsChanged()
+    }
+
+    public func select(_ tab: WebTab) {
+        currentID = tab.id
+        wakeCurrent()
+        tabsChanged()
+    }
+
+    public func close(_ tab: WebTab) {
+        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        tab.page?.stop()
+        tabs.remove(at: index)
+        if tabs.isEmpty {
+            let fresh = WebTab()
+            tabs = [fresh]
+            currentID = fresh.id
+        } else if tab.id == currentID {
+            currentID = tabs[min(index, tabs.count - 1)].id
+            wakeCurrent()
+        }
+        tabsChanged()
+    }
+
+    /// Private tabs are never saved, so they can't come back after the app closes.
+    private func tabsChanged() {
+        guard let vault, isLoaded else { return }
+        savingTabs?.cancel()
+        savingTabs = Task { [weak self] in
+            try? await Task.sleep(for: Self.savePause)
+            guard !Task.isCancelled, let self else { return }
+            try? await vault.saveTabs(self.savedTabs)
+        }
+    }
+
+    var savedTabs: WebSavedTabs {
+        let kept = tabs.filter { !$0.isPrivate && $0.showing == .page }.compactMap { tab -> WebSavedTabs.Tab? in
+            guard let url = tab.page?.url ?? tab.address else { return nil }
+            return WebSavedTabs.Tab(id: tab.id, url: url, title: tab.title)
+        }
+        return WebSavedTabs(tabs: kept, current: kept.contains { $0.id == currentID } ? currentID : nil)
+    }
+
+    // MARK: History
+
+    private func visited(_ url: URL, title: String, in tab: WebTab) {
+        tab.address = url
+        if !title.isEmpty { tab.savedTitle = title }
+        tabsChanged()
+        guard !tab.isPrivate, let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else { return }
+        if let latest = history.first, latest.url == url {
+            history[0].title = title
+            history[0].date = now()
+        } else {
+            history.insert(WebVisit(title: title, url: url, date: now()), at: 0)
+            history.removeLast(max(0, history.count - Self.historyLimit))
+        }
+        saveHistory()
+    }
+
+    private func saveHistory() {
+        guard let vault else { return }
+        savingHistory?.cancel()
+        savingHistory = Task { [weak self] in
+            try? await Task.sleep(for: Self.savePause)
+            guard !Task.isCancelled, let self else { return }
+            try? await vault.saveHistory(self.history)
+        }
+    }
+
+    public func clearHistory(_ reach: WebClearing) {
+        if let seconds = reach.reach {
+            let cutoff = now().addingTimeInterval(-seconds)
+            history.removeAll { $0.date >= cutoff }
+        } else {
+            history = []
+        }
+        savingHistory?.cancel()
+        Task { [vault, history] in try? await vault?.saveHistory(history) }
+    }
+
+    public func forget(_ visit: WebVisit) {
+        history.removeAll { $0.id == visit.id }
+        saveHistory()
+    }
+
+    /// Signs every site out on this device, for this account.
+    public func clearSiteData() async {
+        await store().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+    }
+
+    /// Bookmarks and pages already visited, matched here. Nothing typed leaves the device until Go.
+    public func suggestions(for typed: String) -> [WebSuggestion] {
+        let terms = SearchText.terms(in: typed)
+        guard !terms.isEmpty else { return [] }
+        func matches(_ title: String, _ url: URL) -> Bool {
+            terms.allSatisfy { SearchText.find($0, in: title) != nil || SearchText.find($0, in: url.absoluteString) != nil }
+        }
+        var seen = Set<URL>()
+        var found: [WebSuggestion] = []
+        for bookmark in bookmarks where matches(bookmark.title, bookmark.url) && seen.insert(bookmark.url).inserted {
+            found.append(WebSuggestion(title: bookmark.displayTitle, url: bookmark.url, isBookmark: true))
+        }
+        for visit in history where matches(visit.title, visit.url) && seen.insert(visit.url).inserted {
+            found.append(WebSuggestion(title: visit.displayTitle, url: visit.url, isBookmark: false))
+        }
+        return Array(found.prefix(Self.suggestionLimit))
+    }
+
+    private static let suggestionLimit = 6
+
+    // MARK: Bookmarks
+
+    public var folders: [String] {
+        Array(Set(bookmarks.map(\.folder).filter { !$0.isEmpty })).sorted()
+    }
+
+    public func bookmark(for url: URL?) -> WebBookmark? {
+        guard let url else { return nil }
+        return bookmarks.first { $0.url == url }
+    }
+
+    public func addBookmark(title: String, url: URL, folder: String = "") async {
+        await changeBookmarks("The bookmark wasn't saved.") { vault in
+            try await vault.save(WebBookmark(title: title, url: url, folder: folder, updatedAt: self.now()))
+        }
+    }
+
+    public func save(_ bookmark: WebBookmark) async {
+        var changed = bookmark
+        changed.updatedAt = now()
+        await changeBookmarks("The bookmark wasn't saved.") { try await $0.save(changed) }
+    }
+
+    public func remove(_ bookmark: WebBookmark) async {
+        await changeBookmarks("The bookmark wasn't removed.") { try await $0.delete(bookmark.id) }
+    }
+
+    private func changeBookmarks(_ failure: String, _ change: (WebVault) async throws -> Void) async {
+        guard let vault else {
+            notice = failure
+            return
+        }
+        do {
+            try await change(vault)
+            bookmarks = try await vault.bookmarks()
+        } catch {
+            notice = failure
+        }
+    }
+
+    /// The home tile: the newest bookmarks, and never history.
+    public var glance: ModuleGlance? {
+        guard isLoaded else { return nil }
+        guard !bookmarks.isEmpty else { return ModuleGlance(lines: ["No bookmarks yet"], isQuiet: true) }
+        return ModuleGlance(lines: bookmarks.map(\.displayTitle))
     }
 
     public var current: WebTab {
@@ -100,6 +365,28 @@ public final class WebModel {
 
     private func attach(_ page: WebPage, to tab: WebTab) {
         tab.page = page
+        page.onVisit = { [weak self, weak tab] url, title in
+            guard let self, let tab else { return }
+            self.visited(url, title: title, in: tab)
+        }
+        page.onNewTab = { [weak self, weak tab] configuration, _ in
+            guard let self, let tab else { return nil }
+            let opened = WebTab(isPrivate: tab.isPrivate)
+            let page = WebPage(configuration: configuration, isPrivate: tab.isPrivate)
+            self.attach(page, to: opened)
+            opened.showing = .page
+            self.tabs.append(opened)
+            self.currentID = opened.id
+            return page.webView
+        }
+        page.onOpenInTab = { [weak self, weak tab] url, isPrivate in
+            guard let self, let tab else { return }
+            let opened = WebTab(isPrivate: isPrivate || tab.isPrivate)
+            self.tabs.append(opened)
+            self.open(url, in: opened)
+            self.currentID = opened.id
+            self.tabsChanged()
+        }
     }
 
     public func search(_ query: String, category: WebCategory? = nil) {
