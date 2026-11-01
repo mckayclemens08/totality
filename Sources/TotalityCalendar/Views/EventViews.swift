@@ -69,11 +69,15 @@ struct EventDetailView: View {
             }
             .font(Typeface.callout)
             .foregroundStyle(theme.textSecondary.color)
-            .padding(Space.s4)
+            .padding(Space.s5)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg))
+            .padding(Space.s4)
         }
         .background(theme.bg.color)
-        .navigationTitle("Event")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
             if occurrence != nil {
                 ToolbarItem(placement: .primaryAction) {
@@ -177,6 +181,8 @@ struct EventEditorView: View {
     @State private var draft: EventDraft
     @State private var choosingScope = false
     @State private var attaching = false
+    @State private var showingNotes = false
+    @FocusState private var typingTitle: Bool
 
     init(model: CalendarModel, draft: EventDraft, occurrence: EventOccurrence?, onDone: @escaping () -> Void, onCancel: (() -> Void)? = nil) {
         self.model = model
@@ -195,6 +201,8 @@ struct EventEditorView: View {
         Form {
             Section {
                 TextField("Title", text: $draft.title)
+                    .font(Typeface.title)
+                    .focused($typingTitle)
                 TextField("Location", text: $draft.location)
             }
             Section {
@@ -213,15 +221,21 @@ struct EventEditorView: View {
                         DatePicker("Last day", selection: Binding(get: { until }, set: { draft.until = $0 }), displayedComponents: [.date])
                     }
                 }
-            }
-            Section {
                 Picker("Reminder", selection: $draft.reminderMinutes) {
                     ForEach(CalendarModel.reminderChoices, id: \.self) { Text(ReminderText.name($0)).tag($0) }
                 }
             } footer: {
-                Text("Reminders show the event's title and time, including on your lock screen. Your device keeps those outside Totality's encryption until the reminder fires.")
+                if draft.reminderMinutes != nil {
+                    Text("Reminders show the event's title and time, including on your lock screen. Your device keeps those outside Totality's encryption until the reminder fires.")
+                }
             }
-            Section("Attached") {
+            Section {
+                if showingNotes || !draft.notes.isEmpty {
+                    TextField("Notes", text: $draft.notes, axis: .vertical)
+                        .lineLimit(3...8)
+                } else {
+                    Button("Add notes", systemImage: "text.alignleft") { showingNotes = true }
+                }
                 ForEach(draft.attachments, id: \.id) { ref in
                     HStack {
                         Text(ref.preview.title).lineLimit(1)
@@ -231,18 +245,14 @@ struct EventEditorView: View {
                             .buttonStyle(.plain)
                     }
                 }
-                Button("Attach from Reader") { attaching = true }
-            }
-            Section("Notes") {
-                TextField("Notes", text: $draft.notes, axis: .vertical)
-                    .lineLimit(3...8)
-                    .labelsHidden()
+                Button("Attach from Reader", systemImage: "paperclip") { attaching = true }
             }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(theme.bg.color)
         .navigationTitle(occurrence == nil ? "New event" : "Edit event")
+        .task { typingTitle = occurrence == nil }
         .onChange(of: draft.start) { old, new in
             draft.end = draft.end.addingTimeInterval(new.timeIntervalSince(old))
         }

@@ -535,18 +535,112 @@ enum Dates {
     }
 }
 
+@Suite struct TimelineLayoutTests {
+    private let calendar = Dates.calendar()
+    private let day = CalendarDay(year: 2026, month: 10, day: 15)
+
+    private func entry(_ title: String, _ start: Date, _ end: Date, allDay: Bool = false) -> CalendarEntry {
+        let event = CalendarEvent(
+            title: title, location: "", notes: "", start: start, end: end, isAllDay: allDay,
+            timeZoneID: calendar.timeZone.identifier, createdAt: start, updatedAt: start
+        )
+        return CalendarEntry(source: .own(EventOccurrence(event: event, start: start, end: end)))
+    }
+
+    private func at(_ hour: Int, _ minute: Int = 0) -> Date {
+        Dates.date(2026, 10, 15, hour, minute)
+    }
+
+    private func blocks(_ entries: CalendarEntry...) -> [String: TimelineBlock] {
+        Dictionary(uniqueKeysWithValues: TimelineLayout.blocks(for: entries, on: day, in: calendar).map { ($0.entry.title, $0) })
+    }
+
+    @Test func eventsApartEachGetTheFullWidth() throws {
+        let found = blocks(entry("Standup", at(9), at(10)), entry("Lunch", at(12), at(13)))
+        #expect(found["Standup"]?.columns == 1)
+        #expect(found["Lunch"]?.columns == 1)
+        #expect(found["Lunch"]?.startMinute == 720)
+    }
+
+    @Test func overlappingEventsSitSideBySide() throws {
+        let found = blocks(entry("Standup", at(9), at(10)), entry("Call", at(9, 30), at(10, 30)))
+        #expect(found["Standup"]?.columns == 2)
+        #expect(found["Call"]?.columns == 2)
+        #expect(found["Standup"]?.column != found["Call"]?.column)
+    }
+
+    @Test("An event ending as another starts doesn't push it aside")
+    func touchingEventsDontOverlap() {
+        let found = blocks(entry("Standup", at(9), at(10)), entry("Review", at(10), at(11)))
+        #expect(found["Review"]?.columns == 1)
+    }
+
+    @Test("A freed column is used again, and everything in the group shares the count")
+    func columnsAreReused() {
+        let found = blocks(
+            entry("Workshop", at(9), at(12)), entry("Call", at(9), at(10)), entry("Review", at(10), at(11))
+        )
+        #expect(found["Workshop"]?.columns == 2)
+        #expect(found["Call"]?.columns == 2)
+        #expect(found["Review"]?.column == found["Call"]?.column)
+    }
+
+    @Test("A later event starts a new group, with its own width")
+    func groupsAreSeparate() {
+        let found = blocks(entry("Standup", at(9), at(10)), entry("Call", at(9), at(10)), entry("Lunch", at(12), at(13)))
+        #expect(found["Lunch"]?.columns == 1)
+        #expect(found["Lunch"]?.column == 0)
+    }
+
+    @Test("All-day events have their own row, not a place on the hours")
+    func allDayEventsAreLeftOut() {
+        #expect(blocks(entry("Holiday", at(0), at(23), allDay: true)).isEmpty)
+    }
+
+    @Test func aShortEventStaysTappable() {
+        let found = blocks(entry("Quick call", at(9), at(9, 5)))
+        #expect(found["Quick call"]?.endMinute == 570)
+    }
+
+    @Test("An event from yesterday into tomorrow fills the day")
+    func multiDayEventsAreClamped() {
+        let found = blocks(entry("Conference", Dates.date(2026, 10, 14, 20), Dates.date(2026, 10, 16, 8)))
+        #expect(found["Conference"]?.startMinute == 0)
+        #expect(found["Conference"]?.endMinute == 1_440)
+    }
+
+    @Test("An event starting late in the day still fits on it")
+    func aLateEventStaysOnTheDay() {
+        let found = blocks(entry("Night train", at(23, 50), Dates.date(2026, 10, 16, 6)))
+        #expect(found["Night train"]?.startMinute == 1_410)
+        #expect(found["Night train"]?.endMinute == 1_440)
+    }
+
+    @Test("On the day clocks change, 9 AM still lines up with 9 AM")
+    func clockChangesKeepTheClockTime() {
+        var zone = Calendar(identifier: .gregorian)
+        zone.timeZone = TimeZone(identifier: "America/Denver")!
+        let changeDay = CalendarDay(year: 2026, month: 11, day: 1)
+        let start = zone.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 9))!
+        #expect(TimelineLayout.minute(of: start, on: changeDay, in: zone) == 540)
+    }
+}
+
 @MainActor
 @Suite struct CalendarModelTests {
     private let devices = FakeDevices()
     private let reminders = FakeReminders()
     private let blobs = MemoryBlobs()
 
-    private func model(mode: CalendarModel.Mode = .agenda, registry: ModuleRegistry? = nil) throws -> CalendarModel {
+    private func model(
+        mode: CalendarModel.Mode = .schedule, registry: ModuleRegistry? = nil, weekSpan: Int = 3,
+        display: Calendar = Dates.calendar(), defaults: UserDefaults? = nil
+    ) throws -> CalendarModel {
         let suite = "totality.tests.\(UUID().uuidString)"
         return CalendarModel(
             vault: CalendarVault(store: blobs, rootKey: try ContentRootKey.generate()), devices: devices, reminders: reminders,
-            registry: registry, startingMode: mode, display: Dates.calendar(),
-            defaults: UserDefaults(suiteName: suite)!, now: { Dates.date(2026, 10, 15, 8, 30) }
+            registry: registry, startingMode: mode, display: display, weekSpan: weekSpan,
+            defaults: defaults ?? UserDefaults(suiteName: suite)!, now: { Dates.date(2026, 10, 15, 8, 30) }
         )
     }
 
@@ -565,18 +659,18 @@ enum Dates {
         return occurrence
     }
 
-    @Test func createsAnEventThatShowsInTheAgenda() async throws {
+    @Test func createsAnEventThatShowsInTheSchedule() async throws {
         let model = try model()
         #expect(await model.create(draft()))
-        #expect(model.agenda.map(\.day) == [CalendarDay(year: 2026, month: 10, day: 15)])
-        #expect(model.agenda.first?.entries.first?.title == "Dentist")
+        #expect(model.schedule.map(\.day) == [CalendarDay(year: 2026, month: 10, day: 15)])
+        #expect(model.schedule.first?.entries.first?.title == "Dentist")
         #expect(try blobs.names().count == 1)
     }
 
-    @Test func theAgendaLeavesOutThePast() async throws {
+    @Test func theScheduleLeavesOutThePast() async throws {
         let model = try model()
         _ = await model.create(draft(day: 14))
-        #expect(model.agenda.isEmpty)
+        #expect(model.schedule.isEmpty)
         #expect(model.entries(on: CalendarDay(year: 2026, month: 10, day: 14)).count == 1)
     }
 
@@ -674,7 +768,7 @@ enum Dates {
         series.frequency = .daily
         _ = await model.create(series)
         await model.delete(try onlyOccurrence(model, day: 16), scope: .allOccurrences)
-        #expect(model.agenda.isEmpty)
+        #expect(model.schedule.isEmpty)
         #expect(try blobs.names().allSatisfy { $0.hasSuffix(".deleted") })
     }
 
@@ -682,7 +776,7 @@ enum Dates {
     func staleEditsAreRefused() async throws {
         let vault = CalendarVault(store: blobs, rootKey: try ContentRootKey.generate())
         let model = CalendarModel(
-            vault: vault, devices: devices, reminders: reminders, startingMode: .agenda, display: Dates.calendar(),
+            vault: vault, devices: devices, reminders: reminders, startingMode: .schedule, display: Dates.calendar(),
             defaults: UserDefaults(suiteName: "totality.tests.\(UUID().uuidString)")!, now: { Dates.date(2026, 10, 15, 8, 30) }
         )
         _ = await model.create(draft("Dentist"))
@@ -702,7 +796,7 @@ enum Dates {
     func staleDeletesAreRefused() async throws {
         let vault = CalendarVault(store: blobs, rootKey: try ContentRootKey.generate())
         let model = CalendarModel(
-            vault: vault, devices: devices, reminders: reminders, startingMode: .agenda, display: Dates.calendar(),
+            vault: vault, devices: devices, reminders: reminders, startingMode: .schedule, display: Dates.calendar(),
             defaults: UserDefaults(suiteName: "totality.tests.\(UUID().uuidString)")!, now: { Dates.date(2026, 10, 15, 8, 30) }
         )
         _ = await model.create(draft("Dentist"))
@@ -745,10 +839,10 @@ enum Dates {
         let model = try model()
         await model.load()
         #expect(model.deviceAccess == .notAsked)
-        #expect(model.agenda.isEmpty)
+        #expect(model.schedule.isEmpty)
         await model.allowDeviceCalendars()
         #expect(model.deviceAccess == .allowed)
-        #expect(model.agenda.first?.entries.map(\.title) == ["Budget review"])
+        #expect(model.schedule.first?.entries.map(\.title) == ["Budget review"])
     }
 
     @Test("Device events are never written into Totality's storage")
@@ -758,7 +852,7 @@ enum Dates {
         devices.stored = [DeviceEvent(id: "1", title: "Budget review", location: "", notes: "", start: Dates.date(2026, 10, 15, 13), end: Dates.date(2026, 10, 15, 14), isAllDay: false, calendarTitle: "Work")]
         let model = try model()
         await model.load()
-        #expect(model.agenda.count == 1)
+        #expect(model.schedule.count == 1)
         #expect(model.events.isEmpty)
         #expect(try blobs.names().isEmpty)
     }
@@ -779,9 +873,9 @@ enum Dates {
         let model = try model()
         await model.load()
         model.setVisible(false, calendar: work)
-        #expect(model.agenda.isEmpty)
+        #expect(model.schedule.isEmpty)
         model.setVisible(true, calendar: work)
-        #expect(model.agenda.count == 1)
+        #expect(model.schedule.count == 1)
     }
 
     @Test func remindersFollowSavesAndDeletes() async throws {
@@ -861,15 +955,169 @@ enum Dates {
     func newEventTimes() throws {
         let model = try model(mode: .month)
         #expect(model.newDraft().start == Dates.date(2026, 10, 15, 9))
-        model.selectedDay = CalendarDay(year: 2026, month: 10, day: 20)
+        model.select(CalendarDay(year: 2026, month: 10, day: 20))
         #expect(model.newDraft().start == Dates.date(2026, 10, 20, 9))
     }
 
-    @Test("In the agenda a new event starts today, whatever day the month view had selected")
-    func agendaIgnoresTheMonthSelection() throws {
-        let model = try model(mode: .agenda)
-        model.selectedDay = CalendarDay(year: 2026, month: 10, day: 20)
+    @Test("In Schedule a new event starts today, whatever day the month view had selected")
+    func scheduleIgnoresTheMonthSelection() throws {
+        let model = try model(mode: .schedule)
+        model.select(CalendarDay(year: 2026, month: 10, day: 20))
         #expect(model.newDraft().start == Dates.date(2026, 10, 15, 9))
+    }
+
+    @Test("A tapped hour on the timeline starts the event there")
+    func aTappedHourSetsTheTime() throws {
+        let model = try model(mode: .day)
+        let draft = model.newDraft(on: CalendarDay(year: 2026, month: 10, day: 20), hour: 14)
+        #expect(draft.start == Dates.date(2026, 10, 20, 14))
+        #expect(draft.end == Dates.date(2026, 10, 20, 15))
+    }
+
+    @Test("Moving goes by the view: a month, a day, or the width of the week")
+    func movingFollowsTheView() throws {
+        let model = try model(mode: .month)
+        model.move(by: 1)
+        #expect(model.selectedDay == CalendarDay(year: 2026, month: 11, day: 1))
+        model.mode = .day
+        model.move(by: 1)
+        #expect(model.selectedDay == CalendarDay(year: 2026, month: 11, day: 2))
+        model.mode = .week
+        model.move(by: -1)
+        #expect(model.selectedDay == CalendarDay(year: 2026, month: 10, day: 30))
+        #expect(model.month == CalendarDay(year: 2026, month: 10, day: 1))
+    }
+
+    @Test("Coming back to this month lands on today, not the 1st")
+    func returningToThisMonthPicksToday() throws {
+        let model = try model(mode: .month)
+        model.move(by: 1)
+        model.move(by: -1)
+        #expect(model.selectedDay == model.today)
+        #expect(model.isShowingToday)
+    }
+
+    @Test func scheduleDoesNotMove() throws {
+        let model = try model(mode: .schedule)
+        model.move(by: 1)
+        #expect(!model.canMove)
+        #expect(model.selectedDay == model.today)
+        #expect(model.isShowingToday)
+    }
+
+    @Test("A full week starts where the device's weeks start, and three days start on the selected day")
+    func visibleDays() throws {
+        let days = { (span: Int) in
+            let model = try self.model(mode: .week, weekSpan: span)
+            return model.visibleDays
+        }
+        let threeDays = try days(3)
+        #expect(threeDays == (15...17).map { CalendarDay(year: 2026, month: 10, day: $0) })
+        // October 15, 2026 is a Thursday, and this calendar's weeks start on Sunday.
+        let week = try days(7)
+        #expect(week == (11...17).map { CalendarDay(year: 2026, month: 10, day: $0) })
+    }
+
+    @Test("A week follows the device when weeks start on Monday")
+    func aMondayWeek() throws {
+        var display = Dates.calendar()
+        display.firstWeekday = 2
+        let model = try model(mode: .week, weekSpan: 7, display: display)
+        #expect(model.visibleDays == (12...18).map { CalendarDay(year: 2026, month: 10, day: $0) })
+    }
+
+    @Test("Today only offers itself once you've left it")
+    func todayButton() throws {
+        let model = try model(mode: .day)
+        #expect(model.isShowingToday)
+        model.move(by: 1)
+        #expect(!model.isShowingToday)
+        model.mode = .week
+        #expect(!model.isShowingToday)
+        model.move(by: -1)
+        model.mode = .week
+        #expect(model.isShowingToday)
+        model.showToday()
+        #expect(model.isShowingToday)
+        model.mode = .month
+        model.select(CalendarDay(year: 2026, month: 10, day: 20))
+        #expect(!model.isShowingToday)
+    }
+
+    @Test("Titles say where you are", arguments: [
+        (CalendarModel.Mode.month, "October 2026"),
+        (.day, "Thursday, Oct 15"),
+        (.week, "Oct 15 to 17"),
+        (.schedule, "Schedule"),
+    ])
+    func titles(mode: CalendarModel.Mode, title: String) throws {
+        #expect(try model(mode: mode).title == title)
+    }
+
+    @Test func aWeekAcrossTwoMonthsNamesBoth() throws {
+        let model = try model(mode: .week)
+        model.select(CalendarDay(year: 2026, month: 10, day: 30))
+        #expect(model.title == "Oct 30 to Nov 1")
+    }
+
+    @Test("The first tap picks a day, and the second opens it")
+    func tappingTwiceOpensTheDay() throws {
+        let model = try model(mode: .month)
+        let day = CalendarDay(year: 2026, month: 10, day: 20)
+        model.choose(day)
+        #expect(model.selectedDay == day)
+        #expect(model.mode == .month)
+        model.choose(day)
+        #expect(model.mode == .day)
+    }
+
+    @Test("Opening the Calendar lands on the month and today, wherever it was left")
+    func opensOnTheMonth() throws {
+        let model = try model(mode: .week)
+        model.select(CalendarDay(year: 2026, month: 12, day: 20))
+        model.showFront()
+        #expect(model.mode == .month)
+        #expect(model.selectedDay == model.today)
+        #expect(model.month == CalendarDay(year: 2026, month: 10, day: 1))
+    }
+
+    @Test("A week at a far date still shows its events, even across a month's edge")
+    func aWeekFillsInBeyondTheMonth() async throws {
+        let model = try model(mode: .week)
+        var series = draft("Rent")
+        series.frequency = .monthly
+        _ = await model.create(series)
+        model.select(CalendarDay(year: 2027, month: 11, day: 30))
+        #expect(model.entries(on: CalendarDay(year: 2027, month: 12, day: 15)).map(\.title).isEmpty)
+        model.move(by: 5)
+        #expect(model.entries(on: CalendarDay(year: 2027, month: 12, day: 15)).map(\.title) == ["Rent"])
+    }
+
+    @Test("Moving inside what's built doesn't ask the device again")
+    func movingStaysCheap() async throws {
+        let model = try model(mode: .day)
+        await model.load()
+        let asked = devices.askedFor.count
+        model.move(by: 1)
+        #expect(devices.askedFor.count == asked)
+        model.move(by: 200)
+        #expect(devices.askedFor.count == asked + 1)
+    }
+
+    @Test("Next is the event on now or the soonest after it, never an all-day one")
+    func nextEvent() async throws {
+        let model = try model()
+        var allDay = draft("Holiday")
+        allDay.isAllDay = true
+        allDay.end = Dates.date(2026, 10, 17, 10)
+        _ = await model.create(allDay)
+        _ = await model.create(draft("Standup", hour: 8))
+        _ = await model.create(draft("Dentist", hour: 11))
+        #expect(model.nextEntry?.title == "Standup")
+        let done = try self.model()
+        _ = await done.create(draft("Standup", hour: 7))
+        _ = await done.create(draft("Dentist", hour: 11))
+        #expect(done.nextEntry?.title == "Dentist")
     }
 
     @Test func aDraftFromAnAllDayEventKeepsItsDates() async throws {

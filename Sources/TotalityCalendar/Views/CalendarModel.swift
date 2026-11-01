@@ -122,19 +122,29 @@ public final class CalendarModel {
     }
 
     public enum Mode: String, CaseIterable, Sendable {
-        case agenda, month
+        case month, day, week, schedule
 
-        public var name: String {
+        public var systemImage: String {
             switch self {
-            case .agenda: "Agenda"
-            case .month: "Month"
+            case .month: "calendar"
+            case .day: "calendar.day.timeline.left"
+            case .week: "rectangle.split.3x1"
+            case .schedule: "list.bullet"
             }
         }
     }
 
     public static let reminderChoices: [Int?] = [nil, 0, 5, 10, 15, 30, 60, 1_440]
-    private static let agendaDays = 90
+    private static let scheduleDays = 90
     private static let hiddenKey = "calendar.hiddenDeviceCalendars"
+    /// Seven columns can't be read on a phone.
+    public nonisolated static var platformWeekSpan: Int {
+        #if os(macOS)
+        7
+        #else
+        3
+        #endif
+    }
 
     public private(set) var phase = Phase.loading
     public private(set) var events: [CalendarEvent] = []
@@ -143,7 +153,7 @@ public final class CalendarModel {
     public private(set) var deviceCalendars: [DeviceCalendar] = []
     public private(set) var hiddenCalendars: Set<String>
     public private(set) var month: CalendarDay
-    public var selectedDay: CalendarDay
+    public private(set) var selectedDay: CalendarDay
     public var mode: Mode
     /// A problem to show the person, cleared when they dismiss it.
     public var notice: String?
@@ -151,6 +161,7 @@ public final class CalendarModel {
     public var isSynced = false
 
     public let display: Calendar
+    public let weekSpan: Int
     private let vault: CalendarVault
     private let devices: any DeviceCalendarSource
     private let reminders: any ReminderScheduler
@@ -159,11 +170,13 @@ public final class CalendarModel {
     private let now: @Sendable () -> Date
     private var deviceEvents: [DeviceEvent] = []
     private var entriesByDay: [CalendarDay: [CalendarEntry]] = [:]
+    private var built: (first: CalendarDay, last: CalendarDay)?
 
     public init(
         vault: CalendarVault, devices: any DeviceCalendarSource, reminders: any ReminderScheduler,
-        registry: ModuleRegistry? = nil, startingMode: Mode, display: Calendar = CalendarModel.personalCalendar,
-        defaults: UserDefaults = .standard, now: @escaping @Sendable () -> Date = { Date() }
+        registry: ModuleRegistry? = nil, startingMode: Mode = .month, display: Calendar = CalendarModel.personalCalendar,
+        weekSpan: Int = CalendarModel.platformWeekSpan, defaults: UserDefaults = .standard,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.vault = vault
         self.devices = devices
@@ -171,6 +184,7 @@ public final class CalendarModel {
         self.registry = registry
         self.mode = startingMode
         self.display = display
+        self.weekSpan = weekSpan
         self.defaults = defaults
         self.now = now
         let today = CalendarDay(now(), in: display)
@@ -191,15 +205,97 @@ public final class CalendarModel {
         CalendarDay(now(), in: display)
     }
 
+    public var currentDate: Date {
+        now()
+    }
+
     public func entries(on day: CalendarDay) -> [CalendarEntry] {
         entriesByDay[day] ?? []
     }
 
     /// Days from today on that have something on them.
-    public var agenda: [(day: CalendarDay, entries: [CalendarEntry])] {
+    public var schedule: [(day: CalendarDay, entries: [CalendarEntry])] {
         let start = today
-        let end = start.adding(days: Self.agendaDays, in: display)
+        let end = start.adding(days: Self.scheduleDays, in: display)
         return entriesByDay.keys.filter { $0 >= start && $0 <= end }.sorted().map { ($0, entriesByDay[$0] ?? []) }
+    }
+
+    /// The timed event on now, or the soonest one after it.
+    public var nextEntry: CalendarEntry? {
+        let current = now()
+        for (_, entries) in schedule {
+            if let next = entries.filter({ !$0.isAllDay && $0.end > current }).min(by: { $0.start < $1.start }) {
+                return next
+            }
+        }
+        return nil
+    }
+
+    public func name(of mode: Mode) -> String {
+        switch mode {
+        case .month: "Month"
+        case .day: "Day"
+        case .week: weekSpan == 7 ? "Week" : "\(weekSpan) Days"
+        case .schedule: "Schedule"
+        }
+    }
+
+    /// The columns of the day and week timelines. A full week starts where the device says weeks start.
+    public var visibleDays: [CalendarDay] {
+        guard mode == .week else { return [selectedDay] }
+        var first = selectedDay
+        if weekSpan == 7 {
+            let weekday = display.component(.weekday, from: selectedDay.start(in: display))
+            first = selectedDay.adding(days: -((weekday - display.firstWeekday + 7) % 7), in: display)
+        }
+        return (0..<weekSpan).map { first.adding(days: $0, in: display) }
+    }
+
+    public var title: String {
+        switch mode {
+        case .month:
+            written(month, .dateTime.month(.wide).year())
+        case .day:
+            written(selectedDay, .dateTime.weekday(.wide).month(.abbreviated).day())
+        case .week:
+            weekTitle
+        case .schedule:
+            name(of: .schedule)
+        }
+    }
+
+    private var weekTitle: String {
+        let days = visibleDays
+        guard let first = days.first, let last = days.last else { return "" }
+        let end = first.month == last.month ? "\(last.day)" : written(last, .dateTime.month(.abbreviated).day())
+        return "\(written(first, .dateTime.month(.abbreviated).day())) to \(end)"
+    }
+
+    public func heading(for day: CalendarDay) -> String {
+        if day == today { return "Today" }
+        if day == today.adding(days: 1, in: display) { return "Tomorrow" }
+        return written(day, .dateTime.weekday(.wide).month(.wide).day())
+    }
+
+    /// Written in the calendar's own zone, or midnight can land on the day before.
+    func written(_ day: CalendarDay, _ style: Date.FormatStyle) -> String {
+        var style = style
+        style.timeZone = display.timeZone
+        style.calendar = display
+        return day.start(in: display).formatted(style)
+    }
+
+    /// Whether Today has anywhere to go.
+    public var isShowingToday: Bool {
+        switch mode {
+        case .month: selectedDay == today
+        case .day, .week: visibleDays.contains(today)
+        case .schedule: true
+        }
+    }
+
+    public var canMove: Bool {
+        mode != .schedule
     }
 
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
@@ -223,24 +319,58 @@ public final class CalendarModel {
     }
 
     public func show(monthsFromNow offset: Int) {
-        month = month.adding(months: offset, in: display)
-        refreshDevice()
-        rebuild()
+        let target = month.adding(months: offset, in: display)
+        select(today.firstOfMonth == target ? today : target)
     }
 
     public func showToday() {
-        month = today.firstOfMonth
-        selectedDay = today
-        refreshDevice()
-        rebuild()
+        select(today)
     }
 
-    /// The selected day only means something in the month view. The agenda starts from now.
+    /// Opening the Calendar always lands on the month, with today's events below (owner, 2026-10-31).
+    public func showFront() {
+        mode = .month
+        showToday()
+    }
+
+    public func select(_ day: CalendarDay) {
+        selectedDay = day
+        month = day.firstOfMonth
+        fillIn()
+    }
+
+    /// In Month, the first tap picks a day and the second opens it.
+    public func choose(_ day: CalendarDay) {
+        if day == selectedDay {
+            mode = .day
+        } else {
+            select(day)
+        }
+    }
+
+    /// One swipe or arrow: forward with 1, back with -1.
+    public func move(by steps: Int) {
+        switch mode {
+        case .month: show(monthsFromNow: steps)
+        case .day: select(selectedDay.adding(days: steps, in: display))
+        case .week: select(selectedDay.adding(days: steps * weekSpan, in: display))
+        case .schedule: break
+        }
+    }
+
+    /// The selected day means nothing in Schedule, which starts from now.
     public func newDraft() -> EventDraft {
-        let day = mode == .month ? selectedDay : today
-        let base = day == today
-            ? display.nextDate(after: now(), matching: DateComponents(minute: 0), matchingPolicy: .nextTime) ?? now()
-            : display.date(byAdding: .hour, value: 9, to: day.start(in: display)) ?? now()
+        let day = mode == .schedule ? today : selectedDay
+        if day == today {
+            let base = display.nextDate(after: now(), matching: DateComponents(minute: 0), matchingPolicy: .nextTime) ?? now()
+            return EventDraft(start: base, end: base.addingTimeInterval(3_600))
+        }
+        return newDraft(on: day, hour: 9)
+    }
+
+    /// For an hour tapped on the timeline.
+    public func newDraft(on day: CalendarDay, hour: Int) -> EventDraft {
+        let base = display.date(bySettingHour: hour, minute: 0, second: 0, of: day.start(in: display)) ?? now()
         return EventDraft(start: base, end: base.addingTimeInterval(3_600))
     }
 
@@ -434,14 +564,27 @@ public final class CalendarModel {
 
     // MARK: Building the days
 
+    /// Wide enough for the month, the schedule, and any week around the selected day.
     private var visibleWindow: (first: CalendarDay, last: CalendarDay) {
         let start = today
         let monthEnd = month.adding(months: 1, in: display).adding(days: -1, in: display)
-        return (min(start, month), max(start.adding(days: Self.agendaDays, in: display), monthEnd))
+        return (
+            min(start, month, selectedDay.adding(days: -7, in: display)),
+            max(start.adding(days: Self.scheduleDays, in: display), monthEnd, selectedDay.adding(days: 7, in: display))
+        )
+    }
+
+    /// Moving between days stays cheap until it reaches days that haven't been built.
+    private func fillIn() {
+        let window = visibleWindow
+        if let built, built.first <= window.first, built.last >= window.last { return }
+        refreshDevice()
+        rebuild()
     }
 
     private func rebuild() {
         let window = visibleWindow
+        built = window
         var own: [CalendarEntry] = []
         for event in events {
             own += event.occurrences(from: window.first, through: window.last, in: display).map { CalendarEntry(source: .own($0)) }

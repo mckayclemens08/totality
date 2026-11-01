@@ -98,11 +98,14 @@ A module offers content through `ContentProvider`, and `ModuleRegistry.providers
 
 ## Calendar
 
-Spec: issue #12. An event is one sealed blob with its times inside, so storage shows only an ID. Events use their own key purpose, so a Reader blob can't open as an event, and the ID inside must match the one outside.
+Spec: issue #12, and issue #23 for the redesign. An event is one sealed blob with its times inside, so storage shows only an ID. Events use their own key purpose, so a Reader blob can't open as an event, and the ID inside must match the one outside.
 
 - All-day events are midnight GMT on their first and last days, so they're plain dates in any zone. Timed events repeat in their own zone, so 3 PM at home stays 3 PM at home while the person travels.
 - Repeats that don't exist, like the 31st of a short month, are skipped rather than moved. Editing one occurrence adds it to `skipped` and makes a standalone event.
 - Device calendars are read through EventKit, held in memory, and never written to Totality's storage. Totality doesn't encrypt them, and the UI says so. Only opaque calendar IDs are kept, in `UserDefaults`, to remember which are hidden.
+- The Calendar always opens on Month and today, with that day's events below (owner, 2026-10-31). Day, Week, and Schedule are one menu away. Week is seven days on Mac and three on iPhone.
+- `TimelineLayout` places timed events by clock minutes, so 9 AM lines up with 9 AM on a day the clocks change. Overlapping events share the width.
+- Anything a swipe can cross uses `tappable`, not a Button. A Button also fires when a swipe ends on it, which opened a new event on the simulator.
 - A reminder gives the operating system the title and time only, outside Totality's encryption. Locations and notes never go with it.
 - Reader and Calendar share one root key, so `ContentRootKey.loadOrCreate(in:sealedIn:)` has to count every module's storage. A key is only created when nothing anywhere is sealed under a missing one.
 - Reminders are planned per device. Events sync, and each device schedules its own reminders from what it has.

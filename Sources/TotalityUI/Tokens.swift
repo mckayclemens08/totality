@@ -68,6 +68,8 @@ public enum Space {
     public static let s6: CGFloat = 32
     public static let s7: CGFloat = 48
     public static let s8: CGFloat = 64
+    /// Rules on a timeline, which sit in the surface rather than on it.
+    public static let hairline: CGFloat = 1
 }
 
 /// Text styles, so every size scales with Dynamic Type.

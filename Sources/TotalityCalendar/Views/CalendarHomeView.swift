@@ -2,14 +2,18 @@ import SwiftUI
 import TotalityCore
 import TotalityUI
 
-/// The Calendar's front screen: the agenda and the month, with new events and device calendars.
+/// The Calendar's front screen: one header, and whichever of the four views is showing.
 public struct CalendarHomeView: View {
+    /// How far a swipe has to go, so a scroll that drifts sideways doesn't change the page.
+    private static let swipeDistance = Space.s7
+
     @Bindable private var model: CalendarModel
     private let onClose: (() -> Void)?
     private let onOpen: (ContentRef) -> Void
     @State private var path: [CalendarEntry] = []
-    @State private var creating = false
+    @State private var creating: EventDraft?
     @State private var showingSources = false
+    @State private var movingForward = true
 
     public init(model: CalendarModel, onClose: (() -> Void)? = nil, onOpen: @escaping (ContentRef) -> Void = { _ in }) {
         self.model = model
@@ -22,18 +26,24 @@ public struct CalendarHomeView: View {
         NavigationStack(path: $path) {
             content
                 .background(theme.bg.color)
-                .navigationTitle("Calendar")
                 .navigationDestination(for: CalendarEntry.self) { entry in
                     EventDetailView(entry: entry, model: model, onOpen: onOpen) { path.removeAll() }
                 }
                 .toolbar { toolbar }
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #else
+                .navigationTitle("Calendar")
+                #endif
         }
         .tint(theme.accent.color)
-        .sheet(isPresented: $creating) {
-            NavigationStack {
-                EventEditorView(model: model, draft: model.newDraft(), occurrence: nil) { creating = false }
+        .sheet(isPresented: isCreating) {
+            if let creating {
+                NavigationStack {
+                    EventEditorView(model: model, draft: creating, occurrence: nil) { self.creating = nil }
+                }
+                .tint(theme.accent.color)
             }
-            .tint(theme.accent.color)
         }
         .sheet(isPresented: $showingSources) {
             NavigationStack {
@@ -46,7 +56,14 @@ public struct CalendarHomeView: View {
         } message: {
             Text(model.notice ?? "")
         }
-        .task { await model.load() }
+        .task {
+            model.showFront()
+            await model.load()
+        }
+    }
+
+    private var isCreating: Binding<Bool> {
+        Binding(get: { creating != nil }, set: { if !$0 { creating = nil } })
     }
 
     private var noticeShown: Binding<Bool> {
@@ -60,10 +77,20 @@ public struct CalendarHomeView: View {
             }
         }
         ToolbarItem(placement: .automatic) {
-            Button("Calendars", systemImage: "calendar.badge.checkmark") { showingSources = true }
+            Menu {
+                Picker("View", selection: $model.mode) {
+                    ForEach(CalendarModel.Mode.allCases, id: \.self) { mode in
+                        Label(model.name(of: mode), systemImage: mode.systemImage).tag(mode)
+                    }
+                }
+                Divider()
+                Button("Calendars", systemImage: "calendar.badge.checkmark") { showingSources = true }
+            } label: {
+                Label("View", systemImage: model.mode.systemImage)
+            }
         }
         ToolbarItem(placement: .primaryAction) {
-            Button("New event", systemImage: "plus") { creating = true }
+            Button("New event", systemImage: "plus") { creating = model.newDraft() }
         }
     }
 
@@ -81,22 +108,92 @@ public struct CalendarHomeView: View {
             )
         case .ready:
             VStack(spacing: Space.s3) {
-                Picker("View", selection: $model.mode) {
-                    ForEach(CalendarModel.Mode.allCases, id: \.self) { Text($0.name).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, Space.s4)
-                switch model.mode {
-                case .agenda: agenda
-                case .month: MonthView(model: model)
-                }
+                header
+                UnreadableNote(model: model)
+                page
+                    .id(model.title)
+                    .transition(.push(from: movingForward ? .trailing : .leading))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             }
+            #if os(iOS)
+            .simultaneousGesture(swipe)
+            #endif
         }
     }
 
-    @ViewBuilder private var agenda: some View {
-        let days = model.agenda
+    @ViewBuilder private var page: some View {
+        switch model.mode {
+        case .month:
+            MonthView(model: model) { path.append($0) }
+        case .day, .week:
+            DayTimelineView(model: model, onOpen: { path.append($0) }) { day, hour in
+                creating = model.newDraft(on: day, hour: hour)
+            }
+        case .schedule:
+            schedule
+        }
+    }
+
+    private var header: some View {
+        let theme = Theme.current
+        return HStack(spacing: Space.s3) {
+            Text(model.title)
+                .font(Typeface.display)
+                .foregroundStyle(theme.textPrimary.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityAction(named: "Previous") { move(by: -1) }
+                .accessibilityAction(named: "Next") { move(by: 1) }
+            Spacer(minLength: 0)
+            if !model.isShowingToday {
+                Button("Today") {
+                    movingForward = model.selectedDay < model.today
+                    withAnimation(Motion.quick) { model.showToday() }
+                }
+                .font(Typeface.callout)
+                .foregroundStyle(theme.accent.color)
+                .padding(.horizontal, Space.s3)
+                .padding(.vertical, Space.s2)
+                .neumorphic(.subtle, in: Capsule())
+                .buttonStyle(.plain)
+            }
+            #if os(macOS)
+            if model.canMove {
+                Button("Previous", systemImage: "chevron.left") { move(by: -1) }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                Button("Next", systemImage: "chevron.right") { move(by: 1) }
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+            }
+            #endif
+        }
+        #if os(macOS)
+        .labelStyle(.iconOnly)
+        .buttonStyle(.plain)
+        #endif
+        .padding(.horizontal, Space.s4)
+    }
+
+    private func move(by steps: Int) {
+        guard model.canMove else { return }
+        movingForward = steps > 0
+        withAnimation(Motion.quick) { model.move(by: steps) }
+    }
+
+    #if os(iOS)
+    private var swipe: some Gesture {
+        DragGesture(minimumDistance: Space.s5).onEnded { drag in
+            let across = drag.translation.width
+            guard abs(across) > Self.swipeDistance, abs(across) > abs(drag.translation.height) * 2 else { return }
+            move(by: across < 0 ? 1 : -1)
+        }
+    }
+    #endif
+
+    @ViewBuilder private var schedule: some View {
+        let theme = Theme.current
+        let days = model.schedule
         if days.isEmpty && model.unreadable == 0 {
             CalendarMessage(
                 systemImage: "calendar",
@@ -106,102 +203,50 @@ public struct CalendarHomeView: View {
                     : "Add an event, or show your Apple and Google calendars here. Events you add here are encrypted and aren't synced between your devices yet."
             )
         } else {
-            List {
-                CalendarNotes(model: model)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                ForEach(days, id: \.day) { day in
-                    Section {
-                        ForEach(day.entries) { entry in
-                            NavigationLink(value: entry) {
-                                EntryRow(entry: entry)
+            let next = model.nextEntry?.id
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Space.s3, pinnedViews: .sectionHeaders) {
+                    ForEach(days, id: \.day) { day in
+                        Section {
+                            ForEach(day.entries) { entry in
+                                EventTile(entry: entry, isNext: entry.id == next)
+                                    .tappable { path.append(entry) }
                             }
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                        } header: {
+                            Text(model.heading(for: day.day))
+                                .font(Typeface.callout)
+                                .foregroundStyle(theme.textSecondary.color)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, Space.s1)
+                                .background(theme.bg.color)
                         }
-                    } header: {
-                        Text(heading(for: day.day))
                     }
                 }
+                .padding(.horizontal, Space.s4)
+                .padding(.bottom, Space.s4)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
         }
-    }
-
-    private func heading(for day: CalendarDay) -> String {
-        if day == model.today { return "Today" }
-        if day == model.today.adding(days: 1, in: model.display) { return "Tomorrow" }
-        return day.start(in: model.display).formatted(.dateTime.weekday(.wide).month(.wide).day())
     }
 }
 
-/// The two things worth saying above the list: what's unreadable, and where events are kept.
-struct CalendarNotes: View {
+/// The one note that stays on the main screen, because it's a problem the person should see.
+struct UnreadableNote: View {
     let model: CalendarModel
 
-    var body: some View {
-        let theme = Theme.current
-        VStack(alignment: .leading, spacing: Space.s2) {
-            if model.unreadable > 0 {
-                Label(unreadableText, systemImage: "lock.slash")
-                    .foregroundStyle(theme.danger.color)
-            }
-            Label(
-                model.isSynced
-                    ? "Events you add here are encrypted, and sync between your devices. Apple and Google calendars aren't encrypted by Totality."
-                    : "Events you add here are encrypted and can't be recovered on a new device yet. Apple and Google calendars aren't encrypted by Totality.",
-                systemImage: model.isSynced ? "lock" : "iphone"
-            )
-                .foregroundStyle(theme.textSecondary.color)
-        }
-        .font(Typeface.caption)
-    }
-
-    private var unreadableText: String {
+    private var text: String {
         model.unreadable == 1
             ? "1 event can't be opened on this device."
             : "\(model.unreadable) events can't be opened on this device."
     }
-}
-
-struct EntryRow: View {
-    let entry: CalendarEntry
-
-    private var isOwn: Bool {
-        if case .own = entry.source { true } else { false }
-    }
-
-    private var caption: String {
-        var parts: [String] = []
-        if case .device(let event) = entry.source, !event.calendarTitle.isEmpty { parts.append(event.calendarTitle) }
-        if !entry.location.isEmpty { parts.append(entry.location) }
-        return parts.joined(separator: " · ")
-    }
 
     var body: some View {
-        let theme = Theme.current
-        HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
-            Text(entry.isAllDay ? "All day" : entry.start.formatted(date: .omitted, time: .shortened))
+        if model.unreadable > 0 {
+            Label(text, systemImage: "lock.slash")
                 .font(Typeface.caption)
-                .foregroundStyle(theme.textSecondary.color)
-                .frame(minWidth: Space.s8, alignment: .leading)
-            VStack(alignment: .leading, spacing: Space.s1) {
-                Text(entry.title)
-                    .font(Typeface.headline)
-                    .foregroundStyle(isOwn ? theme.textPrimary.color : theme.textSecondary.color)
-                    .lineLimit(2)
-                if !caption.isEmpty {
-                    Text(caption)
-                        .font(Typeface.caption)
-                        .foregroundStyle(theme.textSecondary.color)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 0)
+                .foregroundStyle(Theme.current.danger.color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Space.s4)
         }
-        .padding(.vertical, Space.s1)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -237,6 +282,16 @@ struct DeviceCalendarsView: View {
     var body: some View {
         let theme = Theme.current
         Form {
+            Section("Events you add here") {
+                Label(
+                    model.isSynced
+                        ? "Encrypted, and synced between your devices."
+                        : "Encrypted, and can't be recovered on a new device yet.",
+                    systemImage: model.isSynced ? "lock" : "iphone"
+                )
+                .font(Typeface.body)
+                .foregroundStyle(theme.textSecondary.color)
+            }
             switch model.deviceAccess {
             case .notAsked:
                 Section {
