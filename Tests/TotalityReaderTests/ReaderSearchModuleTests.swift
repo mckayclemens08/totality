@@ -117,3 +117,63 @@ import TotalityCore
         #expect(cold < .seconds(10))
     }
 }
+
+@MainActor
+@Suite struct ReadAlongListenTests {
+    private let engine = FakeSpeechEngine()
+
+    private func model() throws -> ReaderModel {
+        ReaderModel(vault: try newVault(), listen: ListenController(engine: engine))
+    }
+
+    private func note(in model: ReaderModel, _ body: String) async throws -> ReaderItem {
+        let note = try #require(await model.newNote())
+        await model.saveNote(note.id, title: "Lisbon trip", body: body)
+        return note
+    }
+
+    @Test("Tapping a sentence with nothing playing starts Listen there")
+    func starts() async throws {
+        let model = try model()
+        let text = "Take the tram. Walk back along the river."
+        let note = try await note(in: model, text)
+        await model.listen(to: note.id, from: 15, on: ListenScript(text: text))
+        #expect(engine.spoken == ["Walk back along the river."])
+        #expect(model.listen.current?.id == note.id)
+    }
+
+    @Test("Tapping a sentence in what's playing moves within it, without starting over")
+    func moves() async throws {
+        let model = try model()
+        let text = "Take the tram. Walk back along the river."
+        let note = try await note(in: model, text)
+        await model.startListening(to: note.id)
+        let playing = try #require(model.listen.current)
+        await model.listen(to: note.id, from: 15, on: playing.script)
+        #expect(model.listen.sentence == 1)
+        #expect(model.listen.current == playing)
+    }
+
+    @Test("Tapping a sentence in another document moves Listen to it")
+    func switches() async throws {
+        let model = try model()
+        let first = try await note(in: model, "Take the tram. Walk back.")
+        let second = try await note(in: model, "Cross the bridge. Climb the hill.")
+        await model.startListening(to: first.id)
+        await model.listen(to: second.id, from: 18, on: ListenScript(text: "Cross the bridge. Climb the hill."))
+        #expect(model.listen.current?.id == second.id)
+        #expect(engine.spoken.last == "Climb the hill.")
+    }
+
+    @Test("Tapping a sentence after the note changed starts again on the new text")
+    func changed() async throws {
+        let model = try model()
+        let note = try await note(in: model, "Take the tram. Walk back.")
+        await model.startListening(to: note.id)
+        let newer = "Take the tram. Walk back. Stop for coffee."
+        await model.saveNote(note.id, title: "Lisbon trip", body: newer)
+        await model.listen(to: note.id, from: 26, on: ListenScript(text: newer))
+        #expect(model.listen.current?.script.fingerprint == ListenScript(text: newer).fingerprint)
+        #expect(engine.spoken.last == "Stop for coffee.")
+    }
+}

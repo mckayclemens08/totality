@@ -77,8 +77,13 @@ public final class ListenController {
     }
 
     public func skip(by count: Int) {
+        jump(to: sentence + count)
+    }
+
+    /// Reads from a sentence, playing if it was paused, because that's what tapping one asks for.
+    public func jump(to index: Int) {
         guard let track = current else { return }
-        sentence = min(max(0, sentence + count), track.script.sentences.count - 1)
+        sentence = min(max(0, index), track.script.sentences.count - 1)
         speakCurrent()
     }
 
