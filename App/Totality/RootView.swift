@@ -35,7 +35,7 @@ struct RootView: View {
         Group {
             switch open {
             case nil:
-                HomeView(center: recentModule, glances: glances, style: homeStyle) { module in
+                HomeView(center: recentModule, glances: glances, bigTile: bigTile, style: homeStyle) { module in
                     if module == .reader || module == .calendar { prepareContent() }
                     recentModule = module
                     open = module
@@ -128,6 +128,20 @@ struct RootView: View {
         glances[.reader] = reader?.glance
         glances[.calendar] = calendar?.glance
         return glances
+    }
+
+    /// A module's own view for a big tile. Nil falls back to the lines, which say why it's quiet.
+    private func bigTile(_ module: ModuleID, size: BigTileSize) -> AnyView? {
+        switch module {
+        case .reader:
+            guard let reader, reader.glance?.isQuiet == false else { return nil }
+            return AnyView(ReaderHomeTile(model: reader, size: size))
+        case .calendar:
+            guard let calendar, calendar.glance != nil else { return nil }
+            return AnyView(CalendarHomeTile(model: calendar, size: size))
+        default:
+            return nil
+        }
     }
 
     private var accountButton: some View {
