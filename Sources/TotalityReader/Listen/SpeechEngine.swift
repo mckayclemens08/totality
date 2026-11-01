@@ -12,17 +12,26 @@ public protocol SpeechEngine: AnyObject {
     var onFinish: (() -> Void)? { get set }
     /// Called as each word starts, with how far into the text it is, in UTF-16 units.
     var onWord: ((Int) -> Void)? { get set }
+    /// Something the person should see while speech can't start yet. Nil clears it.
+    var onStatus: ((String?) -> Void)? { get set }
     func speak(_ text: String, speed: Double, voice: String?)
+    /// A hint at what comes next, so it can start straight after this sentence. Nil drops anything held.
+    func prepare(_ text: String?, speed: Double, voice: String?)
     func pause()
     func resume()
     func stop()
     func voices() -> [ListenVoice]
 }
 
+public extension SpeechEngine {
+    func prepare(_ text: String?, speed: Double, voice: String?) {}
+}
+
 @MainActor
 public final class SystemSpeechEngine: NSObject, SpeechEngine, AVSpeechSynthesizerDelegate {
     public var onFinish: (() -> Void)?
     public var onWord: ((Int) -> Void)?
+    public var onStatus: ((String?) -> Void)?
     /// Tests set this to zero so they make no sound.
     var volume: Float = 1
 

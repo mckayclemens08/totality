@@ -23,6 +23,11 @@ struct ListenBar: View {
                         .accessibilityLabel("Sentence \(Self.label(forSentence: listen.sentence, of: track.script.sentences.count))")
                 }
             }
+            if let status = listen.status {
+                Text(status)
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+            }
             ListenProgress(value: listen.progress)
             HStack(spacing: 0) {
                 control("gobackward", label: "Previous sentence") { listen.skip(by: -1) }
