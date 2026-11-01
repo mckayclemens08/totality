@@ -294,6 +294,25 @@ private func until(_ condition: () async -> Bool) async throws {
         #expect(offsets == [0, 5, 9])
     }
 
+    @Test("A new sentence reports its first word, even at the same place as the last sentence's")
+    func positionStartsAgainEachSentence() async throws {
+        let first = [VoiceMark(fraction: 0, offset: 0)]
+        let marked = FakeVoice(marks: ["One.": first, "Two.": first])
+        let engine = engine(marked)
+        var offsets: [Int] = []
+        engine.onWord = { offsets.append($0) }
+        for sentence in ["One.", "Two."] {
+            let played = output.played.count
+            engine.speak(sentence, speed: 1)
+            try await until { await marked.isHeld(sentence) }
+            await marked.release(sentence)
+            try await until { output.played.count > played }
+            output.playedFraction = 0.5
+            engine.reportPosition()
+        }
+        #expect(offsets == [0, 0])
+    }
+
     @Test("A voice that fails passes its sentence on instead of going quiet")
     func failureHandsBackTheText() async throws {
         let broken = FakeVoice(failsPreparing: true)
@@ -836,6 +855,18 @@ private final class Finished {
     @Test("A sentence the model made in pieces has no marks, so the estimate takes over")
     func pieces() {
         #expect(VoiceTiming.marks(text: "Take the tram.", said: nil, phonemes: "tAk ði tɹæm.", durations: [1, 2, 3], kept: 0..<600).isEmpty)
+    }
+
+    @Test("A sentence with too many sounds' timings has no marks either")
+    func tooManyDurations() {
+        let durations = Array(repeating: 1, count: 16)
+        #expect(VoiceTiming.marks(text: "Take the tram.", said: nil, phonemes: "tAk ði tɹæm.", durations: durations, kept: 0..<9600).isEmpty)
+    }
+
+    @Test("Spoken words find written ones whatever their case")
+    func caseDoesNotMatter() {
+        let found = marks("Take the [12] tram.", said: "TAKE THE TRAM.", phonemes: "tAk ði tɹæm.")
+        #expect(found.map(\.offset) == [0, 5, 14])
     }
 
     @Test("No text or no audio has no marks")
