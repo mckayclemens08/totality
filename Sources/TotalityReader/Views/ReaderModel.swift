@@ -55,6 +55,12 @@ public final class ReaderModel {
         return ModuleGlance(lines: (playing.map { ["Listening to \($0.title)"] } ?? []) + recent.prefix(Self.glanceTitles) + [count])
     }
 
+    /// What the home tile puts first: what's playing, or else what was opened last.
+    public var frontOfShelf: ReaderItem? {
+        let playing = listen.current?.id
+        return items.first { $0.id == playing } ?? library.lastOpened.first
+    }
+
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
     public func stopForKeyChange() async {
         listen.stop()
