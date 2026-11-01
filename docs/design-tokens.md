@@ -29,6 +29,8 @@ large text 3:1.** Every ratio below was computed, not estimated. The look never 
 | `textTertiary` | `#7D8592` | disabled, placeholder | 3.2:1 — large text / non-text only |
 | `accent` | `#1F5FBF` | the one saturated colour, used sparingly | **5.3:1** ✓ AA |
 | `accentOn` | `#FFFFFF` | text on an accent fill | **6.1:1** vs accent ✓ AA |
+| `highlight` | `#D3E0F4` | the sentence Listen is reading | `textPrimary` on it **13.3:1** ✓ AA |
+| `highlightStrong` | `#A9C5EE` | the word Listen is reading | `textPrimary` on it **10.1:1** ✓ AA |
 | `danger` | `#B3261E` | destructive, key-loss warnings | 5.7:1 ✓ AA |
 | `success` | `#1E6F4C` | verified contact, synced | 5.3:1 ✓ AA |
 

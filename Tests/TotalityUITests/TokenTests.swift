@@ -34,6 +34,14 @@ struct TokenTests {
         #expect(contrast(theme.textTertiary, theme.surface) >= 3)
     }
 
+    @Test("Text on a highlight meets AA")
+    func highlights() {
+        let theme = Theme.current
+        for fill in [theme.highlight, theme.highlightStrong] {
+            #expect(contrast(theme.textPrimary, fill) >= 4.5)
+        }
+    }
+
     @Test("Text on an accent fill meets AA")
     func accentFill() {
         let theme = Theme.current
