@@ -1,0 +1,24 @@
+# What search asks and how. The secret comes from the environment, so it never lives here.
+use_default_settings: true
+general:
+  debug: false
+  instance_name: Totality
+search:
+  safe_search: 1
+  formats: [json]
+server:
+  # The gateway does the limiting, per account. Everything here reaches SearXNG through it.
+  limiter: false
+  image_proxy: true
+  public_instance: false
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 8.0
+# Measured from this server on 2026-11-01: these three refuse it, so asking them only slows searches.
+engines:
+  - {name: bing, disabled: false}
+  - {name: brave, disabled: false}
+  - {name: wikipedia, disabled: false}
+  - {name: duckduckgo, disabled: true}
+  - {name: google, disabled: true}
+  - {name: qwant, disabled: true}
