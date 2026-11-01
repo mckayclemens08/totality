@@ -372,3 +372,61 @@ import TotalityCore
         #expect(model.notice == nil)
     }
 }
+
+@MainActor
+@Suite struct CalendarHomeTileTests {
+    private let devices = FakeDevices()
+
+    private func model(firstWeekday: Int = 1) throws -> (CalendarModel, CalendarVault) {
+        var display = Dates.calendar()
+        display.firstWeekday = firstWeekday
+        let vault = CalendarVault(store: MemoryBlobs(), rootKey: try ContentRootKey.generate())
+        let model = CalendarModel(
+            vault: vault, devices: devices, reminders: FakeReminders(), registry: nil, startingMode: .month, display: display,
+            defaults: UserDefaults(suiteName: "totality.tests.\(UUID().uuidString)")!, now: { Dates.date(2026, 10, 15, 8, 30) }
+        )
+        return (model, vault)
+    }
+
+    @Test("This week runs from where the device starts its week")
+    func week() throws {
+        // October 15, 2026 is a Thursday.
+        #expect(try model(firstWeekday: 1).0.thisWeek.map(\.day) == [11, 12, 13, 14, 15, 16, 17])
+        #expect(try model(firstWeekday: 2).0.thisWeek.map(\.day) == [12, 13, 14, 15, 16, 17, 18])
+    }
+
+    @Test("The weekday letters start the same way")
+    func letters() throws {
+        #expect(try model(firstWeekday: 1).0.weekdayLetters == ["S", "M", "T", "W", "T", "F", "S"])
+        #expect(try model(firstWeekday: 2).0.weekdayLetters == ["M", "T", "W", "T", "F", "S", "S"])
+    }
+
+    @Test("A week crossing into last month still knows what's on")
+    func weekAcrossMonths() async throws {
+        var display = Dates.calendar()
+        display.firstWeekday = 1
+        let vault = CalendarVault(store: MemoryBlobs(), rootKey: try ContentRootKey.generate())
+        // Thursday, October 1, so the week starts on September 27.
+        let model = CalendarModel(
+            vault: vault, devices: devices, reminders: FakeReminders(), registry: nil, startingMode: .month, display: display,
+            defaults: UserDefaults(suiteName: "totality.tests.\(UUID().uuidString)")!, now: { Dates.date(2026, 10, 1, 8, 30) }
+        )
+        try await vault.save(Dates.event(Dates.date(2026, 9, 28, 9), title: "Dentist"))
+        await model.load()
+        model.select(CalendarDay(year: 2027, month: 6, day: 15))
+        #expect(model.thisWeek.first == CalendarDay(year: 2026, month: 9, day: 27))
+        #expect(model.entries(on: CalendarDay(year: 2026, month: 9, day: 28)).map(\.title) == ["Dentist"])
+    }
+
+    @Test("The tile's month keeps its events after the Calendar was left on another month")
+    func monthStaysThisMonth() async throws {
+        let (model, vault) = try model()
+        try await vault.save(Dates.event(Dates.date(2026, 10, 2, 9), title: "Dentist"))
+        try await vault.save(Dates.event(Dates.date(2026, 10, 30, 9), title: "Physio"))
+        await model.load()
+        // Past the schedule's reach, so the days are built again.
+        model.select(CalendarDay(year: 2027, month: 6, day: 15))
+        #expect(model.entries(on: CalendarDay(year: 2026, month: 10, day: 2)).map(\.title) == ["Dentist"])
+        #expect(model.entries(on: CalendarDay(year: 2026, month: 10, day: 30)).map(\.title) == ["Physio"])
+    }
+}

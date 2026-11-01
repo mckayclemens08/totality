@@ -9,12 +9,6 @@ struct MonthView: View {
         Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
     }
 
-    private var weekdays: [String] {
-        let symbols = model.display.veryShortStandaloneWeekdaySymbols
-        let first = model.display.firstWeekday - 1
-        return Array(symbols[first...] + symbols[..<first])
-    }
-
     var body: some View {
         #if os(macOS)
         HStack(alignment: .top, spacing: Space.s4) {
@@ -38,7 +32,7 @@ struct MonthView: View {
     private var grid: some View {
         let theme = Theme.current
         return LazyVGrid(columns: columns, spacing: Space.s1) {
-            ForEach(Array(weekdays.enumerated()), id: \.offset) { _, name in
+            ForEach(Array(model.weekdayLetters.enumerated()), id: \.offset) { _, name in
                 Text(name)
                     .font(Typeface.micro)
                     .foregroundStyle(theme.textSecondary.color)
