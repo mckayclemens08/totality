@@ -37,21 +37,26 @@ enum ContentSetup {
     }
 
     /// The key step finishes any move that was interrupted, so this always opens with the right key.
-    static func makeModels() throws -> (reader: ReaderModel, calendar: CalendarModel, areas: [any SyncArea]) {
+    static func makeModels() throws -> (reader: ReaderModel, calendar: CalendarModel, areas: [any SyncArea], registry: ModuleRegistry) {
         let stores = try stores()
         let rootKey = try keyRing().current()
 
         let readerVault = ReaderVault(store: stores.reader, rootKey: rootKey)
         let calendarVault = CalendarVault(store: stores.calendar, rootKey: rootKey)
-        let registry = try ModuleRegistry(handlers: [ReaderModule(vault: readerVault), CalendarModule()])
+        let devices = SystemCalendarSource()
+        let registry = try ModuleRegistry(handlers: [
+            ReaderModule(vault: readerVault),
+            CalendarModule(vault: calendarVault, devices: devices, hidden: { CalendarModel.hiddenCalendars(in: .standard) }),
+        ])
         return (
             ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices())),
             CalendarModel(
                 vault: calendarVault,
-                devices: SystemCalendarSource(), reminders: SystemReminders(),
+                devices: devices, reminders: SystemReminders(),
                 registry: registry
             ),
-            [readerVault, calendarVault]
+            [readerVault, calendarVault],
+            registry
         )
     }
 }
