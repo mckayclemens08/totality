@@ -483,6 +483,33 @@ import TotalityCore
         #expect(model.glance?.lines == ["Listening to Lease", "1 item"])
     }
 
+    @Test("Each title on the tile opens that item, and the count opens nothing")
+    func glanceLinesOpenTheirItems() async throws {
+        let (model, _) = try model()
+        var ids: [UUID] = []
+        for title in ["Lease", "Tax notes", "Trail map"] {
+            let note = try #require(await model.newNote())
+            #expect(await model.saveNote(note.id, title: title, body: "Notes on \(title)"))
+            ids.append(note.id)
+        }
+        await model.load()
+        #expect(model.glance?.lines == ["Trail map", "Tax notes", "Lease", "3 items"])
+        #expect((0...3).map(model.glanceItem(at:)) == [ids[2], ids[1], ids[0], nil])
+    }
+
+    @Test("What's playing stays in step with the lines, even when it's listed first")
+    func glanceLinesFollowListening() async throws {
+        let (model, _) = try model()
+        let lease = try #require(await model.newNote())
+        #expect(await model.saveNote(lease.id, title: "Lease", body: "Rent is due on the first"))
+        let map = try #require(await model.newNote())
+        #expect(await model.saveNote(map.id, title: "Trail map", body: "North along the ridge"))
+        await model.load()
+        model.listen.play(try #require(ListenTrack(id: lease.id, title: "Lease", text: "Rent is due on the first.")))
+        #expect(model.glance?.lines == ["Listening to Lease", "Trail map", "2 items"])
+        #expect((0...2).map(model.glanceItem(at:)) == [lease.id, map.id, nil])
+    }
+
     @Test("A note deleted while open opens the kept copy, so typing doesn't make another each pause")
     func aKeptCopyOpens() async throws {
         let (model, _) = try model()

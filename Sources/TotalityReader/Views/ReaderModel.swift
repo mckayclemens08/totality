@@ -50,9 +50,20 @@ public final class ReaderModel {
         guard phase == .ready else { return nil }
         guard !items.isEmpty else { return ModuleGlance(lines: ["Nothing saved yet"], isQuiet: true) }
         let playing = listen.current
-        let recent = library.lastOpened.filter { $0.id != playing?.id }.map(\.displayTitle)
+        let recent = glanceTitles(leaving: playing?.id).map(\.displayTitle)
         let count = items.count == 1 ? "1 item" : "\(items.count) items"
-        return ModuleGlance(lines: (playing.map { ["Listening to \($0.title)"] } ?? []) + recent.prefix(Self.glanceTitles) + [count])
+        return ModuleGlance(lines: (playing.map { ["Listening to \($0.title)"] } ?? []) + recent + [count])
+    }
+
+    private func glanceTitles(leaving playing: UUID?) -> [ReaderItem] {
+        Array(library.lastOpened.filter { $0.id != playing }.prefix(Self.glanceTitles))
+    }
+
+    /// The item behind a line of the glance. The last line counts items, so it opens nothing.
+    public func glanceItem(at line: Int) -> UUID? {
+        let playing = listen.current?.id
+        let ids = (playing.map { [$0] } ?? []) + glanceTitles(leaving: playing).map(\.id)
+        return ids.indices.contains(line) ? ids[line] : nil
     }
 
     /// What the home tile puts first: what's playing, or else what was opened last.

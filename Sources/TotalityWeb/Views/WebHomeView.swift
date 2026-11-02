@@ -60,6 +60,14 @@ public struct WebHomeView: View {
             showAddress()
         }
         .modifier(WebPageAlerts(page: page))
+        .task(id: model.requestedPanel) {
+            switch model.requestedPanel {
+            case .tabs: showingTabs = true
+            case .downloads: showingDownloads = true
+            case nil: return
+            }
+            model.requestedPanel = nil
+        }
         .sheet(isPresented: $showingTabs) { WebTabsView(model: model) { showingTabs = false } }
         .sheet(isPresented: $showingLibrary) { WebLibraryView(model: model) { showingLibrary = false } }
         .sheet(isPresented: $showingSettings) { WebSettingsView(model: model) { showingSettings = false } }

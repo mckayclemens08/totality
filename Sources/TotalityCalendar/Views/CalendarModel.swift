@@ -161,6 +161,7 @@ public final class CalendarModel {
     public var isSynced = false
     /// A search result to open. The home screen takes it from here.
     public var requestedHit: SearchHit?
+    private var requestedDay: CalendarDay?
 
     public let display: Calendar
     public let weekSpan: Int
@@ -263,13 +264,25 @@ public final class CalendarModel {
         case 1: "1 thing today"
         default: "\(todays.count) things today"
         }
-        let rest = todays.filter { $0.id != next?.id && ($0.isAllDay || $0.end > current) }.map { entry in
+        let rest = restOfToday(after: next).map { entry in
             entry.isAllDay ? entry.title : "\(entry.start.formatted(date: .omitted, time: .shortened)) \(entry.title)"
         }
         return ModuleGlance(
             lines: (next.map { [glanceLine(for: $0, at: current)] } ?? []) + [count] + rest,
             isQuiet: next == nil && todays.isEmpty
         )
+    }
+
+    private func restOfToday(after next: CalendarEntry?) -> [CalendarEntry] {
+        let current = now()
+        return entries(on: today).filter { $0.id != next?.id && ($0.isAllDay || $0.end > current) }
+    }
+
+    /// What a line of the glance is about: an event, or today for the line that counts them.
+    public func glanceTarget(at line: Int) -> Target? {
+        let next = nextEntry
+        let targets = (next.map { [Target.entry($0)] } ?? []) + [.day(today)] + restOfToday(after: next).map { .entry($0) }
+        return targets.indices.contains(line) ? targets[line] : nil
     }
 
     private func glanceLine(for entry: CalendarEntry, at current: Date) -> String {
@@ -386,6 +399,29 @@ public final class CalendarModel {
         selectedDay = day
         month = day.firstOfMonth
         fillIn()
+    }
+
+    /// Something on the home page to show once the Calendar is open.
+    public enum Target: Sendable, Hashable {
+        case entry(CalendarEntry)
+        case day(CalendarDay)
+    }
+
+    /// An event goes the way a search result does, so it gets the same check that it's still there.
+    public func request(_ target: Target) {
+        switch target {
+        case .entry(let entry):
+            requestedHit = SearchHit(module: .calendar, itemID: entry.id, title: entry.title, date: entry.start)
+        case .day(let day):
+            requestedDay = day
+        }
+    }
+
+    public func takeRequestedDay() {
+        guard let day = requestedDay else { return }
+        requestedDay = nil
+        select(day)
+        mode = .day
     }
 
     /// Goes to the day of the requested result and hands back its event. It can be gone by now,

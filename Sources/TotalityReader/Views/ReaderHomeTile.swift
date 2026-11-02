@@ -7,10 +7,18 @@ public struct ReaderHomeTile: View {
 
     private let model: ReaderModel
     private let size: BigTileSize
+    private let onOpen: @MainActor () -> Void
 
-    public init(model: ReaderModel, size: BigTileSize) {
+    /// `onOpen` brings the Reader up after an item has been asked for.
+    public init(model: ReaderModel, size: BigTileSize, onOpen: @escaping @MainActor () -> Void = {}) {
         self.model = model
         self.size = size
+        self.onOpen = onOpen
+    }
+
+    private func open(_ item: ReaderItem) {
+        model.requestedItem = item.id
+        onOpen()
     }
 
     private var front: ReaderItem? {
@@ -28,6 +36,7 @@ public struct ReaderHomeTile: View {
                 HStack(alignment: .top, spacing: Space.s3) {
                     ForEach(shelf) { item in
                         SmallBook(item: item)
+                            .tileLink(item.displayTitle) { open(item) }
                     }
                 }
             }
@@ -69,6 +78,7 @@ public struct ReaderHomeTile: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .tileLink(item.displayTitle) { open(item) }
     }
 }
 

@@ -141,6 +141,7 @@ import TotalityCore
 @MainActor
 @Suite struct WebBrowsingTests {
     private let trams = URL(string: "https://lisbon.example/trams")!
+    private let ferries = URL(string: "https://lisbon.example/ferries")!
     private let food = URL(string: "https://lisbon.example/pasteis")!
 
     private func loaded(_ store: MemoryBlobStore = MemoryBlobStore(), key: ContentRootKey? = nil, now: @escaping @Sendable () -> Date = { Date() }) async throws -> (WebModel, WebVault) {
@@ -153,6 +154,37 @@ import TotalityCore
     private func visit(_ url: URL, in model: WebModel, title: String = "Page") {
         model.open(url)
         model.current.page?.onVisit?(url, title)
+    }
+
+    @Test("A bookmark from the home page uses an empty tab and leaves a page alone")
+    func openingFromHome() async throws {
+        let (model, _) = try await loaded()
+        let bookmark = WebBookmark(title: "Trams", url: trams)
+        model.openFromHome(bookmark)
+        #expect(model.tabs.count == 1)
+        #expect(model.current.address == trams)
+        model.openFromHome(WebBookmark(title: "Ferries", url: ferries))
+        #expect(model.tabs.count == 2)
+        #expect(model.tabs[0].address == trams)
+        #expect(model.current.address == ferries)
+    }
+
+    @Test("A bookmark from the home page never lands in a private tab")
+    func openingFromHomeIsNeverPrivate() async throws {
+        let (model, _) = try await loaded()
+        model.newTab(isPrivate: true)
+        model.openFromHome(WebBookmark(title: "Trams", url: trams))
+        #expect(!model.current.isPrivate)
+        #expect(model.current.address == trams)
+    }
+
+    @Test func eachLineMatchesItsBookmark() async throws {
+        let (model, _) = try await loaded()
+        await model.addBookmark(title: "Trams", url: trams)
+        await model.addBookmark(title: "Ferries", url: ferries)
+        #expect(model.glance?.lines == model.bookmarks.map(\.displayTitle))
+        #expect((0..<2).map { model.glanceBookmark(at: $0) } == model.bookmarks)
+        #expect(model.glanceBookmark(at: 2) == nil)
     }
 
     @Test func tabsOpenSwitchAndClose() async throws {

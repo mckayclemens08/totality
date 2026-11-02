@@ -37,10 +37,9 @@ struct RootView: View {
         Group {
             switch open {
             case nil:
-                HomeView(center: recentModule, glances: glances, bigTile: bigTile, style: homeStyle) { module in
+                HomeView(center: recentModule, glances: glances, bigTile: bigTile, lineLink: lineLink, style: homeStyle) { module in
                     if module == .reader || module == .calendar || module == .web { prepareContent() }
-                    recentModule = module
-                    open = module
+                    bringUp(module)
                 } onSearch: {
                     prepareContent()
                     showingSearch = true
@@ -146,16 +145,48 @@ struct RootView: View {
         switch module {
         case .reader:
             guard let reader, reader.glance?.isQuiet == false else { return nil }
-            return AnyView(ReaderHomeTile(model: reader, size: size))
+            return AnyView(ReaderHomeTile(model: reader, size: size) { bringUp(.reader) })
         case .calendar:
             guard let calendar, calendar.glance != nil else { return nil }
-            return AnyView(CalendarHomeTile(model: calendar, size: size))
+            return AnyView(CalendarHomeTile(model: calendar, size: size) { bringUp(.calendar) })
         case .web:
             guard let web, web.glance != nil else { return nil }
-            return AnyView(WebHomeTile(model: web, size: size))
+            return AnyView(WebHomeTile(model: web, size: size) { bringUp(.web) })
         default:
             return nil
         }
+    }
+
+    /// What a line of a tile opens. A tile can only show these once its module is open, so nothing here
+    /// has to prepare content.
+    private func lineLink(_ module: ModuleID, _ line: Int) -> (@MainActor () -> Void)? {
+        switch module {
+        case .reader:
+            guard let id = reader?.glanceItem(at: line) else { return nil }
+            return {
+                reader?.requestedItem = id
+                bringUp(.reader)
+            }
+        case .calendar:
+            guard let target = calendar?.glanceTarget(at: line) else { return nil }
+            return {
+                calendar?.request(target)
+                bringUp(.calendar)
+            }
+        case .web:
+            guard let bookmark = web?.glanceBookmark(at: line) else { return nil }
+            return {
+                web?.openFromHome(bookmark)
+                bringUp(.web)
+            }
+        default:
+            return nil
+        }
+    }
+
+    private func bringUp(_ module: ModuleID) {
+        recentModule = module
+        open = module
     }
 
     private var accountButton: some View {
@@ -247,8 +278,7 @@ struct RootView: View {
     private func show(_ ref: ContentRef) {
         guard ref.module == .reader else { return }
         reader?.requestedItem = ref.id
-        recentModule = .reader
-        open = .reader
+        bringUp(.reader)
     }
 
     /// Only the module that found a result knows what its ID means, so it goes back there to open.
@@ -259,8 +289,7 @@ struct RootView: View {
         case .calendar: calendar?.requestedHit = hit
         default: return
         }
-        recentModule = hit.module
-        open = hit.module
+        bringUp(hit.module)
     }
 }
 

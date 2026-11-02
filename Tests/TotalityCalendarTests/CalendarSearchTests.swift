@@ -418,6 +418,61 @@ import TotalityCore
         #expect(model.entries(on: CalendarDay(year: 2026, month: 9, day: 28)).map(\.title) == ["Dentist"])
     }
 
+    @Test("Each line on the tile leads to what it's about")
+    func linesKnowTheirTargets() async throws {
+        let (model, vault) = try model()
+        try await vault.save(Dates.event(Dates.date(2026, 10, 15, 10), title: "Dentist"))
+        try await vault.save(Dates.event(Dates.date(2026, 10, 15, 17), title: "Dinner"))
+        await model.load()
+        let lines = try #require(model.glance?.lines)
+        #expect(lines.count == 3)
+        #expect(lines[0].hasPrefix("Dentist"))
+        #expect(lines[1] == "2 things today")
+        #expect(lines[2].hasSuffix("Dinner"))
+        let titles = (0...2).map { line -> String? in
+            guard case .entry(let entry) = model.glanceTarget(at: line) else { return nil }
+            return entry.title
+        }
+        #expect(titles == ["Dentist", nil, "Dinner"])
+        #expect(model.glanceTarget(at: 1) == .day(model.today))
+        #expect(model.glanceTarget(at: 3) == nil)
+    }
+
+    @Test("A quiet day's one line opens today")
+    func quietLineOpensToday() async throws {
+        let (model, _) = try model()
+        await model.load()
+        #expect(model.glance?.lines == ["Nothing today"])
+        #expect(model.glanceTarget(at: 0) == .day(model.today))
+    }
+
+    @Test("A day on the tile opens that day, even though the Calendar starts on its front page")
+    func aDayOpensItself() async throws {
+        let (model, _) = try model()
+        await model.load()
+        let day = CalendarDay(year: 2026, month: 10, day: 22)
+        model.request(.day(day))
+        model.showFront()
+        model.takeRequestedDay()
+        #expect(model.mode == .day)
+        #expect(model.selectedDay == day)
+        model.showFront()
+        model.takeRequestedDay()
+        #expect(model.mode == .month)
+    }
+
+    @Test("An event on the tile opens that event")
+    func anEventOpensItself() async throws {
+        let (model, vault) = try model()
+        try await vault.save(Dates.event(Dates.date(2026, 10, 20, 10), title: "Dentist"))
+        await model.load()
+        let entry = try #require(model.entries(on: CalendarDay(year: 2026, month: 10, day: 20)).first)
+        model.request(.entry(entry))
+        model.showFront()
+        #expect(model.takeRequestedEntry()?.id == entry.id)
+        #expect(model.selectedDay == CalendarDay(year: 2026, month: 10, day: 20))
+    }
+
     @Test("The tile's month keeps its events after the Calendar was left on another month")
     func monthStaysThisMonth() async throws {
         let (model, vault) = try model()
