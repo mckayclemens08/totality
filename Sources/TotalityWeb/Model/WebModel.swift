@@ -489,6 +489,18 @@ public final class WebModel {
         return ModuleGlance(lines: bookmarks.map(\.displayTitle))
     }
 
+    /// The bookmark behind a line of the glance.
+    public func glanceBookmark(at line: Int) -> WebBookmark? {
+        bookmarks.indices.contains(line) ? bookmarks[line] : nil
+    }
+
+    /// A bookmark on the home page opens in a normal tab of its own, so it can't replace a page the
+    /// person left open or land in a private tab.
+    public func openFromHome(_ bookmark: WebBookmark) {
+        if current.isPrivate || current.showing != .start { newTab() }
+        open(bookmark.url)
+    }
+
     /// Normal tabs with something in them. Only the number reaches the home page.
     public var openTabCount: Int {
         tabs.filter { !$0.isPrivate && $0.showing != .start }.count
@@ -506,6 +518,10 @@ public final class WebModel {
         case nil: break
         }
     }
+
+    /// A panel the home page asked for, for when Web comes up.
+    public enum Panel: Sendable { case tabs, downloads }
+    public var requestedPanel: Panel?
 
     public func open(_ url: URL, in tab: WebTab? = nil) {
         let tab = tab ?? current

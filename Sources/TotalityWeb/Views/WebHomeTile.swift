@@ -3,16 +3,25 @@ import TotalityUI
 
 /// Web's big home tile: bookmarks on a wall, with a download or the open tabs underneath. Never history.
 /// A bookmark's first letter stands in for the site's icon, because fetching one would tell the site.
+/// Each of them opens what it shows.
 public struct WebHomeTile: View {
     private static let perRow = 4
     private static let rows: [BigTileSize: Int] = [.medium: 1, .large: 2, .square: 3]
 
     private let model: WebModel
     private let size: BigTileSize
+    private let onOpen: @MainActor () -> Void
 
-    public init(model: WebModel, size: BigTileSize) {
+    /// `onOpen` brings Web up after a site or a panel has been asked for.
+    public init(model: WebModel, size: BigTileSize, onOpen: @escaping @MainActor () -> Void = {}) {
         self.model = model
         self.size = size
+        self.onOpen = onOpen
+    }
+
+    private func open(_ panel: WebModel.Panel) {
+        model.requestedPanel = panel
+        onOpen()
     }
 
     private var rows: [[WebBookmark]] {
@@ -39,10 +48,12 @@ public struct WebHomeTile: View {
                     ProgressView(value: progress)
                         .tint(Theme.current.accent.color)
                 }
+                .tileLink("Downloads") { open(.downloads) }
             } else if !rows.isEmpty, let tabsLine, size != .medium {
                 Text(tabsLine)
                     .font(Typeface.caption)
                     .foregroundStyle(Theme.current.textSecondary.color)
+                    .tileLink(tabsLine) { open(.tabs) }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -52,7 +63,13 @@ public struct WebHomeTile: View {
         VStack(spacing: size == .square ? Space.s6 : Space.s5) {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(alignment: .top, spacing: Space.s3) {
-                    ForEach(row) { SiteMark(bookmark: $0, size: size) }
+                    ForEach(row) { bookmark in
+                        SiteMark(bookmark: bookmark, size: size)
+                            .tileLink(bookmark.displayTitle) {
+                                model.openFromHome(bookmark)
+                                onOpen()
+                            }
+                    }
                     ForEach(row.count..<Self.perRow, id: \.self) { _ in
                         Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
                     }
@@ -76,6 +93,7 @@ public struct WebHomeTile: View {
             Text(tabsLine ?? "No bookmarks yet")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
+                .tileLink(tabsLine ?? "", action: tabsLine.map { _ in { open(.tabs) } })
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)

@@ -1,13 +1,15 @@
 import SwiftUI
 import TotalityCore
 
-/// The home page's tiles. A tap opens a module. Holding any tile enters edit mode and picks it up, so
-/// the same press can carry on into a drag.
+/// The home page's tiles. A tap opens what's under it, or else the module. Holding any tile enters edit
+/// mode and picks it up, so the same press can carry on into a drag.
 struct BentoGrid: View {
     @Binding var layout: HomeLayout
     let modules: [ModuleEntry]
     let glances: [ModuleID: ModuleGlance]
     let bigTile: (ModuleID, BigTileSize) -> AnyView?
+    /// What a line of a module's glance opens, if anything.
+    var lineLink: (ModuleID, Int) -> (@MainActor () -> Void)? = { _, _ in nil }
     let width: CGFloat
     @Binding var isEditing: Bool
     let onOpen: (ModuleID) -> Void
@@ -26,16 +28,27 @@ struct BentoGrid: View {
         let metrics = BentoMetrics(width: width)
         let placements = layout.placements
         ZStack(alignment: .topLeading) {
-            ForEach(placements) { placement in
-                if let module = modules.first(where: { $0.id == placement.id }) {
-                    tile(module, at: metrics.frame(of: placement), metrics: metrics)
+            ZStack(alignment: .topLeading) {
+                ForEach(placements) { placement in
+                    if let module = modules.first(where: { $0.id == placement.id }) {
+                        tile(module, at: metrics.frame(of: placement), metrics: metrics)
+                    }
                 }
             }
-            #if os(iOS)
-            touchArea(metrics: metrics)
-                .frame(width: width, height: metrics.height(of: placements))
-                .zIndex(2)
-            #endif
+            .frame(width: width, height: metrics.height(of: placements), alignment: .topLeading)
+            .overlayPreferenceValue(TileLinkKey.self) { links in
+                GeometryReader { proxy in
+                    let spots = links.map { LinkSpot(link: $0, frame: proxy[$0.bounds]) }
+                    if !isEditing {
+                        ForEach(Array(spots.enumerated()), id: \.offset) { _, spot in
+                            linkButton(spot, metrics: metrics)
+                        }
+                    }
+                    #if os(iOS)
+                    touchArea(metrics: metrics, spots: spots)
+                    #endif
+                }
+            }
             if isEditing, drag == nil {
                 // Above the touch area, or it would take their taps. That's above the tiles too, so
                 // they leave while one is carried, or they'd show through it.
@@ -64,7 +77,8 @@ struct BentoGrid: View {
             let size = layout.bigSize(of: module.id)
             TileLabel(
                 module: module, glance: glances[module.id], size: size,
-                content: size.flatMap { bigTile(module.id, $0) }, isEditing: isEditing
+                content: size.flatMap { bigTile(module.id, $0) }, isEditing: isEditing,
+                lineLink: { lineLink(module.id, $0) }
             )
         }
         #if os(iOS)
@@ -79,13 +93,33 @@ struct BentoGrid: View {
         .zIndex(dragged == nil ? 0 : 1)
     }
 
+    /// Where VoiceOver and a keyboard reach a link, and on a Mac where the mouse does too. On iPhone
+    /// it sits under the touch area, so fingers go through `touchArea`.
+    private func linkButton(_ spot: LinkSpot, metrics: BentoMetrics) -> some View {
+        Button(action: spot.link.action) {
+            Color.clear.contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(spot.link.name)
+        #if os(macOS)
+        .simultaneousGesture(mouseHold(metrics: metrics))
+        #endif
+        .frame(width: spot.frame.width, height: spot.frame.height)
+        .position(x: spot.frame.midX, y: spot.frame.midY)
+    }
+
     #if os(iOS)
-    private func touchArea(metrics: BentoMetrics) -> some View {
+    private func touchArea(metrics: BentoMetrics, spots: [LinkSpot]) -> some View {
         let tile = { (point: CGPoint) in metrics.placement(at: point, among: layout.placements)?.id }
         return TileTouchArea { point in
             touched = point.flatMap(tile)
         } onTap: { point in
-            if !isEditing, let id = tile(point) { onOpen(id) }
+            guard !isEditing else { return }
+            if let spot = spots.first(where: { $0.frame.contains(point) }) {
+                spot.link.action()
+            } else if let id = tile(point) {
+                onOpen(id)
+            }
         } onHold: {
             held($0, metrics: metrics)
         }
@@ -215,6 +249,12 @@ private final class TileTouchView: UIView {
 
 private let tileShape = RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
 
+/// A link and where it landed in the grid.
+private struct LinkSpot {
+    let link: TileLink
+    let frame: CGRect
+}
+
 private struct TileDrag {
     let id: ModuleID
     var position: CGPoint
@@ -231,6 +271,7 @@ struct TileLabel: View {
     /// The module's own view for a big tile. Without one, the tile shows its lines.
     let content: AnyView?
     let isEditing: Bool
+    var lineLink: (Int) -> (@MainActor () -> Void)? = { _ in nil }
 
     var body: some View {
         let theme = Theme.current
@@ -253,7 +294,7 @@ struct TileLabel: View {
             } else {
                 ViewThatFits(in: .vertical) {
                     ForEach(Array(stride(from: lines.count, to: 0, by: -1)), id: \.self) { count in
-                        GlanceLines(lines: Array(lines.prefix(count)), isQuiet: isQuiet, isHero: size == .square)
+                        GlanceLines(lines: Array(lines.prefix(count)), isQuiet: isQuiet, isHero: size == .square, link: lineLink)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -272,6 +313,7 @@ private struct GlanceLines: View {
     let lines: [String]
     let isQuiet: Bool
     let isHero: Bool
+    let link: (Int) -> (@MainActor () -> Void)?
 
     private var leadFont: Font {
         if isQuiet { return Typeface.caption }
@@ -287,6 +329,8 @@ private struct GlanceLines: View {
                     .font(index == 0 ? leadFont : isHero ? Typeface.body : Typeface.caption)
                     .foregroundStyle(isLead ? theme.textPrimary.color : theme.textSecondary.color)
                     .lineLimit(index == 0 ? 2 : 1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tileLink(line, action: link(index))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

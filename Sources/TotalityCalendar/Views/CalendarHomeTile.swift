@@ -1,14 +1,23 @@
 import SwiftUI
 import TotalityUI
 
-/// The Calendar's big home tile: this week on a medium tile, the whole month on a larger one.
+/// The Calendar's big home tile: this week on a medium tile, the whole month on a larger one. A day opens
+/// that day, and a line opens what it's about.
 public struct CalendarHomeTile: View {
     private let model: CalendarModel
     private let size: BigTileSize
+    private let onOpen: @MainActor () -> Void
 
-    public init(model: CalendarModel, size: BigTileSize) {
+    /// `onOpen` brings the Calendar up after a day or an event has been asked for.
+    public init(model: CalendarModel, size: BigTileSize, onOpen: @escaping @MainActor () -> Void = {}) {
         self.model = model
         self.size = size
+        self.onOpen = onOpen
+    }
+
+    private func open(_ target: CalendarModel.Target) {
+        model.request(target)
+        onOpen()
     }
 
     public var body: some View {
@@ -32,6 +41,7 @@ public struct CalendarHomeTile: View {
                         TileDay(day: day, model: model)
                     }
                     .frame(maxWidth: .infinity)
+                    .tileLink(model.heading(for: day)) { open(.day(day)) }
                 }
             }
             lines
@@ -67,6 +77,7 @@ public struct CalendarHomeTile: View {
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .tileLink(day.map(model.heading(for:)) ?? "", action: day.map { day in { open(.day(day)) } })
                     }
                 }
             }
@@ -84,6 +95,8 @@ public struct CalendarHomeTile: View {
                     .font(isLead ? Typeface.headline : Typeface.caption)
                     .foregroundStyle(isLead ? theme.textPrimary.color : theme.textSecondary.color)
                     .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tileLink(line, action: model.glanceTarget(at: index).map { target in { open(target) } })
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

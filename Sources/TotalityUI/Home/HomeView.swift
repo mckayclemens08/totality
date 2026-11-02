@@ -8,6 +8,7 @@ public struct HomeView: View {
     private let center: ModuleID
     private let glances: [ModuleID: ModuleGlance]
     private let bigTile: (ModuleID, BigTileSize) -> AnyView?
+    private let lineLink: (ModuleID, Int) -> (@MainActor () -> Void)?
     @Binding private var style: HomeStyle
     private let onOpen: (ModuleID) -> Void
     private let onSearch: () -> Void
@@ -22,6 +23,7 @@ public struct HomeView: View {
         center: ModuleID = .reader,
         glances: [ModuleID: ModuleGlance] = [:],
         bigTile: @escaping (ModuleID, BigTileSize) -> AnyView? = { _, _ in nil },
+        lineLink: @escaping (ModuleID, Int) -> (@MainActor () -> Void)? = { _, _ in nil },
         style: Binding<HomeStyle> = .constant(.tiles),
         onOpen: @escaping (ModuleID) -> Void,
         onSearch: @escaping () -> Void = {}
@@ -30,6 +32,7 @@ public struct HomeView: View {
         self.center = center
         self.glances = glances
         self.bigTile = bigTile
+        self.lineLink = lineLink
         _style = style
         self.onOpen = onOpen
         self.onSearch = onSearch
@@ -51,7 +54,7 @@ public struct HomeView: View {
                 GeometryReader { proxy in
                     ScrollView {
                         BentoGrid(
-                            layout: layout, modules: modules, glances: glances, bigTile: bigTile,
+                            layout: layout, modules: modules, glances: glances, bigTile: bigTile, lineLink: lineLink,
                             width: min(proxy.size.width - Space.s4 * 2, Space.s8 * 8),
                             isEditing: $isEditing, onOpen: onOpen
                         )
