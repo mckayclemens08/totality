@@ -1,0 +1,304 @@
+import Foundation
+import Testing
+import TotalityCore
+@testable import TotalityMail
+
+/// A store that remembers what reached it, and can pretend the device is offline.
+private actor FakeStore: MailStore {
+    var mailbox: Mailbox
+    var failure: MailStoreError?
+    var isOffline = false
+    private(set) var saved: [[UUID: MailMarks]] = []
+    private(set) var savedSettings: [MailSettings] = []
+    private(set) var erased: [Set<UUID>] = []
+
+    init(_ mailbox: Mailbox, failure: MailStoreError? = nil) {
+        self.mailbox = mailbox
+        self.failure = failure
+    }
+
+    func set(offline: Bool) { isOffline = offline }
+
+    func open(progress: @escaping @Sendable (MailDownload) -> Void) async throws -> MailOpening {
+        if let failure { throw failure }
+        return MailOpening(mailbox: mailbox, isOffline: isOffline)
+    }
+
+    func save(_ marks: [UUID: MailMarks]) async throws {
+        if isOffline { throw MailStoreError.offline }
+        saved.append(marks)
+    }
+
+    func save(_ settings: MailSettings) async throws {
+        if isOffline { throw MailStoreError.offline }
+        savedSettings.append(settings)
+    }
+
+    func erase(_ messages: Set<UUID>) async throws {
+        if isOffline { throw MailStoreError.offline }
+        erased.append(messages)
+    }
+
+    func data(of attachment: UUID) async throws -> Data { Data() }
+}
+
+private actor FakeReader: ContentReceiver {
+    nonisolated let module = ModuleID.reader
+    nonisolated let kinds: Set<ContentKind> = [.file]
+    private(set) var files: [String] = []
+
+    func attachable() async throws -> [ContentRef] { [] }
+    func current(_ ref: ContentRef) async throws -> ContentRef? { nil }
+    func receive(noteTitled title: String, body: String) async throws -> ContentRef { try ref(title) }
+    func receive(file data: Data, named filename: String) async throws -> ContentRef {
+        files.append(filename)
+        return try ref(filename)
+    }
+
+    private func ref(_ title: String) throws -> ContentRef {
+        ContentRef(module: .reader, kind: .file, id: UUID(), keyRef: .plain, preview: .init(title: title))
+    }
+}
+
+private let now = Date(timeIntervalSince1970: 1_800_000_000)
+private let dana = MailAddress(name: "Dana Whitfield", address: "dana@usetotality.com")
+
+private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
+    MailMessage(
+        conversationID: UUID(), from: dana, to: [MailAddress(address: "mckay@usetotality.com")], subject: "Saturday",
+        date: now, body: .plain("Are we still on?"), route: .betweenAccounts, marks: marks
+    )
+}
+
+@MainActor
+@Suite struct MailModelTests {
+    private func opened(_ messages: [MailMessage], settings: MailSettings = MailSettings()) async -> (MailModel, FakeStore) {
+        let store = FakeStore(Mailbox(address: "mckay@usetotality.com", messages: messages, settings: settings))
+        let model = MailModel(store: store, now: { now })
+        await model.load()
+        return (model, store)
+    }
+
+    @Test func aMissingKeyAndAFailureAreDifferentScreens() async {
+        let noKey = MailModel(store: FakeStore(Mailbox(), failure: .noKey))
+        await noKey.load()
+        #expect(noKey.phase == .noKey)
+        let failed = MailModel(store: FakeStore(Mailbox(), failure: .unavailable))
+        await failed.load()
+        #expect(failed.phase == .failed)
+    }
+
+    @Test func anActionShowsAtOnceAndReachesTheStore() async {
+        let (model, store) = await opened([message()])
+        await model.perform(.archive, on: model.conversations)
+        #expect(model.conversations.isEmpty)
+        #expect(model.undo?.label == "Archived")
+        #expect(await store.saved.count == 1)
+    }
+
+    @Test func undoPutsEverythingBackAndTellsTheStore() async {
+        let (model, store) = await opened([message(MailMarks(isUnread: true))])
+        await model.perform(.trash, on: model.conversations)
+        await model.undoLast()
+        #expect(model.conversations.count == 1)
+        #expect(model.conversations[0].isUnread)
+        #expect(model.mailbox.messages[0].marks.trashedAt == nil)
+        #expect(model.undo == nil)
+        #expect(await store.saved.count == 2)
+    }
+
+    @Test func undoSpeaksForTheLastActionOnly() async {
+        let (model, _) = await opened([message(), message()])
+        let first = model.conversations[0]
+        let second = model.conversations[1]
+        await model.perform(.archive, on: [first])
+        await model.perform(.trash, on: [second])
+        await model.undoLast()
+        #expect(model.conversations.map(\.id) == [second.id])
+    }
+
+    @Test func undoTheBarWentAwayForDoesNothing() async {
+        let (model, _) = await opened([message()])
+        await model.perform(.archive, on: model.conversations)
+        let shown = model.undo?.id
+        await model.perform(.markUnread, on: model.mailbox.conversations(in: .folder(.archive)))
+        model.dismissUndo(shown!)
+        #expect(model.undo != nil)
+    }
+
+    @Test func openingAConversationReadsItWithoutOfferingUndo() async {
+        let (model, _) = await opened([message(MailMarks(isUnread: true))])
+        await model.markRead(model.conversations[0])
+        #expect(!model.conversations[0].isUnread)
+        #expect(model.undo == nil)
+    }
+
+    @Test func severalAtOnceCountAsOneAction() async {
+        let (model, store) = await opened([message(), message(), message()])
+        model.beginSelecting()
+        model.toggle(model.conversations[0])
+        model.toggle(model.conversations[1])
+        await model.perform(.archive, on: model.selected)
+        #expect(model.conversations.count == 1)
+        #expect(model.undo?.label == "Archived: 2 conversations")
+        #expect(!model.isSelecting)
+        #expect(await store.saved.count == 1)
+    }
+
+    @Test func changingPlaceEndsSelecting() async {
+        let (model, _) = await opened([message()])
+        model.beginSelecting(model.conversations[0])
+        model.place = .starred
+        #expect(!model.isSelecting)
+        #expect(model.selection.isEmpty)
+    }
+
+    @Test func deletingForeverOffersNoUndoAndErases() async {
+        let (model, store) = await opened([message(MailMarks(folder: .trash, trashedAt: now))])
+        model.place = .folder(.trash)
+        let ids = Set(model.mailbox.messages.map(\.id))
+        await model.deleteForever(model.conversations)
+        #expect(model.mailbox.messages.isEmpty)
+        #expect(model.undo == nil)
+        #expect(await store.erased == [ids])
+    }
+
+    @Test func oldTrashGoesOnOpen() async {
+        let old = message(MailMarks(folder: .trash, trashedAt: now.addingTimeInterval(-Mailbox.trashLifetime - 60)))
+        let (model, store) = await opened([old, message()])
+        #expect(model.mailbox.messages.count == 1)
+        #expect(await store.erased == [[old.id]])
+    }
+
+    @Test func blockingCanBeUndone() async {
+        let (model, store) = await opened([message()])
+        await model.block(dana)
+        #expect(model.conversations.isEmpty)
+        #expect(model.mailbox.settings.blockedSenders == [dana.key])
+        await model.undoLast()
+        #expect(model.conversations.count == 1)
+        #expect(model.mailbox.settings.blockedSenders.isEmpty)
+        #expect(await store.savedSettings.last?.blockedSenders.isEmpty == true)
+    }
+
+    @Test func offlineChangesWaitSayHowManyAndGoThroughLater() async {
+        let (model, store) = await opened([message(), message()])
+        await store.set(offline: true)
+        await model.perform(.archive, on: [model.conversations[0]])
+        await model.perform(.star, on: [model.conversations[0]])
+        #expect(model.isOffline)
+        #expect(model.waiting == 2)
+        #expect(model.conversations.count == 1)
+        #expect(model.notice == nil)
+        #expect(await store.saved.isEmpty)
+
+        await model.load()
+        #expect(model.isOffline)
+        #expect(model.waiting == 2)
+        #expect(model.conversations.count == 1)
+
+        await store.set(offline: false)
+        await model.load()
+        #expect(!model.isOffline)
+        #expect(model.waiting == 0)
+        #expect(await store.saved.count == 1)
+        #expect(await store.saved[0].count == 2)
+    }
+
+    @Test func offlineDeleteWaitsToo() async {
+        let (model, store) = await opened([message(MailMarks(folder: .trash, trashedAt: now))])
+        model.place = .folder(.trash)
+        await store.set(offline: true)
+        await model.deleteForever(model.conversations)
+        await model.load()
+        #expect(model.mailbox.messages.isEmpty)
+        #expect(model.waiting == 1)
+    }
+
+    @Test func aFolderGoesToArchiveNotAway() async {
+        let folder = MailOwnFolder(name: "Travel")
+        let (model, _) = await opened([message(MailMarks(folder: .own(folder.id)))], settings: MailSettings(folders: [folder]))
+        model.place = .folder(.own(folder.id))
+        await model.remove(folder)
+        #expect(model.place == .inbox)
+        #expect(model.mailbox.settings.folders.isEmpty)
+        #expect(model.mailbox.messages[0].marks.folder == .archive)
+    }
+
+    @Test func folderNamesAreCheckedAgainstEveryOtherName() async {
+        let (model, _) = await opened([])
+        await model.addFolder(named: "  Travel ")
+        await model.addFolder(named: "travel")
+        await model.addFolder(named: "INBOX")
+        await model.addFolder(named: "   ")
+        #expect(model.mailbox.settings.folders.map(\.name) == ["Travel"])
+        #expect(model.notice != nil)
+    }
+
+    @Test func aFolderCanChangeItsOwnCapitals() async {
+        let (model, _) = await opened([])
+        await model.addFolder(named: "travel")
+        await model.rename(model.mailbox.settings.folders[0], to: "Trips")
+        #expect(model.mailbox.settings.folders[0].name == "Trips")
+    }
+
+    @Test func savingToTheReaderNeedsAReceiver() async {
+        let (model, _) = await opened([])
+        let attachment = MailAttachment(name: "lease.pdf", mimeType: "application/pdf", size: 10)
+        #expect(!model.canSaveToReader)
+        let reader = FakeReader()
+        model.receiver = reader
+        await model.saveToReader(attachment)
+        #expect(await reader.files == ["lease.pdf"])
+        #expect(model.notice == "Saved lease.pdf to the Reader.")
+    }
+}
+
+@Suite struct SampleMailTests {
+    @Test func everyStateOpensAsItSays() async throws {
+        let store = SampleMailStore(now: now, pause: .zero)
+        #expect(try await !store.open { _ in }.mailbox.messages.isEmpty)
+        await store.use(.empty)
+        #expect(try await store.open { _ in }.mailbox.messages.isEmpty)
+        await store.use(.offline)
+        #expect(try await store.open { _ in }.isOffline)
+        await store.use(.full)
+        #expect(try await store.open { _ in }.mailbox.isFull)
+        await store.use(.noKey)
+        await #expect(throws: MailStoreError.noKey) { try await store.open { _ in } }
+        await store.use(.failed)
+        await #expect(throws: MailStoreError.unavailable) { try await store.open { _ in } }
+    }
+
+    @Test func theFirstDownloadReportsItsProgress() async throws {
+        let store = SampleMailStore(scene: .download, now: now, pause: .zero)
+        let seen = Seen()
+        _ = try await store.open { download in Task { await seen.add(download.fraction) } }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await seen.fractions.max() ?? 0 > 0.9)
+    }
+
+    @Test func everyAttachmentHasRealBytes() async throws {
+        let store = SampleMailStore(now: now, pause: .zero)
+        let attachments = try await store.open { _ in }.mailbox.messages.flatMap(\.attachments)
+        #expect(!attachments.isEmpty)
+        for attachment in attachments {
+            let data = try await store.data(of: attachment.id)
+            #expect(Int64(data.count) == attachment.size)
+            #expect(data.count > 100)
+        }
+    }
+
+    @Test func noSampleSenderIsARealDomain() {
+        for message in SampleMail(now: now).mailbox.messages where !message.isUnreadable {
+            for address in [message.from] + message.to {
+                #expect(address.domain == "usetotality.com" || address.domain.hasSuffix(".example"))
+            }
+        }
+    }
+
+    private actor Seen {
+        var fractions: [Double] = []
+        func add(_ fraction: Double) { fractions.append(fraction) }
+    }
+}
