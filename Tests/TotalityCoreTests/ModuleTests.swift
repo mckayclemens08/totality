@@ -7,6 +7,21 @@ private struct Handler: ContentHandler {
     let kinds: Set<ContentKind>
 }
 
+private struct Receiver: ContentReceiver {
+    let module: ModuleID
+    let kinds: Set<ContentKind> = []
+
+    private func ref() -> ContentRef {
+        let id = UUID()
+        return ContentRef(module: module, kind: .note, id: id, keyRef: .crk(objectID: id), preview: .init(title: "Lease"))
+    }
+
+    func attachable() async throws -> [ContentRef] { [] }
+    func current(_ ref: ContentRef) async throws -> ContentRef? { ref }
+    func receive(noteTitled title: String, body: String) async throws -> ContentRef { ref() }
+    func receive(file data: Data, named filename: String) async throws -> ContentRef { ref() }
+}
+
 @Suite("Module contracts")
 struct ModuleTests {
     private func ref(_ kind: ContentKind) -> ContentRef {
@@ -18,6 +33,13 @@ struct ModuleTests {
         let registry = try ModuleRegistry(handlers: [Handler(module: .reader, kinds: [.doc, .note])])
         #expect(registry.handler(for: ref(.doc))?.module == .reader)
         #expect(registry.handler(for: ref(.photo)) == nil)
+    }
+
+    @Test("A module never receives from itself, and one with no receiver gets nil")
+    func receivers() throws {
+        let registry = try ModuleRegistry(handlers: [Receiver(module: .reader), Handler(module: .web, kinds: [])])
+        #expect(registry.receiver(for: .web)?.module == .reader)
+        #expect(registry.receiver(for: .reader) == nil)
     }
 
     @Test func rejectsTwoHandlersForOneModuleOrKind() {

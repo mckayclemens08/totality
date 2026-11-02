@@ -1,4 +1,6 @@
 import Foundation
+import Network
+import Testing
 import TotalityCore
 @testable import TotalityWeb
 
@@ -79,12 +81,21 @@ func resultsJSON(_ titles: [String], partial: Bool = false) -> Data {
     return try! JSONSerialization.data(withJSONObject: ["results": results, "partial": partial])
 }
 
-func until(_ done: @MainActor () -> Bool) async throws {
+func until(_ done: @MainActor () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
     for _ in 0..<500 {
         if await done() { return }
         try await Task.sleep(for: .milliseconds(10))
     }
+    Issue.record("This never came true.", sourceLocation: sourceLocation)
     throw CancellationError()
+}
+
+extension Bundle {
+    /// The target's own bundle isn't reachable by name from the tests, so this looks beside them.
+    static func module(named name: String) -> URL? {
+        let tests = Bundle(for: FakeGateway.self).bundleURL.deletingLastPathComponent()
+        return tests.appendingPathComponent("Totality_TotalityWeb.bundle/\(name).json")
+    }
 }
 
 final class MemoryBlobStore: BlobStore, @unchecked Sendable {
@@ -95,4 +106,75 @@ final class MemoryBlobStore: BlobStore, @unchecked Sendable {
     func read(_ name: String) throws -> Data? { lock.withLock { blobs[name] } }
     func write(_ data: Data, as name: String) throws { lock.withLock { blobs[name] = data } }
     func delete(_ name: String) throws { _ = lock.withLock { blobs.removeValue(forKey: name) } }
+}
+
+/// A real web server on this machine, so tests can watch what WebKit actually fetches.
+final class LocalSite: @unchecked Sendable {
+    private let listener: NWListener
+    private let lock = NSLock()
+    private var paths: [String] = []
+    private let pages: [String: (type: String, extra: String, body: String)]
+    /// Paths that never answer, like a server stalling on purpose.
+    private let silent: Set<String>
+    /// Paths that send half their body and then stall, so a download stays in progress.
+    private let partial: Set<String>
+    private var held: [NWConnection] = []
+    private var unsent: Data?
+
+    init(pages: [String: (type: String, extra: String, body: String)], silent: Set<String> = [], partial: Set<String> = []) throws {
+        self.pages = pages
+        self.silent = silent
+        self.partial = partial
+        let parameters = NWParameters.tcp
+        parameters.requiredInterfaceType = .loopback
+        listener = try NWListener(using: parameters, on: .any)
+        listener.newConnectionHandler = { [weak self] connection in self?.serve(connection) }
+        listener.start(queue: .global())
+    }
+
+    deinit { listener.cancel() }
+
+    var requested: [String] { lock.withLock { paths } }
+
+    func url(_ path: String) async throws -> URL {
+        for _ in 0..<200 {
+            // The port reads as zero until the listener is ready.
+            if let port = listener.port?.rawValue, port != 0 { return URL(string: "http://127.0.0.1:\(port)\(path)")! }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw CancellationError()
+    }
+
+    /// Lets a stalled body finish.
+    func finish() {
+        let (connection, rest) = lock.withLock { (held.last, unsent) }
+        guard let connection, let rest else { return }
+        connection.send(content: rest, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    private func serve(_ connection: NWConnection) {
+        connection.start(queue: .global())
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8_192) { [weak self] data, _, _, _ in
+            guard let self, let data else { return connection.cancel() }
+            let line = String(decoding: data, as: UTF8.self).split(separator: "\r\n").first ?? ""
+            let path = String(line.split(separator: " ").dropFirst().first ?? "/")
+            self.lock.withLock { self.paths.append(path) }
+            if self.silent.contains(path) {
+                self.lock.withLock { self.held.append(connection) }
+                return
+            }
+            let page = self.pages[path] ?? ("text/plain", "", "ok")
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: \(page.type)\r\n\(page.extra)Content-Length: \(page.body.utf8.count)\r\nConnection: close\r\n\r\n"
+            if self.partial.contains(path) {
+                let half = page.body.count / 2
+                self.lock.withLock {
+                    self.held.append(connection)
+                    self.unsent = Data(page.body.dropFirst(half).utf8)
+                }
+                connection.send(content: Data((head + page.body.prefix(half)).utf8), completion: .idempotent)
+                return
+            }
+            connection.send(content: Data((head + page.body).utf8), completion: .contentProcessed { _ in connection.cancel() })
+        }
+    }
 }

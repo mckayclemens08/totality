@@ -210,5 +210,9 @@ private struct WebThumbnailView: View {
 
 enum WebCopy {
     static let notEncrypted = "Web searches aren't end-to-end encrypted. They go to your server through Cloudflare, and your server keeps no record of them."
+    static let downloads = "Downloads stay on this device and aren't backed up. Totality doesn't encrypt them until you open one in the Reader."
+    static let keepsNothing = "Bookmarks, history, downloads, and site sign-ins are kept only for the account that owns this device. Nothing you do here now is kept."
+    static let permissions = "Sites ask before using your camera, microphone, or location. Totality doesn't keep your answer, so closing the tab undoes it."
+    static let blockingCredit = "Blocking uses EasyList and EasyPrivacy, © the EasyList authors, adapted to whole-site rules under CC BY-SA 3.0."
     static let privateTab = "This tab keeps no history, cookies, or site data once it's closed. Sites you open still see your device's address."
 }

@@ -24,6 +24,38 @@ struct WebSettingsView: View {
                         .pickerStyle(.segmented)
                     }
                     VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("Ad and tracker blocking")
+                            .font(Typeface.headline)
+                            .foregroundStyle(theme.textPrimary.color)
+                        Text(WebCopy.blockingCredit)
+                            .font(Typeface.body)
+                            .foregroundStyle(theme.textSecondary.color)
+                        Link("easylist.to", destination: URL(string: "https://easylist.to")!)
+                            .font(Typeface.callout)
+                            .foregroundStyle(theme.accent.color)
+                        ForEach(model.unblockedSites, id: \.self) { site in
+                            HStack {
+                                Text("Off on \(site)")
+                                    .font(Typeface.body)
+                                    .foregroundStyle(theme.textPrimary.color)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                Button("Turn On") { model.setBlocking(true, for: site) }
+                                    .font(Typeface.callout)
+                                    .foregroundStyle(theme.accent.color)
+                                    .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("Camera, microphone, and location")
+                            .font(Typeface.headline)
+                            .foregroundStyle(theme.textPrimary.color)
+                        Text(WebCopy.permissions)
+                            .font(Typeface.body)
+                            .foregroundStyle(theme.textSecondary.color)
+                    }
+                    VStack(alignment: .leading, spacing: Space.s2) {
                         Text("Sign-ins and site data")
                             .font(Typeface.headline)
                             .foregroundStyle(theme.textPrimary.color)
@@ -44,8 +76,7 @@ struct WebSettingsView: View {
         .confirmationDialog("Sign out of all sites?", isPresented: $clearingSites, titleVisibility: .visible) {
             Button("Sign Out of All Sites", role: .destructive) {
                 Task {
-                    await model.clearSiteData()
-                    clearedSites = true
+                    clearedSites = await model.clearSiteData()
                 }
             }
         } message: {

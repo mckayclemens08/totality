@@ -4,6 +4,14 @@
 <dict>
 	<key>NSRequiresAquaSystemAppearance</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Lets a site you're on use your camera when you agree. Totality doesn't record or keep anything.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Lets a site you're on see your location when you agree. Totality doesn't keep it.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Lets a site you're on use your microphone when you agree. Totality doesn't record or keep anything.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Saves an image from a page to your photos when you choose to.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Shows the calendars on this device next to your Totality events. Totality doesn't copy or upload them.</string>
 	<key>NSCalendarsUsageDescription</key>

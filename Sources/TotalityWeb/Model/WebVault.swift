@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import TotalityCore
 
@@ -51,11 +52,8 @@ public struct WebSavedTabs: Codable, Equatable, Sendable {
     public var current: UUID?
 }
 
-/// What belongs to this account on this device, sealed with its key.
+/// What belongs to one account on this device, sealed with the device's key.
 public struct WebSettings: Codable, Equatable, Sendable {
-    /// Names the store of cookies and site data. The ID is sealed, so another account on this device
-    /// has a different key, can't read it, and gets a store of its own.
-    public var storeID = UUID()
     /// Sites the person turned blocking off for.
     public var unblockedSites: Set<String> = []
 }
@@ -64,17 +62,28 @@ public enum WebVaultError: Error, Equatable {
     case notFound, mismatched, closed
 }
 
-/// Bookmarks are one blob each and sync. History, open tabs, and settings stay on this device. All of it
-/// is sealed, because addresses and page titles count as content. Blob names hold only IDs.
+/// Bookmarks are one blob each and sync. History, open tabs, and settings stay on this device, one set
+/// for each account. All of it is sealed, because addresses and page titles count as content. A device
+/// has one content key, so the key doesn't keep two accounts apart: the IDs do. Blob names hold only IDs.
 public actor WebVault {
     public static let sealedPurposes: [String: KeyPurpose] = [
         ".bookmark": .bookmark, ".bookmark.trash": .bookmark, ".browsing": .browsing,
     ]
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
 
-    private static let historyID = UUID(uuidString: "00000000-0000-0000-0000-00000000000a")!
-    private static let tabsID = UUID(uuidString: "00000000-0000-0000-0000-00000000000b")!
-    private static let settingsID = UUID(uuidString: "00000000-0000-0000-0000-00000000000c")!
+    /// The same every launch and different for every account, so nothing has to be stored to find it.
+    private static func id(_ name: String, for account: String) -> UUID {
+        var bytes = Array(SHA256.hash(data: Data("totality.web.\(name).\(account)".utf8)).prefix(16))
+        // WebKit takes only a well-formed UUID as a store's name.
+        bytes[6] = bytes[6] & 0x0f | 0x40
+        bytes[8] = bytes[8] & 0x3f | 0x80
+        return bytes.withUnsafeBytes { UUID(uuid: $0.load(as: uuid_t.self)) }
+    }
+
+    /// Names one account's store of cookies and site data, and its downloads folder.
+    public static func siteID(for account: String) -> UUID {
+        id("site", for: account)
+    }
 
     private let store: any BlobStore
     private let rootKey: ContentRootKey
@@ -140,32 +149,36 @@ public actor WebVault {
         return try JSONDecoder().decode(type, from: ContentCipher.open(sealed, key: key, objectID: id))
     }
 
-    public func history() throws -> [WebVisit] {
-        try read([WebVisit].self, id: Self.historyID) ?? []
+    private func remove(id: UUID) throws {
+        guard !isClosed else { throw WebVaultError.closed }
+        try store.delete(browsingName(id))
     }
 
-    public func saveHistory(_ visits: [WebVisit]) throws {
-        try write(visits, id: Self.historyID)
+    public func history(for account: String) throws -> [WebVisit] {
+        try read([WebVisit].self, id: Self.id("history", for: account)) ?? []
     }
 
-    public func savedTabs() throws -> WebSavedTabs {
-        try read(WebSavedTabs.self, id: Self.tabsID) ?? WebSavedTabs()
+    /// Nothing is left behind by an empty list, so a device nobody has really used stays empty.
+    public func saveHistory(_ visits: [WebVisit], for account: String) throws {
+        let id = Self.id("history", for: account)
+        if visits.isEmpty { try remove(id: id) } else { try write(visits, id: id) }
     }
 
-    public func saveTabs(_ tabs: WebSavedTabs) throws {
-        try write(tabs, id: Self.tabsID)
+    public func savedTabs(for account: String) throws -> WebSavedTabs {
+        try read(WebSavedTabs.self, id: Self.id("tabs", for: account)) ?? WebSavedTabs()
     }
 
-    /// Made the first time, so the store's ID stays the same from then on.
-    public func settings() throws -> WebSettings {
-        if let settings = try? read(WebSettings.self, id: Self.settingsID) { return settings }
-        let settings = WebSettings()
-        try write(settings, id: Self.settingsID)
-        return settings
+    public func saveTabs(_ tabs: WebSavedTabs, for account: String) throws {
+        let id = Self.id("tabs", for: account)
+        if tabs.tabs.isEmpty { try remove(id: id) } else { try write(tabs, id: id) }
     }
 
-    public func saveSettings(_ settings: WebSettings) throws {
-        try write(settings, id: Self.settingsID)
+    public func settings(for account: String) throws -> WebSettings {
+        try read(WebSettings.self, id: Self.id("settings", for: account)) ?? WebSettings()
+    }
+
+    public func saveSettings(_ settings: WebSettings, for account: String) throws {
+        try write(settings, id: Self.id("settings", for: account))
     }
 }
 

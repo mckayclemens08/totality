@@ -3,7 +3,6 @@ import Observation
 import TotalityCore
 import WebKit
 
-/// One tab's search.
 /// Something already on this device that matches what's being typed.
 public struct WebSuggestion: Equatable, Identifiable, Sendable {
     public let title: String
@@ -13,6 +12,7 @@ public struct WebSuggestion: Equatable, Identifiable, Sendable {
     public var id: URL { url }
 }
 
+/// One tab's search.
 public struct WebSearchState: Equatable, Sendable {
     public enum Phase: Equatable, Sendable {
         case searching, done
@@ -98,41 +98,118 @@ public final class WebModel {
     public private(set) var bookmarks: [WebBookmark] = []
     public private(set) var history: [WebVisit] = []
     public private(set) var isLoaded = false
+    public private(set) var downloads: [WebDownload] = []
     public var notice: String?
+    /// Something reached the Reader, so its library has to look again.
+    @ObservationIgnored public var onSentToReader: (() -> Void)?
+    /// A download is in the Reader and the person asked to go there.
+    @ObservationIgnored public var onOpenInReader: ((ContentRef) -> Void)?
 
     @ObservationIgnored private let client: WebSearchClient?
     @ObservationIgnored private let vault: WebVault?
+    @ObservationIgnored private let blocker: WebBlocker?
+    @ObservationIgnored private let downloadsRoot: URL?
+    @ObservationIgnored private let receiver: (any ContentReceiver)?
+    @ObservationIgnored private var folder: WebDownloadFolder?
+    @ObservationIgnored private var blockingStarted = false
     @ObservationIgnored private var searching: Task<Void, Never>?
-    @ObservationIgnored private var settings = WebSettings()
+    private var settings = WebSettings()
+    /// Who things are kept for. Nil for anyone else, and then nothing is.
+    private var account: String?
     @ObservationIgnored private var dataStore: WKWebsiteDataStore?
     @ObservationIgnored private var savingHistory: Task<Void, Never>?
     @ObservationIgnored private var savingTabs: Task<Void, Never>?
     @ObservationIgnored private let now: @Sendable () -> Date
 
-    public init(client: WebSearchClient?, vault: WebVault? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(
+        client: WebSearchClient?, vault: WebVault? = nil, blocker: WebBlocker? = nil, downloads: URL? = nil,
+        receiver: (any ContentReceiver)? = nil, now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.client = client
         self.vault = vault
+        self.blocker = blocker
+        self.downloadsRoot = downloads
+        self.receiver = receiver
         self.now = now
         let first = WebTab()
         tabs = [first]
         currentID = first.id
     }
 
+    /// Says who's here. Only the account that owns this device's key has things kept, because its
+    /// bookmarks sync under that key. Signed out or anyone else, the browser works and keeps nothing.
+    /// Nothing is written until there's something to keep, so an unused browser leaves a device empty
+    /// and a new account can still take it over.
+    public func use(account: String?) async {
+        if account != self.account {
+            reset()
+            self.account = account
+        }
+        await load()
+    }
+
+    /// What's open belongs to whoever is leaving, so none of it carries over. What they kept stays
+    /// sealed on the device for when they're back.
+    private func reset() {
+        savingHistory?.cancel()
+        savingTabs?.cancel()
+        searching?.cancel()
+        for tab in tabs { tab.page?.stop() }
+        for download in downloads where download.state == .running { remove(download) }
+        let first = WebTab()
+        tabs = [first]
+        currentID = first.id
+        bookmarks = []
+        history = []
+        downloads = []
+        settings = WebSettings()
+        folder = nil
+        dataStore = nil
+        notice = nil
+        isLoaded = false
+    }
+
     /// Reads what's sealed on this device. Open tabs come back without loading, and each one loads when
     /// it's next looked at, so reopening the app doesn't fetch every site.
     public func load() async {
-        guard let vault else {
+        startBlocking()
+        guard let vault, let account else {
             isLoaded = true
             return
         }
         do {
-            bookmarks = try await vault.bookmarks()
-            history = try await vault.history()
-            settings = try await vault.settings()
-            if !isLoaded { restoreTabs(try await vault.savedTabs()) }
+            let bookmarks = try await vault.bookmarks()
+            // Sync reloads too, and the rest is already in memory, with changes still on their way to disk.
+            guard !isLoaded else {
+                if account == self.account { self.bookmarks = bookmarks }
+                return
+            }
+            let history = try await vault.history(for: account)
+            let settings = try await vault.settings(for: account)
+            let tabs = try await vault.savedTabs(for: account)
+            guard account == self.account, !isLoaded else { return }
+            self.bookmarks = bookmarks
+            self.history = history
+            self.settings = settings
+            let directory = WebVault.siteID(for: account).uuidString
+            folder = downloadsRoot.map { WebDownloadFolder(directory: $0.appendingPathComponent(directory, isDirectory: true)) }
+            downloads = folder?.existing().map(WebDownload.init(finished:)) ?? []
+            restoreTabs(tabs)
             isLoaded = true
         } catch {
             notice = "Your bookmarks and history couldn't be opened."
+        }
+    }
+
+    /// True once it's settled that this person gets a browser that keeps nothing.
+    public var keepsNothing: Bool { vault != nil && isLoaded && account == nil }
+
+    private func startBlocking() {
+        guard let blocker, !blockingStarted else { return }
+        blockingStarted = true
+        Task { [weak self] in
+            await blocker.prepare()
+            for tab in self?.tabs ?? [] { tab.page?.rules = blocker.rules }
         }
     }
 
@@ -162,12 +239,10 @@ public final class WebModel {
         page(for: tab).load(address)
     }
 
-    /// Each account has its own store of cookies and site data, so one person's sign-ins can't reach another's.
+    /// The account's own store of cookies and site data, so one person's sign-ins can't reach another's.
     private func store() -> WKWebsiteDataStore {
         if let dataStore { return dataStore }
-        // Until the sealed settings open there's no store ID, and a page mustn't make one up.
-        guard vault == nil || isLoaded else { return .nonPersistent() }
-        let store = vault == nil ? WKWebsiteDataStore.nonPersistent() : WKWebsiteDataStore(forIdentifier: settings.storeID)
+        let store = account.map { WKWebsiteDataStore(forIdentifier: WebVault.siteID(for: $0)) } ?? .nonPersistent()
         dataStore = store
         return store
     }
@@ -204,12 +279,12 @@ public final class WebModel {
 
     /// Private tabs are never saved, so they can't come back after the app closes.
     private func tabsChanged() {
-        guard let vault, isLoaded else { return }
+        guard let vault, let account, isLoaded else { return }
         savingTabs?.cancel()
         savingTabs = Task { [weak self] in
             try? await Task.sleep(for: Self.savePause)
             guard !Task.isCancelled, let self else { return }
-            try? await vault.saveTabs(self.savedTabs)
+            try? await vault.saveTabs(self.savedTabs, for: account)
         }
     }
 
@@ -227,7 +302,7 @@ public final class WebModel {
         tab.address = url
         if !title.isEmpty { tab.savedTitle = title }
         tabsChanged()
-        guard !tab.isPrivate, let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else { return }
+        guard account != nil, isLoaded, !tab.isPrivate, let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else { return }
         if let latest = history.first, latest.url == url {
             history[0].title = title
             history[0].date = now()
@@ -239,12 +314,12 @@ public final class WebModel {
     }
 
     private func saveHistory() {
-        guard let vault else { return }
+        guard let vault, let account, isLoaded else { return }
         savingHistory?.cancel()
         savingHistory = Task { [weak self] in
             try? await Task.sleep(for: Self.savePause)
             guard !Task.isCancelled, let self else { return }
-            try? await vault.saveHistory(self.history)
+            try? await vault.saveHistory(self.history, for: account)
         }
     }
 
@@ -256,7 +331,8 @@ public final class WebModel {
             history = []
         }
         savingHistory?.cancel()
-        Task { [vault, history] in try? await vault?.saveHistory(history) }
+        guard let account, isLoaded else { return }
+        Task { [vault, history] in try? await vault?.saveHistory(history, for: account) }
     }
 
     public func forget(_ visit: WebVisit) {
@@ -264,9 +340,12 @@ public final class WebModel {
         saveHistory()
     }
 
-    /// Signs every site out on this device, for this account.
-    public func clearSiteData() async {
+    /// Signs every site out on this device, for this account. False when it isn't known yet whose store
+    /// to clear, so the screen can't say it's done.
+    public func clearSiteData() async -> Bool {
+        guard isLoaded else { return false }
         await store().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+        return true
     }
 
     /// Bookmarks and pages already visited, matched here. Nothing typed leaves the device until Go.
@@ -288,6 +367,80 @@ public final class WebModel {
     }
 
     private static let suggestionLimit = 6
+
+    // MARK: Blocking
+
+    public var unblockedSites: [String] { settings.unblockedSites.sorted() }
+
+    public func isBlocking(_ url: URL?) -> Bool {
+        WebSite.key(url).map { !settings.unblockedSites.contains($0) } ?? true
+    }
+
+    public func setBlocking(_ isOn: Bool, for site: String) {
+        if isOn { settings.unblockedSites.remove(site) } else { settings.unblockedSites.insert(site) }
+        if let account, isLoaded {
+            Task { [vault, settings] in try? await vault?.saveSettings(settings, for: account) }
+        }
+        for tab in tabs where WebSite.key(tab.page?.url) == site {
+            tab.page?.applyRules(for: tab.page?.url)
+            tab.page?.reload()
+        }
+    }
+
+    // MARK: Downloads and the Reader
+
+    public func remove(_ download: WebDownload) {
+        download.cancel()
+        try? FileManager.default.removeItem(at: download.file)
+        downloads.removeAll { $0.id == download.id }
+    }
+
+    /// Goes through the registry, so Web hands over a note and never learns how the Reader keeps it.
+    public func saveToReader() async {
+        guard let page = current.page, let receiver else { return }
+        do {
+            let text = try await page.readableText()
+            guard !text.body.isEmpty else {
+                notice = "This page has no text to save."
+                return
+            }
+            _ = try await receiver.receive(noteTitled: text.title, body: text.body)
+            onSentToReader?()
+            notice = "Saved to Reader."
+        } catch {
+            notice = "This page wasn't saved."
+        }
+    }
+
+    /// Hands the file over the first time, then opens it there. A file that's already in the Reader
+    /// goes back to the same document, unless it's been deleted there.
+    public func openInReader(_ download: WebDownload) async {
+        guard let receiver else { return }
+        do {
+            let kept = if let sent = download.inReader { try await receiver.current(sent) } else { nil as ContentRef? }
+            let ref = if let kept { kept } else { try await receiver.receive(file: Data(contentsOf: download.file), named: download.filename) }
+            download.inReader = ref
+            onOpenInReader?(ref)
+        } catch {
+            notice = "The Reader couldn't take this file."
+        }
+    }
+
+    /// Every running download as one number, or nil when none is running.
+    public var downloadProgress: Double? {
+        let running = downloads.filter { $0.state == .running }
+        return running.isEmpty ? nil : running.map(\.progress).reduce(0, +) / Double(running.count)
+    }
+
+    /// True while there's a download to show, running or ended and not looked at yet.
+    public var showsDownloadStatus: Bool {
+        downloads.contains { $0.state == .running || !$0.wasSeen }
+    }
+
+    /// Anything still running keeps its marker, so its ending gets seen too.
+    public func downloadsSeen() {
+        for download in downloads where download.state != .running { download.wasSeen = true }
+    }
 
     // MARK: Bookmarks
 
@@ -317,7 +470,7 @@ public final class WebModel {
     }
 
     private func changeBookmarks(_ failure: String, _ change: (WebVault) async throws -> Void) async {
-        guard let vault else {
+        guard let vault, account != nil, isLoaded else {
             notice = failure
             return
         }
@@ -334,6 +487,11 @@ public final class WebModel {
         guard isLoaded else { return nil }
         guard !bookmarks.isEmpty else { return ModuleGlance(lines: ["No bookmarks yet"], isQuiet: true) }
         return ModuleGlance(lines: bookmarks.map(\.displayTitle))
+    }
+
+    /// Normal tabs with something in them. Only the number reaches the home page.
+    public var openTabCount: Int {
+        tabs.filter { !$0.isPrivate && $0.showing != .start }.count
     }
 
     public var current: WebTab {
@@ -365,6 +523,17 @@ public final class WebModel {
 
     private func attach(_ page: WebPage, to tab: WebTab) {
         tab.page = page
+        page.isUnblocked = { [weak self] site in self?.settings.unblockedSites.contains(site) ?? false }
+        page.rules = blocker?.rules
+        page.onDownload = { [weak self] task, name in
+            guard let self else { return nil }
+            guard let file = try? self.folder?.destination(for: name) else {
+                self.notice = "This file wasn't saved. Downloads are kept only for the account that owns this device."
+                return nil
+            }
+            self.downloads.insert(WebDownload(file: file, task: task), at: 0)
+            return file
+        }
         page.onVisit = { [weak self, weak tab] url, title in
             guard let self, let tab else { return }
             self.visited(url, title: title, in: tab)

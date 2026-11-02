@@ -32,6 +32,19 @@ public struct ReaderModule: ContentProvider {
     }
 }
 
+extension ReaderModule: ContentReceiver {
+    public func receive(noteTitled title: String, body: String) async throws -> ContentRef {
+        guard let vault else { throw ReaderError.notFound }
+        let note = try await vault.createNote(title: title)
+        return Self.ref(try await vault.saveNote(note.id, title: title, body: body))
+    }
+
+    public func receive(file data: Data, named filename: String) async throws -> ContentRef {
+        guard let vault else { throw ReaderError.notFound }
+        return Self.ref(try await vault.importFile(data, filename: filename))
+    }
+}
+
 extension ReaderModule: ModuleSearcher {
     public func search(_ query: String) async throws -> [SearchHit] {
         try await vault?.search(query).map { hit in

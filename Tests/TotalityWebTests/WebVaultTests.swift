@@ -1,10 +1,12 @@
 import Foundation
 import Testing
 import TotalityCore
+import WebKit
 @testable import TotalityWeb
 
 @Suite struct WebVaultTests {
     private let site = URL(string: "https://lisbon.example/trams")!
+    private let account = "user-1"
 
     private func vault(_ store: MemoryBlobStore = MemoryBlobStore()) throws -> WebVault {
         WebVault(store: store, rootKey: try .generate())
@@ -24,8 +26,8 @@ import TotalityCore
         let store = MemoryBlobStore()
         let vault = try vault(store)
         try await vault.save(WebBookmark(title: "Tram 28", url: site))
-        try await vault.saveHistory([WebVisit(title: "Tram 28", url: site, date: Date())])
-        try await vault.saveTabs(WebSavedTabs(tabs: [.init(id: UUID(), url: site, title: "Tram 28")], current: nil))
+        try await vault.saveHistory([WebVisit(title: "Tram 28", url: site, date: Date())], for: account)
+        try await vault.saveTabs(WebSavedTabs(tabs: [.init(id: UUID(), url: site, title: "Tram 28")], current: nil), for: account)
         for name in try store.names() {
             let text = String(decoding: try #require(try store.read(name)), as: UTF8.self)
             #expect(!text.contains("lisbon") && !text.contains("Tram"))
@@ -38,20 +40,30 @@ import TotalityCore
         let vault = try vault()
         let saved = WebBookmark(title: "Tram 28", url: site)
         try await vault.save(saved)
-        try await vault.saveHistory([WebVisit(title: "Tram 28", url: site, date: Date())])
-        try await vault.saveTabs(WebSavedTabs())
-        _ = try await vault.settings()
+        try await vault.saveHistory([WebVisit(title: "Tram 28", url: site, date: Date())], for: account)
+        try await vault.saveTabs(WebSavedTabs(tabs: [.init(id: UUID(), url: site, title: "Tram 28")], current: nil), for: account)
+        try await vault.saveSettings(WebSettings(unblockedSites: ["lisbon.example"]), for: account)
         #expect(try await vault.sealedObjectIDs() == [saved.id])
         #expect(vault.kinds == [.bookmark])
     }
 
     @Test("The site data store stays the same from launch to launch")
-    func storeIDLasts() async throws {
+    func storeIDLasts() {
+        #expect(WebVault.siteID(for: account) == WebVault.siteID(for: account))
+    }
+
+    @Test("Reading and empty lists leave nothing behind, so a device nobody used stays empty")
+    func emptyLeavesNothing() async throws {
         let store = MemoryBlobStore()
-        let key = try ContentRootKey.generate()
-        let first = try await WebVault(store: store, rootKey: key).settings()
-        let second = try await WebVault(store: store, rootKey: key).settings()
-        #expect(first.storeID == second.storeID)
+        let vault = try vault(store)
+        #expect(try await vault.history(for: account).isEmpty)
+        #expect(try await vault.settings(for: account) == WebSettings())
+        #expect(try await vault.savedTabs(for: account) == WebSavedTabs())
+        #expect(try store.names().isEmpty)
+        try await vault.saveHistory([WebVisit(title: "Tram 28", url: site, date: Date())], for: account)
+        try await vault.saveHistory([], for: account)
+        try await vault.saveTabs(WebSavedTabs(), for: account)
+        #expect(try store.names().isEmpty)
     }
 
     @Test("A bookmark from sync must open under this key")
@@ -121,33 +133,132 @@ import TotalityCore
         let vault = try vault()
         await vault.close()
         await #expect(throws: WebVaultError.closed) { try await vault.save(WebBookmark(title: "A", url: site)) }
-        await #expect(throws: WebVaultError.closed) { try await vault.saveHistory([]) }
+        await #expect(throws: WebVaultError.closed) { try await vault.saveHistory([], for: account) }
+        await #expect(throws: WebVaultError.closed) { try await vault.saveTabs(WebSavedTabs(), for: account) }
     }
 }
 
-/// Web's cases for the brief §6 two-user test, at the encryption layer.
+/// Web's cases for the brief §6 two-user test. A device has one content key, so these use the same key
+/// and storage for both people, because that's what two accounts on one device really share.
+@MainActor
 @Suite struct WebTwoUserTests {
     private let site = URL(string: "https://lisbon.example/trams")!
 
-    @Test("User 2 cannot see user 1's bookmarks, history, or tabs from the same storage")
+    @Test("User 2 cannot see user 1's history, tabs, or settings under the same key")
     func user2CannotRead() async throws {
-        let store = MemoryBlobStore()
-        let user1 = WebVault(store: store, rootKey: try .generate())
-        try await user1.save(WebBookmark(title: "Tram 28", url: site))
-        try await user1.saveHistory([WebVisit(title: "Tram 28", url: site, date: Date())])
-        try await user1.saveTabs(WebSavedTabs(tabs: [.init(id: UUID(), url: site, title: "Tram 28")], current: nil))
+        let vault = WebVault(store: MemoryBlobStore(), rootKey: try .generate())
+        try await vault.saveHistory([WebVisit(title: "Tram 28", url: site, date: Date())], for: "user-1")
+        try await vault.saveTabs(WebSavedTabs(tabs: [.init(id: UUID(), url: site, title: "Tram 28")], current: nil), for: "user-1")
+        try await vault.saveSettings(WebSettings(unblockedSites: ["lisbon.example"]), for: "user-1")
 
-        let user2 = WebVault(store: store, rootKey: try .generate())
-        #expect(try await user2.bookmarks().isEmpty)
-        await #expect(throws: CryptoError.authenticationFailed) { try await user2.history() }
-        await #expect(throws: CryptoError.authenticationFailed) { try await user2.savedTabs() }
+        #expect(try await vault.history(for: "user-2").isEmpty)
+        #expect(try await vault.savedTabs(for: "user-2").tabs.isEmpty)
+        #expect(try await vault.settings(for: "user-2") == WebSettings())
+        #expect(try await vault.history(for: "user-1").count == 1)
     }
 
     @Test("Two accounts never share a store of site sign-ins")
-    func user2HasOwnSignIns() async throws {
+    func user2HasOwnSignIns() {
+        #expect(WebVault.siteID(for: "user-1") != WebVault.siteID(for: "user-2"))
+    }
+
+    private func signedIn(_ store: MemoryBlobStore, key: ContentRootKey) async -> WebModel {
+        let model = WebModel(client: nil, vault: WebVault(store: store, rootKey: key))
+        await model.use(account: "user-1")
+        return model
+    }
+
+    @Test("Nothing of the owner's shows once they sign out, and it all comes back")
+    func signingOutHidesEverything() async throws {
         let store = MemoryBlobStore()
-        let first = try await WebVault(store: store, rootKey: try .generate()).settings()
-        let second = try await WebVault(store: store, rootKey: try .generate()).settings()
-        #expect(first.storeID != second.storeID)
+        let model = await signedIn(store, key: try .generate())
+        await model.addBookmark(title: "Tram 28", url: site)
+        model.open(site)
+        let page = try #require(model.current.page)
+        page.onVisit?(site, "Tram 28")
+        #expect(model.history.count == 1)
+
+        await model.use(account: nil)
+        #expect(model.keepsNothing)
+        #expect(model.bookmarks.isEmpty)
+        #expect(model.history.isEmpty)
+        #expect(model.tabs.count == 1)
+        #expect(model.current.showing == .start)
+        #expect(model.current.page == nil)
+        #expect(model.glance?.lines == ["No bookmarks yet"])
+        #expect(model.suggestions(for: "tram").isEmpty)
+
+        await model.use(account: "user-1")
+        #expect(!model.keepsNothing)
+        #expect(model.bookmarks.map(\.title) == ["Tram 28"])
+    }
+
+    @Test("Someone who doesn't own the device keeps nothing, and adds nothing to the owner's")
+    func nonOwnerKeepsNothing() async throws {
+        let store = MemoryBlobStore()
+        let key = try ContentRootKey.generate()
+        let model = WebModel(client: nil, vault: WebVault(store: store, rootKey: key))
+        await model.use(account: nil)
+        #expect(try store.names().isEmpty)
+
+        await model.addBookmark(title: "Tram 28", url: site)
+        #expect(model.bookmarks.isEmpty)
+        #expect(model.notice != nil)
+        model.open(site)
+        try #require(model.current.page).onVisit?(site, "Tram 28")
+        model.setBlocking(false, for: "lisbon.example")
+        model.newTab()
+        #expect(model.history.isEmpty)
+        try await Task.sleep(for: .seconds(1))
+        #expect(try store.names().isEmpty)
+    }
+
+    @Test("A browser opened by a new owner writes nothing, so the device can still pass on")
+    func openingWritesNothing() async throws {
+        let store = MemoryBlobStore()
+        let model = await signedIn(store, key: try .generate())
+        model.newTab()
+        try await Task.sleep(for: .seconds(1))
+        #expect(try store.names().isEmpty)
+    }
+
+    @Test("Whoever comes next doesn't get the last person's open tabs")
+    func tabsDontCarryOver() async throws {
+        let store = MemoryBlobStore()
+        let key = try ContentRootKey.generate()
+        let vault = WebVault(store: store, rootKey: key)
+        try await vault.saveTabs(WebSavedTabs(tabs: [.init(id: UUID(), url: site, title: "Tram 28")], current: nil), for: "user-1")
+        let model = await signedIn(store, key: key)
+        #expect(model.current.address == site)
+        await model.use(account: "user-2")
+        #expect(model.current.address == nil)
+        #expect(model.current.showing == .start)
+    }
+
+    @Test("Sites get a different store for each account, and one that keeps nothing when signed out")
+    func storesAreSeparate() async throws {
+        let model = WebModel(client: nil, vault: WebVault(store: MemoryBlobStore(), rootKey: try .generate()))
+        let accounts = [UUID().uuidString, UUID().uuidString]
+        defer {
+            for account in accounts { WKWebsiteDataStore.remove(forIdentifier: WebVault.siteID(for: account)) { _ in } }
+        }
+        func store(_ account: String?) async throws -> WKWebsiteDataStore {
+            await model.use(account: account)
+            model.open(site)
+            let page = try #require(model.current.page)
+            page.stop()
+            return page.webView.configuration.websiteDataStore
+        }
+        #expect(try await store(accounts[0]).identifier == WebVault.siteID(for: accounts[0]))
+        #expect(try await store(accounts[1]).identifier == WebVault.siteID(for: accounts[1]))
+        #expect(try await store(nil).isPersistent == false)
+    }
+
+    @Test("Signing every site out can't report done before it knows whose store that is")
+    func clearingNeedsToKnowWhoItIs() async throws {
+        let model = WebModel(client: nil, vault: WebVault(store: MemoryBlobStore(), rootKey: try .generate()))
+        #expect(await model.clearSiteData() == false)
+        await model.use(account: nil)
+        #expect(await model.clearSiteData())
     }
 }

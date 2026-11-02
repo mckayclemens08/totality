@@ -103,6 +103,7 @@ public final class AccountModel {
                 notice = "You're signed out on this device, but the server couldn't be reached to end the session."
             }
         }
+        await backup?.accountSignedOut()
         sync?.resume()
     }
 

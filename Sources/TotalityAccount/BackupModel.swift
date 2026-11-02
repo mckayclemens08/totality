@@ -42,6 +42,8 @@ public final class BackupModel {
     public private(set) var canProveOwnership = false
     /// Called once this device has joined, so sync can start.
     public var onJoined: (() async -> Void)?
+    /// Someone signed in or out, or the device changed hands, so what it keeps for them may have changed.
+    public var onOwnerChanged: (() async -> Void)?
 
     private let service: any KeyBackupService
     private let content: any ContentKeyAccess
@@ -65,6 +67,11 @@ public final class BackupModel {
     /// doesn't, because that content could be someone else's, so `load` asks. Either way this ends the
     /// first-launch rule, so a later launch can't mistake this session for an old install's.
     public func accountSignedIn() async {
+        await claimIfEmpty()
+        await onOwnerChanged?()
+    }
+
+    private func claimIfEmpty() async {
         guard let account = await service.signedInAccountID() else { return }
         do {
             try await content.settleExistingInstall(signedInAccount: nil)
@@ -73,6 +80,16 @@ public final class BackupModel {
         } catch {
             // Nothing is claimed, so `load` falls back to asking.
         }
+    }
+
+    public func accountSignedOut() async {
+        await onOwnerChanged?()
+    }
+
+    /// The signed-in account, if this device's key is theirs.
+    public func deviceOwner() async -> String? {
+        guard let account = await service.signedInAccountID(), let owner = try? await content.keyOwner(), owner == account else { return nil }
+        return account
     }
 
     /// Whether this device may sync: it has to belong to the signed-in account and have joined.
@@ -146,6 +163,7 @@ public final class BackupModel {
             guard let account = await service.signedInAccountID() else { return }
             try await content.release(by: account)
             ownershipConfirmedBy = nil
+            await onOwnerChanged?()
             await load()
         } catch {
             notice = "This device couldn't be released."
@@ -228,6 +246,7 @@ public final class BackupModel {
             self.newKey = nil
             existing = FetchedBackup(backup: backup, inSupabase: true)
             phase = .ready(await copies(of: FetchedBackup(backup: backup, inSupabase: true)))
+            await onOwnerChanged?()
             await onJoined?()
         } catch ContentKeyError.otherAccount {
             self.newKey = nil
@@ -277,6 +296,7 @@ public final class BackupModel {
             if report.unreadable > 0 {
                 notice = "\(report.unreadable) items can't be opened with this key. They're untouched."
             }
+            await onOwnerChanged?()
             await onJoined?()
         } catch ContentKeyError.otherAccount {
             phase = .otherAccount

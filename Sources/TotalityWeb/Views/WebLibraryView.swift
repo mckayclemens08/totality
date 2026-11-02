@@ -50,7 +50,7 @@ struct WebLibraryView: View {
                 ForEach(folders, id: \.self) { folder in
                     let inside = model.bookmarks.filter { $0.folder == folder }
                     if !inside.isEmpty {
-                        SwiftUI.Section(folder) {
+                        SwiftUI.Section {
                             ForEach(inside) { bookmark in
                                 row(bookmark.displayTitle, url: bookmark.url, image: "bookmark")
                                     .contextMenu {
@@ -62,10 +62,13 @@ struct WebLibraryView: View {
                                 let removed = rows.map { inside[$0] }
                                 Task { for bookmark in removed { await model.remove(bookmark) } }
                             }
+                        } header: {
+                            if !folder.isEmpty { Text(folder) }
                         }
                     }
                 }
                 .listRowBackground(Theme.current.bg.color)
+                .listRowSeparator(.hidden)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -102,6 +105,7 @@ struct WebLibraryView: View {
                     for row in rows { model.forget(shown[row]) }
                 }
                 .listRowBackground(theme.bg.color)
+                .listRowSeparator(.hidden)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)

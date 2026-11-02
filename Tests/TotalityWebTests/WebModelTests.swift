@@ -146,7 +146,7 @@ import TotalityCore
     private func loaded(_ store: MemoryBlobStore = MemoryBlobStore(), key: ContentRootKey? = nil, now: @escaping @Sendable () -> Date = { Date() }) async throws -> (WebModel, WebVault) {
         let vault = WebVault(store: store, rootKey: try key ?? .generate())
         let model = WebModel(client: nil, vault: vault, now: now)
-        await model.load()
+        await model.use(account: "user-1")
         return (model, vault)
     }
 
@@ -188,8 +188,8 @@ import TotalityCore
         visit(food, in: first, title: "Pasteis")
         first.newTab(isPrivate: true)
         visit(food, in: first, title: "Secret")
-        try await vault.saveTabs(first.savedTabs)
-        try await vault.saveHistory(first.history)
+        try await vault.saveTabs(first.savedTabs, for: "user-1")
+        try await vault.saveHistory(first.history, for: "user-1")
 
         let (second, _) = try await loaded(store, key: key)
         #expect(second.tabs.map(\.savedTitle) == ["Trams", "Pasteis"])
@@ -236,7 +236,7 @@ import TotalityCore
         let (client, host) = FakeGateway.client { _ in (200, Data()) }
         let vault = WebVault(store: MemoryBlobStore(), rootKey: try .generate())
         let model = WebModel(client: client, vault: vault)
-        await model.load()
+        await model.use(account: "user-1")
         await model.addBookmark(title: "Tram guide", url: trams)
         visit(food, in: model, title: "Tram food")
         visit(trams, in: model, title: "Tram guide")
@@ -309,5 +309,17 @@ import TotalityCore
     @Test func offlineIsToldApart() {
         #expect(WebPageFailure.of(NSError(domain: NSURLErrorDomain, code: NSURLErrorNotConnectedToInternet)) == .offline)
         #expect(WebPageFailure.of(NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)) == .other)
+    }
+
+    @Test("The tile counts normal tabs that hold something, and never private ones")
+    func tabCount() async throws {
+        let model = WebModel(client: nil)
+        await model.use(account: nil)
+        #expect(model.openTabCount == 0)
+        model.open(URL(string: "https://lisbon.example/trams")!)
+        model.newTab()
+        model.newTab(isPrivate: true)
+        model.open(URL(string: "https://lisbon.example/secret")!)
+        #expect(model.openTabCount == 1)
     }
 }

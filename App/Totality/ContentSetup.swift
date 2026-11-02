@@ -60,7 +60,11 @@ enum ContentSetup {
                 devices: devices, reminders: SystemReminders(),
                 registry: registry
             ),
-            WebModel(client: AccountSetup.searchToken.map { WebSearchClient(token: $0) }, vault: webVault),
+            WebModel(
+                client: AccountSetup.searchToken.map { WebSearchClient(token: $0) }, vault: webVault, blocker: WebBlocker(),
+                downloads: try base().appendingPathComponent("Downloads", isDirectory: true),
+                receiver: registry.receiver(for: .web)
+            ),
             [readerVault, calendarVault, webVault],
             registry
         )

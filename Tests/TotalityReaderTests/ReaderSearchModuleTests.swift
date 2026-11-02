@@ -189,3 +189,32 @@ import TotalityCore
         #expect(engine.spoken.last == "Stop for coffee.")
     }
 }
+
+@Suite struct ReaderReceiverTests {
+    @Test("A page saved from another module lands in the library, sealed, and readable by Listen")
+    func note() async throws {
+        let store = MemoryBlobStore()
+        let vault = try newVault(store: store)
+        let ref = try await ReaderModule(vault: vault).receive(noteTitled: "Riding tram 28", body: "The yellow tram climbs.")
+        #expect(ref.kind == .note)
+        #expect(ref.preview.title == "Riding tram 28")
+        #expect(String(decoding: try await vault.body(of: ref.id), as: UTF8.self) == "The yellow tram climbs.")
+        for name in try store.names() {
+            #expect(!String(decoding: try #require(try store.read(name)), as: UTF8.self).contains("yellow"))
+        }
+    }
+
+    @Test("A file handed over is imported like any other")
+    func file() async throws {
+        let vault = try newVault()
+        let ref = try await ReaderModule(vault: vault).receive(file: Data("Tram notes".utf8), named: "tram.txt")
+        #expect(ref.kind == .file)
+        #expect(try await vault.item(ref.id).kind == .file)
+        #expect(String(decoding: try await vault.body(of: ref.id), as: UTF8.self) == "Tram notes")
+    }
+
+    @Test("Without a vault nothing is pretended to be saved")
+    func noVault() async {
+        await #expect(throws: ReaderError.notFound) { try await ReaderModule().receive(noteTitled: "A", body: "B") }
+    }
+}
