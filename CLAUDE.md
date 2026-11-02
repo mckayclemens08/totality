@@ -97,8 +97,10 @@ membership.
 
 Stages A and B cost nothing. Free tiers, open source, hardware already owned. If a feature cannot be
 done at $0, it waits or gets redesigned — it does not quietly start a subscription. Flag it, don't
-decide it. The one named exception is the domain, `usetotality.com`, which the owner bought on 2026-10-30
-at roughly $10 a year (proposal §11-L).
+decide it. There are two named exceptions. The domain, `usetotality.com`, which the owner bought on
+2026-10-30 at roughly $10 a year (proposal §11-L). And Cloudflare Workers Paid at $5 a month plus usage,
+which the owner chose on 2026-11-02 to send mail to outside addresses ("just increase my cloudflare the
+$5 a month").
 
 ## Running the app
 

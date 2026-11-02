@@ -71,6 +71,10 @@ public final class AccountModel {
             notice = "Use 3 to 24 letters, numbers, or underscores for your username."
             return
         }
+        guard !name.isReserved else {
+            notice = AccountError.usernameTaken.message
+            return
+        }
         guard password.unicodeScalars.count >= Self.minimumPasswordLength else {
             notice = "Use at least \(Self.minimumPasswordLength) characters for your password."
             return

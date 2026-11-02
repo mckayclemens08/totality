@@ -210,6 +210,7 @@ Spec: issue #17. A device's content key is locked by a recovery key in Matrix's 
 - A joined device remembers the backup's fingerprint, not its ID, so a server can't swap the contents behind the same ID. A backup is never written over a different one on Matrix.
 - `fetchBackup` returns nil only when both servers answer that there's nothing. An outage must never read as "no backup", because that invites a second recovery key.
 - A handle is retired for good when its profile is deleted, because Matrix finds accounts by name and the next owner would inherit the old account.
+- Some names are retired from the start, because every username is also a mail address: `abuse@`, `postmaster@`, `admin@`, and the others in `20261102000001_reserved_usernames.sql`. Mail to them goes to the owner, at `mckayclemens@`. The app's `Username.reserved` holds the same list so sign-up can answer clearly, and a test keeps the two equal.
 
 ## Encrypted sync
 

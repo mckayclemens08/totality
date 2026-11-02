@@ -236,4 +236,14 @@ describe('retired handles', () => {
     await assert.rejects(as(db, user1, (q) => q('delete from public.retired_handles')), /permission denied/)
     await assert.rejects(as(db, null, (q) => q('select * from public.retired_handles')), /permission denied/)
   })
+
+  for (const name of ['abuse', 'admin', 'administrator', 'hostmaster', 'postmaster', 'webmaster', 'mckayclemens']) {
+    test(`nobody can sign up as ${name}, because it would be a mail address`, async () => {
+      await assert.rejects(addAccount(name), /retired/)
+    })
+  }
+
+  test('a name close to a reserved one is still free', async () => {
+    await addAccount('admin_fan')
+  })
 })
