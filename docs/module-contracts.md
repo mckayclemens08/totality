@@ -270,3 +270,28 @@ Agreed with the owner on 2026-10-30. The account page becomes the signed-in pers
 - Followers, posts, and viewing other people's profiles are not here. Follows and posts wait for Phase 2, and viewing others waits for search.
 - Before showing other people's photos: treat `avatars` as hostile input. The bucket's JPEG rule checks the declared type, not the bytes, and a client can skip the device's rebuild.
 - Before adding profile visibility controls: a photo stays readable by anyone holding its URL, so a block or a move to private has to change the file's name.
+
+## Mail
+
+Agreed with the owner on 2026-11-02, in issue 37, which holds the full spec. Mail stands apart from Supabase and Matrix: mailboxes and public keys live on the Oracle server, and arrival never calls an outside service, so nobody else learns when someone receives mail.
+
+**Arrivals.** Cloudflare Email Routing hands every message to the Worker in `server/mail-worker/`, which streams it to `POST /mail/arrive` with a secret. `server/mail/mail.mjs` checks the address, asks Rspamd, seals, and writes. The order is what keeps the promise: nothing reaches the disk until it's sealed.
+
+- **Bounce or wait.** Only three answers bounce: 410 no such address, 413 too big, and 507 mailbox full. Every other answer makes the Worker throw, which Cloudflare passes on as a temporary failure, and the sender's server tries again. The trial proved this with Gmail on 2026-11-02. Unknown addresses are 410 and not 404, because a tunnel with the wrong path answers 404 by itself, and that must never bounce mail.
+- **Memory.** Readable mail exists only in the `mail` and `rspamd` containers, which have no swap, no core files, and no logs. The server has no swap at all. At most four messages are held at once, and the rest wait at the sender. Buffers are wiped after sealing, which is best effort in a garbage-collected language, so the guarantee is "never on disk", not "gone from memory at once".
+- **Spam.** Rspamd sits on a network with no way out, so nothing about a message can leave the server, and that's enforced by Docker, not by settings. It means no blocklists, so it judges by content alone. Cloudflare checks SPF, DKIM, and DMARC and writes the results into the message's headers. A failed spam check stores the message with no verdict, because losing mail is worse than missing spam.
+
+**Sealing.** HPKE (RFC 9180) in base mode with X25519, HKDF-SHA256, and ChaCha20-Poly1305, because CryptoKit can open it, and the RFC's test vector runs against the server's code. A sealed file is version (1), encapsulated key (32), then ciphertext and tag. The info string is `totality/mail/v1`, and the mailbox and message IDs are authenticated, so a file can't be moved. Inside is one line of JSON with what the device can't work out, which is when it arrived and the spam verdict, then the message exactly as it came. `MailKeyTests` opens a file the server really sealed.
+
+**Keys.** `MailKey` comes from the content key, so every device has it and the recovery key restores it. A device publishes the public half to `POST /mail/key`, signed in. The account comes from the sign-in and never from the request. There's one key per mailbox for good, and a different one gets a 409, so a stolen session can't swap in its own and read what arrives afterwards.
+
+- Before publishing from the app: a device that later joins a key backup adopts a different content key, and the published key can't be replaced. So publish only once the device's backup is settled.
+- Public keys don't need to be secret, so step 5 can hand them to senders. Nobody can tell from a sealed file who sealed it, because anyone can seal to a public key. A planted file is no worse than an email.
+
+**On the disk.** `~/totality/mailboxes` holds `boxes/<account>/public.key` and `<message>.sealed`, and `names/<username>`, which holds the account an address belongs to. An address exists once its name file does, and that's written last. Reserved names like `abuse` are name files added by hand on the server, pointing at the owner's account, so no account ID enters the repo.
+
+**Not built yet.**
+
+- Reading mail: there's no list or fetch path until step 4, and the app doesn't publish a key yet, so no real address works.
+- Account deletion: the app has none yet, so a mailbox outlives an account deleted by hand and keeps accepting mail. The name is retired, so nobody can inherit it. Whatever deletes an account has to remove its folder and name file too.
+- No backup, as the owner accepted.
