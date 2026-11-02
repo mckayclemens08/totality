@@ -67,6 +67,11 @@ public struct SupabaseAccountService: AccountService {
         )
     }
 
+    /// A current sign-in token for the web search gateway. It's refreshed here if it has expired.
+    public func accessToken() async throws -> String {
+        try await client.auth.session.accessToken
+    }
+
     public func currentUsername() async -> String? {
         client.auth.currentSession?.user.email.flatMap { Username(address: $0)?.value }
     }

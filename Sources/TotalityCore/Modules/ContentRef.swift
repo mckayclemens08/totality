@@ -7,6 +7,7 @@ public enum Visibility: String, Codable, Sendable, CaseIterable {
 public enum ContentKind: String, Codable, Sendable, CaseIterable {
     case file, note, doc, photo, video, audio, post, event, transaction
     case aiMemory = "ai_memory"
+    case bookmark
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {

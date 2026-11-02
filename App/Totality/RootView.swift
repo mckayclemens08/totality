@@ -4,6 +4,7 @@ import TotalityCalendar
 import TotalityCore
 import TotalityReader
 import TotalityUI
+import TotalityWeb
 
 /// Home and whichever module is open. The Reader's model stays alive here, so Listen keeps playing
 /// after the person goes back to the home screen.
@@ -13,6 +14,7 @@ struct RootView: View {
     @AppStorage("home.recentModule") private var recentModule = ModuleID.reader
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
+    @State private var web: WebModel?
     @State private var registry: ModuleRegistry?
     @State private var syncAreas: [any SyncArea] = []
     @State private var contentProblem: ContentProblem?
@@ -36,7 +38,7 @@ struct RootView: View {
             switch open {
             case nil:
                 HomeView(center: recentModule, glances: glances, bigTile: bigTile, style: homeStyle) { module in
-                    if module == .reader || module == .calendar { prepareContent() }
+                    if module == .reader || module == .calendar || module == .web { prepareContent() }
                     recentModule = module
                     open = module
                 } onSearch: {
@@ -56,11 +58,17 @@ struct RootView: View {
                 } else {
                     contentMessage { open = nil }
                 }
+            case .web:
+                if let web {
+                    WebHomeView(model: web) { open = nil }
+                } else {
+                    contentMessage { open = nil }
+                }
             case .some(let module):
                 ModuleMessage(
                     systemImage: "hammer",
                     title: ModuleEntry.all.first { $0.id == module }?.name ?? "This module",
-                    detail: "This isn't built yet. The Reader and Calendar are ready to use."
+                    detail: "This isn't built yet. The Reader, Calendar, and Web are ready to use."
                 ) { open = nil }
             }
         }
@@ -72,6 +80,7 @@ struct RootView: View {
                 await calendar?.stopForKeyChange()
                 reader = nil
                 calendar = nil
+                web = nil
                 registry = nil
                 syncAreas = []
                 contentProblem = nil
@@ -174,6 +183,7 @@ struct RootView: View {
             let content = try ContentSetup.makeModels()
             reader = content.reader
             calendar = content.calendar
+            web = content.web
             registry = content.registry
             syncAreas = content.areas
             refreshRecoveryLabels()

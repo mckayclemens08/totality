@@ -3,6 +3,7 @@ import TotalityAccount
 import TotalityCalendar
 import TotalityCore
 import TotalityReader
+import TotalityWeb
 
 /// Connects the modules that seal content to this device's key and storage. They share one key, so
 /// they're set up together.
@@ -37,7 +38,7 @@ enum ContentSetup {
     }
 
     /// The key step finishes any move that was interrupted, so this always opens with the right key.
-    static func makeModels() throws -> (reader: ReaderModel, calendar: CalendarModel, areas: [any SyncArea], registry: ModuleRegistry) {
+    static func makeModels() throws -> (reader: ReaderModel, calendar: CalendarModel, web: WebModel, areas: [any SyncArea], registry: ModuleRegistry) {
         let stores = try stores()
         let rootKey = try keyRing().current()
 
@@ -47,6 +48,7 @@ enum ContentSetup {
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault),
             CalendarModule(vault: calendarVault, devices: devices, hidden: { CalendarModel.hiddenCalendars(in: .standard) }),
+            WebModule(),
         ])
         return (
             ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices())),
@@ -55,6 +57,7 @@ enum ContentSetup {
                 devices: devices, reminders: SystemReminders(),
                 registry: registry
             ),
+            WebModel(client: AccountSetup.searchToken.map { WebSearchClient(token: $0) }),
             [readerVault, calendarVault],
             registry
         )

@@ -18,6 +18,10 @@ public enum KeyPurpose: String, Sendable, Hashable {
     case metadata
     /// Calendar events. Their own purpose means one module's blob can never open as another's.
     case event
+    /// Web bookmarks, which sync.
+    case bookmark
+    /// Web history, open tabs, and settings, which stay on the device.
+    case browsing
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.
