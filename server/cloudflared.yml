@@ -10,4 +10,8 @@ ingress:
   - hostname: usetotality.com
     path: ^/\.well-known/matrix/
     service: http://tuwunel:8008
+  # Search, through the gateway. SearXNG itself is never reachable from here.
+  - hostname: usetotality.com
+    path: ^/web/(search|image)$
+    service: http://gateway:8080
   - service: http_status:404

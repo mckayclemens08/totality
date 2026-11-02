@@ -27,7 +27,50 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
-    depends_on: [tuwunel]
+    depends_on: [tuwunel, gateway]
     volumes:
       - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
       - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
+
+  # The only way in to search. It checks a Totality sign-in and logs nothing about what was searched.
+  # .env holds SUPABASE_URL, SUPABASE_ANON_KEY, and SEARXNG_SECRET, and exists only on the server.
+  gateway:
+    image: python:3.13-alpine@sha256:7984cf56ceaddebe4fefeb75d64000b9f45d8b77b11a09b24524da6cdc3af0c8
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    env_file: .env
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    command: python /app/gateway.py
+    depends_on: [searxng]
+    networks: [default, search]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://127.0.0.1:8080/web/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./gateway/gateway.py:/app/gateway.py:ro
+
+  # Asks the search engines. It has no published port and shares a network only with the gateway, so
+  # it can't reach Tuwunel. Its logging is off because a failed engine logs the address it tried, and
+  # that address has the search in it.
+  searxng:
+    image: searxng/searxng@sha256:2d8d40c0d69d8b458d394701d284ccb052b25a19c18c930d8920296953caafe2
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?}
+    logging:
+      driver: none
+    networks: [search]
+    volumes:
+      - ./searxng.yml:/etc/searxng/settings.yml:ro
+
+networks:
+  search:
