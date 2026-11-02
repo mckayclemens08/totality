@@ -295,3 +295,24 @@ Agreed with the owner on 2026-11-02, in issue 37, which holds the full spec. Mai
 - Reading mail: there's no list or fetch path until step 4, and the app doesn't publish a key yet, so no real address works.
 - Account deletion: the app has none yet, so a mailbox outlives an account deleted by hand and keeps accepting mail. The name is retired, so nobody can inherit it. Whatever deletes an account has to remove its folder and name file too.
 - No backup, as the owner accepted.
+
+## Mail screens
+
+Issue 37, step 4. The screens are in `Sources/TotalityMail`, and they run on sample mail for now, because the server has no list or fetch path yet. The app says so on screen, and "Try a state" shows each empty, loading, and error state. Nothing here reads a real mailbox, publishes a key, or sends.
+
+**Swapping in the real store.** The screens only know `MailStore`: open, save marks, save settings, erase, and read an attachment. The real one downloads what's sealed, opens it with `MailKey`, parses it, keeps it on the device, and syncs `MailMarks` and `MailSettings`, sealed. `SampleMailStore`, `SampleMail`, and `MailSampleNote` go away with it, and so does the line in `RootView` that makes the model without a key.
+
+- **What the real store has to work out.** `MailRoute` comes from how a message travelled and never from its address, because anyone can write a Totality address in a From line. `MailProof` comes from the checks Cloudflare writes into the headers. `.unreadable` is for a seal that won't open, where nothing but the date is known.
+- **Block Sender** moves what's already here to Spam and adds to the blocked list. The server can't read a sender, so the real store has to apply that list as mail arrives on the device.
+- **Trash** empties when Mail opens, from `MailMarks.trashedAt`. Anything offline waits in the model and says how many changes are waiting.
+- **Inline images.** `cid:` images in HTML mail aren't drawn yet, because that needs a parsed message. They should become `data:` URLs in `MailHTML.document`, which the page's policy already allows.
+
+**HTML mail is hostile.** `MailHTML` and `MailPage` show it, and `MailPageSafetyTests` loads a page of hostile tags in a real web view with a listener standing in for the sender's server. Scripts are off, `<link>` elements are renamed before loading, the page's policy refuses every load, a compiled rule list refuses them again, every navigation is cancelled, and a web link tap leaves for Web. While images are off, the web view's only way out is a SOCKS proxy that isn't there.
+
+- `<link rel="preconnect">` opened a connection to the sender's server with the policy and the rule list both on, and only the view staying alive showed it. So a test has to keep the web view for as long as it waits.
+- Local addresses skip proxies, so the tests can't catch the proxy with `127.0.0.1`. They point the proxy at a listener and load real hostnames instead.
+- The rule lists live in their own store, because `WebBlocker` removes everything else from the shared one.
+- Load Images asks for HTTPS images only. "Always load" only counts for a message that proves its sender and isn't in Spam, or anyone could borrow that sender's address.
+- Attachments are read into memory and drawn only for kinds that can't run anything. HTML and SVG can be saved, never drawn.
+
+**Not built yet.** Compose, reply, and send are steps 5 and 6. The home tile is step 7, and until then it only says "Sample mail". Search stays inside Mail, and the home page's magnifying glass doesn't reach it. The Mac's selecting uses the same check marks as iPhone, not Shift or Command clicks.
