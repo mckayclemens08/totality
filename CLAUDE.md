@@ -125,6 +125,7 @@ copied to `~/totality` and started with `docker compose`. Reach it with
 `ssh -i ~/.ssh/totality_server ubuntu@158.101.16.156`. Secrets stay on the server and never enter the repo.
 The only public paths are the ones in `server/cloudflared.yml`, and the only open port is SSH.
 SearXNG runs there too, reachable only through the gateway in `server/gateway/`, and neither one logs searches.
+Mail arrives through `server/mail/`, from the Cloudflare Worker in `server/mail-worker/`, and is sealed before it reaches `~/totality/mailboxes`. Rspamd checks it first, on a network with no way out. Neither one logs anything.
 Never upgrade the Oracle account to paid: that's the owner's decision under the cost rule.
 
 ## Working discipline

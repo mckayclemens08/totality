@@ -29,3 +29,14 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m unittest -v test_gateway
+  mail-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/mail
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test mail.test.mjs
