@@ -14,4 +14,9 @@ ingress:
   - hostname: usetotality.com
     path: ^/web/(search|image)$
     service: http://gateway:8080
+  # Mail from Cloudflare's Worker, which has to present a secret, and a device publishing its public
+  # key, which has to be signed in.
+  - hostname: usetotality.com
+    path: ^/mail/(arrive|key)$
+    service: http://mail:8080
   - service: http_status:404

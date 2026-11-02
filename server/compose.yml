@@ -27,7 +27,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
-    depends_on: [tuwunel, gateway]
+    depends_on: [tuwunel, gateway, mail]
     volumes:
       - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
       - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
@@ -72,5 +72,62 @@ services:
     volumes:
       - ./searxng.yml:/etc/searxng/settings.yml:ro
 
+  # Takes mail from Cloudflare's Worker and seals it before anything reaches the disk. Outside mail is
+  # readable here for a moment, so nothing it does is logged, it has no swap, and a crash can't leave a
+  # core file. `.env` is read for these values only, so it never holds the other secrets.
+  mail:
+    image: node:24-alpine@sha256:e643984449ad25c88c0ff45094c74916806c9ee9dd1bc26c3593686ba2b853e4
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    ulimits:
+      core: 0
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?}
+      MAIL_ARRIVAL_SECRET: ${MAIL_ARRIVAL_SECRET:?}
+    command: node /app/mail.mjs
+    depends_on: [rspamd]
+    networks: [default, spam]
+    logging:
+      driver: none
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/mail/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./mail/mail.mjs:/app/mail.mjs:ro
+      - ./mailboxes:/var/lib/totality-mail
+
+  # The spam check. Its network has no way out, so nothing about a message can leave this server, and
+  # everything it writes stays in memory. That means no blocklists, so it judges by content alone.
+  # v4.2.3 for arm64, pinned by digest.
+  rspamd:
+    image: rspamd/rspamd@sha256:c2d5de2f2183d511ce398141ee95ae2d2919064040d37dc874c591cd246f2ca6
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    ulimits:
+      core: 0
+    tmpfs:
+      - /tmp
+      - /var/lib/rspamd:uid=11333,gid=11333
+      - /run/rspamd:uid=11333,gid=11333
+    logging:
+      driver: none
+    networks: [spam]
+    volumes:
+      - ./rspamd:/etc/rspamd/local.d:ro
+
 networks:
   search:
+  spam:
+    internal: true
