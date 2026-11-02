@@ -51,7 +51,7 @@ The right seam: **a record's transport is chosen by its visibility, not by the m
                        │ call signal  │ │  blobs       │ │ public profile│
                        │ device keys  │ │ calendar     │ │ feed gens     │
                        │ private posts│ │ money view   │ └───────────────┘
-                       │ shared docs  │ │ mail cache   │
+                       │ shared docs  │ │              │
                        │ SSSS backup  │ │ audit log    │
                        └──────────────┘ │ push routing │
                                         └──────────────┘
@@ -606,6 +606,16 @@ The owner chose this on 2026-10-30. It removes the outside email, the custom URL
 2. **The server receives the password.** It travels over HTTPS and is stored as a hash, but Supabase handles it in the clear in between. So a password must never unlock or derive a content key.
 3. **Guessing is limited per IP address, not per account.** Supabase's leaked-password check needs the paid plan. The 12-character minimum is the main defence.
 4. **Public sign-up is open.** Anyone holding the app's public key can create an account. Row-level rules still keep them out of other people's data. Close it or add a captcha before the app leaves the owner's circle.
+
+### O. **Mail is its own system, on the Oracle server.**
+The owner agreed the Mail spec, issue 37, on 2026-11-02. It changes this proposal in four ways, and replaces the "mail cache" that §2 first put in Supabase:
+
+1. **Mail is Totality's own email.** Every account gets `username@usetotality.com`. There's no connected outside account. Sign-up still asks for no email address, so §11-N stands.
+2. **Mailboxes live on the Oracle server, not Supabase.** They're sealed files. Supabase's free tier has 1 GB of storage already shared with the Reader, and the server has about 41 GB free. The owner accepted that this one server has no backup yet.
+3. **Mail between accounts doesn't use Matrix.** Email is its own system, and Phase 2 is closed.
+4. **Outside mail is the one exception to client-side sealing.** It arrives readable, so the server handles it for a moment, in memory only and out of logs, then seals it to the recipient's public key. `CLAUDE.md` records this under non-negotiable 2.
+
+Cloudflare Email Routing receives outside mail and Cloudflare Email Service sends it, on Workers Paid at $5 a month plus usage. Cloudflare's own logs keep the subject and addresses of that mail, which the owner accepted on 2026-11-02 on the condition that the spec and the app say so. Mail between accounts never goes through those logs.
 
 ## 12. What I need from the owner to proceed
 

@@ -24,7 +24,12 @@ These fail review, full stop. There is no "just for now" version of any of them.
    `scripts/check-schema-invariants.sql` is written at Phase 0 step 0.3 and then runs in CI. Do not add
    a table without running it. Account and infrastructure tables are on an owner-approved allowlist.
 2. **Private content is encrypted client-side before upload.** A plaintext content column on a
-   private entity is an automatic rejection. Filenames and captions count as content.
+   private entity is an automatic rejection. Filenames and captions count as content. There is one
+   exception, which the owner agreed on 2026-11-02 (issue 37): outside email can't meet this, because
+   it arrives unsealed from the rest of the world and a sent message has to reach the sending service
+   readable. The mail server may hold outside mail unsealed for a moment, in memory only and out of
+   every log, and seals it to the recipient's public key before anything touches the disk. Nothing
+   else gets this exception.
 3. **Passwords sign you in and do nothing else.** The owner replaced email links with username and
    password on 2026-10-30 ("I don't want to send them an external email ... change the sign up/sign in
    to username/password only"). The password goes only to the account server over HTTPS, which keeps a
@@ -74,7 +79,8 @@ interpersonal thing — DMs, communities/channels, call signalling, device keys,
 docs — all E2E. **atproto** (Phase 2) carries public social posts only. A record's transport is chosen
 by its **visibility**, not by its module. Keys live on devices, backed up in Matrix SSSS under one
 recovery key. Large binaries go to Supabase Storage as ciphertext; Matrix holds the key and the
-membership.
+membership. Mail is the exception, and stands apart from all three (owner, 2026-11-02): mailboxes live
+on the Oracle server as sealed files, and mail between accounts doesn't use Matrix.
 
 ## Design
 
@@ -137,6 +143,7 @@ Mac app. Groups are Discord-shaped; DMs are Snapchat-shaped minus the clutter. S
 with a Lemon8-style discovery homepage. Docs are a content type inside the Reader — there is no Docs
 module. Listen is a button inside the Reader — there is no Speechify module. Shopping is
 Amazon-*like*, never an Amazon wrapper. Home is a two-column grid of tiles the person arranges, each showing live content (owner, 2026-10-31). The flower stays as the alternative, one button away, and a setting picks which opens first; tiles are the default. Holding a tile enters edit mode. Web search is a module; search inside Totality is a magnifying glass on the home page, not a module.
+Mail is Totality's own email, never a client for Gmail or any outside account: every account gets `username@usetotality.com`, and sign-up still asks for no email (owner, 2026-11-02, issue 37).
 Federation and E2E are principles, not features. Pi self-hosting is the hosting direction. The Matrix
 server name is `usetotality.com`, and it cannot change.
 
