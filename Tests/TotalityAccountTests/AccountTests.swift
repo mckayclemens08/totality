@@ -176,6 +176,28 @@ actor FakeAccountService: AccountService {
     }
 }
 
+@Suite struct ReservedUsernameTests {
+    @Test("The app's list matches the one the server enforces")
+    func matchesTheMigration() throws {
+        let migration = URL(filePath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "supabase/migrations/20261102000001_reserved_usernames.sql")
+        let sql = try String(contentsOf: migration, encoding: .utf8)
+        let names = sql.split(separator: "\n").filter { !$0.hasPrefix("--") }.joined()
+            .matches(of: /\('([a-z0-9_]+)'\)/).map { String($0.1) }
+        #expect(Set(names) == Username.reserved)
+    }
+
+    @Test(arguments: Username.reserved)
+    func everyNameCouldHaveBeenAUsername(name: String) {
+        #expect(Username(name)?.isReserved == true)
+    }
+
+    @Test func aNameCloseToOneIsFree() {
+        #expect(Username("admin_fan")?.isReserved == false)
+    }
+}
+
 @Suite struct AccountErrorTests {
     private func api(_ code: ErrorCode) -> AuthError {
         .api(
@@ -223,6 +245,15 @@ actor FakeAccountService: AccountService {
         #expect(model.phase == .signedIn(username: "owner"))
         #expect(await service.signUps == ["owner"])
         #expect(await service.devices == 1)
+    }
+
+    @Test("A reserved name gets the plain answer and never reaches the server", arguments: ["Admin", "postmaster", "mckayclemens"])
+    func aReservedNameIsTaken(name: String) async {
+        let service = FakeAccountService()
+        let model = AccountModel(service: service)
+        await model.signUp(username: name, password: password, confirmation: password)
+        #expect(model.notice == AccountError.usernameTaken.message)
+        #expect(await service.signUps.isEmpty)
     }
 
     @Test func aWrongPasswordSignsNobodyIn() async {

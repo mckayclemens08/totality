@@ -7,6 +7,18 @@ public struct Username: Equatable, Sendable {
 
     private static let domain = "@totality.invalid"
 
+    /// Names nobody can sign up with, because each username is also a mail address. The server's list
+    /// in `retired_handles` is what enforces this, and here it only gives a clear answer at sign-up.
+    static let reserved: Set<String> = [
+        "abuse", "admin", "administrator", "billing", "contact", "dmarc", "email", "help",
+        "hostmaster", "info", "legal", "mail", "mailer_daemon", "mailerdaemon", "mckayclemens",
+        "no_reply", "noreply", "official", "postmaster", "privacy", "root", "security",
+        "ssladmin", "ssladministrator", "staff", "support", "sysadmin", "system", "team",
+        "totality", "webmaster",
+    ]
+
+    var isReserved: Bool { Self.reserved.contains(value) }
+
     /// Same rule as `profiles.handle` and the auth trigger. Input is lowercased, not refused.
     public init?(_ text: String) {
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
