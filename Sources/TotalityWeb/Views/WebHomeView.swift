@@ -8,6 +8,9 @@ public struct WebHomeView: View {
 
     @State private var typed = ""
     @FocusState private var isTyping: Bool
+    @State private var showingTabs = false
+    @State private var showingLibrary = false
+    @State private var showingSettings = false
     @AppStorage(SafeSearch.key) private var safety = SafeSearch.moderate.rawValue
 
     public init(model: WebModel, onClose: (() -> Void)? = nil) {
@@ -23,7 +26,11 @@ public struct WebHomeView: View {
         VStack(spacing: 0) {
             addressBar
             progress
-            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            ZStack {
+                content
+                if isTyping, !suggestions.isEmpty { suggestionList }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             controls
         }
         .background(theme.bg.color)
@@ -37,6 +44,9 @@ public struct WebHomeView: View {
             showAddress()
         }
         .modifier(WebPageAlerts(page: page))
+        .sheet(isPresented: $showingTabs) { WebTabsView(model: model) { showingTabs = false } }
+        .sheet(isPresented: $showingLibrary) { WebLibraryView(model: model) { showingLibrary = false } }
+        .sheet(isPresented: $showingSettings) { WebSettingsView(model: model) { showingSettings = false } }
     }
 
     /// The site's name, until the box is tapped, when it's the whole address to edit.
@@ -49,9 +59,56 @@ public struct WebHomeView: View {
         }
     }
 
+    private var suggestions: [WebSuggestion] {
+        model.suggestions(for: typed)
+    }
+
+    private var suggestionList: some View {
+        let theme = Theme.current
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(suggestions) { suggestion in
+                    Button {
+                        isTyping = false
+                        model.open(suggestion.url)
+                    } label: {
+                        HStack(spacing: Space.s3) {
+                            Image(systemName: suggestion.isBookmark ? "bookmark" : "clock")
+                                .font(Typeface.body)
+                                .foregroundStyle(theme.textSecondary.color)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(suggestion.title)
+                                    .font(Typeface.body)
+                                    .foregroundStyle(theme.textPrimary.color)
+                                    .lineLimit(1)
+                                Text(suggestion.url.host() ?? "")
+                                    .font(Typeface.caption)
+                                    .foregroundStyle(theme.textSecondary.color)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, Space.s4)
+                        .padding(.vertical, Space.s2)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .background(theme.bg.color)
+    }
+
     private var addressBar: some View {
         let theme = Theme.current
         return HStack(spacing: Space.s2) {
+            // The usual way to reach the box from a keyboard.
+            Button("Go to address") { isTyping = true }
+                .keyboardShortcut("l", modifiers: .command)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
             if let onClose {
                 Button(action: onClose) {
                     Image(systemName: "circle.hexagongrid")
@@ -64,6 +121,12 @@ public struct WebHomeView: View {
                 .accessibilityLabel("Home")
             }
             HStack(spacing: Space.s2) {
+                if tab.isPrivate {
+                    Image(systemName: "eye.slash")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.accent.color)
+                        .accessibilityLabel("Private tab")
+                }
                 if let page, !page.isSecure {
                     Label("Not secure", systemImage: "lock.open")
                         .labelStyle(.iconOnly)
@@ -106,6 +169,7 @@ public struct WebHomeView: View {
                             .foregroundStyle(theme.textSecondary.color)
                     }
                     .buttonStyle(.plain)
+                    .keyboardShortcut("r", modifiers: .command)
                     .accessibilityLabel(page.isLoading ? "Stop" : "Reload")
                 }
             }
@@ -136,7 +200,7 @@ public struct WebHomeView: View {
     @ViewBuilder private var content: some View {
         switch tab.showing {
         case .start:
-            WebMessage(systemImage: "globe", title: "Search the web", detail: WebCopy.notEncrypted)
+            WebStartView(model: model, isPrivate: tab.isPrivate)
         case .results:
             WebResultsView(model: model, tab: tab)
         case .page:
@@ -169,10 +233,62 @@ public struct WebHomeView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Share")
+                Spacer(minLength: 0)
             }
+            control("book", label: "Bookmarks and history", enabled: true) { showingLibrary = true }
+                .keyboardShortcut("y", modifiers: .command)
+            Spacer(minLength: 0)
+            Button {
+                showingTabs = true
+            } label: {
+                Image(systemName: "\(min(model.tabs.count, 50)).square")
+                    .font(Typeface.body)
+                    .frame(width: Space.s7, height: Space.s7)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Tabs, \(model.tabs.count) open")
+            menu
         }
         .foregroundStyle(Theme.current.textPrimary.color)
         .padding(.horizontal, Space.s3)
+    }
+
+    private var menu: some View {
+        Menu {
+            Button("New Tab", systemImage: "plus.square") { startTab() }
+                .keyboardShortcut("t", modifiers: .command)
+            Button("New Private Tab", systemImage: "eye.slash") { startTab(isPrivate: true) }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("Close Tab", systemImage: "xmark.square") { model.close(tab) }
+                .keyboardShortcut("w", modifiers: .command)
+            if let url = page?.url {
+                Divider()
+                if let saved = model.bookmark(for: url) {
+                    Button("Remove Bookmark", systemImage: "bookmark.slash") { Task { await model.remove(saved) } }
+                } else {
+                    Button("Add Bookmark", systemImage: "bookmark") {
+                        Task { await model.addBookmark(title: page?.title ?? "", url: url) }
+                    }
+                    .keyboardShortcut("d", modifiers: .command)
+                }
+            }
+            Divider()
+            Button("Web Settings", systemImage: "gearshape") { showingSettings = true }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(Typeface.body)
+                .frame(width: Space.s7, height: Space.s7)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .accessibilityLabel("More")
+    }
+
+    private func startTab(isPrivate: Bool = false) {
+        model.newTab(isPrivate: isPrivate)
+        isTyping = true
     }
 
     private func control(_ systemImage: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {

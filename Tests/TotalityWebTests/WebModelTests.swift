@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TotalityCore
 @testable import TotalityWeb
 
 @MainActor
@@ -134,6 +135,140 @@ import Testing
         let url = try #require(model.current.page?.url)
         #expect(url.host() == "duckduckgo.com")
         #expect(url.query()?.contains("tram") == true)
+    }
+}
+
+@MainActor
+@Suite struct WebBrowsingTests {
+    private let trams = URL(string: "https://lisbon.example/trams")!
+    private let food = URL(string: "https://lisbon.example/pasteis")!
+
+    private func loaded(_ store: MemoryBlobStore = MemoryBlobStore(), key: ContentRootKey? = nil, now: @escaping @Sendable () -> Date = { Date() }) async throws -> (WebModel, WebVault) {
+        let vault = WebVault(store: store, rootKey: try key ?? .generate())
+        let model = WebModel(client: nil, vault: vault, now: now)
+        await model.load()
+        return (model, vault)
+    }
+
+    private func visit(_ url: URL, in model: WebModel, title: String = "Page") {
+        model.open(url)
+        model.current.page?.onVisit?(url, title)
+    }
+
+    @Test func tabsOpenSwitchAndClose() async throws {
+        let (model, _) = try await loaded()
+        let first = model.current
+        model.newTab()
+        #expect(model.tabs.count == 2)
+        #expect(model.current.id != first.id)
+        model.close(model.current)
+        #expect(model.current.id == first.id)
+        model.close(first)
+        #expect(model.tabs.count == 1)
+        #expect(model.current.showing == .start)
+    }
+
+    @Test("Private tabs keep no history and aren't saved")
+    func privateTabs() async throws {
+        let (model, _) = try await loaded()
+        model.newTab(isPrivate: true)
+        visit(trams, in: model)
+        #expect(model.current.page?.isPrivate == true)
+        #expect(model.history.isEmpty)
+        #expect(model.savedTabs.tabs.isEmpty)
+    }
+
+    @Test("Normal tabs and history come back after the app closes, and pages wait to load")
+    func restored() async throws {
+        let store = MemoryBlobStore()
+        let key = try ContentRootKey.generate()
+        let (first, vault) = try await loaded(store, key: key)
+        visit(trams, in: first, title: "Trams")
+        first.newTab()
+        visit(food, in: first, title: "Pasteis")
+        first.newTab(isPrivate: true)
+        visit(food, in: first, title: "Secret")
+        try await vault.saveTabs(first.savedTabs)
+        try await vault.saveHistory(first.history)
+
+        let (second, _) = try await loaded(store, key: key)
+        #expect(second.tabs.map(\.savedTitle) == ["Trams", "Pasteis"])
+        // The private tab was in front, so the first tab wakes and the other waits.
+        #expect(second.current.id == second.tabs[0].id)
+        #expect(second.tabs[1].page == nil)
+        #expect(second.history.map(\.url) == [food, trams])
+    }
+
+    @Test("Reloading the same page doesn't add a second visit")
+    func repeatVisit() async throws {
+        let (model, _) = try await loaded()
+        visit(trams, in: model)
+        model.current.page?.onVisit?(trams, "Page")
+        #expect(model.history.count == 1)
+    }
+
+    @Test("History stops growing at its limit, and the oldest goes")
+    func limit() async throws {
+        let (model, _) = try await loaded()
+        visit(trams, in: model)
+        for index in 0..<WebModel.historyLimit {
+            model.current.page?.onVisit?(URL(string: "https://lisbon.example/\(index)")!, "Page")
+        }
+        #expect(model.history.count == WebModel.historyLimit)
+        #expect(!model.history.contains { $0.url == trams })
+    }
+
+    @Test("Clear History reaches as far back as asked")
+    func clearing() async throws {
+        nonisolated(unsafe) var moment = Date(timeIntervalSince1970: 1_000_000)
+        let (model, _) = try await loaded(now: { moment })
+        visit(trams, in: model)
+        moment += 2 * 60 * 60
+        visit(food, in: model)
+        model.clearHistory(.lastHour)
+        #expect(model.history.map(\.url) == [trams])
+        model.clearHistory(.everything)
+        #expect(model.history.isEmpty)
+    }
+
+    @Test("Suggestions come from bookmarks first, then history, and send nothing")
+    func suggestions() async throws {
+        let (client, host) = FakeGateway.client { _ in (200, Data()) }
+        let vault = WebVault(store: MemoryBlobStore(), rootKey: try .generate())
+        let model = WebModel(client: client, vault: vault)
+        await model.load()
+        await model.addBookmark(title: "Tram guide", url: trams)
+        visit(food, in: model, title: "Tram food")
+        visit(trams, in: model, title: "Tram guide")
+        let found = model.suggestions(for: "tram")
+        #expect(found.map(\.url) == [trams, food])
+        #expect(found.first?.isBookmark == true)
+        #expect(FakeGateway.requests(to: host).isEmpty)
+    }
+
+    @Test("The tile shows bookmarks and never history")
+    func glance() async throws {
+        let (model, _) = try await loaded()
+        visit(trams, in: model, title: "Somewhere private")
+        #expect(model.glance == ModuleGlance(lines: ["No bookmarks yet"], isQuiet: true))
+        await model.addBookmark(title: "Tram guide", url: food)
+        #expect(model.glance?.lines == ["Tram guide"])
+    }
+
+    @Test("A page opened before the sealed settings load keeps nothing")
+    func noStoreBeforeLoad() throws {
+        let model = WebModel(client: nil, vault: WebVault(store: MemoryBlobStore(), rootKey: try .generate()))
+        model.open(trams)
+        #expect(model.current.page?.webView.configuration.websiteDataStore.isPersistent == false)
+    }
+
+    @Test("A link opened from a private tab stays private")
+    func privateStaysPrivate() async throws {
+        let (model, _) = try await loaded()
+        model.newTab(isPrivate: true)
+        visit(trams, in: model)
+        model.current.page?.onOpenInTab?(food, false)
+        #expect(model.current.isPrivate)
     }
 }
 

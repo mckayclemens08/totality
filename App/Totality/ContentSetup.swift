@@ -15,11 +15,12 @@ enum ContentSetup {
             .appendingPathComponent("Totality", isDirectory: true)
     }
 
-    private static func stores() throws -> (reader: FileBlobStore, calendar: FileBlobStore) {
+    private static func stores() throws -> (reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore) {
         let base = try base()
         return (
             try FileBlobStore(directory: base.appendingPathComponent("Reader", isDirectory: true)),
-            try FileBlobStore(directory: base.appendingPathComponent("Calendar", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Calendar", isDirectory: true)),
+            try FileBlobStore(directory: base.appendingPathComponent("Web", isDirectory: true))
         )
     }
 
@@ -28,6 +29,7 @@ enum ContentSetup {
         return ContentKeyRing(keys: KeychainKeyStore(), areas: [
             SealedArea(store: stores.reader, purposes: ReaderVault.sealedPurposes),
             SealedArea(store: stores.calendar, purposes: CalendarVault.sealedPurposes),
+            SealedArea(store: stores.web, purposes: WebVault.sealedPurposes),
         ])
     }
 
@@ -44,6 +46,7 @@ enum ContentSetup {
 
         let readerVault = ReaderVault(store: stores.reader, rootKey: rootKey)
         let calendarVault = CalendarVault(store: stores.calendar, rootKey: rootKey)
+        let webVault = WebVault(store: stores.web, rootKey: rootKey)
         let devices = SystemCalendarSource()
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault),
@@ -57,8 +60,8 @@ enum ContentSetup {
                 devices: devices, reminders: SystemReminders(),
                 registry: registry
             ),
-            WebModel(client: AccountSetup.searchToken.map { WebSearchClient(token: $0) }),
-            [readerVault, calendarVault],
+            WebModel(client: AccountSetup.searchToken.map { WebSearchClient(token: $0) }, vault: webVault),
+            [readerVault, calendarVault, webVault],
             registry
         )
     }
