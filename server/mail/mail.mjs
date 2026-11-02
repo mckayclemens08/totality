@@ -173,11 +173,14 @@ export class Mailboxes {
     return publicKey && { mailbox, publicKey }
   }
 
-  /** One key per mailbox, for good, so a stolen session can't swap in its own and read what arrives
-   *  afterwards. The name goes last, so an address never exists without a key. Returns a status. */
+  /** One key per mailbox, for good, so once it's published a stolen session can't swap in its own and
+   *  read what arrives afterwards. A name held by another mailbox stays with it, which covers reserved
+   *  names. The name goes last, so an address never exists without a key. Returns a status. */
   async publish(name, mailbox, publicKey) {
     const folder = this.folder(mailbox)
     const nameFile = this.nameFile(name)
+    const holder = (await readIfThere(nameFile))?.toString().trim()
+    if (holder && holder !== mailbox) return 409
     await mkdir(folder, { recursive: true, mode: 0o700 })
     await mkdir(join(this.root, 'names'), { recursive: true, mode: 0o700 })
     const keyFile = join(folder, 'public.key')
