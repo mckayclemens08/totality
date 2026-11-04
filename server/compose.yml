@@ -33,7 +33,7 @@ services:
       - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
 
   # The only way in to search. It checks a Totality sign-in and logs nothing about what was searched.
-  # .env holds SUPABASE_URL, SUPABASE_ANON_KEY, and SEARXNG_SECRET, and exists only on the server.
+  # .env exists only on the server, and each service is handed just the values it needs.
   gateway:
     image: python:3.13-alpine@sha256:7984cf56ceaddebe4fefeb75d64000b9f45d8b77b11a09b24524da6cdc3af0c8
     restart: unless-stopped
@@ -41,8 +41,10 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    env_file: .env
     environment:
+      SUPABASE_URL: ${SUPABASE_URL:?}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?}
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?}
       PYTHONDONTWRITEBYTECODE: "1"
     command: python /app/gateway.py
     depends_on: [searxng]
@@ -74,7 +76,9 @@ services:
 
   # Takes mail from Cloudflare's Worker and seals it before anything reaches the disk. Outside mail is
   # readable here for a moment, so nothing it does is logged, it has no swap, and a crash can't leave a
-  # core file. `.env` is read for these values only, so it never holds the other secrets.
+  # core file. The core limit is 1 and not 0 on purpose, here and on rspamd: this host pipes crashes to
+  # Ubuntu's crash reporter, which a limit of 0 doesn't stop. A 2026-11-02 test crash wrote a report to
+  # /var/crash with a limit of 0 and nothing with a limit of 1, which the kernel treats as no dump.
   mail:
     image: node:24-alpine@sha256:e643984449ad25c88c0ff45094c74916806c9ee9dd1bc26c3593686ba2b853e4
     restart: unless-stopped
@@ -85,7 +89,7 @@ services:
     mem_limit: 512m
     memswap_limit: 512m
     ulimits:
-      core: 0
+      core: 1
     environment:
       SUPABASE_URL: ${SUPABASE_URL:?}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?}
@@ -116,7 +120,7 @@ services:
     mem_limit: 512m
     memswap_limit: 512m
     ulimits:
-      core: 0
+      core: 1
     tmpfs:
       - /tmp
       - /var/lib/rspamd:uid=11333,gid=11333

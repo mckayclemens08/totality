@@ -359,6 +359,14 @@ describe('publishing a key', () => {
     assert.deepEqual((await mailboxes.recipient(person.name)).publicKey, publicKey)
   })
 
+  test('a name another mailbox holds stays with it, so a reserved name cannot be taken', async () => {
+    const person = account()
+    const { publicKey } = newKeys()
+    await mailboxes.publish(person.name, randomUUID(), publicKey)
+    assert.equal(await publish(person.token, asJSON(newKeys().publicKey)), 409)
+    assert.deepEqual((await mailboxes.recipient(person.name)).publicKey, publicKey)
+  })
+
   test('user 2 cannot publish for user 1, because the account comes from the sign-in', async () => {
     const [user1, user2] = [account(), account()]
     const { publicKey } = newKeys()
@@ -517,5 +525,20 @@ describe('the Worker', () => {
 
   test('no error says anything about the message', async () => {
     await assert.rejects(deliver(503), (error) => !error.message.includes(ADDRESS))
+  })
+})
+
+describe('the server setup', () => {
+  // Docker's limit of 0 doesn't stop a crash report on this host, and a report could hold readable mail.
+  test('crashes leave nothing behind', async () => {
+    const compose = (await readFile(new URL('../compose.yml', import.meta.url))).toString()
+    assert.equal(compose.match(/^ +core: 1$/gm).length, 2)
+    assert.doesNotMatch(compose, /^ +core: 0$/m)
+  })
+
+  test('only the mail service gets the arrival secret', async () => {
+    const compose = (await readFile(new URL('../compose.yml', import.meta.url))).toString()
+    assert.equal(compose.match(/MAIL_ARRIVAL_SECRET/g).length, 2)
+    assert.doesNotMatch(compose, /env_file/)
   })
 })
