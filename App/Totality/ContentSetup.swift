@@ -92,8 +92,9 @@ struct MailContent {
 final class MailWiring {
     private(set) var vault: MailVault?
     private var content: MailContent?
-    /// Whether this device may publish the mailbox's key. Set from the account, if there is one.
-    var canPublish: @Sendable () async -> Bool = { false }
+    /// Whether this device may publish this account's mailbox key. Set from the account, if there is one.
+    /// It names the account, so a sign-in that changes mid-open can't publish one person's key for another.
+    var canPublish: @Sendable (String) async -> Bool = { _ in false }
 
     /// The content key is open.
     func connect(_ content: MailContent) {
@@ -131,7 +132,7 @@ final class MailWiring {
         do {
             return try ServerMailStore(
                 account: account, rootKey: content.rootKey, vault: vault, server: MailServerClient(token: token),
-                canPublish: canPublish, username: username
+                canPublish: { [canPublish] in await canPublish(account) }, username: username
             )
         } catch {
             return UnavailableMailStore(.noKey)

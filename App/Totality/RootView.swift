@@ -39,7 +39,10 @@ struct RootView: View {
         let wiring = MailWiring()
         // A mailbox's key can never be replaced, so it's published only from a device whose key is the
         // signed-in account's and has joined the key backup.
-        wiring.canPublish = { [backup = account?.backup] in await backup?.deviceCanSync() ?? false }
+        wiring.canPublish = { [backup = account?.backup] account in
+            guard let backup, await backup.deviceCanSync() else { return false }
+            return await backup.deviceOwner() == account
+        }
         _mailWiring = State(initialValue: wiring)
         _mail = State(initialValue: MailAccountModel { wiring.makeStore(account: $0) })
     }
