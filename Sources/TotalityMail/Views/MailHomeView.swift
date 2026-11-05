@@ -8,8 +8,6 @@ public struct MailHomeView: View {
     private static let wideWidth = Space.s8 * 13
     private static let foldersWidth = Space.s8 * 3.5
     private static let listWidth = Space.s8 * 5.5
-    private static let undoTime = Duration.seconds(6)
-    private static let noticeTime = Duration.seconds(4)
 
     @Bindable private var model: MailModel
     private let onClose: (() -> Void)?
@@ -17,6 +15,7 @@ public struct MailHomeView: View {
 
     @State private var opened: UUID?
     @State private var showingFolders = false
+    @State private var composing: MailComposer?
 
     public init(model: MailModel, onClose: (() -> Void)? = nil, onOpenLink: @escaping (URL) -> Void = { _ in }) {
         self.model = model
@@ -64,15 +63,21 @@ public struct MailHomeView: View {
             .frame(minWidth: Space.s8 * 6, minHeight: Space.s8 * 8)
             #endif
         }
+        .sheet(item: $composing) { composer in
+            MailComposeView(composer: composer) { composing = nil }
+                #if os(macOS)
+                .frame(minWidth: Space.s8 * 8, minHeight: Space.s8 * 9)
+                #endif
+        }
         .task { await model.load() }
         .task(id: model.undo?.id) {
             guard let shown = model.undo?.id else { return }
-            try? await Task.sleep(for: Self.undoTime)
+            try? await Task.sleep(for: MailTiming.undo)
             if !Task.isCancelled { model.dismissUndo(shown) }
         }
         .task(id: model.notice) {
             guard model.notice != nil else { return }
-            try? await Task.sleep(for: Self.noticeTime)
+            try? await Task.sleep(for: MailTiming.notice)
             if !Task.isCancelled { model.notice = nil }
         }
         .onChange(of: model.place) { opened = nil }
@@ -133,12 +138,12 @@ public struct MailHomeView: View {
     }
 
     private var list: some View {
-        MailListView(model: model, opened: opened) { opened = $0.id }
+        MailListView(model: model, opened: opened, onOpen: { opened = $0.id }, onWrite: { composing = $0 })
             .searchable(text: $model.query, prompt: "Search mail on this device")
     }
 
     private func conversationPage(_ id: UUID) -> some View {
-        MailConversationView(id: id, model: model, onOpenLink: onOpenLink) { opened = nil }
+        MailConversationView(id: id, model: model, onOpenLink: onOpenLink, onWrite: { composing = $0 }) { opened = nil }
     }
 
     @ToolbarContentBuilder private func toolbar(isWide: Bool) -> some ToolbarContent {
@@ -152,6 +157,10 @@ public struct MailHomeView: View {
                 ToolbarItem(placement: .automatic) {
                     Button("Mailboxes", systemImage: "tray.2") { showingFolders = true }
                 }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button("New Message", systemImage: "square.and.pencil") { composing = .new(in: model) }
+                    .disabled(model.isSelecting)
             }
             ToolbarItem(placement: .primaryAction) {
                 if model.isSelecting {
