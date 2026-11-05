@@ -162,22 +162,23 @@ public struct MailHomeView: View {
             }
         }
         if model.phase == .ready {
-            if !isWide {
-                ToolbarItem(placement: .automatic) {
-                    Button("Mailboxes", systemImage: "tray.2") { showingFolders = true }
-                }
-            }
+            // One item, so the buttons sit together as a set. As separate items, iPhone spread them
+            // across most of the bar.
             ToolbarItem(placement: .primaryAction) {
-                Button("New Message", systemImage: "square.and.pencil") { composing = .new(in: model) }
-                    .disabled(model.isSelecting)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                if model.isSelecting {
-                    Button("Done") { model.endSelecting() }
-                } else {
-                    Button("Select", systemImage: "checkmark.circle") { model.beginSelecting() }
-                        .disabled(model.conversations.isEmpty)
+                HStack(spacing: Space.s4) {
+                    if !isWide {
+                        Button("Mailboxes", systemImage: "tray.2") { showingFolders = true }
+                    }
+                    Button("New Message", systemImage: "square.and.pencil") { composing = .new(in: model) }
+                        .disabled(model.isSelecting)
+                    if model.isSelecting {
+                        Button("Done") { model.endSelecting() }
+                    } else {
+                        Button("Select", systemImage: "checkmark.circle") { model.beginSelecting() }
+                            .disabled(model.conversations.isEmpty)
+                    }
                 }
+                .labelStyle(.iconOnly)
             }
         }
     }
