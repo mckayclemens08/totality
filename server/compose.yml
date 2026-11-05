@@ -94,6 +94,9 @@ services:
       SUPABASE_URL: ${SUPABASE_URL:?}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?}
       MAIL_ARRIVAL_SECRET: ${MAIL_ARRIVAL_SECRET:?}
+      # Outside sending stays off until both are set in .env.
+      MAIL_SEND_URL: ${MAIL_SEND_URL:-}
+      MAIL_SEND_SECRET: ${MAIL_SEND_SECRET:-}
     command: node /app/mail.mjs
     depends_on: [rspamd]
     networks: [default, spam]

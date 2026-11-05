@@ -1,0 +1,13 @@
+name = "totality-send"
+main = "worker.mjs"
+compatibility_date = "2026-10-01"
+# Reached only by the mail server, at its workers.dev address, with MAIL_SEND_SECRET.
+workers_dev = true
+preview_urls = false
+
+# Nothing a message holds may reach a log.
+[observability]
+enabled = false
+
+[[send_email]]
+name = "EMAIL"
