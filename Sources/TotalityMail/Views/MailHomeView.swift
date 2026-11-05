@@ -1,0 +1,183 @@
+import SwiftUI
+import TotalityUI
+
+/// Mail's front screen. A narrow window, which is every iPhone, shows one thing at a time. A wide one
+/// shows folders, the list, and the open conversation side by side.
+public struct MailHomeView: View {
+    /// Wide enough for three columns to each stay readable.
+    private static let wideWidth = Space.s8 * 13
+    private static let foldersWidth = Space.s8 * 3.5
+    private static let listWidth = Space.s8 * 5.5
+    private static let undoTime = Duration.seconds(6)
+    private static let noticeTime = Duration.seconds(4)
+
+    @Bindable private var model: MailModel
+    private let onClose: (() -> Void)?
+    private let onOpenLink: (URL) -> Void
+
+    @State private var opened: UUID?
+    @State private var showingFolders = false
+
+    public init(model: MailModel, onClose: (() -> Void)? = nil, onOpenLink: @escaping (URL) -> Void = { _ in }) {
+        self.model = model
+        self.onClose = onClose
+        self.onOpenLink = onOpenLink
+    }
+
+    public var body: some View {
+        let theme = Theme.current
+        GeometryReader { proxy in
+            let isWide = proxy.size.width >= Self.wideWidth
+            NavigationStack {
+                content(isWide: isWide)
+                    .background(theme.bg.color)
+                    .toolbar { toolbar(isWide: isWide) }
+                    .navigationTitle(model.placeName)
+                    #if os(iOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackground(theme.bg.color, for: .navigationBar)
+                    #endif
+                    .navigationDestination(item: isWide ? .constant(nil) : $opened) { id in
+                        conversationPage(id)
+                    }
+            }
+            .tint(theme.accent.color)
+            .overlay(alignment: .bottom) { bottomBar }
+            .animation(Motion.quick, value: model.undo)
+            .animation(Motion.quick, value: model.notice)
+        }
+        .sheet(isPresented: $showingFolders) {
+            NavigationStack {
+                MailFoldersView(model: model) { showingFolders = false }
+                    .navigationTitle("Mailboxes")
+                    #if os(iOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                    #endif
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingFolders = false }
+                        }
+                    }
+            }
+            .tint(theme.accent.color)
+            #if os(macOS)
+            .frame(minWidth: Space.s8 * 6, minHeight: Space.s8 * 8)
+            #endif
+        }
+        .task { await model.load() }
+        .task(id: model.undo?.id) {
+            guard let shown = model.undo?.id else { return }
+            try? await Task.sleep(for: Self.undoTime)
+            if !Task.isCancelled { model.dismissUndo(shown) }
+        }
+        .task(id: model.notice) {
+            guard model.notice != nil else { return }
+            try? await Task.sleep(for: Self.noticeTime)
+            if !Task.isCancelled { model.notice = nil }
+        }
+        .onChange(of: model.place) { opened = nil }
+    }
+
+    @ViewBuilder private func content(isWide: Bool) -> some View {
+        switch model.phase {
+        case .loading(let download):
+            MailDownloadView(download: download)
+        case .noKey:
+            MailStateView(
+                systemImage: "lock.slash", title: "Your key isn't on this device",
+                detail: "Mail is sealed with a key made from your content key, so it can't open here yet. Add your recovery key in Account, then come back."
+            )
+            .overlay(alignment: .top) { MailSampleNote(model: model) }
+        case .failed:
+            MailStateView(
+                systemImage: "exclamationmark.triangle", title: "Your mail didn't open",
+                detail: "Totality couldn't reach your mailbox, and nothing on this device has changed.",
+                action: MailStateAction(label: "Try again") { Task { await model.load() } }
+            )
+            .overlay(alignment: .top) { MailSampleNote(model: model) }
+        case .ready:
+            if isWide {
+                HStack(spacing: 0) {
+                    MailFoldersView(model: model) {}
+                        .frame(width: Self.foldersWidth)
+                    list.frame(width: Self.listWidth)
+                    Group {
+                        if let opened, model.mailbox.conversation(opened, in: model.place) != nil {
+                            conversationPage(opened).id(opened)
+                        } else {
+                            MailStateView(systemImage: "envelope", title: "No conversation open", detail: "Pick one from the list to read it here.")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else {
+                list
+            }
+        }
+    }
+
+    private var list: some View {
+        MailListView(model: model, opened: opened) { opened = $0.id }
+            .searchable(text: $model.query, prompt: "Search mail on this device")
+    }
+
+    private func conversationPage(_ id: UUID) -> some View {
+        MailConversationView(id: id, model: model, onOpenLink: onOpenLink) { opened = nil }
+    }
+
+    @ToolbarContentBuilder private func toolbar(isWide: Bool) -> some ToolbarContent {
+        if let onClose {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Home", systemImage: "circle.hexagongrid", action: onClose)
+            }
+        }
+        if model.phase == .ready {
+            if !isWide {
+                ToolbarItem(placement: .automatic) {
+                    Button("Mailboxes", systemImage: "tray.2") { showingFolders = true }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if model.isSelecting {
+                    Button("Done") { model.endSelecting() }
+                } else {
+                    Button("Select", systemImage: "checkmark.circle") { model.beginSelecting() }
+                        .disabled(model.conversations.isEmpty)
+                }
+            }
+        }
+    }
+
+    /// Undo and anything short the screens have to say sit in one place, above the action bar.
+    @ViewBuilder private var bottomBar: some View {
+        let theme = Theme.current
+        Group {
+            if let notice = model.notice {
+                Text(notice)
+                    .font(Typeface.callout)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, Space.s4)
+                    .padding(.vertical, Space.s3)
+                    .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md))
+            } else if let undo = model.undo {
+                HStack(spacing: Space.s3) {
+                    Text(undo.label)
+                        .font(Typeface.callout)
+                        .foregroundStyle(theme.textPrimary.color)
+                        .lineLimit(1)
+                    Button("Undo") { Task { await model.undoLast() } }
+                        .font(Typeface.callout)
+                        .foregroundStyle(theme.accent.color)
+                        .buttonStyle(.plain)
+                }
+                .padding(.horizontal, Space.s4)
+                .padding(.vertical, Space.s3)
+                .neumorphic(.raised, in: Capsule())
+            }
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.bottom, Space.s8)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+}

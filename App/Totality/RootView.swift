@@ -2,6 +2,7 @@ import SwiftUI
 import TotalityAccount
 import TotalityCalendar
 import TotalityCore
+import TotalityMail
 import TotalityReader
 import TotalityUI
 import TotalityWeb
@@ -15,6 +16,9 @@ struct RootView: View {
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
     @State private var web: WebModel?
+    // Sample mail until the server can list and fetch, so it needs no key yet. Issue 37, step 4.
+    // The real store is made here, for the account it's given.
+    @State private var mail = MailAccountModel { _ in SampleMailStore() }
     @State private var registry: ModuleRegistry?
     @State private var syncAreas: [any SyncArea] = []
     @State private var contentProblem: ContentProblem?
@@ -38,7 +42,7 @@ struct RootView: View {
             switch open {
             case nil:
                 HomeView(center: recentModule, glances: glances, bigTile: bigTile, lineLink: lineLink, style: homeStyle) { module in
-                    if module == .reader || module == .calendar || module == .web { prepareContent() }
+                    if module == .reader || module == .calendar || module == .web || module == .mail { prepareContent() }
                     bringUp(module)
                 } onSearch: {
                     prepareContent()
@@ -63,6 +67,9 @@ struct RootView: View {
                 } else {
                     contentMessage { open = nil }
                 }
+            case .mail:
+                MailHomeView(model: mail.current, onClose: { open = nil }, onOpenLink: openInWeb)
+                    .id(ObjectIdentifier(mail.current))
             case .some(let module):
                 ModuleMessage(
                     systemImage: "hammer",
@@ -81,6 +88,7 @@ struct RootView: View {
                 reader = nil
                 calendar = nil
                 web = nil
+                mail.keyChanged()
                 registry = nil
                 syncAreas = []
                 contentProblem = nil
@@ -137,6 +145,7 @@ struct RootView: View {
         glances[.reader] = reader?.glance
         glances[.calendar] = calendar?.glance
         glances[.web] = web?.glance
+        glances[.mail] = ModuleGlance(lines: ["Sample mail"], isQuiet: true)
         return glances
     }
 
@@ -222,10 +231,12 @@ struct RootView: View {
             web = content.web
             web?.onSentToReader = { Task { await reader?.load() } }
             web?.onOpenInReader = { show($0) }
+            mail.receiver = content.registry.receiver(for: .mail)
+            mail.onSentToReader = { Task { await reader?.load() } }
             registry = content.registry
             syncAreas = content.areas
             refreshRecoveryLabels()
-            Task { await tellWebWhoIsHere() }
+            Task { await tellWhoIsHere() }
         } catch KeyStoreError.keyMissing {
             contentProblem = .keyMissing
         } catch {
@@ -240,11 +251,14 @@ struct RootView: View {
         prepareContent()
         await reader?.load()
         await calendar?.load()
-        await tellWebWhoIsHere()
+        await tellWhoIsHere()
     }
 
-    private func tellWebWhoIsHere() async {
-        await web?.use(account: await account?.backup?.deviceOwner())
+    /// Web keeps things only for the key's owner, and Mail shows only the owner's mailbox.
+    private func tellWhoIsHere() async {
+        let owner = await account?.backup?.deviceOwner()
+        mail.use(account: owner)
+        await web?.use(account: owner)
     }
 
     /// Only a sync that really finished counts, so the screens can't claim safety too early.
@@ -271,7 +285,15 @@ struct RootView: View {
             await web?.load()
         }
         backup.onJoined = { await sync.syncNow() }
-        backup.onOwnerChanged = { await tellWebWhoIsHere() }
+        backup.onOwnerChanged = { await tellWhoIsHere() }
+    }
+
+    /// Mail's links leave for Web, which opens them like any other address. If Web can't open, that's
+    /// where the person hears why.
+    private func openInWeb(_ url: URL) {
+        prepareContent()
+        web?.open(url)
+        bringUp(.web)
     }
 
     /// Only the Reader's content can be attached so far, so that's where a ref opens.

@@ -2,6 +2,7 @@ import Foundation
 import TotalityAccount
 import TotalityCalendar
 import TotalityCore
+import TotalityMail
 import TotalityReader
 import TotalityWeb
 
@@ -52,6 +53,7 @@ enum ContentSetup {
             ReaderModule(vault: readerVault),
             CalendarModule(vault: calendarVault, devices: devices, hidden: { CalendarModel.hiddenCalendars(in: .standard) }),
             WebModule(),
+            MailModule(),
         ])
         return (
             ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices())),

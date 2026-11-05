@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "TotalityReader", targets: ["TotalityReader"]),
         .library(name: "TotalityCalendar", targets: ["TotalityCalendar"]),
         .library(name: "TotalityWeb", targets: ["TotalityWeb"]),
+        .library(name: "TotalityMail", targets: ["TotalityMail"]),
         .library(name: "TotalityAccount", targets: ["TotalityAccount"]),
     ],
     dependencies: [
@@ -28,6 +29,7 @@ let package = Package(
         ]),
         .target(name: "TotalityCalendar", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityWeb", dependencies: ["TotalityCore", "TotalityUI"], resources: [.copy("Resources/blocklist.json")]),
+        .target(name: "TotalityMail", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityAccount", dependencies: [
             "TotalityCore", "TotalityUI",
             .product(name: "Supabase", package: "supabase-swift"),
@@ -37,6 +39,7 @@ let package = Package(
         .testTarget(name: "TotalityReaderTests", dependencies: ["TotalityReader"]),
         .testTarget(name: "TotalityCalendarTests", dependencies: ["TotalityCalendar"]),
         .testTarget(name: "TotalityWebTests", dependencies: ["TotalityWeb"]),
+        .testTarget(name: "TotalityMailTests", dependencies: ["TotalityMail"]),
         .testTarget(name: "TotalityAccountTests", dependencies: ["TotalityAccount"]),
     ]
 )
