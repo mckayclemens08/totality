@@ -19,6 +19,8 @@ export const MAILBOX_LIMIT = 1024 ** 3
 export const AT_ONCE = 4
 const MAX_KEY_REQUEST = 1_024
 const MAX_DELETE_REQUEST = 64 * 1024
+// A device's message comes as base64 in a little JSON, so the request is a third bigger than the message.
+export const MAX_SEALED_REQUEST = Math.ceil(MAX_MESSAGE * 4 / 3) + 4_096
 export const MAX_DELETE = 500
 // The Worker bounces this for good. It's not 404, because a broken tunnel answers 404 by itself, and
 // that must never bounce someone's mail.
@@ -92,6 +94,9 @@ export function aead(key, nonce, plaintext, associated) {
 }
 
 const SEAL_VERSION = 1
+/** A Sent copy: version 2 (1 byte) · nonce (12) · ciphertext and tag (16 or more). Only a device seals these. */
+const SENT_VERSION = 2
+const SENT_HEADER = 1 + 12 + 16
 const SEAL_INFO = Buffer.from('totality/mail/v1')
 
 function uuidBytes(id) {
@@ -109,9 +114,12 @@ export function seal(plaintext, recipientPublicKey, mailbox, message) {
 }
 
 /** What gets sealed: one line of facts the device can't work out, then the message exactly as it came.
- *  `spam` is null when the check couldn't run, so a broken filter never costs anyone their mail. */
-export function sealedForm(raw, spam, received) {
-  const facts = { version: 1, received: new Date(received).toISOString(), spam }
+ *  `spam` is null when the check couldn't run, so a broken filter never costs anyone their mail. `from`
+ *  is there only for mail between Totality accounts, and it's the sender's sign-in, never their say-so. */
+export function sealedForm(raw, spam, received, from, to) {
+  // `to` is the name it was delivered to, which can be a reserved name on its owner's mailbox. The
+  // sender sealed the inner part to that name, so the device needs it to open the message.
+  const facts = { version: 1, received: new Date(received).toISOString(), spam, ...(from !== undefined && { from, to }) }
   return Buffer.concat([Buffer.from(`${JSON.stringify(facts)}\n`), raw])
 }
 
@@ -210,8 +218,14 @@ export class Mailboxes {
     return total
   }
 
+  /** Returns false if the mailbox already has a message with this ID, which is left as it was. */
   async add(mailbox, message, sealed) {
-    await writeOnce(this.messageFile(mailbox, message), sealed)
+    return writeOnce(this.messageFile(mailbox, message), sealed)
+  }
+
+  /** Whether a mailbox has published its key, which is when it starts to exist. */
+  async hasKey(mailbox) {
+    return (await readIfThere(join(this.folder(mailbox), 'public.key'))) !== null
   }
 
   /** The ID is checked before it becomes part of a path, so it can't name anything but a message in
@@ -299,17 +313,22 @@ export class Arrivals {
   }
 
   /** Returns `{ status, body, type }`. Only `/mail/message/<id>` ever carries a message, and only to the
-   *  account it belongs to. `read` takes a limit, gets the body, and returns null past the limit.
-   *  Nothing is read until the caller is proven. */
+   *  account it belongs to. `/mail/recipient/<name>` carries a public key and never a mailbox.
+   *  `read` takes a limit, gets the body, and returns null past the limit. Nothing is read until the
+   *  caller is proven. */
   async respond(method, path, authorization, to, read) {
     if (method === 'GET' && path === '/mail/health') return { status: 200 }
     const message = /^\/mail\/message\/([^/]*)$/.exec(path)?.[1]
+    const name = /^\/mail\/recipient\/([^/]*)$/.exec(path)?.[1]
     if (message !== undefined) {
       if (!MAILBOX.test(message)) return { status: 404 }
       if (method !== 'GET') return { status: 405 }
+    } else if (name !== undefined) {
+      if (!NAME.test(name)) return { status: 404 }
+      if (method !== 'GET') return { status: 405 }
     } else if (path === '/mail/list') {
       if (method !== 'GET') return { status: 405 }
-    } else if (path === '/mail/arrive' || path === '/mail/key' || path === '/mail/delete') {
+    } else if (['/mail/arrive', '/mail/key', '/mail/delete', '/mail/deliver', '/mail/keep'].includes(path)) {
       if (method !== 'POST') return { status: 405 }
     } else {
       return { status: 404 }
@@ -322,6 +341,9 @@ export class Arrivals {
       if (!account) return { status: 401 }
       if (path === '/mail/list') return await this.list(account)
       if (path === '/mail/delete') return await this.remove(account, read)
+      if (name !== undefined) return await this.publicKeyFor(name)
+      if (path === '/mail/deliver') return { status: await this.holding(() => this.deliver(account, read)) }
+      if (path === '/mail/keep') return { status: await this.holding(() => this.keep(account, read)) }
       const sealed = await this.mailboxes.message(account.mailbox, message)
       return sealed ? { status: 200, body: sealed, type: 'application/octet-stream' } : { status: 404 }
     } catch {
@@ -357,12 +379,94 @@ export class Arrivals {
 
   async arriveWithSecret(authorization, to, read) {
     if (!authorization?.startsWith('Bearer ') || !sameSecret(authorization.slice(7), this.secret)) return 401
+    return this.holding(() => this.arrive(to, read))
+  }
+
+  /** Arrivals and devices share one cap, because it's what bounds the memory mail can use. */
+  async holding(work) {
     if (this.working >= AT_ONCE) return 503
     this.working += 1
     try {
-      return await this.arrive(to, read)
+      return await work()
     } finally {
       this.working -= 1
+    }
+  }
+
+  /** A public key is for anyone to seal with. The mailbox it belongs to stays on the server. */
+  async publicKeyFor(name) {
+    const recipient = await this.mailboxes.recipient(name)
+    return recipient ? json(200, { publicKey: recipient.publicKey.toString('base64') }) : { status: 404 }
+  }
+
+  /** A device's JSON with its `sealed` field decoded, or a status. The request is wiped once read, and
+   *  the caller wipes `bytes`. */
+  async sealedRequest(read) {
+    const body = await read(MAX_SEALED_REQUEST)
+    if (!body) return { status: 413 }
+    try {
+      let request
+      try {
+        request = JSON.parse(body)
+      } catch {
+        return { status: 400 }
+      }
+      const { id, sealed } = request ?? {}
+      if (typeof id !== 'string' || !MAILBOX.test(id) || typeof sealed !== 'string') return { status: 400 }
+      const bytes = Buffer.from(sealed, 'base64')
+      if (bytes.toString('base64') !== sealed) {
+        bytes.fill(0)
+        return { status: 400 }
+      }
+      return { request, id, bytes }
+    } finally {
+      body.fill(0)
+    }
+  }
+
+  /** Mail to another Totality account. The sender's device sealed it for that person, and this seals it
+   *  again into their mailbox with who sent it, taken from the sign-in. Nothing in the request can name
+   *  the sender or the mailbox. Sending to yourself is allowed. */
+  async deliver(account, read) {
+    const given = await this.sealedRequest(read)
+    if (given.status) return given.status
+    const { request, id, bytes } = given
+    try {
+      if (typeof request.to !== 'string' || bytes.length === 0) return 400
+      const recipient = NAME.test(request.to) ? await this.mailboxes.recipient(request.to) : null
+      if (!recipient) return 404
+      if (bytes.length > MAX_MESSAGE) return 413
+      const stored = await this.mailboxes.size(recipient.mailbox)
+      if (stored >= MAILBOX_LIMIT) return 507
+      const plain = sealedForm(bytes, null, this.clock(), account.name, request.to)
+      const sealed = seal(plain, recipient.publicKey, recipient.mailbox, id)
+      plain.fill(0)
+      if (stored + sealed.length > MAILBOX_LIMIT) return 507
+      return (await this.mailboxes.add(recipient.mailbox, id, sealed)) ? 201 : 409
+    } finally {
+      bytes.fill(0)
+    }
+  }
+
+  /** A Sent copy, kept exactly as it came, and only ever in the caller's own mailbox. It has its own
+   *  format, version 2, sealed with a key that comes from the person's content key, which this server
+   *  never sees. Version 1 is what this server seals to a public key, which anyone can do, so a stolen
+   *  sign-in could use it to plant mail that looks like it came from someone. Only version 2 is taken.
+   *  The server can't check the seal, only its shape. A mailbox exists once its key does, so an
+   *  account without one has nowhere to keep it. */
+  async keep(account, read) {
+    const given = await this.sealedRequest(read)
+    if (given.status) return given.status
+    const { id, bytes } = given
+    try {
+      if (bytes.length <= SENT_HEADER || bytes[0] !== SENT_VERSION) return 400
+      if (bytes.length > MAX_MESSAGE) return 413
+      if (!(await this.mailboxes.hasKey(account.mailbox))) return 404
+      const stored = await this.mailboxes.size(account.mailbox)
+      if (stored + bytes.length > MAILBOX_LIMIT) return 507
+      return (await this.mailboxes.add(account.mailbox, id, bytes)) ? 201 : 409
+    } finally {
+      bytes.fill(0)
     }
   }
 

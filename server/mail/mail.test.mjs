@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  AT_ONCE, Arrivals, MAILBOX_LIMIT, MAX_DELETE, MAX_MESSAGE, Mailboxes, accountFrom, aead, keySchedule, mailName, readBody, seal,
+  AT_ONCE, Arrivals, MAILBOX_LIMIT, MAX_DELETE, MAX_MESSAGE, MAX_SEALED_REQUEST, Mailboxes, accountFrom, aead, keySchedule, mailName, readBody, seal,
   sealedForm, serve, verdict,
 } from './mail.mjs'
 import worker from '../mail-worker/worker.mjs'
@@ -668,6 +668,293 @@ describe('reading mail', () => {
   })
 })
 
+describe('mail between accounts', () => {
+  let root, mailboxes, gate
+  const accounts = new Map()
+  let supabaseDown = false
+  const NOW = Date.UTC(2026, 10, 5, 14, 30)
+
+  before(async () => {
+    root = await mkdtemp(join(tmpdir(), 'totality-mail-'))
+    mailboxes = new Mailboxes(root)
+    gate = new Arrivals({
+      secret: SECRET,
+      checkSignIn: async (token) => {
+        if (supabaseDown) throw new Error('down')
+        return accounts.get(token) ?? null
+      },
+      checkSpam: async () => assert.fail('mail between accounts is never read by the spam check'),
+      mailboxes,
+      clock: () => NOW,
+    })
+  })
+  after(() => rm(root, { recursive: true, force: true }))
+
+  let n = 0
+  const person = async ({ publish = true } = {}) => {
+    n += 1
+    const token = `direct_${n}`
+    const keys = newKeys()
+    const signedIn = { name: `grace_${n}`, mailbox: randomUUID() }
+    accounts.set(token, signedIn)
+    if (publish) await mailboxes.publish(signedIn.name, signedIn.mailbox, keys.publicKey)
+    return { token, keys, ...signedIn, folder: join(root, 'boxes', signedIn.mailbox) }
+  }
+  const ask = (token, method, path, body) =>
+    gate.respond(method, path, token && `Bearer ${token}`, undefined, async () => body === undefined ? null : Buffer.from(body))
+  // What the sender's device would have sealed for the recipient. The server never opens it.
+  const DEVICE_SEALED = Buffer.concat([Buffer.from([1]), Buffer.alloc(32, 7), Buffer.from('a sealed note about the engine')])
+  const deliver = (from, fields) => ask(from.token, 'POST', '/mail/deliver', JSON.stringify(fields))
+  const letter = (to, id = randomUUID(), sealed = DEVICE_SEALED) => ({ to: to.name, id, sealed: sealed.toString('base64') })
+  // A Sent copy as a device seals it, under a key from the content key. The server never opens it either.
+  const SENT_SEALED = Buffer.concat([Buffer.from([2]), Buffer.alloc(12, 3), Buffer.from('a sealed copy of the note about the engine')])
+  const keep = (from, id = randomUUID(), sealed = SENT_SEALED) =>
+    ask(from.token, 'POST', '/mail/keep', JSON.stringify({ id, sealed: sealed.toString('base64') }))
+  const listed = async (who) => JSON.parse((await ask(who.token, 'GET', '/mail/list')).body).messages.map(({ id }) => id)
+  const factsAndBody = (form) => {
+    const line = form.indexOf(10)
+    return [JSON.parse(form.subarray(0, line)), form.subarray(line + 1)]
+  }
+
+  test('user 1 finds user 2\'s key by name, and never their mailbox', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const reply = await ask(user1.token, 'GET', `/mail/recipient/${user2.name}`)
+    assert.equal(reply.status, 200)
+    assert.equal(reply.type, 'application/json')
+    assert.deepEqual(JSON.parse(reply.body), { publicKey: user2.keys.publicKey.toString('base64') })
+    assert.equal(reply.body.includes(user2.mailbox), false)
+    assert.equal(reply.body.includes(user2.mailbox.replaceAll('-', '')), false)
+  })
+
+  test('a name nobody holds, or one with no key yet, has no recipient', async () => {
+    const [user1, keyless] = [await person(), await person({ publish: false })]
+    await writeFile(join(root, 'names', 'hostmaster'), `${keyless.mailbox}\n`)
+    for (const name of ['nobody_here', 'hostmaster', keyless.name]) {
+      const reply = await ask(user1.token, 'GET', `/mail/recipient/${name}`)
+      assert.equal(reply.status, 404)
+      assert.equal(reply.body, undefined)
+    }
+  })
+
+  for (const name of ['ab', 'Grace', 'grace.hopper', '..', '..%2Fnames%2Fgrace', 'a'.repeat(25), '']) {
+    test(`a recipient named ${JSON.stringify(name)} is a 404`, async () => {
+      const user1 = await person()
+      assert.equal((await ask(user1.token, 'GET', `/mail/recipient/${name}`)).status, 404)
+    })
+  }
+
+  test('user 1 delivers to user 2, who lists, fetches, and opens it with who sent it', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const id = randomUUID()
+    assert.equal((await deliver(user1, letter(user2, id))).status, 201)
+    assert.deepEqual(await listed(user2), [id])
+    const reply = await ask(user2.token, 'GET', `/mail/message/${id}`)
+    assert.equal(reply.status, 200)
+    const [facts, body] = factsAndBody(opened(reply.body, user2.keys, user2.mailbox, id))
+    assert.deepEqual(facts, { version: 1, received: '2026-11-05T14:30:00.000Z', spam: null, from: user1.name, to: user2.name })
+    assert.deepEqual(body, DEVICE_SEALED)
+    assert.equal(reply.body.includes(user1.name), false)
+  })
+
+  test('the delivered message lands in user 2\'s box only, and nothing in user 1\'s', async () => {
+    const [user1, user2] = [await person(), await person()]
+    await deliver(user1, letter(user2))
+    assert.deepEqual(await listed(user1), [])
+    assert.equal((await listed(user2)).length, 1)
+  })
+
+  test('sending to yourself is allowed', async () => {
+    const user1 = await person()
+    const id = randomUUID()
+    assert.equal((await deliver(user1, letter(user1, id))).status, 201)
+    const [facts] = factsAndBody(opened(await mailboxes.message(user1.mailbox, id), user1.keys, user1.mailbox, id))
+    assert.equal(facts.from, user1.name)
+  })
+
+  test('user 1 cannot choose who it says it\'s from, or which mailbox it lands in', async () => {
+    const [user1, user2, user3] = [await person(), await person(), await person()]
+    const id = randomUUID()
+    const smuggled = { ...letter(user2, id), from: user3.name, name: user3.name, mailbox: user3.mailbox, spam: { flagged: false },
+      received: '2020-01-01T00:00:00.000Z', version: 2 }
+    assert.equal((await deliver(user1, smuggled)).status, 201)
+    const [facts] = factsAndBody(opened(await mailboxes.message(user2.mailbox, id), user2.keys, user2.mailbox, id))
+    assert.deepEqual(facts, { version: 1, received: '2026-11-05T14:30:00.000Z', spam: null, from: user1.name, to: user2.name })
+    assert.deepEqual(await listed(user3), [])
+  })
+
+  test('the memory holding the message is wiped afterwards', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const body = Buffer.from(JSON.stringify(letter(user2)))
+    assert.equal(await gate.handle('POST', '/mail/deliver', `Bearer ${user1.token}`, undefined, async () => body), 201)
+    assert.equal(body.every((byte) => byte === 0), true)
+  })
+
+  test('an unknown or keyless recipient is a 404, and nothing is stored', async () => {
+    const [user1, keyless] = [await person(), await person({ publish: false })]
+    for (const to of ['nobody_here', keyless.name, 'Grace_1', '../x', 'ab']) {
+      assert.equal((await deliver(user1, { ...letter(user1), to })).status, 404)
+    }
+    assert.deepEqual(await listed(user1), [])
+  })
+
+  test('a full mailbox is a 507', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const full = new Arrivals({
+      secret: SECRET,
+      checkSignIn: async (token) => accounts.get(token) ?? null,
+      checkSpam: async () => null,
+      mailboxes: Object.assign(Object.create(mailboxes), {
+        size: async () => MAILBOX_LIMIT - Math.min(DEVICE_SEALED.length, SENT_SEALED.length),
+        add: async () => assert.fail('stored past the limit'),
+      }),
+    })
+    const post = (path, body) => full.handle('POST', path, `Bearer ${user1.token}`, undefined, async () => Buffer.from(body))
+    assert.equal(await post('/mail/deliver', JSON.stringify(letter(user2))), 507)
+    assert.equal(await post('/mail/keep', JSON.stringify({ id: randomUUID(), sealed: Buffer.concat([SENT_SEALED, Buffer.alloc(1)]).toString('base64') })), 507)
+  })
+
+  test('a message past the limit is a 413', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const tooBig = Buffer.alloc(MAX_MESSAGE + 1, 1)
+    assert.equal((await deliver(user1, letter(user2, randomUUID(), tooBig))).status, 413)
+    assert.equal((await keep(user1, randomUUID(), Buffer.alloc(MAX_MESSAGE + 1, 2))).status, 413)
+    assert.equal((await gate.respond('POST', '/mail/deliver', `Bearer ${user1.token}`, undefined, async () => null)).status, 413)
+    assert.deepEqual(await listed(user2), [])
+    assert.ok(MAX_SEALED_REQUEST > Math.ceil(MAX_MESSAGE / 3) * 4)
+  })
+
+  test('the same id twice is a 409, and the first stays as it was', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const id = randomUUID()
+    assert.equal((await deliver(user1, letter(user2, id))).status, 201)
+    const first = await readFile(join(user2.folder, `${id}.sealed`))
+    assert.equal((await deliver(user1, letter(user2, id, Buffer.from('a replacement')))).status, 409)
+    assert.deepEqual(await readFile(join(user2.folder, `${id}.sealed`)), first)
+    assert.equal((await keep(user2, id)).status, 409)
+    assert.deepEqual(await readFile(join(user2.folder, `${id}.sealed`)), first)
+    assert.deepEqual(await listed(user2), [id])
+  })
+
+  test('a Sent copy is kept exactly as sent, in the caller\'s own box', async () => {
+    const user1 = await person()
+    const id = randomUUID()
+    assert.equal((await keep(user1, id)).status, 201)
+    const reply = await ask(user1.token, 'GET', `/mail/message/${id}`)
+    assert.deepEqual(reply.body, SENT_SEALED)
+  })
+
+  // Anyone can seal version 1 to a public key, so a stolen sign-in could plant mail claiming a sender,
+  // or claiming to be a Sent copy, if keep took it. It doesn't, however well-formed it is.
+  test('keep refuses version 1, even a real seal to the caller\'s own key that claims a sender', async () => {
+    const user1 = await person()
+    const id = randomUUID()
+    const forged = Buffer.from('{"version":1,"received":"2026-11-05T14:30:00.000Z","spam":null,"from":"mckay","to":"grace_1"}\n' +
+      'From: mckay@usetotality.com\r\n\r\nPlease wire the deposit today.\r\n')
+    for (const sealed of [seal(forged, user1.keys.publicKey, user1.mailbox, id), DEVICE_SEALED]) {
+      assert.equal((await keep(user1, id, sealed)).status, 400)
+    }
+    assert.deepEqual(await listed(user1), [])
+  })
+
+  test('user 1 cannot keep anything in user 2\'s box', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const id = randomUUID()
+    const smuggled = JSON.stringify({ id, sealed: SENT_SEALED.toString('base64'), to: user2.name, mailbox: user2.mailbox,
+      name: user2.name })
+    assert.equal((await ask(user1.token, 'POST', '/mail/keep', smuggled)).status, 201)
+    assert.deepEqual(await listed(user2), [])
+    assert.deepEqual(await listed(user1), [id])
+  })
+
+  test('an account with no key yet has nowhere to keep a copy', async () => {
+    const keyless = await person({ publish: false })
+    assert.equal((await keep(keyless)).status, 404)
+    await assert.rejects(readdir(keyless.folder), { code: 'ENOENT' })
+  })
+
+  for (const [label, sealed] of [['an empty file', Buffer.alloc(0)], ['a bare header', Buffer.concat([Buffer.from([2]), Buffer.alloc(28)])],
+    ['version 1', Buffer.concat([Buffer.from([1]), Buffer.alloc(64)])], ['another version', Buffer.concat([Buffer.from([3]), Buffer.alloc(64)])]]) {
+    test(`keeping ${label} is refused`, async () => {
+      const user1 = await person()
+      assert.equal((await keep(user1, randomUUID(), sealed)).status, 400)
+      assert.deepEqual(await listed(user1), [])
+    })
+  }
+
+  const id = randomUUID()
+  const good = DEVICE_SEALED.toString('base64')
+  // Refused by both, because the id or the sealed bytes are wrong. `to` is there for delivery and ignored by keep.
+  for (const body of ['', 'not json', 'null', '7', '[]', '{}', JSON.stringify({ to: 'grace_1', sealed: good }),
+    JSON.stringify({ to: 'grace_1', id: id.toUpperCase(), sealed: good }), JSON.stringify({ to: 'grace_1', id: `${id}\n`, sealed: good }),
+    JSON.stringify({ to: 'grace_1', id: '../public.key', sealed: good }), JSON.stringify({ to: 'grace_1', id, sealed: 7 }),
+    JSON.stringify({ to: 'grace_1', id }), JSON.stringify({ to: 'grace_1', id, sealed: `${good}\n` }),
+    JSON.stringify({ to: 'grace_1', id, sealed: 'not base64!' }), JSON.stringify({ to: 'grace_1', id, sealed: '' })]) {
+    test(`a delivery or keep of ${JSON.stringify(body).slice(0, 90)} is refused`, async () => {
+      const user1 = await person()
+      assert.equal((await ask(user1.token, 'POST', '/mail/deliver', body)).status, 400)
+      assert.equal((await ask(user1.token, 'POST', '/mail/keep', body)).status, 400)
+      assert.deepEqual(await listed(user1), [])
+    })
+  }
+
+  for (const body of [JSON.stringify({ to: 7, id, sealed: good }), JSON.stringify({ id, sealed: good })]) {
+    test(`a delivery of ${body.slice(0, 60)} is refused`, async () => {
+      const user1 = await person()
+      assert.equal((await ask(user1.token, 'POST', '/mail/deliver', body)).status, 400)
+    })
+  }
+
+  test('without a sign-in nothing is looked up, delivered, kept, or read', async () => {
+    const user2 = await person()
+    let read = false
+    for (const authorization of [undefined, '', 'Bearer ', 'Bearer nonsense', BEARER, `Basic ${user2.token}`, user2.token]) {
+      for (const [method, path] of [['GET', `/mail/recipient/${user2.name}`], ['POST', '/mail/deliver'], ['POST', '/mail/keep']]) {
+        const reply = await gate.respond(method, path, authorization, undefined, async () => { read = true })
+        assert.equal(reply.status, 401)
+        assert.equal(reply.body, undefined)
+      }
+    }
+    assert.equal(read, false)
+    assert.deepEqual(await listed(user2), [])
+  })
+
+  test('if the sign-in can\'t be checked, the device is told to try later', async () => {
+    const [user1, user2] = [await person(), await person()]
+    supabaseDown = true
+    try {
+      assert.equal((await ask(user1.token, 'GET', `/mail/recipient/${user2.name}`)).status, 503)
+      assert.equal((await deliver(user1, letter(user2))).status, 503)
+      assert.equal((await keep(user1)).status, 503)
+    } finally {
+      supabaseDown = false
+    }
+    assert.deepEqual(await listed(user2), [])
+  })
+
+  test('if the disk fails, the device is told to try later', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const broken = new Arrivals({
+      secret: SECRET,
+      checkSignIn: async (token) => accounts.get(token) ?? null,
+      checkSpam: async () => null,
+      mailboxes: Object.assign(Object.create(mailboxes), { add: async () => { throw new Error('disk') } }),
+    })
+    const post = (path, body) => broken.handle('POST', path, `Bearer ${user1.token}`, undefined, async () => Buffer.from(body))
+    assert.equal(await post('/mail/deliver', JSON.stringify(letter(user2))), 503)
+    assert.equal(await post('/mail/keep', JSON.stringify({ id: randomUUID(), sealed: SENT_SEALED.toString('base64') })), 503)
+  })
+
+  test('each path takes only its own method', async () => {
+    const user1 = await person()
+    assert.equal((await ask(user1.token, 'POST', `/mail/recipient/${user1.name}`, '{}')).status, 405)
+    assert.equal((await ask(user1.token, 'GET', '/mail/deliver')).status, 405)
+    assert.equal((await ask(user1.token, 'GET', '/mail/keep')).status, 405)
+    assert.equal((await ask(user1.token, 'GET', `/mail/recipient/${user1.name}/`)).status, 404)
+    assert.equal((await ask(user1.token, 'GET', '/mail/recipient')).status, 404)
+    assert.equal((await ask(user1.token, 'POST', '/mail/deliver?to=x', '{}')).status, 404)
+  })
+})
+
 describe('over a real connection', () => {
   let root, server, url, mailbox, keys
 
@@ -816,11 +1103,13 @@ describe('the server setup', () => {
     const rules = [...tunnel.matchAll(/^ +path: (\^\/mail\/.*)$/gm)].map((match) => new RegExp(match[1]))
     assert.equal(rules.length, 1)
     const [rule] = rules
-    for (const path of ['/mail/arrive', '/mail/key', '/mail/list', '/mail/delete', `/mail/message/${randomUUID()}`]) {
+    for (const path of ['/mail/arrive', '/mail/key', '/mail/list', '/mail/delete', '/mail/deliver', '/mail/keep',
+      '/mail/recipient/ada_lovelace', `/mail/message/${randomUUID()}`]) {
       assert.match(path, rule)
     }
     for (const path of ['/mail/health', '/mail/message/public.key', '/mail/message/../x', `/mail/message/${randomUUID()}0`,
-      '/mail/lists', '/mail/', '/mail/list/']) {
+      '/mail/lists', '/mail/', '/mail/list/', '/mail/recipient/', '/mail/recipient/ab', '/mail/recipient/Ada',
+      '/mail/recipient/../names/ada', `/mail/recipient/${'a'.repeat(25)}`, '/mail/recipient/ada/', '/mail/keeps']) {
       assert.doesNotMatch(path, rule)
     }
   })

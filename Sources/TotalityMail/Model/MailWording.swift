@@ -4,7 +4,12 @@ import Foundation
 /// 37, and they have to stay literally true: nothing here may call mail end-to-end encrypted until
 /// people can verify each other's keys.
 public enum MailWording {
+    /// What you send to another account, and your Sent copy of it.
     public static let betweenAccounts = "Sealed by your device. Totality's servers can't read it."
+    /// What another account sent you, when it's proved their device sealed it, not yours.
+    public static let betweenAccountsReceived = "Sealed by the sender's device. Totality's servers carry it but can't open it."
+    /// What another account seems to have sent you, when that couldn't be proved. Nothing more is true.
+    public static let betweenAccountsUnconfirmed = "Totality couldn't confirm who sealed this."
     public static let outside = "Email isn't end-to-end encrypted. Totality's server handles it as it arrives or leaves, and so do Cloudflare and the mail servers it passes through. Cloudflare's log keeps the subject and addresses of mail to and from outside. The stored copy is sealed."
 
     public static func route(_ route: MailRoute) -> String {
@@ -14,10 +19,81 @@ public enum MailWording {
         }
     }
 
+    /// The line under a message. Mail between accounts says whose device sealed it: only a message that
+    /// arrived from another account names the account that sent it. That line is only for one that's
+    /// proved, with the sender's pinned key. Anything else could have been sealed by the server with a
+    /// key it handed out, so it says only that nobody could confirm it, beside its warning.
+    public static func route(for message: MailMessage) -> String? {
+        guard let route = message.route else { return nil }
+        if route == .betweenAccounts, message.sentBy != nil {
+            return message.proof == .proved && !message.senderKeyChanged ? betweenAccountsReceived : betweenAccountsUnconfirmed
+        }
+        return self.route(route)
+    }
+
     /// The sender's name can say anything, so this names the domain, which is what the checks looked at.
     public static func unproved(_ sender: MailAddress) -> String {
         "This message says it's from \(sender.domain), but that couldn't be proved. Be careful with its links and attachments."
     }
+
+    /// Mail between accounts where the From line names someone other than the account that sent it.
+    public static func claimsSomeoneElse(_ claimed: MailAddress, sentBy: MailAddress) -> String {
+        "This message says it's from \(claimed.address), but it was sent by \(sentBy.address). Be careful with its links and attachments."
+    }
+
+    /// Mail between accounts whose sender's key isn't the one pinned for them the first time.
+    public static func keyChanged(_ sentBy: MailAddress) -> String {
+        "This message says it's from \(sentBy.address), but their key has changed since you first heard from them, or couldn't be checked, so it couldn't be proved. Be careful with its links and attachments."
+    }
+
+    /// The warning a message needs, if any. Mail between accounts knows who really sent it, so it says so.
+    public static func warning(for message: MailMessage) -> String? {
+        guard message.proof == .unproved, !message.isUnreadable else { return nil }
+        if message.route == .betweenAccounts, message.senderKeyChanged, let sentBy = message.sentBy {
+            return keyChanged(sentBy)
+        }
+        if message.route == .betweenAccounts, let sentBy = message.sentBy, message.from.totalityName != sentBy.totalityName {
+            return claimsSomeoneElse(message.from, sentBy: sentBy)
+        }
+        return unproved(message.from)
+    }
+
+    // MARK: Sending
+
+    /// For a draft with anyone outside Totality on it. It says what happens, and promises nothing more.
+    public static let outsideNotYet = "Sending outside Totality isn't on yet. Outside addresses stay on the draft until it is."
+
+    /// What happened for one person, in a sentence.
+    public static func outcome(_ outcome: MailSendResult.Outcome) -> String {
+        switch outcome {
+        case .delivered: "Delivered."
+        case .noSuchAddress: "Not sent. No Totality account has this address, or they haven't opened Mail yet."
+        case .outsideNotYet: "Not sent. Sending outside Totality isn't on yet, so this address stays on the draft."
+        case .notAnAddress: "Not sent. This isn't an email address."
+        case .recipientFull: "Not sent. Their mailbox is full."
+        case .tooBig: "Not sent. It's too big for their mailbox."
+        case .offline: "Not sent. You're offline, so it stays a draft. Send it again when you're back."
+        case .failed: "Not sent. Something went wrong on the way. Try sending again."
+        case .keyChanged: "Not sent. This person's key changed since you first wrote to each other, so Totality can't be sure it would reach only them."
+        }
+    }
+
+    /// Why a send didn't start. The draft is kept either way.
+    public static func notSent(_ error: any Error) -> String {
+        switch error {
+        case MailSendError.noRecipients: "Add someone to send it to."
+        case MailSendError.tooManyRecipients(let count): "A message can go to \(MailDraft.maxRecipients) people at most, and this one has \(count)."
+        case MailSendError.tooBig: "It's over 25 MB. Remove an attachment and try again."
+        case MailSendError.noAddress: "Your username isn't known yet, so there's no address to send from. Try again in a moment."
+        case MailStoreError.offline: "You're offline. It's kept as a draft, so send it when you're back."
+        case MailStoreError.waitingForBackup: "Mail can't send until your recovery key is set up. It's kept as a draft."
+        case MailStoreError.keyConflict: "There's a problem with your mailbox, so nothing can send. It's kept as a draft."
+        case MailStoreError.noKey: "Your key isn't on this device, so nothing can send. It's kept as a draft."
+        default: "Totality couldn't reach your mailbox, so nothing was sent. It's kept as a draft."
+        }
+    }
+
+    public static let copyOnDevice = "Your Sent copy is only on this device for now. Totality tries your mailbox again the next time Mail opens."
 
     public static let imagesOff = "Images from the internet are off, because senders use them to see when and where you opened a message."
 

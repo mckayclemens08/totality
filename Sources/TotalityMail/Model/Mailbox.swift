@@ -43,11 +43,30 @@ public struct MailSettings: Hashable, Codable, Sendable {
     public var folders: [MailOwnFolder]
     public var blockedSenders: Set<String>
     public var alwaysLoadImages: Set<String>
+    /// Written under each new message, reply, and forward. Empty means none.
+    public var signature: String
 
-    public init(folders: [MailOwnFolder] = [], blockedSenders: Set<String> = [], alwaysLoadImages: Set<String> = []) {
+    public init(
+        folders: [MailOwnFolder] = [], blockedSenders: Set<String> = [], alwaysLoadImages: Set<String> = [], signature: String = ""
+    ) {
         self.folders = folders
         self.blockedSenders = blockedSenders
         self.alwaysLoadImages = alwaysLoadImages
+        self.signature = signature
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case folders, blockedSenders, alwaysLoadImages, signature
+    }
+
+    /// Settings saved before the signature existed still open, with none. Settings that still hold pins
+    /// from before they moved to `MailPins` open too: the vault moves those pins over.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        folders = try container.decode([MailOwnFolder].self, forKey: .folders)
+        blockedSenders = try container.decode(Set<String>.self, forKey: .blockedSenders)
+        alwaysLoadImages = try container.decode(Set<String>.self, forKey: .alwaysLoadImages)
+        signature = try container.decodeIfPresent(String.self, forKey: .signature) ?? ""
     }
 }
 
@@ -60,12 +79,18 @@ public struct Mailbox: Sendable, Equatable {
     public var messages: [MailMessage]
     public var settings: MailSettings
     public var isFull: Bool
+    /// What's being written, newest first. Drafts aren't messages until they're sent.
+    public var drafts: [MailDraft]
 
-    public init(address: String = "", messages: [MailMessage] = [], settings: MailSettings = MailSettings(), isFull: Bool = false) {
+    public init(
+        address: String = "", messages: [MailMessage] = [], settings: MailSettings = MailSettings(), isFull: Bool = false,
+        drafts: [MailDraft] = []
+    ) {
         self.address = address
         self.messages = messages
         self.settings = settings
         self.isFull = isFull
+        self.drafts = drafts
     }
 
     public var places: [MailPlace] {

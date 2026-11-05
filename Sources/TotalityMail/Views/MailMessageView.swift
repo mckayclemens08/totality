@@ -23,8 +23,8 @@ struct MailMessageView: View {
                 ForEach(message.attachments) { attachment in
                     MailAttachmentView(attachment: attachment, model: model)
                 }
-                if let route = message.route, message.marks.folder != .drafts {
-                    Label(MailWording.route(route), systemImage: route == .betweenAccounts ? "lock" : "info.circle")
+                if let route = message.route, let line = MailWording.route(for: message), message.marks.folder != .drafts {
+                    Label(line, systemImage: route == .betweenAccounts ? "lock" : "info.circle")
                         .font(Typeface.caption)
                         .foregroundStyle(theme.textSecondary.color)
                         .padding(.top, Space.s1)
@@ -91,8 +91,8 @@ struct MailMessageView: View {
     }
 
     @ViewBuilder private var notes: some View {
-        if message.proof == .unproved {
-            MailStrip(systemImage: "exclamationmark.shield", text: MailWording.unproved(message.from), isWarning: true)
+        if let warning = MailWording.warning(for: message) {
+            MailStrip(systemImage: "exclamationmark.shield", text: warning, isWarning: true)
         }
         switch message.delivery {
         case .fine:

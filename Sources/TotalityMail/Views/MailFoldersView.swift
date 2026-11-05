@@ -9,6 +9,7 @@ struct MailFoldersView: View {
     @State private var naming: FolderName?
     @State private var typed = ""
     @State private var removing: MailOwnFolder?
+    @State private var editingSignature = false
 
     private struct FolderName: Identifiable {
         let id = UUID()
@@ -57,10 +58,27 @@ struct MailFoldersView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                Button {
+                    editingSignature = true
+                } label: {
+                    Label("Signature", systemImage: "signature")
+                        .font(Typeface.callout)
+                        .foregroundStyle(theme.textPrimary.color)
+                        .padding(Space.s3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .padding(Space.s3)
         }
         .background(theme.bg.color)
+        .sheet(isPresented: $editingSignature) {
+            MailSignatureView(model: model) { editingSignature = false }
+                #if os(macOS)
+                .frame(minWidth: Space.s8 * 6, minHeight: Space.s8 * 5)
+                #endif
+        }
         .alert(naming?.folder == nil ? "New Folder" : "Rename Folder", isPresented: isNaming) {
             TextField("Folder name", text: $typed)
             Button("Save") { save() }
@@ -141,5 +159,55 @@ struct MailFoldersView: View {
                 Button("Remove Folder", systemImage: "folder.badge.minus", role: .destructive) { removing = folder }
             }
         }
+    }
+}
+
+/// The signature under new messages. It's a setting, so it's sealed and syncs with the rest.
+struct MailSignatureView: View {
+    private static let editorHeight = Space.s8 * 2
+
+    let model: MailModel
+    let onDone: () -> Void
+
+    @State private var text = ""
+
+    var body: some View {
+        let theme = Theme.current
+        NavigationStack {
+            VStack(alignment: .leading, spacing: Space.s3) {
+                Text("Written under each new message, reply, and forward. Leave it empty for none.")
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                TextEditor(text: $text)
+                    .font(Typeface.body)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: Self.editorHeight)
+                    .padding(Space.s2)
+                    .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+                    .accessibilityLabel("Signature")
+                Spacer(minLength: 0)
+            }
+            .padding(Space.s4)
+            .background(theme.bg.color)
+            .navigationTitle("Signature")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onDone)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let signature = text
+                        Task { await model.setSignature(signature) }
+                        onDone()
+                    }
+                }
+            }
+        }
+        .tint(theme.accent.color)
+        .onAppear { text = model.mailbox.settings.signature }
     }
 }

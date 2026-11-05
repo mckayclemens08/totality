@@ -1,4 +1,5 @@
 import Foundation
+import TotalityCore
 
 public struct MailAddress: Hashable, Codable, Sendable {
     public let name: String
@@ -14,6 +15,25 @@ public struct MailAddress: Hashable, Codable, Sendable {
     public var key: String { address.lowercased() }
     /// The part after the @, which is what a sender claims to be.
     public var domain: String { key.split(separator: "@").last.map(String.init) ?? key }
+
+    /// The account an address reaches when it's a Totality address, with any `+tag` dropped.
+    public var totalityName: String? {
+        let lower = key
+        guard let at = lower.lastIndex(of: "@"), lower[lower.index(after: at)...] == MailDomain.name else { return nil }
+        var local = lower[..<at]
+        if let plus = local.firstIndex(of: "+") { local = local[..<plus] }
+        return local.isEmpty ? nil : String(local)
+    }
+
+    /// One `@` with something either side, and nothing that could end a header or start another
+    /// address. It's what can be written into a message, not a promise that anyone is there.
+    public var isWellFormed: Bool {
+        let parts = address.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, parts[1].contains("."), !parts[1].hasPrefix("."), !parts[1].hasSuffix("."),
+              address.utf8.count <= 254
+        else { return false }
+        return !address.unicodeScalars.contains { $0.value <= 0x20 || $0.value == 0x7F || "<>()[],;:\\\"".unicodeScalars.contains($0) }
+    }
 }
 
 public enum MailFolder: Hashable, Codable, Sendable {
@@ -140,11 +160,27 @@ public struct MailMessage: Identifiable, Hashable, Sendable {
     public let proof: MailProof
     public let delivery: MailDelivery
     public var marks: MailMarks
+    /// Only ever on your own Sent copies: a delivered message never names its Bcc.
+    public let bcc: [MailAddress]
+    /// Where replies go when the sender asked for somewhere other than their From address.
+    public let replyTo: [MailAddress]
+    /// The message's own `Message-ID`, without its angle brackets, and the thread it answers, oldest
+    /// first. A reply carries both on.
+    public let messageID: String?
+    public let references: [String]
+    /// For mail between Totality accounts, the account that really sent it, which the server vouches
+    /// for. When it differs from `from`, the message claims to be from someone else.
+    public let sentBy: MailAddress?
+    /// For mail between Totality accounts, the sender's key wasn't the one pinned for them, so it can't
+    /// be proved and says why.
+    public let senderKeyChanged: Bool
 
     public init(
         id: UUID = UUID(), conversationID: UUID, from: MailAddress, to: [MailAddress], cc: [MailAddress] = [],
         subject: String, date: Date, body: MailBody, attachments: [MailAttachment] = [],
-        route: MailRoute?, proof: MailProof = .proved, delivery: MailDelivery = .fine, marks: MailMarks
+        route: MailRoute?, proof: MailProof = .proved, delivery: MailDelivery = .fine, marks: MailMarks,
+        bcc: [MailAddress] = [], replyTo: [MailAddress] = [], messageID: String? = nil, references: [String] = [],
+        sentBy: MailAddress? = nil, senderKeyChanged: Bool = false
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -159,6 +195,24 @@ public struct MailMessage: Identifiable, Hashable, Sendable {
         self.proof = proof
         self.delivery = delivery
         self.marks = marks
+        self.bcc = bcc
+        self.replyTo = replyTo
+        self.messageID = messageID
+        self.references = references
+        self.sentBy = sentBy
+        self.senderKeyChanged = senderKeyChanged
+    }
+
+    /// The same message, with what the path it took says about it.
+    func travelled(
+        _ route: MailRoute?, proof: MailProof, sentBy: MailAddress? = nil, marks: MailMarks? = nil, senderKeyChanged: Bool = false
+    ) -> MailMessage {
+        MailMessage(
+            id: id, conversationID: conversationID, from: from, to: to, cc: cc, subject: subject, date: date, body: body,
+            attachments: attachments, route: route, proof: proof, delivery: delivery, marks: marks ?? self.marks,
+            bcc: bcc, replyTo: replyTo, messageID: messageID, references: references, sentBy: sentBy,
+            senderKeyChanged: senderKeyChanged
+        )
     }
 
     /// A stored message whose seal won't open. Its date is the only thing the server keeps.
