@@ -78,4 +78,52 @@ struct MailKeyTests {
     @Test func refusesASeedOfTheWrongLength() {
         #expect(throws: CryptoError.invalidKey) { try MailKey(seed: Data(count: 31)) }
     }
+
+    // MARK: Mail between accounts
+
+    private static let letter = Data("From: dana@usetotality.com\r\nTo: mckay@usetotality.com\r\nSubject: Saturday's hike\r\n\r\nMeet at the Lost Lake trailhead at 7.\r\n".utf8)
+
+    @Test func aDirectMessageOpensForItsRecipient() throws {
+        let mckay = try MailKey(seed: Self.seed)
+        let sealed = try MailKey.sealDirect(Self.letter, to: mckay.publicKey(), from: "dana", recipient: "mckay", message: Self.message)
+        #expect(sealed.first == 1)
+        #expect(sealed.count == 1 + 32 + Self.letter.count + 16)
+        #expect(try mckay.openDirect(sealed, from: "dana", recipient: "mckay", message: Self.message) == Self.letter)
+        #expect(try mckay.openDirect(sealed, from: "Dana", recipient: "MCKAY", message: Self.message) == Self.letter)
+    }
+
+    @Test func aDirectMessageWontOpenForAnotherSenderRecipientOrID() throws {
+        let mckay = try MailKey(seed: Self.seed)
+        let sealed = try MailKey.sealDirect(Self.letter, to: mckay.publicKey(), from: "dana", recipient: "mckay", message: Self.message)
+        #expect(throws: CryptoError.authenticationFailed) { try mckay.openDirect(sealed, from: "sam", recipient: "mckay", message: Self.message) }
+        #expect(throws: CryptoError.authenticationFailed) { try mckay.openDirect(sealed, from: "dana", recipient: "mckayc", message: Self.message) }
+        #expect(throws: CryptoError.authenticationFailed) { try mckay.openDirect(sealed, from: "dana", recipient: "mckay", message: UUID()) }
+        // The name boundaries are fixed, so moving a letter between the names doesn't make a match.
+        #expect(throws: CryptoError.authenticationFailed) { try mckay.openDirect(sealed, from: "danam", recipient: "ckay", message: Self.message) }
+        // Nor does it open as ordinary mail.
+        #expect(throws: CryptoError.authenticationFailed) { try mckay.open(sealed, mailbox: Self.mailbox, message: Self.message) }
+    }
+
+    @Test func aDirectMessageWontOpenWithAnotherKey() throws {
+        let mckay = try MailKey(seed: Self.seed)
+        let sealed = try MailKey.sealDirect(Self.letter, to: mckay.publicKey(), from: "dana", recipient: "mckay", message: Self.message)
+        let other = try MailKey(seed: Data(repeating: 0x4E, count: 32))
+        #expect(throws: CryptoError.authenticationFailed) { try other.openDirect(sealed, from: "dana", recipient: "mckay", message: Self.message) }
+    }
+
+    @Test func sealingToSomethingThatIsntAKeyIsRefused() {
+        #expect(throws: CryptoError.invalidKey) {
+            try MailKey.sealDirect(Self.letter, to: Data(count: 31), from: "dana", recipient: "mckay", message: Self.message)
+        }
+    }
+
+    @Test func aSentCopyOpensWithTheOrdinaryOpenAndNowhereElse() throws {
+        let mckay = try MailKey(seed: Self.seed)
+        let sealed = try mckay.sealOwn(Self.letter, mailbox: Self.mailbox, message: Self.message)
+        #expect(try mckay.open(sealed, mailbox: Self.mailbox, message: Self.message) == Self.letter)
+        #expect(throws: CryptoError.authenticationFailed) { try mckay.open(sealed, mailbox: UUID(), message: Self.message) }
+        #expect(throws: CryptoError.authenticationFailed) {
+            try MailKey(seed: Data(repeating: 0x4E, count: 32)).open(sealed, mailbox: Self.mailbox, message: Self.message)
+        }
+    }
 }
