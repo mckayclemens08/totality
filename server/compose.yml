@@ -128,6 +128,12 @@ services:
     logging:
       driver: none
     networks: [spam]
+    # The image's own check asks the controller, which is off, so this asks the port mail uses.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/11333 && printf 'GET /ping HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q pong <&3"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     volumes:
       - ./rspamd:/etc/rspamd/local.d:ro
 
