@@ -45,25 +45,41 @@ public struct MailSettings: Hashable, Codable, Sendable {
     public var alwaysLoadImages: Set<String>
     /// Written under each new message, reply, and forward. Empty means none.
     public var signature: String
+    /// Each Totality name's public key, lowercased name to key, pinned the first time mail went to or
+    /// came from them. A key that's different later is never trusted on its own. Kept sealed here so
+    /// the pins sync to the person's other devices. A pin is only ever added, never replaced.
+    public var knownKeys: [String: Data]
 
-    public init(folders: [MailOwnFolder] = [], blockedSenders: Set<String> = [], alwaysLoadImages: Set<String> = [], signature: String = "") {
+    public init(
+        folders: [MailOwnFolder] = [], blockedSenders: Set<String> = [], alwaysLoadImages: Set<String> = [], signature: String = "",
+        knownKeys: [String: Data] = [:]
+    ) {
         self.folders = folders
         self.blockedSenders = blockedSenders
         self.alwaysLoadImages = alwaysLoadImages
         self.signature = signature
+        self.knownKeys = knownKeys
     }
 
     private enum CodingKeys: String, CodingKey {
-        case folders, blockedSenders, alwaysLoadImages, signature
+        case folders, blockedSenders, alwaysLoadImages, signature, knownKeys
     }
 
-    /// Settings saved before the signature existed still open, with none.
+    /// Settings saved before the signature or the pins existed still open, with none.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         folders = try container.decode([MailOwnFolder].self, forKey: .folders)
         blockedSenders = try container.decode(Set<String>.self, forKey: .blockedSenders)
         alwaysLoadImages = try container.decode(Set<String>.self, forKey: .alwaysLoadImages)
         signature = try container.decodeIfPresent(String.self, forKey: .signature) ?? ""
+        knownKeys = try container.decodeIfPresent([String: Data].self, forKey: .knownKeys) ?? [:]
+    }
+
+    /// Nothing the person chose, only pins the device learned by itself.
+    var isOnlyPins: Bool {
+        var bare = self
+        bare.knownKeys = [:]
+        return bare == MailSettings()
     }
 }
 

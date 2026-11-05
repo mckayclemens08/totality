@@ -12,6 +12,7 @@ public actor ServerMailStore: MailStore {
     private let account: String
     private let mailboxID: UUID
     private let key: MailKey
+    private let sentKey: MailSentKey
     private let vault: MailVault
     private let server: any MailServer
     private let canPublish: @Sendable () async -> Bool
@@ -37,6 +38,7 @@ public actor ServerMailStore: MailStore {
         self.account = account
         self.mailboxID = mailboxID
         key = try MailKey(root: rootKey)
+        sentKey = MailSentKey(root: rootKey)
         self.vault = vault
         self.server = server
         self.canPublish = canPublish
@@ -86,7 +88,7 @@ public actor ServerMailStore: MailStore {
                 continue
             }
             do {
-                try await server.keep(id: id, sealed: try key.sealOwn(raw, mailbox: mailboxID, message: id))
+                try await server.keep(id: id, sealed: try sentKey.seal(raw, account: mailboxID, message: id))
                 try await vault.kept(id)
             } catch is MailServerError {
                 waiting.insert(id)
@@ -116,12 +118,74 @@ public actor ServerMailStore: MailStore {
                 continue
             }
             // A seal that won't open is kept with no contents, so it shows as unreadable instead of
-            // vanishing, and isn't fetched again and again.
-            let opened = try? key.open(sealed, mailbox: mailboxID, message: entry.id)
-            try await vault.keep(MailStoredMessage(id: entry.id, received: entry.received, raw: opened))
+            // vanishing, and isn't fetched again and again. A Sent copy has its own seal, which only
+            // this person's devices can make; everything else is in the seal anyone can make.
+            let stored: MailStoredMessage
+            if sealed.first == MailSentKey.version {
+                let opened = try? sentKey.open(sealed, account: mailboxID, message: entry.id)
+                stored = MailStoredMessage(id: entry.id, received: entry.received, raw: opened, ownCopy: true)
+            } else {
+                let opened = try? key.open(sealed, mailbox: mailboxID, message: entry.id)
+                let check: SenderCheck
+                do {
+                    check = try await checkSender(opened, message: entry.id)
+                } catch let error as MailServerError where error == .offline || error == .signedOut {
+                    return false
+                } catch is MailServerError {
+                    // The sender's key couldn't be fetched just now, and nothing was pinned to fall
+                    // back on. The next open tries again.
+                    continue
+                }
+                stored = MailStoredMessage(
+                    id: entry.id, received: entry.received, raw: opened, senderKey: check.key, senderKeyChanged: check.changed
+                )
+            }
+            try await vault.keep(stored)
             progress(MailDownload(done: index + 1, total: missing.count))
         }
         return true
+    }
+
+    private struct SenderCheck {
+        var key: Data?
+        var changed = false
+    }
+
+    /// For mail from another Totality account: the key its inner seal opens with, and whether that's
+    /// the key this account pinned for the sender. The inner seal is HPKE in auth mode, so it opens only
+    /// with the public key of whoever sealed it, and the server can't make one for anyone else's key.
+    ///
+    /// - With a pin, the pin is tried first. If the server now gives a different key, or only that
+    ///   different key opens it, the message isn't proved and says the key changed.
+    /// - Without a pin, the server's key is pinned once it opens the message.
+    /// - Nothing opening means no key is kept, so the message shows as unreadable.
+    ///
+    /// Throws only when the key can't be fetched and there's no pin to use instead.
+    private func checkSender(_ opened: Data?, message: UUID) async throws -> SenderCheck {
+        guard let opened, let envelope = MailParser.envelope(opened, ownCopy: false), let sender = envelope.from?.lowercased(),
+              let me = await username()?.lowercased()
+        else { return SenderCheck() }
+        let recipient = (envelope.to ?? me).lowercased()
+        func opens(_ senderKey: Data) -> Bool {
+            (try? key.openDirect(envelope.rest, senderKey: senderKey, from: sender, recipient: recipient, message: message)) != nil
+        }
+        var settings = try await vault.settings() ?? MailSettings()
+        let pinned = settings.knownKeys[sender]
+        let fetched: Data?
+        do {
+            fetched = try await server.recipientKey(sender)
+        } catch let error as MailServerError where pinned != nil && error != .offline && error != .signedOut {
+            fetched = nil
+        }
+        if let pinned {
+            if opens(pinned) { return SenderCheck(key: pinned, changed: fetched.map { $0 != pinned } ?? false) }
+            if let fetched, fetched != pinned, opens(fetched) { return SenderCheck(key: fetched, changed: true) }
+            return SenderCheck(changed: true)
+        }
+        guard let fetched, opens(fetched) else { return SenderCheck() }
+        settings.knownKeys[sender] = fetched
+        try await vault.save(settings, at: now())
+        return SenderCheck(key: fetched)
     }
 
     /// Another device deleted these for good: the server no longer lists them, and it's the same mailbox
@@ -162,24 +226,31 @@ public actor ServerMailStore: MailStore {
     ///   server vouched for, this account, and the server's ID for it. It's proved only when its one
     ///   From address is that sender's, ignoring case and any `+tag`. Otherwise it claims to be from
     ///   someone else, and says who really sent it.
-    /// - A Sent copy is this account's own, sealed by its own device.
+    /// - A Sent copy is this account's own, sealed by its own device with a key only its devices hold.
+    ///   Nothing in the standard seal is ever taken for one, since anyone can seal to a public key.
     private func read(_ stored: MailStoredMessage, me: String?) -> ParsedMail {
         guard let raw = stored.raw else {
             return ParsedMail(message: .unreadable(id: stored.id, date: stored.received, marks: MailMarks(isUnread: true)), attachments: [:])
         }
-        guard let envelope = MailParser.envelope(raw), envelope.from != nil || envelope.sent else {
-            return MailParser.parse(raw, id: stored.id, now: stored.received)
+        guard let envelope = MailParser.envelope(raw, ownCopy: stored.ownCopy), envelope.from != nil || envelope.sent else {
+            return MailParser.parse(raw, id: stored.id, now: stored.received, ownCopy: stored.ownCopy)
         }
         let received = envelope.received ?? stored.received
         if let sender = envelope.from?.lowercased() {
-            guard let me, let inner = try? key.openDirect(envelope.rest, from: sender, recipient: (envelope.to ?? me).lowercased(), message: stored.id) else {
+            guard let me, let senderKey = stored.senderKey,
+                  let inner = try? key.openDirect(
+                      envelope.rest, senderKey: senderKey, from: sender, recipient: (envelope.to ?? me).lowercased(), message: stored.id
+                  )
+            else {
                 return ParsedMail(message: .unreadable(id: stored.id, date: received, marks: envelope.marks), attachments: [:])
             }
             let parsed = MailParser.parseMessage(inner, id: stored.id, received: received, marks: envelope.marks)
             guard !parsed.message.isUnreadable else { return parsed }
-            let proved = parsed.fromLines == 1 && parsed.senders.count == 1 && parsed.senders[0].totalityName == sender
+            let proved = !stored.senderKeyChanged && parsed.fromLines == 1 && parsed.senders.count == 1
+                && parsed.senders[0].totalityName == sender
             let message = parsed.message.travelled(
-                .betweenAccounts, proof: proved ? .proved : .unproved, sentBy: MailAddress(address: MailDomain.address(for: sender))
+                .betweenAccounts, proof: proved ? .proved : .unproved, sentBy: MailAddress(address: MailDomain.address(for: sender)),
+                senderKeyChanged: stored.senderKeyChanged
             )
             return ParsedMail(message: message, attachments: parsed.attachments, senders: parsed.senders, fromLines: parsed.fromLines)
         }
@@ -203,8 +274,14 @@ public actor ServerMailStore: MailStore {
         try await vault.save(marks, at: now())
     }
 
+    /// The screens' copy can be older than the pins this store learned since, and a pin is never lost
+    /// or replaced here, so the pins already kept win.
     public func save(_ settings: MailSettings) async throws {
-        try await vault.save(settings, at: now())
+        var merged = settings
+        if let kept = try await vault.settings() {
+            merged.knownKeys.merge(kept.knownKeys) { _, kept in kept }
+        }
+        try await vault.save(merged, at: now())
     }
 
     /// From the server first, so a message can't come back on the next download. Offline, nothing is
@@ -270,10 +347,13 @@ public actor ServerMailStore: MailStore {
             throw MailStoreError.unavailable
         }
 
+        var settings = try await vault.settings() ?? MailSettings()
+        let pinsBefore = settings.knownKeys
         var outcomes: [MailSendResult.Recipient] = []
         for address in draft.recipients {
-            outcomes.append(MailSendResult.Recipient(address: address, outcome: await deliver(raw, to: address, from: me)))
+            outcomes.append(MailSendResult.Recipient(address: address, outcome: await deliver(raw, to: address, from: me, pins: &settings.knownKeys)))
         }
+        if settings.knownKeys != pinsBefore { try await vault.save(settings, at: now()) }
 
         let delivered = Set(outcomes.filter { $0.outcome == .delivered }.map(\.address.key))
         var sent: UUID?
@@ -283,9 +363,9 @@ public actor ServerMailStore: MailStore {
             let copy = MailWriter.write(draft, from: me, message: messageID, date: date, keepingBcc: true)
             let facts = #"{"version":1,"received":"\#(Self.iso(date))","spam":null,"sent":true}"#
             let opened = Data(facts.utf8) + Data([0x0A]) + copy
-            let stored = MailStoredMessage(id: id, received: date, raw: opened)
+            let stored = MailStoredMessage(id: id, received: date, raw: opened, ownCopy: true)
             do {
-                try await server.keep(id: id, sealed: try key.sealOwn(opened, mailbox: mailboxID, message: id))
+                try await server.keep(id: id, sealed: try sentKey.seal(opened, account: mailboxID, message: id))
                 try await vault.keep(stored)
                 keptCopy = true
             } catch is MailServerError {
@@ -310,13 +390,17 @@ public actor ServerMailStore: MailStore {
         return MailSendResult(recipients: outcomes, sent: sent, keptCopy: keptCopy, remaining: remaining)
     }
 
-    private func deliver(_ raw: Data, to address: MailAddress, from me: String) async -> MailSendResult.Outcome {
+    /// A recipient's key is pinned the first time. A different key later is refused, never sent to:
+    /// it could be the server's own, put there to read the message.
+    private func deliver(_ raw: Data, to address: MailAddress, from me: String, pins: inout [String: Data]) async -> MailSendResult.Outcome {
         guard address.isWellFormed else { return .notAnAddress }
-        guard let name = address.totalityName else { return .outsideNotYet }
+        guard let name = address.totalityName?.lowercased() else { return .outsideNotYet }
         do {
             guard let recipientKey = try await server.recipientKey(name) else { return .noSuchAddress }
+            if let pinned = pins[name], pinned != recipientKey { return .keyChanged }
+            pins[name] = recipientKey
             let id = UUID()
-            let sealed = try MailKey.sealDirect(raw, to: recipientKey, from: me, recipient: name, message: id)
+            let sealed = try key.sealDirect(raw, to: recipientKey, from: me, recipient: name, message: id)
             switch try await server.deliver(to: name, id: id, sealed: sealed) {
             case .delivered: return .delivered
             case .noSuchAddress: return .noSuchAddress

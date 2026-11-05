@@ -171,13 +171,16 @@ public struct MailMessage: Identifiable, Hashable, Sendable {
     /// For mail between Totality accounts, the account that really sent it, which the server vouches
     /// for. When it differs from `from`, the message claims to be from someone else.
     public let sentBy: MailAddress?
+    /// For mail between Totality accounts, the sender's key wasn't the one pinned for them, so it can't
+    /// be proved and says why.
+    public let senderKeyChanged: Bool
 
     public init(
         id: UUID = UUID(), conversationID: UUID, from: MailAddress, to: [MailAddress], cc: [MailAddress] = [],
         subject: String, date: Date, body: MailBody, attachments: [MailAttachment] = [],
         route: MailRoute?, proof: MailProof = .proved, delivery: MailDelivery = .fine, marks: MailMarks,
         bcc: [MailAddress] = [], replyTo: [MailAddress] = [], messageID: String? = nil, references: [String] = [],
-        sentBy: MailAddress? = nil
+        sentBy: MailAddress? = nil, senderKeyChanged: Bool = false
     ) {
         self.id = id
         self.conversationID = conversationID
@@ -197,14 +200,18 @@ public struct MailMessage: Identifiable, Hashable, Sendable {
         self.messageID = messageID
         self.references = references
         self.sentBy = sentBy
+        self.senderKeyChanged = senderKeyChanged
     }
 
     /// The same message, with what the path it took says about it.
-    func travelled(_ route: MailRoute?, proof: MailProof, sentBy: MailAddress? = nil, marks: MailMarks? = nil) -> MailMessage {
+    func travelled(
+        _ route: MailRoute?, proof: MailProof, sentBy: MailAddress? = nil, marks: MailMarks? = nil, senderKeyChanged: Bool = false
+    ) -> MailMessage {
         MailMessage(
             id: id, conversationID: conversationID, from: from, to: to, cc: cc, subject: subject, date: date, body: body,
             attachments: attachments, route: route, proof: proof, delivery: delivery, marks: marks ?? self.marks,
-            bcc: bcc, replyTo: replyTo, messageID: messageID, references: references, sentBy: sentBy
+            bcc: bcc, replyTo: replyTo, messageID: messageID, references: references, sentBy: sentBy,
+            senderKeyChanged: senderKeyChanged
         )
     }
 

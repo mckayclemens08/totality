@@ -706,7 +706,9 @@ describe('mail between accounts', () => {
   const DEVICE_SEALED = Buffer.concat([Buffer.from([1]), Buffer.alloc(32, 7), Buffer.from('a sealed note about the engine')])
   const deliver = (from, fields) => ask(from.token, 'POST', '/mail/deliver', JSON.stringify(fields))
   const letter = (to, id = randomUUID(), sealed = DEVICE_SEALED) => ({ to: to.name, id, sealed: sealed.toString('base64') })
-  const keep = (from, id = randomUUID(), sealed = DEVICE_SEALED) =>
+  // A Sent copy as a device seals it, under a key from the content key. The server never opens it either.
+  const SENT_SEALED = Buffer.concat([Buffer.from([2]), Buffer.alloc(12, 3), Buffer.from('a sealed copy of the note about the engine')])
+  const keep = (from, id = randomUUID(), sealed = SENT_SEALED) =>
     ask(from.token, 'POST', '/mail/keep', JSON.stringify({ id, sealed: sealed.toString('base64') }))
   const listed = async (who) => JSON.parse((await ask(who.token, 'GET', '/mail/list')).body).messages.map(({ id }) => id)
   const factsAndBody = (form) => {
@@ -802,20 +804,20 @@ describe('mail between accounts', () => {
       checkSignIn: async (token) => accounts.get(token) ?? null,
       checkSpam: async () => null,
       mailboxes: Object.assign(Object.create(mailboxes), {
-        size: async () => MAILBOX_LIMIT - DEVICE_SEALED.length,
+        size: async () => MAILBOX_LIMIT - Math.min(DEVICE_SEALED.length, SENT_SEALED.length),
         add: async () => assert.fail('stored past the limit'),
       }),
     })
     const post = (path, body) => full.handle('POST', path, `Bearer ${user1.token}`, undefined, async () => Buffer.from(body))
     assert.equal(await post('/mail/deliver', JSON.stringify(letter(user2))), 507)
-    assert.equal(await post('/mail/keep', JSON.stringify({ id: randomUUID(), sealed: Buffer.concat([DEVICE_SEALED, Buffer.alloc(1)]).toString('base64') })), 507)
+    assert.equal(await post('/mail/keep', JSON.stringify({ id: randomUUID(), sealed: Buffer.concat([SENT_SEALED, Buffer.alloc(1)]).toString('base64') })), 507)
   })
 
   test('a message past the limit is a 413', async () => {
     const [user1, user2] = [await person(), await person()]
     const tooBig = Buffer.alloc(MAX_MESSAGE + 1, 1)
     assert.equal((await deliver(user1, letter(user2, randomUUID(), tooBig))).status, 413)
-    assert.equal((await keep(user1, randomUUID(), tooBig)).status, 413)
+    assert.equal((await keep(user1, randomUUID(), Buffer.alloc(MAX_MESSAGE + 1, 2))).status, 413)
     assert.equal((await gate.respond('POST', '/mail/deliver', `Bearer ${user1.token}`, undefined, async () => null)).status, 413)
     assert.deepEqual(await listed(user2), [])
     assert.ok(MAX_SEALED_REQUEST > Math.ceil(MAX_MESSAGE / 3) * 4)
@@ -836,17 +838,28 @@ describe('mail between accounts', () => {
   test('a Sent copy is kept exactly as sent, in the caller\'s own box', async () => {
     const user1 = await person()
     const id = randomUUID()
-    const own = seal(Buffer.from('To: grace_2@usetotality.com\r\n\r\nSee you Tuesday.\r\n'), user1.keys.publicKey, user1.mailbox, id)
-    assert.equal((await keep(user1, id, own)).status, 201)
+    assert.equal((await keep(user1, id)).status, 201)
     const reply = await ask(user1.token, 'GET', `/mail/message/${id}`)
-    assert.deepEqual(reply.body, own)
-    assert.equal(opened(reply.body, user1.keys, user1.mailbox, id).includes('Tuesday'), true)
+    assert.deepEqual(reply.body, SENT_SEALED)
+  })
+
+  // Anyone can seal version 1 to a public key, so a stolen sign-in could plant mail claiming a sender,
+  // or claiming to be a Sent copy, if keep took it. It doesn't, however well-formed it is.
+  test('keep refuses version 1, even a real seal to the caller\'s own key that claims a sender', async () => {
+    const user1 = await person()
+    const id = randomUUID()
+    const forged = Buffer.from('{"version":1,"received":"2026-11-05T14:30:00.000Z","spam":null,"from":"mckay","to":"grace_1"}\n' +
+      'From: mckay@usetotality.com\r\n\r\nPlease wire the deposit today.\r\n')
+    for (const sealed of [seal(forged, user1.keys.publicKey, user1.mailbox, id), DEVICE_SEALED]) {
+      assert.equal((await keep(user1, id, sealed)).status, 400)
+    }
+    assert.deepEqual(await listed(user1), [])
   })
 
   test('user 1 cannot keep anything in user 2\'s box', async () => {
     const [user1, user2] = [await person(), await person()]
     const id = randomUUID()
-    const smuggled = JSON.stringify({ id, sealed: DEVICE_SEALED.toString('base64'), to: user2.name, mailbox: user2.mailbox,
+    const smuggled = JSON.stringify({ id, sealed: SENT_SEALED.toString('base64'), to: user2.name, mailbox: user2.mailbox,
       name: user2.name })
     assert.equal((await ask(user1.token, 'POST', '/mail/keep', smuggled)).status, 201)
     assert.deepEqual(await listed(user2), [])
@@ -859,8 +872,8 @@ describe('mail between accounts', () => {
     await assert.rejects(readdir(keyless.folder), { code: 'ENOENT' })
   })
 
-  for (const [label, sealed] of [['an empty file', Buffer.alloc(0)], ['a bare header', Buffer.concat([Buffer.from([1]), Buffer.alloc(32)])],
-    ['another version', Buffer.concat([Buffer.from([2]), Buffer.alloc(64)])]]) {
+  for (const [label, sealed] of [['an empty file', Buffer.alloc(0)], ['a bare header', Buffer.concat([Buffer.from([2]), Buffer.alloc(28)])],
+    ['version 1', Buffer.concat([Buffer.from([1]), Buffer.alloc(64)])], ['another version', Buffer.concat([Buffer.from([3]), Buffer.alloc(64)])]]) {
     test(`keeping ${label} is refused`, async () => {
       const user1 = await person()
       assert.equal((await keep(user1, randomUUID(), sealed)).status, 400)
@@ -928,7 +941,7 @@ describe('mail between accounts', () => {
     })
     const post = (path, body) => broken.handle('POST', path, `Bearer ${user1.token}`, undefined, async () => Buffer.from(body))
     assert.equal(await post('/mail/deliver', JSON.stringify(letter(user2))), 503)
-    assert.equal(await post('/mail/keep', JSON.stringify({ id: randomUUID(), sealed: good })), 503)
+    assert.equal(await post('/mail/keep', JSON.stringify({ id: randomUUID(), sealed: SENT_SEALED.toString('base64') })), 503)
   })
 
   test('each path takes only its own method', async () => {

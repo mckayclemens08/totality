@@ -94,6 +94,9 @@ export function aead(key, nonce, plaintext, associated) {
 }
 
 const SEAL_VERSION = 1
+/** A Sent copy: version 2 (1 byte) · nonce (12) · ciphertext and tag (16 or more). Only a device seals these. */
+const SENT_VERSION = 2
+const SENT_HEADER = 1 + 12 + 16
 const SEAL_INFO = Buffer.from('totality/mail/v1')
 
 function uuidBytes(id) {
@@ -445,15 +448,18 @@ export class Arrivals {
     }
   }
 
-  /** A Sent copy the device sealed to itself, kept exactly as it came, and only ever in the caller's own
-   *  mailbox. The server can't check what it was sealed to, only that it looks like a sealed file. A
-   *  mailbox exists once its key does, so an account without one has nowhere to keep it. */
+  /** A Sent copy, kept exactly as it came, and only ever in the caller's own mailbox. It has its own
+   *  format, version 2, sealed with a key that comes from the person's content key, which this server
+   *  never sees. Version 1 is what this server seals to a public key, which anyone can do, so a stolen
+   *  sign-in could use it to plant mail that looks like it came from someone. Only version 2 is taken.
+   *  The server can't check the seal, only its shape. A mailbox exists once its key does, so an
+   *  account without one has nowhere to keep it. */
   async keep(account, read) {
     const given = await this.sealedRequest(read)
     if (given.status) return given.status
     const { id, bytes } = given
     try {
-      if (bytes.length <= 33 || bytes[0] !== SEAL_VERSION) return 400
+      if (bytes.length <= SENT_HEADER || bytes[0] !== SENT_VERSION) return 400
       if (bytes.length > MAX_MESSAGE) return 413
       if (!(await this.mailboxes.hasKey(account.mailbox))) return 404
       const stored = await this.mailboxes.size(account.mailbox)

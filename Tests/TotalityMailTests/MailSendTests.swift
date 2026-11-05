@@ -47,9 +47,26 @@ private actor PostOffice {
         return count
     }
 
+    /// Stands in for a server that hands out a key of its own for a name, to read or forge its mail.
+    private var swappedKeys: [String: Data] = [:]
+    func swapKey(of name: String, for key: Data) { swappedKeys[name] = key }
+
     func key(of name: String) throws -> Data? {
         if isOffline { throw MailServerError.offline }
-        return boxes[box(for: name)]?.publicKey
+        return swappedKeys[name] ?? boxes[box(for: name)]?.publicKey
+    }
+
+    /// Puts any file at all in a box, as a stolen sign-in or the server itself could.
+    func plant(_ sealed: Data, in name: String, id: UUID, at date: Date) {
+        boxes[name]?.files[id] = (sealed, date)
+    }
+
+    /// Wraps what someone sealed in the standard outer seal with a line naming whoever it likes, as the
+    /// server itself could.
+    func mint(_ inner: Data, to name: String, claiming sender: String, id: UUID, at date: Date) throws {
+        guard let box = boxes[name] else { return }
+        let facts = #"{"version":1,"received":"\#(Self.iso(date))","spam":null,"from":"\#(sender)","to":"\#(name)"}"#
+        plant(try Self.outerSeal(Data(facts.utf8) + Data([0x0A]) + inner, to: box.publicKey, mailbox: box.account, message: id), in: name, id: id, at: date)
     }
 
     func deliver(from sender: String, to name: String, id: UUID, sealed: Data, at date: Date) throws -> MailDeliveryAnswer {
@@ -78,6 +95,16 @@ private actor PostOffice {
         var sender = try HPKE.Sender(recipientKey: recipient, ciphersuite: .Curve25519_SHA256_ChachaPoly, info: info)
         let ids = withUnsafeBytes(of: mailbox.uuid) { Data($0) } + withUnsafeBytes(of: message.uuid) { Data($0) }
         return Data([1]) + sender.encapsulatedKey + (try sender.seal(plaintext, authenticating: info + ids))
+    }
+
+    /// What anyone holding a public key can make: the direct format with the right AAD, in HPKE base
+    /// mode, so it names a sender without proving it.
+    static func baseModeDirect(_ letter: Data, to publicKey: Data, from sender: String, recipient name: String, message: UUID) throws -> Data {
+        let info = Data("totality/mail-direct/v2".utf8)
+        let recipient = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: publicKey)
+        var hpke = try HPKE.Sender(recipientKey: recipient, ciphersuite: .Curve25519_SHA256_ChachaPoly, info: info)
+        let aad = info + Data(sender.utf8) + Data([0]) + Data(name.utf8) + Data([0]) + withUnsafeBytes(of: message.uuid) { Data($0) }
+        return Data([1]) + hpke.encapsulatedKey + (try hpke.seal(letter, authenticating: aad))
     }
 
     static func iso(_ date: Date) -> String {
@@ -181,7 +208,7 @@ private struct Person {
         #expect(received.marks.isUnread)
         #expect(received.bcc.isEmpty, "Bcc never reaches anyone")
         #expect(received.body == .plain(draft.body))
-        #expect(MailWording.route(.betweenAccounts) == "Sealed by your device. Totality's servers can't read it.")
+        #expect(MailWording.route(for: received) == "Sealed by the sender's device. Totality's servers carry it but can't open it.")
         #expect(MailWording.warning(for: received) == nil)
         let permit = try #require(received.attachments.first)
         #expect(permit.name == "permit.txt")
@@ -194,6 +221,8 @@ private struct Person {
         #expect(!sent.marks.isUnread)
         #expect(sent.route == .betweenAccounts)
         #expect(sent.bcc.map(\.address) == ["mckay+archive@usetotality.com"])
+        #expect(MailWording.route(for: sent) == "Sealed by your device. Totality's servers can't read it.")
+        #expect(await office.files(of: "mckay")[sent.id]?.sealed.first == MailSentKey.version, "The Sent copy is in its own format")
         #expect(mailbox.conversations(in: .folder(.sent)).count == 1)
         #expect(mailbox.messages.contains { $0.marks.folder == .inbox && $0.subject == "Lost Lake on Saturday" })
 
@@ -228,18 +257,18 @@ private struct Person {
     @Test("A From line naming someone other than the sender isn't proved, and says who really sent it")
     func forgedFrom() async throws {
         let office = PostOffice()
-        _ = try await person("mckay", at: office)
+        let mckay = try MailKey(root: try await person("mckay", at: office).root)
         let dana = try await person("dana", at: office)
         // mckay's device writes a message claiming to be from sam, sealed honestly as from mckay.
         for (id, from) in [(UUID(), "Sam Ortiz <sam@usetotality.com>"), (UUID(), "mckay@usetotality.com, sam@usetotality.com")] {
             let raw = Data("From: \(from)\r\nTo: dana@usetotality.com\r\nSubject: Change of plan \(id)\r\n\r\nSend the permit fee to me instead.\r\n".utf8)
-            let sealed = try MailKey.sealDirect(raw, to: try #require(try await office.key(of: "dana")), from: "mckay", recipient: "dana", message: id)
+            let sealed = try mckay.sealDirect(raw, to: try #require(try await office.key(of: "dana")), from: "mckay", recipient: "dana", message: id)
             _ = try await office.deliver(from: "mckay", to: "dana", id: id, sealed: sealed, at: date)
         }
         // A +tag and a capital letter are still mckay.
         let tagged = UUID()
         let raw = Data("From: McKay <McKay+Hikes@usetotality.com>\r\nTo: dana@usetotality.com\r\nSubject: Tagged\r\n\r\nStill me.\r\n".utf8)
-        let sealed = try MailKey.sealDirect(raw, to: try #require(try await office.key(of: "dana")), from: "mckay", recipient: "dana", message: tagged)
+        let sealed = try mckay.sealDirect(raw, to: try #require(try await office.key(of: "dana")), from: "mckay", recipient: "dana", message: tagged)
         _ = try await office.deliver(from: "mckay", to: "dana", id: tagged, sealed: sealed, at: date)
 
         let messages = try await inbox(of: dana)
@@ -270,15 +299,179 @@ private struct Person {
     @Test("Mail sealed for one person won't open for another, even if the server moves it")
     func cantBeMoved() async throws {
         let office = PostOffice()
-        _ = try await person("mckay", at: office)
+        let mckay = try MailKey(root: try await person("mckay", at: office).root)
         let dana = try await person("dana", at: office)
         let id = UUID()
         let raw = Data("From: mckay@usetotality.com\r\nTo: priya@usetotality.com\r\nSubject: For Priya\r\n\r\nPrivate.\r\n".utf8)
         // Sealed to dana's key but naming priya as the recipient, as if the server had redirected it.
-        let sealed = try MailKey.sealDirect(raw, to: try #require(try await office.key(of: "dana")), from: "mckay", recipient: "priya", message: id)
+        let sealed = try mckay.sealDirect(raw, to: try #require(try await office.key(of: "dana")), from: "mckay", recipient: "priya", message: id)
         _ = try await office.deliver(from: "mckay", to: "dana", id: id, sealed: sealed, at: date)
         let moved = try await dana.store.open { _ in }.mailbox.messages
         #expect(moved.count == 1 && moved.allSatisfy { $0.isUnreadable })
+    }
+
+    // MARK: Forged mail
+
+    private func standardFacts(_ date: Date, extra: String) -> Data {
+        Data(#"{"version":1,"received":"\#(PostOffice.iso(date))","spam":null,\#(extra)}"#.utf8) + Data([0x0A])
+    }
+
+    @Test("A standard seal claiming to be a Sent copy lands in the Inbox, not in Sent")
+    func plantedSentCopyIsntSent() async throws {
+        let office = PostOffice()
+        let mckay = try await person("mckay", at: office)
+        let id = UUID()
+        let mckayKey = try #require(try await office.key(of: "mckay"))
+        let raw = standardFacts(date, extra: #""sent":true"#)
+            + Data("From: mckay@usetotality.com\r\nTo: dana@usetotality.com\r\nSubject: Wire it today\r\n\r\nI already sent the account number.\r\n".utf8)
+        // Anyone can make this: it's sealed to mckay's public key, under his own mailbox ID.
+        await office.plant(try PostOffice.outerSeal(raw, to: mckayKey, mailbox: mckay.account, message: id), in: "mckay", id: id, at: date)
+        let message = try #require(try await mckay.store.open { _ in }.mailbox.messages.first { $0.id == id })
+        #expect(message.marks.folder == .inbox)
+        #expect(message.marks.isUnread)
+        #expect(message.route == .outside)
+        #expect(message.proof == .unproved)
+    }
+
+    @Test("A standard seal from a third party naming a Totality sender isn't proved")
+    func thirdPartyClaimingASenderIsntProved() async throws {
+        let office = PostOffice()
+        let mckay = try await person("mckay", at: office)
+        _ = try await person("dana", at: office)
+        let mckayKey = try #require(try await office.key(of: "mckay"))
+        let letter = Data("From: dana@usetotality.com\r\nTo: mckay@usetotality.com\r\nSubject: New bank details\r\n\r\nUse the new account.\r\n".utf8)
+        // The thief can't seal as dana, only to mckay: base mode, or auth mode with a key of their own.
+        let thief = try MailKey(root: try ContentRootKey.generate())
+        let base = UUID(), own = UUID()
+        let baseInner = try PostOffice.baseModeDirect(letter, to: mckayKey, from: "dana", recipient: "mckay", message: base)
+        let ownInner = try thief.sealDirect(letter, to: mckayKey, from: "dana", recipient: "mckay", message: own)
+        for (id, inner) in [(base, baseInner), (own, ownInner)] {
+            let raw = standardFacts(date, extra: #""from":"dana","to":"mckay""#) + inner
+            await office.plant(try PostOffice.outerSeal(raw, to: mckayKey, mailbox: mckay.account, message: id), in: "mckay", id: id, at: date)
+        }
+        let messages = try await mckay.store.open { _ in }.mailbox.messages
+        #expect(messages.count == 2)
+        #expect(messages.allSatisfy { $0.isUnreadable })
+    }
+
+    @Test("A Sent copy sealed under another content key won't open")
+    func sentCopyFromAnotherKeyWontOpen() async throws {
+        let office = PostOffice()
+        let mckay = try await person("mckay", at: office)
+        let id = UUID()
+        let raw = standardFacts(date, extra: #""sent":true"#) + Data("To: dana@usetotality.com\r\nSubject: Planted\r\n\r\nNot mine.\r\n".utf8)
+        let planted = try MailSentKey(root: try ContentRootKey.generate()).seal(raw, account: mckay.account, message: id)
+        await office.plant(planted, in: "mckay", id: id, at: date)
+        let message = try #require(try await mckay.store.open { _ in }.mailbox.messages.first { $0.id == id })
+        #expect(message.isUnreadable)
+        #expect(message.marks.folder != .sent)
+    }
+
+    @Test("Mail the server mints in someone's name isn't proved")
+    func serverMintedMailIsntProved() async throws {
+        let office = PostOffice()
+        _ = try await person("mckay", at: office)
+        let dana = try await person("dana", at: office)
+        let danaKey = try #require(try await office.key(of: "dana"))
+        let letter = Data("From: mckay@usetotality.com\r\nTo: dana@usetotality.com\r\nSubject: Permit fee\r\n\r\nPay it to this account instead.\r\n".utf8)
+        let server = try MailKey(root: try ContentRootKey.generate())
+        let base = UUID(), wrongKey = UUID()
+        let baseInner = try PostOffice.baseModeDirect(letter, to: danaKey, from: "mckay", recipient: "dana", message: base)
+        try await office.mint(baseInner, to: "dana", claiming: "mckay", id: base, at: date)
+        try await office.mint(
+            try server.sealDirect(letter, to: danaKey, from: "mckay", recipient: "dana", message: wrongKey), to: "dana", claiming: "mckay", id: wrongKey, at: date
+        )
+        let messages = try await dana.store.open { _ in }.mailbox.messages
+        #expect(messages.count == 2)
+        #expect(messages.allSatisfy { $0.isUnreadable })
+        #expect(!messages.contains { $0.proof == .proved && !$0.isUnreadable })
+    }
+
+    @Test("A recipient whose key changed since the first message is refused and reported")
+    func changedKeyOnSendIsRefused() async throws {
+        let office = PostOffice()
+        let mckay = try await person("mckay", at: office)
+        let dana = try await person("dana", at: office)
+        #expect(try await mckay.store.send(MailDraft(to: [dana.address], subject: "Saturday", body: "Meet at 7.")).deliveredToEveryone)
+        let pinned = try #require(try await mckay.vault.settings()?.knownKeys["dana"])
+        let danaKey = try await office.key(of: "dana")
+        #expect(pinned == danaKey)
+
+        // The server now hands out its own key for dana, to read what's sent to her.
+        let server = try MailKey(root: try ContentRootKey.generate())
+        await office.swapKey(of: "dana", for: try server.publicKey())
+        let draft = MailDraft(to: [dana.address], subject: "Sunday", body: "The gate code is 4471.")
+        let before = await office.deliveries
+        let result = try await mckay.store.send(draft)
+        #expect(result.recipients == [.init(address: dana.address, outcome: .keyChanged)])
+        #expect(result.sent == nil)
+        #expect(result.remaining == draft)
+        #expect(await office.deliveries == before)
+        #expect(try await mckay.vault.settings()?.knownKeys["dana"] == pinned, "The pin is never replaced")
+        #expect(MailWording.outcome(.keyChanged).contains("This person's key changed"))
+    }
+
+    @Test("A sender whose key changed since the first message isn't proved, and says so")
+    func changedKeyOnReceiveWarns() async throws {
+        let office = PostOffice()
+        let mckay = try await person("mckay", at: office)
+        let dana = try await person("dana", at: office)
+        #expect(try await mckay.store.send(MailDraft(to: [dana.address], subject: "Saturday", body: "Meet at 7.")).deliveredToEveryone)
+        #expect(try await inbox(of: dana).first?.proof == .proved)
+        #expect(try await dana.vault.settings()?.knownKeys["mckay"] != nil, "Pinned on first success")
+
+        // The server swaps mckay's key for its own and mints a message from him with it.
+        let server = try MailKey(root: try ContentRootKey.generate())
+        await office.swapKey(of: "mckay", for: try server.publicKey())
+        let id = UUID()
+        let danaKey = try #require(try await office.key(of: "dana"))
+        let letter = Data("From: mckay@usetotality.com\r\nTo: dana@usetotality.com\r\nSubject: Change of plan\r\n\r\nSend the permit fee to this account.\r\n".utf8)
+        try await office.mint(try server.sealDirect(letter, to: danaKey, from: "mckay", recipient: "dana", message: id), to: "dana", claiming: "mckay", id: id, at: date)
+
+        let changed = try #require(try await inbox(of: dana).first { $0.id == id })
+        #expect(!changed.isUnreadable)
+        #expect(changed.proof == .unproved)
+        #expect(changed.senderKeyChanged)
+        let warning = try #require(MailWording.warning(for: changed))
+        #expect(warning.contains("key has changed"))
+        #expect(warning.contains("mckay@usetotality.com"))
+
+        // Mail mckay really sealed, with the key that was pinned, is unproved too while the server
+        // hands out another: the pin opens it, but the server's answer doesn't agree.
+        #expect(try await mckay.store.send(MailDraft(to: [dana.address], subject: "Really me", body: "Ignore that.")).deliveredToEveryone)
+        let real = try #require(try await inbox(of: dana).first { $0.subject == "Really me" })
+        #expect(real.proof == .unproved)
+        #expect(real.senderKeyChanged)
+    }
+
+    @Test("Pins sync to the person's other devices, and the screens can't drop them")
+    func pinsSync() async throws {
+        let office = PostOffice()
+        let mckay = try await person("mckay", at: office)
+        let dana = try await person("dana", at: office)
+        _ = try await mckay.store.send(MailDraft(to: [dana.address], subject: "Saturday", body: "Meet at 7."))
+        let pins = try #require(try await mckay.vault.settings()?.knownKeys)
+        let danaKey = try await office.key(of: "dana")
+        #expect(pins["dana"] == danaKey)
+
+        // Settings saved from an older copy keep the pins.
+        try await mckay.store.save(MailSettings(signature: "McKay"))
+        #expect(try await mckay.vault.settings()?.knownKeys == pins)
+        #expect(try await mckay.vault.settings()?.signature == "McKay")
+
+        // The sealed settings carry them to another device.
+        let id = MailVault.settingsID(account: mckay.account.uuidString.lowercased())
+        let object = try #require(try await mckay.vault.verifiedObject(id))
+        let mac = MailVault(store: MailMemoryStore(), rootKey: mckay.root, account: mckay.account.uuidString.lowercased())
+        try await mac.store(object, ifLocalHash: nil)
+        #expect(try await mac.settings()?.knownKeys == pins)
+
+        // A new device that has only pinned keys doesn't wipe the settings the person chose.
+        let phone = MailVault(store: MailMemoryStore(), rootKey: mckay.root, account: mckay.account.uuidString.lowercased())
+        try await phone.save(MailSettings(knownKeys: ["sam": Data(repeating: 1, count: 32)]), at: date.addingTimeInterval(60))
+        let onlyPins = try #require(try await phone.verifiedObject(id))
+        #expect(try await mckay.vault.resolveConflict(local: object, remote: onlyPins) == .keepLocal)
+        #expect(try await phone.resolveConflict(local: onlyPins, remote: object) == .keepRemote)
     }
 
     // MARK: Who it goes to

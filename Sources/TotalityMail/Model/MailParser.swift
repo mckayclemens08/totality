@@ -24,9 +24,10 @@ public enum MailParser {
     static let maxInlineBytes = 8 * 1_024 * 1_024
 
     /// `id` is the server's name for the message, which is also what the seal authenticated. `now` is
-    /// the date only when the server's own line can't be read.
-    public static func parse(_ opened: Data, id: UUID, now: Date = Date()) -> ParsedMail {
-        guard let envelope = envelope(opened) else {
+    /// the date only when the server's own line can't be read. `ownCopy` says it came out of this
+    /// person's own Sent seal, which is the only place a line saying "sent" is believed.
+    public static func parse(_ opened: Data, id: UUID, now: Date = Date(), ownCopy: Bool = false) -> ParsedMail {
+        guard let envelope = envelope(opened, ownCopy: ownCopy) else {
             return ParsedMail(message: .unreadable(id: id, date: now, marks: MailMarks(isUnread: true)), attachments: [:])
         }
         let received = envelope.received ?? now
@@ -58,14 +59,19 @@ public enum MailParser {
         }
     }
 
-    static func envelope(_ opened: Data) -> Envelope? {
+    /// What the line says counts only as far as the seal it came out of vouches for it. Anyone can seal
+    /// to a public key, so a line from the standard seal is never a Sent copy, whatever it says: it's
+    /// Inbox or Spam. A Sent copy's own seal only this person's devices can make, so there it's never
+    /// from another account, whatever it says.
+    static func envelope(_ opened: Data, ownCopy: Bool) -> Envelope? {
         guard let newline = opened.firstIndex(of: 0x0A),
               let facts = try? JSONDecoder().decode(Facts.self, from: opened[opened.startIndex..<newline]),
               facts.version == 1
         else { return nil }
         return Envelope(
-            received: isoDate(facts.received), flagged: facts.spam?.flagged == true, from: facts.from, to: facts.to,
-            sent: facts.sent == true, rest: Data(opened[(newline + 1)...])
+            received: isoDate(facts.received), flagged: facts.spam?.flagged == true,
+            from: ownCopy ? nil : facts.from, to: ownCopy ? nil : facts.to,
+            sent: ownCopy && facts.sent == true, rest: Data(opened[(newline + 1)...])
         )
     }
 

@@ -323,7 +323,7 @@ private actor CountingStore: MailStore {
         #expect(composer.routeNote?.isSealed == true)
         composer.add(sam, to: .cc)
         #expect(composer.routeNote?.text == MailWording.outsideNotYet)
-        for outcome: MailSendResult.Outcome in [.delivered, .noSuchAddress, .outsideNotYet, .notAnAddress, .recipientFull, .tooBig, .offline, .failed] {
+        for outcome: MailSendResult.Outcome in [.delivered, .noSuchAddress, .outsideNotYet, .notAnAddress, .recipientFull, .tooBig, .offline, .failed, .keyChanged] {
             #expect(!MailWording.outcome(outcome).localizedCaseInsensitiveContains("end-to-end"))
         }
     }

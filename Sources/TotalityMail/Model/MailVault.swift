@@ -1,18 +1,45 @@
 import Foundation
 import TotalityCore
 
-/// A message as this device keeps it: what `MailKey` opened, exactly as it came, re-sealed with the
-/// content key so a key move carries it along. `raw` is nil when the server's seal wouldn't open, so
-/// the date is all that's known and it isn't fetched again and again.
+/// A message as this device keeps it: what `MailKey` or `MailSentKey` opened, exactly as it came,
+/// re-sealed with the content key so a key move carries it along. `raw` is nil when the server's seal
+/// wouldn't open, so the date is all that's known and it isn't fetched again and again.
 public struct MailStoredMessage: Codable, Equatable, Sendable {
     public let id: UUID
     public let received: Date
     public let raw: Data?
+    /// This account's own Sent copy: written on this device, or opened from the format only this
+    /// person's devices can seal. Only then does the line above the message count when it says "sent".
+    public let ownCopy: Bool
+    /// For mail from another Totality account, the sender's public key its inner seal was checked
+    /// against. Nil when no key was found, so it can't be opened.
+    public let senderKey: Data?
+    /// The key the server gave for the sender wasn't the one this account pinned for them, so the
+    /// message is never shown as proved.
+    public let senderKeyChanged: Bool
 
-    public init(id: UUID, received: Date, raw: Data?) {
+    public init(id: UUID, received: Date, raw: Data?, ownCopy: Bool = false, senderKey: Data? = nil, senderKeyChanged: Bool = false) {
         self.id = id
         self.received = received
         self.raw = raw
+        self.ownCopy = ownCopy
+        self.senderKey = senderKey
+        self.senderKeyChanged = senderKeyChanged
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, received, raw, ownCopy, senderKey, senderKeyChanged
+    }
+
+    /// Kept before these existed, it's nobody's own copy and has no sender key, so it claims nothing.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        received = try container.decode(Date.self, forKey: .received)
+        raw = try container.decodeIfPresent(Data.self, forKey: .raw)
+        ownCopy = try container.decodeIfPresent(Bool.self, forKey: .ownCopy) ?? false
+        senderKey = try container.decodeIfPresent(Data.self, forKey: .senderKey)
+        senderKeyChanged = try container.decodeIfPresent(Bool.self, forKey: .senderKeyChanged) ?? false
     }
 }
 
@@ -471,8 +498,17 @@ extension MailVault: SyncArea {
 
     /// The newest wins. One message's marks or one set of settings is small, and the screens can't show
     /// a second copy of either, so keeping one would only hide it.
+    ///
+    /// Settings that hold only pins a device learned by itself never beat settings the person chose,
+    /// whatever their dates: a new device pins keys as its first mail arrives, before sync has brought
+    /// the folders and signature, and mustn't wipe them. Its pins are learned again on the next contact.
     public func resolveConflict(local: SealedObject, remote: SealedObject) throws -> ConflictResolution {
         guard local.kind == remote.kind else { throw CryptoError.authenticationFailed }
+        if local.kind == .mailSettings {
+            let mine = try openedSettings(id: local.id, sealed: local.meta).settings
+            let theirs = try openedSettings(id: remote.id, sealed: remote.meta).settings
+            if mine.isOnlyPins != theirs.isOnlyPins { return mine.isOnlyPins ? .keepRemote : .keepLocal }
+        }
         return try updatedAt(local) >= updatedAt(remote) ? .keepLocal : .keepRemote
     }
 }

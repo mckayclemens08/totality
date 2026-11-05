@@ -4,7 +4,10 @@ import Foundation
 /// 37, and they have to stay literally true: nothing here may call mail end-to-end encrypted until
 /// people can verify each other's keys.
 public enum MailWording {
+    /// What you send to another account, and your Sent copy of it.
     public static let betweenAccounts = "Sealed by your device. Totality's servers can't read it."
+    /// What another account sent you. Their device sealed it, not yours.
+    public static let betweenAccountsReceived = "Sealed by the sender's device. Totality's servers carry it but can't open it."
     public static let outside = "Email isn't end-to-end encrypted. Totality's server handles it as it arrives or leaves, and so do Cloudflare and the mail servers it passes through. Cloudflare's log keeps the subject and addresses of mail to and from outside. The stored copy is sealed."
 
     public static func route(_ route: MailRoute) -> String {
@@ -12,6 +15,14 @@ public enum MailWording {
         case .betweenAccounts: betweenAccounts
         case .outside: outside
         }
+    }
+
+    /// The line under a message. Mail between accounts says whose device sealed it: only a message that
+    /// arrived from another account names the account that sent it.
+    public static func route(for message: MailMessage) -> String? {
+        guard let route = message.route else { return nil }
+        if route == .betweenAccounts, message.sentBy != nil { return betweenAccountsReceived }
+        return self.route(route)
     }
 
     /// The sender's name can say anything, so this names the domain, which is what the checks looked at.
@@ -24,9 +35,17 @@ public enum MailWording {
         "This message says it's from \(claimed.address), but it was sent by \(sentBy.address). Be careful with its links and attachments."
     }
 
+    /// Mail between accounts whose sender's key isn't the one pinned for them the first time.
+    public static func keyChanged(_ sentBy: MailAddress) -> String {
+        "This message says it's from \(sentBy.address), but their key has changed since you first heard from them, or couldn't be checked, so it couldn't be proved. Be careful with its links and attachments."
+    }
+
     /// The warning a message needs, if any. Mail between accounts knows who really sent it, so it says so.
     public static func warning(for message: MailMessage) -> String? {
         guard message.proof == .unproved, !message.isUnreadable else { return nil }
+        if message.route == .betweenAccounts, message.senderKeyChanged, let sentBy = message.sentBy {
+            return keyChanged(sentBy)
+        }
         if message.route == .betweenAccounts, let sentBy = message.sentBy, message.from.totalityName != sentBy.totalityName {
             return claimsSomeoneElse(message.from, sentBy: sentBy)
         }
@@ -49,6 +68,7 @@ public enum MailWording {
         case .tooBig: "Not sent. It's too big for their mailbox."
         case .offline: "Not sent. You're offline, so it stays a draft. Send it again when you're back."
         case .failed: "Not sent. Something went wrong on the way. Try sending again."
+        case .keyChanged: "Not sent. This person's key changed since you first wrote to each other, so Totality can't be sure it would reach only them."
         }
     }
 

@@ -176,6 +176,8 @@ public struct MailSendResult: Equatable, Sendable {
         case tooBig
         case offline
         case failed
+        /// The server gave a different key for this person than the one pinned for them, so nothing went.
+        case keyChanged
     }
 
     public struct Recipient: Equatable, Sendable {
