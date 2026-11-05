@@ -204,10 +204,11 @@ public actor ServerMailStore: MailStore {
         let settings = try await vault.settings() ?? MailSettings()
         let marks = try await vault.marks()
         let me = await username()
+        let pins = try await vault.pins()
         var sources: [UUID: UUID] = [:]
         var messages: [MailMessage] = []
         for stored in try await vault.messages() {
-            var message = read(stored, me: me).message
+            var message = read(stored, me: me, pins: pins).message
             if let synced = marks[stored.id] {
                 message.marks = synced
             } else if message.marks.folder == .inbox, settings.blockedSenders.contains(message.from.key) {
@@ -232,7 +233,11 @@ public actor ServerMailStore: MailStore {
     ///   someone else, and says who really sent it.
     /// - A Sent copy is this account's own, sealed by its own device with a key only its devices hold.
     ///   Nothing in the standard seal is ever taken for one, since anyone can seal to a public key.
-    private func read(_ stored: MailStoredMessage, me: String?) -> ParsedMail {
+    ///
+    /// The proof is worked out each time it's shown, against the pins as they are now. Pins that arrive
+    /// by sync after a message was kept can show its sender's key was never the pinned one, or that the
+    /// name is disputed, and then it stops being proved.
+    private func read(_ stored: MailStoredMessage, me: String?, pins: MailPins) -> ParsedMail {
         guard let raw = stored.raw else {
             return ParsedMail(message: .unreadable(id: stored.id, date: stored.received, marks: MailMarks(isUnread: true)), attachments: [:])
         }
@@ -250,11 +255,12 @@ public actor ServerMailStore: MailStore {
             }
             let parsed = MailParser.parseMessage(inner, id: stored.id, received: received, marks: envelope.marks)
             guard !parsed.message.isUnreadable else { return parsed }
-            let proved = !stored.senderKeyChanged && parsed.fromLines == 1 && parsed.senders.count == 1
+            let keyChanged = stored.senderKeyChanged || pins.isDisputed(sender) || pins.key(for: sender) != senderKey
+            let proved = !keyChanged && parsed.fromLines == 1 && parsed.senders.count == 1
                 && parsed.senders[0].totalityName == sender
             let message = parsed.message.travelled(
                 .betweenAccounts, proof: proved ? .proved : .unproved, sentBy: MailAddress(address: MailDomain.address(for: sender)),
-                senderKeyChanged: stored.senderKeyChanged
+                senderKeyChanged: keyChanged
             )
             return ParsedMail(message: message, attachments: parsed.attachments, senders: parsed.senders, fromLines: parsed.fromLines)
         }
@@ -300,7 +306,7 @@ public actor ServerMailStore: MailStore {
 
     public func data(of attachment: UUID) async throws -> Data {
         guard let source = attachmentSources[attachment], let stored = try await vault.message(source),
-              let data = read(stored, me: await username()).attachments[attachment]
+              let data = read(stored, me: await username(), pins: try await vault.pins()).attachments[attachment]
         else { throw MailStoreError.unavailable }
         return data
     }

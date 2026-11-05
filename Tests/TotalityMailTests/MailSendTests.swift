@@ -499,6 +499,30 @@ private struct Person {
         #expect(reply.recipients.map(\.outcome) == [.keyChanged])
     }
 
+    @Test("Mail already kept stops being proved when synced pins show its key wasn't the first")
+    func laterPinsUnproveKeptMail() async throws {
+        let office = PostOffice()
+        let mckay = try await person("mckay", at: office)
+        let dana = try await person("dana", at: office)
+        #expect(try await mckay.store.send(MailDraft(to: [dana.address], subject: "Saturday", body: "Meet at 7.")).deliveredToEveryone)
+        let saturday = try #require(try await inbox(of: dana).first { $0.subject == "Saturday" })
+        #expect(saturday.proof == .proved)
+
+        // Dana's other device pinned a different key for mckay first, and its pins only now arrive.
+        let account = dana.account.uuidString.lowercased()
+        let other = MailVault(store: MailMemoryStore(), rootKey: dana.root, account: account)
+        try await other.pin("mckay", key: try MailKey(root: try ContentRootKey.generate()).publicKey(), at: date.addingTimeInterval(-60))
+        let id = MailVault.keysID(account: account)
+        let incoming = try #require(try await other.verifiedObject(id))
+        try await dana.vault.store(incoming, ifLocalHash: try await dana.vault.sealedHash(of: id))
+        #expect(try await dana.vault.pins().isDisputed("mckay"))
+
+        let again = try #require(try await inbox(of: dana).first { $0.subject == "Saturday" })
+        #expect(again.proof == .unproved)
+        #expect(again.senderKeyChanged)
+        #expect(MailWording.route(for: again) != MailWording.betweenAccountsReceived)
+    }
+
     @Test("Sending and opening at once don't lose each other's pins")
     func sendAndOpenKeepBothPins() async throws {
         for _ in 0..<5 {
