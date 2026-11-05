@@ -183,10 +183,14 @@ public struct Mailbox: Sendable, Equatable {
         }.map(\.id))
     }
 
-    /// A sender's standing choice only counts if the message proves it's from them, or anyone could
-    /// borrow their address to see who opens a message. Nothing in Spam loads by itself.
-    public func loadsImages(for message: MailMessage) -> Bool {
+    /// Where "Always load" can work. A sender's standing choice only counts if the message proves it's
+    /// from them, or anyone could borrow their address to see who opens a message. Nothing in Spam
+    /// loads by itself.
+    public func allowsAlwaysLoad(for message: MailMessage) -> Bool {
         message.proof == .proved && message.marks.folder != .spam
-            && settings.alwaysLoadImages.contains(message.from.key)
+    }
+
+    public func loadsImages(for message: MailMessage) -> Bool {
+        allowsAlwaysLoad(for: message) && settings.alwaysLoadImages.contains(message.from.key)
     }
 }

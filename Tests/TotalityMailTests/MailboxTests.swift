@@ -125,6 +125,13 @@ private func message(
         #expect(!box.loadsImages(for: message(from: shop)))
     }
 
+    @Test func alwaysLoadIsOfferedOnlyWhereItCanWork() {
+        let box = Mailbox()
+        #expect(box.allowsAlwaysLoad(for: message(from: shop)))
+        #expect(!box.allowsAlwaysLoad(for: message(from: shop, proof: .unproved)))
+        #expect(!box.allowsAlwaysLoad(for: message(from: shop, marks: MailMarks(folder: .spam))))
+    }
+
     @Test func aRowNamesTheOtherPersonOrWhoItWentTo() {
         let thread = UUID()
         let conversation = Mailbox(messages: [

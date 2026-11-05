@@ -190,7 +190,7 @@ struct MailBodyView: View {
                 .foregroundStyle(theme.textSecondary.color)
             HStack(spacing: Space.s4) {
                 Button("Load Images") { loadedImages = true }
-                if message.proof == .proved {
+                if model.mailbox.allowsAlwaysLoad(for: message) {
                     Button("Always load") {
                         Task { await model.alwaysLoadImages(from: message.from) }
                     }
