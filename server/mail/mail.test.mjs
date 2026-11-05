@@ -7,10 +7,11 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  AT_ONCE, Arrivals, MAILBOX_LIMIT, MAX_DELETE, MAX_MESSAGE, MAX_SEALED_REQUEST, Mailboxes, accountFrom, aead, keySchedule, mailName, readBody, seal,
-  sealedForm, serve, verdict,
+  AT_ONCE, Arrivals, MAILBOX_LIMIT, MAX_DELETE, MAX_MESSAGE, MAX_SEALED_REQUEST, Mailboxes, NEW_ACCOUNT_DAYS, OUTSIDE_PER_DAY,
+  OUTSIDE_PER_MONTH, SendLedger, accountFrom, aead, keySchedule, mailName, outsideMessage, readBody, seal, sealedForm, serve, verdict,
 } from './mail.mjs'
 import worker from '../mail-worker/worker.mjs'
+import sender from '../send-worker/worker.mjs'
 
 const hex = (text) => Buffer.from(text, 'hex')
 const SECRET = 'a-test-secret-for-this-file-only'
@@ -414,7 +415,9 @@ describe('reading a Supabase user', () => {
   const id = randomUUID()
 
   test('a username at the reserved domain is an account', () => {
-    assert.deepEqual(accountFrom({ id, email: 'ada_lovelace@totality.invalid' }), { name: 'ada_lovelace', mailbox: id })
+    assert.deepEqual(accountFrom({ id, email: 'ada_lovelace@totality.invalid' }), { name: 'ada_lovelace', mailbox: id, created: null })
+    assert.deepEqual(accountFrom({ id, email: 'ada_lovelace@totality.invalid', created_at: '2026-10-01T12:00:00.5Z' }),
+      { name: 'ada_lovelace', mailbox: id, created: Date.UTC(2026, 9, 1, 12, 0, 0, 500) })
   })
 
   for (const user of [null, {}, { id }, { email: 'ada@totality.invalid' }, { id, email: 'ada@gmail.com' },
@@ -1090,6 +1093,289 @@ describe('the Worker', () => {
   })
 })
 
+describe('mail to outside addresses', () => {
+  let root, mailboxes, gate
+  const accounts = new Map()
+  const handed = []
+  let next = () => ({ sent: true })
+  let now = Date.UTC(2026, 10, 5, 14, 30)
+  const OLD = Date.UTC(2026, 9, 1)
+
+  before(async () => {
+    root = await mkdtemp(join(tmpdir(), 'totality-send-'))
+    mailboxes = new Mailboxes(root)
+    gate = new Arrivals({
+      secret: SECRET,
+      checkSignIn: async (token) => accounts.get(token) ?? null,
+      checkSpam: async () => assert.fail('sending is never read by the spam check'),
+      mailboxes,
+      clock: () => now,
+      sendOutside: async (message) => {
+        handed.push(message)
+        return next(message)
+      },
+    })
+  })
+  after(() => rm(root, { recursive: true, force: true }))
+
+  let n = 0
+  const person = (created = OLD) => {
+    n += 1
+    const signedIn = { name: `ada_${n}`, mailbox: randomUUID(), created }
+    accounts.set(`out_${n}`, signedIn)
+    return { token: `out_${n}`, ...signedIn }
+  }
+  const note = (fields = {}) => ({
+    id: randomUUID(), to: ['charles@example.org'], subject: 'The engine', text: 'The gears arrived on Tuesday.', ...fields,
+  })
+  const send = async (who, fields, gateway = gate) => {
+    const reply = await gateway.respond('POST', '/mail/send', who && `Bearer ${who.token}`, undefined,
+      async () => Buffer.from(typeof fields === 'string' ? fields : JSON.stringify(fields)))
+    return { status: reply.status, reason: reply.body && JSON.parse(reply.body).reason }
+  }
+
+  test('a message goes out from the signed-in account, whatever the request says', async () => {
+    const user1 = person()
+    handed.length = 0
+    const reply = await send(user1, note({ from: 'someone_else@usetotality.com', cc: ['ada@example.com'], bcc: ['b@example.net'],
+      inReplyTo: '<one@example.org>', references: ['<zero@example.org>', '<one@example.org>'],
+      attachments: [{ filename: 'gears.txt', type: 'text/plain', content: Buffer.from('twelve').toString('base64') }] }))
+    assert.deepEqual(reply, { status: 200, reason: undefined })
+    assert.equal(handed.length, 1)
+    const [message] = handed
+    assert.equal(message.from, `${user1.name}@usetotality.com`)
+    assert.deepEqual([message.to, message.cc, message.bcc], [['charles@example.org'], ['ada@example.com'], ['b@example.net']])
+    assert.deepEqual(message.headers, { 'In-Reply-To': '<one@example.org>', References: '<zero@example.org> <one@example.org>' })
+    assert.deepEqual(message.attachments, [{ filename: 'gears.txt', type: 'text/plain', content: 'dHdlbHZl', disposition: 'attachment' }])
+    assert.deepEqual(Object.keys(message).sort(), ['attachments', 'bcc', 'cc', 'from', 'headers', 'subject', 'text', 'to'])
+  })
+
+  test('without a sign-in nothing is read or sent', async () => {
+    handed.length = 0
+    let read = false
+    for (const authorization of [undefined, '', 'Bearer ', 'Bearer nonsense', BEARER]) {
+      const reply = await gate.respond('POST', '/mail/send', authorization, undefined, async () => { read = true })
+      assert.equal(reply.status, 401)
+    }
+    assert.equal(read, false)
+    assert.equal(handed.length, 0)
+    assert.equal((await gate.respond('GET', '/mail/send', 'Bearer out_1', undefined, async () => null)).status, 405)
+  })
+
+  test('an account under seven days old can only mail other Totality accounts', async () => {
+    handed.length = 0
+    assert.deepEqual(await send(person(now - (NEW_ACCOUNT_DAYS * 24 - 1) * 3_600_000), note()), { status: 403, reason: 'new' })
+    assert.deepEqual(await send(person(null), note()), { status: 403, reason: 'new' })
+    assert.equal(handed.length, 0)
+    assert.equal((await send(person(now - NEW_ACCOUNT_DAYS * 24 * 3_600_000), note())).status, 200)
+  })
+
+  test('each account gets twenty outside recipients a day, and the count resets the next day', async () => {
+    const user1 = person()
+    const user2 = person()
+    const ten = Array.from({ length: 10 }, (_, i) => `reader${i}@example.org`)
+    assert.equal((await send(user1, note({ to: ten }))).status, 200)
+    assert.equal((await send(user1, note({ to: ten.slice(0, 9) }))).status, 200)
+    assert.deepEqual(await send(user1, note({ to: ['one@example.org', 'two@example.org'] })), { status: 429, reason: 'daily' })
+    assert.equal((await send(user1, note())).status, 200)
+    assert.deepEqual(await send(user1, note()), { status: 429, reason: 'daily' })
+    assert.equal((await send(user2, note())).status, 200, 'one account\'s limit is not another\'s')
+    const saved = now
+    now += 24 * 3_600_000
+    try {
+      assert.equal((await send(user1, note())).status, 200)
+    } finally {
+      now = saved
+    }
+    assert.equal(OUTSIDE_PER_DAY, 20)
+  })
+
+  test('the whole server stops short of the included sends in any 31 days, whenever the billing cycle starts', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'totality-ledger-'))
+    const ledger = new SendLedger(folder)
+    const start = Date.UTC(2026, 10, 20)
+    let used = 0
+    while (used + 10 <= OUTSIDE_PER_MONTH) {
+      assert.equal(await ledger.reserve(randomUUID(), randomUUID(), 10, start), 'ok')
+      used += 10
+    }
+    assert.equal(await ledger.reserve(randomUUID(), randomUUID(), 1, start), 'monthly')
+    // A new calendar month doesn't reset it, because a billing cycle can span the two.
+    assert.equal(await ledger.reserve(randomUUID(), randomUUID(), 1, Date.UTC(2026, 11, 1)), 'monthly')
+    assert.equal(await ledger.reserve(randomUUID(), randomUUID(), 1, start + 30 * 86_400_000), 'monthly')
+    assert.equal(await ledger.reserve(randomUUID(), randomUUID(), 1, start + 31 * 86_400_000), 'ok')
+    assert.ok(OUTSIDE_PER_MONTH < 3_000)
+    // A count that can't be read stops sending instead of starting again from nothing.
+    await writeFile(join(folder, 'sending', 'recent.json'), '{"2026-12-21": 4')
+    assert.equal(await ledger.reserve(randomUUID(), randomUUID(), 1, start + 31 * 86_400_000), 'monthly')
+    await writeFile(join(folder, 'sending', 'recent.json'), '{"2026-12-21": -9000}')
+    assert.equal(await ledger.reserve(randomUUID(), randomUUID(), 1, start + 31 * 86_400_000), 'monthly')
+  })
+
+  test('sends at once can\'t both take the last places', async () => {
+    const ledger = new SendLedger(await mkdtemp(join(tmpdir(), 'totality-ledger-')))
+    const mailbox = randomUUID()
+    const results = await Promise.all(Array.from({ length: 25 }, () => ledger.reserve(mailbox, randomUUID(), 1, now)))
+    assert.equal(results.filter((result) => result === 'ok').length, OUTSIDE_PER_DAY)
+    assert.equal(results.filter((result) => result === 'daily').length, 5)
+  })
+
+  test('past four at once, the device is told to try again and keeps its places', async () => {
+    const user1 = person()
+    let release
+    const waiting = new Promise((resolve) => { release = resolve })
+    next = async () => { await waiting; return { sent: true } }
+    try {
+      const held = Array.from({ length: AT_ONCE }, () => send(user1, note()))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      assert.deepEqual(await send(user1, note()), { status: 503, reason: 'busy' })
+      release()
+      for (const reply of await Promise.all(held)) assert.equal(reply.status, 200)
+    } finally {
+      next = () => ({ sent: true })
+    }
+    // Four went and the busy one gave its place back, so sixteen are left.
+    for (let i = 0; i < OUTSIDE_PER_DAY - AT_ONCE; i += 1) assert.equal((await send(user1, note())).status, 200)
+    assert.deepEqual(await send(user1, note()), { status: 429, reason: 'daily' })
+  })
+
+  test('a message ID is sent only once', async () => {
+    const user1 = person()
+    const fields = note()
+    assert.equal((await send(user1, fields)).status, 200)
+    assert.deepEqual(await send(user1, fields), { status: 409, reason: 'again' })
+  })
+
+  test('only a refusal that took nothing gives the places back', async () => {
+    const user1 = person()
+    const ten = Array.from({ length: 10 }, (_, i) => `reader${i}@example.org`)
+    const one = ['charles@example.org']
+    try {
+      for (const [code, recipients, expected] of [
+        ['E_RECIPIENT_SUPPRESSED', ten, { status: 422, reason: 'refused' }],
+        ['E_DAILY_LIMIT_EXCEEDED', ten, { status: 429, reason: 'busy' }],
+        ['E_SENDER_NOT_VERIFIED', ten, { status: 502, reason: 'failed' }],
+        ['E_NOT_ALLOWED', ten, { status: 502, reason: 'failed' }],
+        // These may have gone, so each keeps its place.
+        ['E_DELIVERY_FAILED', one, { status: 422, reason: 'refused' }],
+        ['E_INTERNAL_SERVER_ERROR', one, { status: 504, reason: 'unknown' }],
+        ['E_SOMETHING_NEW', one, { status: 504, reason: 'unknown' }],
+      ]) {
+        next = () => ({ code })
+        assert.deepEqual(await send(user1, note({ to: recipients })), expected, code)
+      }
+      next = () => { throw new Error('timed out') }
+      assert.deepEqual(await send(user1, note()), { status: 504, reason: 'unknown' })
+    } finally {
+      next = () => ({ sent: true })
+    }
+    // Four kept their places, so sixteen are left.
+    assert.equal((await send(user1, note({ to: ten }))).status, 200)
+    assert.equal((await send(user1, note({ to: ten.slice(0, 6) }))).status, 200)
+    assert.deepEqual(await send(user1, note()), { status: 429, reason: 'daily' })
+  })
+
+  test('with sending off, nothing is read', async () => {
+    const off = new Arrivals({ secret: SECRET, checkSignIn: async (token) => accounts.get(token) ?? null, checkSpam: async () => null, mailboxes })
+    let read = false
+    const reply = await off.respond('POST', '/mail/send', `Bearer ${person().token}`, undefined, async () => { read = true })
+    assert.equal(reply.status, 503)
+    assert.equal(read, false)
+  })
+
+  test('the counts on disk hold no addresses or words', async () => {
+    const user1 = person()
+    await send(user1, note({ to: ['private.person@example.org'], subject: 'Secret plans' }))
+    for (const file of await readdir(join(root, 'sending'))) {
+      const text = (await readFile(join(root, 'sending', file))).toString()
+      assert.doesNotMatch(text, /example|Secret|engine|@/)
+    }
+  })
+
+  const id = randomUUID()
+  for (const [why, fields] of [
+    ['no id', { id: undefined }], ['a bad id', { id: 'x' }], ['no recipients', { to: [] }],
+    ['eleven recipients', { to: Array.from({ length: 11 }, (_, i) => `r${i}@example.org`) }],
+    ['a Totality address', { to: ['grace@usetotality.com'] }], ['a Totality subdomain', { to: ['a@mail.usetotality.com'] }],
+    ['a Totality address in Bcc', { bcc: ['GRACE@UseTotality.com'] }],
+    ['a repeated address', { to: ['a@example.org'], cc: ['A@example.org'] }], ['no domain dot', { to: ['a@localhost'] }],
+    ['a header break', { to: ['a@example.org\r\nBcc: b@example.org'] }], ['a display name', { to: ['Ada <a@example.org>'] }],
+    ['a list that isn\'t', { to: 'a@example.org' }], ['a subject with a line break', { subject: 'Hi\r\nBcc: b@example.org' }],
+    ['no text', { text: undefined }], ['a bad In-Reply-To', { inReplyTo: 'one@example.org' }],
+    ['a broken reference', { references: ['<a@b>\r\nX: y'] }], ['too many references', { references: Array(21).fill('<a@b>') }],
+    ['an attachment with no name', { attachments: [{ filename: '', type: 'text/plain', content: '' }] }],
+    ['an attachment with a line break', { attachments: [{ filename: 'a\r\n.txt', type: 'text/plain', content: '' }] }],
+    ['a bad type', { attachments: [{ filename: 'a.txt', type: 'text', content: '' }] }],
+    ['bad base64', { attachments: [{ filename: 'a.txt', type: 'text/plain', content: 'not base64!' }] }],
+    ['base64 padded in the middle', { attachments: [{ filename: 'a.txt', type: 'text/plain', content: 'ab==cdef' }] }],
+    ['base64 of the wrong length', { attachments: [{ filename: 'a.txt', type: 'text/plain', content: 'abcde' }] }],
+  ]) {
+    test(`a message with ${why} is refused`, async () => {
+      handed.length = 0
+      assert.equal((await send(person(), { ...note(), ...fields, ...(why === 'no id' && { id: undefined }) })).status, 400)
+      assert.equal(handed.length, 0)
+    })
+  }
+
+  test('a message over 25 MiB is refused', () => {
+    const content = Buffer.alloc(25 * 1024 * 1024).toString('base64')
+    assert.equal(outsideMessage({ ...note(), id, attachments: [{ filename: 'big.bin', type: 'application/octet-stream', content }] }).status, 413)
+  })
+
+  test('a request that isn\'t JSON is refused', async () => {
+    assert.equal((await send(person(), 'not json')).status, 400)
+    assert.equal((await send(person(), 'null')).status, 400)
+  })
+})
+
+describe('the sending Worker', () => {
+  const env = (send) => ({ MAIL_SEND_SECRET: SECRET, EMAIL: { send } })
+  const ask = (body, { authorization = BEARER, method = 'POST', path = '/' } = {}) => new Request(`https://totality-send.example.workers.dev${path}`, {
+    method, headers: { Authorization: authorization, 'Content-Type': 'application/json' }, ...(method === 'POST' && { body: JSON.stringify(body) }),
+  })
+  const message = { from: 'ada_lovelace@usetotality.com', to: ['charles@example.org'], cc: [], bcc: [], subject: 'The engine',
+    text: 'The gears arrived on Tuesday.', headers: { 'In-Reply-To': '<one@example.org>' }, attachments: [] }
+
+  test('the mail server\'s message goes to Cloudflare as it was checked', async () => {
+    const sent = []
+    const reply = await sender.fetch(ask(message), env(async (given) => { sent.push(given); return { messageId: 'x' } }))
+    assert.equal(reply.status, 200)
+    assert.deepEqual(await reply.json(), { sent: true })
+    assert.deepEqual(sent, [{ from: message.from, to: message.to, subject: message.subject, text: message.text, headers: message.headers }])
+  })
+
+  test('nobody without the secret can send', async () => {
+    for (const authorization of ['', 'Bearer ', 'Bearer wrong', SECRET, `Bearer ${SECRET}x`]) {
+      const reply = await sender.fetch(ask(message, { authorization }), env(async () => assert.fail('sent')))
+      assert.equal(reply.status, 401)
+    }
+    assert.equal((await sender.fetch(ask(message), { EMAIL: { send: async () => assert.fail('sent') } })).status, 503)
+  })
+
+  for (const [why, change] of [['another domain', { from: 'ada@example.org' }], ['a +tag', { from: 'ada+x@usetotality.com' }],
+    ['a header it can\'t set', { headers: { 'Reply-To': 'x@example.org' } }], ['no list', { to: 'charles@example.org' }]]) {
+    test(`a message with ${why} is refused`, async () => {
+      const reply = await sender.fetch(ask({ ...message, ...change }), env(async () => assert.fail('sent')))
+      assert.equal(reply.status, 400)
+    })
+  }
+
+  test('a refusal comes back as its code alone', async () => {
+    const reply = await sender.fetch(ask(message), env(async () => {
+      throw Object.assign(new Error('charles@example.org is suppressed'), { code: 'E_RECIPIENT_SUPPRESSED' })
+    }))
+    assert.equal(reply.status, 502)
+    const text = await reply.text()
+    assert.deepEqual(JSON.parse(text), { code: 'E_RECIPIENT_SUPPRESSED' })
+    assert.doesNotMatch(text, /example/)
+  })
+
+  test('only POST to the root sends', async () => {
+    assert.equal((await sender.fetch(ask(message, { method: 'GET' }), env(async () => assert.fail('sent')))).status, 404)
+    assert.equal((await sender.fetch(ask(message, { path: '/x' }), env(async () => assert.fail('sent')))).status, 404)
+  })
+})
+
 describe('the server setup', () => {
   // Docker's limit of 0 doesn't stop a crash report on this host, and a report could hold readable mail.
   test('crashes leave nothing behind', async () => {
@@ -1104,14 +1390,29 @@ describe('the server setup', () => {
     assert.equal(rules.length, 1)
     const [rule] = rules
     for (const path of ['/mail/arrive', '/mail/key', '/mail/list', '/mail/delete', '/mail/deliver', '/mail/keep',
-      '/mail/recipient/ada_lovelace', `/mail/message/${randomUUID()}`]) {
+      '/mail/send', '/mail/recipient/ada_lovelace', `/mail/message/${randomUUID()}`]) {
       assert.match(path, rule)
     }
     for (const path of ['/mail/health', '/mail/message/public.key', '/mail/message/../x', `/mail/message/${randomUUID()}0`,
       '/mail/lists', '/mail/', '/mail/list/', '/mail/recipient/', '/mail/recipient/ab', '/mail/recipient/Ada',
-      '/mail/recipient/../names/ada', `/mail/recipient/${'a'.repeat(25)}`, '/mail/recipient/ada/', '/mail/keeps']) {
+      '/mail/recipient/../names/ada', `/mail/recipient/${'a'.repeat(25)}`, '/mail/recipient/ada/', '/mail/keeps', '/mail/sends',
+      '/mail/send/']) {
       assert.doesNotMatch(path, rule)
     }
+  })
+
+  test('outside sending is off unless the server is given both settings', async () => {
+    const compose = (await readFile(new URL('../compose.yml', import.meta.url))).toString()
+    assert.match(compose, /MAIL_SEND_URL: \$\{MAIL_SEND_URL:-\}/)
+    assert.equal(compose.match(/MAIL_SEND_SECRET/g).length, 2)
+  })
+
+  test('the sending Worker keeps no logs and no preview copies', async () => {
+    const toml = (await readFile(new URL('../send-worker/wrangler.toml', import.meta.url))).toString()
+    assert.match(toml, /\[observability\]\nenabled = false/)
+    assert.match(toml, /preview_urls = false/)
+    const code = (await readFile(new URL('../send-worker/worker.mjs', import.meta.url))).toString()
+    assert.doesNotMatch(code, /console\./)
   })
 
   test('only the mail service gets the arrival secret', async () => {

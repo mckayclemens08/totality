@@ -6,7 +6,7 @@ import {
   createCipheriv, createHash, createHmac, createPublicKey, diffieHellman, generateKeyPairSync, randomUUID,
   timingSafeEqual,
 } from 'node:crypto'
-import { link, lstat, mkdir, open, readFile, readdir, rm, stat, unlink } from 'node:fs/promises'
+import { link, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -27,6 +27,27 @@ export const MAX_DELETE = 500
 export const NO_SUCH_ADDRESS = 410
 
 const ADDRESS = /^([a-z0-9_]{3,24})(\+[^@\s]{0,64})?@usetotality\.com$/
+
+// Sending to outside addresses, agreed in issue 37. Every account shares one domain's reputation and one
+// Cloudflare quota, so these aren't optional.
+export const OUTSIDE_PER_DAY = 20
+export const OUTSIDE_PER_MESSAGE = 10
+export const NEW_ACCOUNT_DAYS = 7
+// Workers Paid includes 3,000 outside emails a month and charges past that. The cost rule allows none
+// of that, so the whole server stops a little short, whatever each account has left. Cloudflare counts
+// by billing cycle, which can start on any day, so the cap holds for any 31 days in a row: no cycle is
+// longer, so none can fit more.
+export const OUTSIDE_PER_MONTH = 2_900
+const MONTH_DAYS = 31
+const DAY = 24 * 60 * 60 * 1000
+// An outside address as a sending service takes it: one @, a dotted domain, nothing that could break a
+// header. Our own domain is never outside, because that mail goes sealed between accounts.
+const OUTSIDE = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?=.{1,253}$)[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})+$/
+const MESSAGE_ID = /^<[\x21-\x3b\x3d\x3f-\x7e]{1,250}>$/
+const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/i
+// Linear on purpose: a file can be 25 MiB of it.
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
+const MAX_ATTACHMENTS = 32
 
 /** The username part of an address, with any +tag dropped, or null if it can't be one of ours. */
 export function mailName(address) {
@@ -295,15 +316,20 @@ function sameSecret(given, secret) {
 /** Who a Supabase user is, as far as mail is concerned, or null if they don't look like an account. */
 export function accountFrom(user) {
   const name = /^([a-z0-9_]{3,24})@totality\.invalid$/.exec(user?.email ?? '')?.[1]
-  return name && MAILBOX.test(user?.id ?? '') ? { name, mailbox: user.id } : null
+  if (!name || !MAILBOX.test(user?.id ?? '')) return null
+  // When the account was made, for the new-account rule. Unknown counts as brand new.
+  const created = Date.parse(user.created_at ?? '')
+  return { name, mailbox: user.id, created: Number.isFinite(created) ? created : null }
 }
 
 /** No sockets in here, so every rule can be tested. `checkSignIn` returns an account or null, and throws
  *  if it can't tell. `checkSpam` returns a verdict and may throw. */
 export class Arrivals {
-  constructor({ secret, checkSignIn, checkSpam, mailboxes, clock = Date.now, newID = randomUUID }) {
+  /** `sendOutside` hands a message to the sending Worker and returns `{ sent: true }` or `{ code }`, and
+   *  throws if it can't tell whether it went. Without it, outside sending is off. */
+  constructor({ secret, checkSignIn, checkSpam, mailboxes, clock = Date.now, newID = randomUUID, sendOutside = null }) {
     if (!secret) throw new Error('no secret')
-    Object.assign(this, { secret, checkSignIn, checkSpam, mailboxes, clock, newID })
+    Object.assign(this, { secret, checkSignIn, checkSpam, mailboxes, clock, newID, sendOutside })
     this.working = 0
   }
 
@@ -328,7 +354,7 @@ export class Arrivals {
       if (method !== 'GET') return { status: 405 }
     } else if (path === '/mail/list') {
       if (method !== 'GET') return { status: 405 }
-    } else if (['/mail/arrive', '/mail/key', '/mail/delete', '/mail/deliver', '/mail/keep'].includes(path)) {
+    } else if (['/mail/arrive', '/mail/key', '/mail/delete', '/mail/deliver', '/mail/keep', '/mail/send'].includes(path)) {
       if (method !== 'POST') return { status: 405 }
     } else {
       return { status: 404 }
@@ -344,6 +370,7 @@ export class Arrivals {
       if (name !== undefined) return await this.publicKeyFor(name)
       if (path === '/mail/deliver') return { status: await this.holding(() => this.deliver(account, read)) }
       if (path === '/mail/keep') return { status: await this.holding(() => this.keep(account, read)) }
+      if (path === '/mail/send') return await this.sendOut(account, read)
       const sealed = await this.mailboxes.message(account.mailbox, message)
       return sealed ? { status: 200, body: sealed, type: 'application/octet-stream' } : { status: 404 }
     } catch {
@@ -470,6 +497,47 @@ export class Arrivals {
     }
   }
 
+  /** Mail to outside addresses. It has to leave readable, so this is the other half of the one
+   *  exception to sealing: it's held in memory only, never logged, and passed straight to the sending
+   *  Worker. The From address comes from the sign-in, never the request. The device keeps its own
+   *  sealed Sent copy through `keep`. Answers with JSON naming the reason when it doesn't send. */
+  async sendOut(account, read) {
+    if (!this.sendOutside) return json(503, { reason: 'off' })
+    this.ledger ??= new SendLedger(this.mailboxes.root)
+    const body = await read(MAX_SEALED_REQUEST)
+    if (!body) return { status: 413 }
+    let request
+    try {
+      request = JSON.parse(body)
+    } catch {
+      return { status: 400 }
+    } finally {
+      body.fill(0)
+    }
+    const message = outsideMessage(request)
+    if (message.status) return { status: message.status }
+    const now = this.clock()
+    if (account.created == null || now - account.created < NEW_ACCOUNT_DAYS * DAY) return json(403, { reason: 'new' })
+    const count = message.to.length + message.cc.length + message.bcc.length
+    return this.holding(async () => {
+      const held = await this.ledger.reserve(account.mailbox, request.id, count, now)
+      if (held !== 'ok') return held === 'again' ? json(409, { reason: 'again' }) : json(429, { reason: held })
+      let answer
+      try {
+        answer = await this.sendOutside({ ...message, from: `${account.name}@usetotality.com` })
+      } catch {
+        // It may have gone, so nothing is given back and the device says it can't tell.
+        return json(504, { reason: 'unknown' })
+      }
+      if (answer?.sent === true) return json(200, { sent: true })
+      const [status, reason, nothingWent] = refusal(answer?.code)
+      // Places come back only when Cloudflare said plainly that it took nothing. Anything else may have
+      // gone, and may count toward the month.
+      if (nothingWent) await this.ledger.release(account.mailbox, request.id, count, now)
+      return json(status, { reason })
+    }).then((reply) => typeof reply === 'number' ? json(reply, { reason: 'busy' }) : reply)
+  }
+
   /** The account comes from the sign-in, never the request, so nobody can publish for someone else. */
   async publishKey(authorization, read) {
     const account = await this.signedIn(authorization)
@@ -517,6 +585,173 @@ export class Arrivals {
   }
 }
 
+/** What Cloudflare's answer means: a status, a reason for the person, and whether it's certain nothing
+ *  went. Only codes that mean the message was turned down before sending are certain. A failed delivery
+ *  was sent and counts; an unknown code, or none, can't be told apart from a send. */
+const REFUSED_BEFORE_SENDING = new Set([
+  'E_VALIDATION_ERROR', 'E_FIELD_MISSING', 'E_TOO_MANY_RECIPIENTS', 'E_TOO_MANY_ATTACHMENTS', 'E_RECIPIENT_NOT_ALLOWED',
+  'E_RECIPIENT_SUPPRESSED', 'E_SENDER_NOT_VERIFIED', 'E_ACCOUNT_SUSPENDED', 'E_SENDER_DOMAIN_NOT_AVAILABLE', 'E_CONTENT_TOO_LARGE',
+  'E_RATE_LIMIT_EXCEEDED', 'E_DAILY_LIMIT_EXCEEDED', 'E_HEADER_NOT_ALLOWED', 'E_HEADER_USE_API_FIELD', 'E_HEADER_VALUE_INVALID',
+  'E_HEADER_VALUE_TOO_LONG', 'E_HEADER_NAME_INVALID', 'E_HEADERS_TOO_LARGE', 'E_HEADERS_TOO_MANY',
+  // The Worker's own: it wasn't set up, or didn't take the request, so it never called Cloudflare.
+  'E_NOT_SET_UP', 'E_NOT_ALLOWED', 'E_NOT_FOUND',
+])
+
+function refusal(code) {
+  const nothingWent = REFUSED_BEFORE_SENDING.has(code)
+  switch (code) {
+    case 'E_DAILY_LIMIT_EXCEEDED':
+    case 'E_RATE_LIMIT_EXCEEDED':
+      return [429, 'busy', nothingWent]
+    case 'E_RECIPIENT_SUPPRESSED':
+    case 'E_RECIPIENT_NOT_ALLOWED':
+    case 'E_DELIVERY_FAILED':
+      return [422, 'refused', nothingWent]
+    case 'E_CONTENT_TOO_LARGE':
+      return [413, 'big', nothingWent]
+    default:
+      return nothingWent ? [502, 'failed', true] : [504, 'unknown', false]
+  }
+}
+
+const list = (value) => value === undefined ? [] : value
+const oneLine = (value, limit) => typeof value === 'string' && value.length <= limit && !/[\r\n\0]/.test(value)
+
+/** The parts of an outside message a device may set, checked, or `{ status: 400 or 413 }`. Our own
+ *  addresses aren't allowed: that mail goes sealed between accounts, never through Cloudflare. */
+export function outsideMessage(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return { status: 400 }
+  const { id, subject, text, inReplyTo, references } = request
+  const [to, cc, bcc] = [list(request.to), list(request.cc), list(request.bcc)]
+  if (typeof id !== 'string' || !MAILBOX.test(id)) return { status: 400 }
+  if (![to, cc, bcc].every(Array.isArray)) return { status: 400 }
+  const everyone = [...to, ...cc, ...bcc]
+  if (everyone.length === 0 || everyone.length > OUTSIDE_PER_MESSAGE) return { status: 400 }
+  const seen = new Set()
+  for (const address of everyone) {
+    if (typeof address !== 'string' || !OUTSIDE.test(address)) return { status: 400 }
+    const lower = address.toLowerCase()
+    const domain = lower.slice(lower.lastIndexOf('@') + 1)
+    if (domain === 'usetotality.com' || domain.endsWith('.usetotality.com') || seen.has(lower)) return { status: 400 }
+    seen.add(lower)
+  }
+  if (!oneLine(subject, 998) || typeof text !== 'string') return { status: 400 }
+  const headers = {}
+  if (inReplyTo !== undefined) {
+    if (typeof inReplyTo !== 'string' || !MESSAGE_ID.test(inReplyTo)) return { status: 400 }
+    headers['In-Reply-To'] = inReplyTo
+  }
+  if (references !== undefined) {
+    if (!Array.isArray(references) || references.length > 20 || !references.every((ref) => typeof ref === 'string' && MESSAGE_ID.test(ref))) {
+      return { status: 400 }
+    }
+    const joined = references.join(' ')
+    if (joined.length > 2_048) return { status: 400 }
+    if (joined) headers.References = joined
+  }
+  const attachments = list(request.attachments)
+  if (!Array.isArray(attachments) || attachments.length > MAX_ATTACHMENTS) return { status: 400 }
+  let size = Buffer.byteLength(text) + Buffer.byteLength(subject)
+  const files = []
+  for (const file of attachments) {
+    const { filename, type, content } = file ?? {}
+    if (!oneLine(filename, 255) || !filename || typeof type !== 'string' || !MIME_TYPE.test(type)) return { status: 400 }
+    if (typeof content !== 'string' || content.length % 4 !== 0 || !BASE64.test(content)) return { status: 400 }
+    size += content.length / 4 * 3 - (content.endsWith('==') ? 2 : content.endsWith('=') ? 1 : 0)
+    files.push({ filename, type, content, disposition: 'attachment' })
+  }
+  if (size > 25 * 1024 * 1024) return { status: 413 }
+  return { to, cc, bcc, subject, text, headers, attachments: files }
+}
+
+/** Counts of outside recipients: each account's today, and the whole server's this month, in UTC. They
+ *  hold numbers and message IDs, never an address or a word of a message. One process writes them, so a
+ *  queue is enough to keep two sends from both taking the last place. */
+export class SendLedger {
+  constructor(root) {
+    this.folder = join(root, 'sending')
+    this.queue = Promise.resolve()
+  }
+
+  serially(work) {
+    const turn = this.queue.then(work)
+    this.queue = turn.catch(() => {})
+    return turn
+  }
+
+  async load(name, period) {
+    const kept = await readIfThere(join(this.folder, name))
+    let parsed = null
+    try {
+      parsed = kept && JSON.parse(kept)
+    } catch {
+      // A torn file can't be trusted to say there's room, so it counts as full until the period ends.
+      return { period, count: Infinity, ids: [] }
+    }
+    return parsed?.period === period ? parsed : { period, count: 0, ids: [] }
+  }
+
+  async save(name, value) {
+    await mkdir(this.folder, { recursive: true, mode: 0o700 })
+    const file = join(this.folder, name)
+    await writeFile(`${file}.new`, JSON.stringify(value), { mode: 0o600 })
+    await rename(`${file}.new`, file)
+  }
+
+  /** 'ok' once the places are held, or why not: 'daily', 'monthly', or 'again' for an ID already used. */
+  reserve(mailbox, id, count, now) {
+    if (!MAILBOX.test(mailbox)) throw new Error('not a mailbox')
+    return this.serially(async () => {
+      const day = today(now)
+      const mine = await this.load(`${mailbox}.json`, day)
+      const recent = await this.recent(now)
+      if (mine.ids.includes(id)) return 'again'
+      if (mine.count + count > OUTSIDE_PER_DAY) return 'daily'
+      if (total(recent) + count > OUTSIDE_PER_MONTH) return 'monthly'
+      await this.save('recent.json', { ...recent, [day]: (recent[day] ?? 0) + count })
+      await this.save(`${mailbox}.json`, { period: day, count: mine.count + count, ids: [...mine.ids, id] })
+      return 'ok'
+    })
+  }
+
+  /** Gives places back when Cloudflare took nothing. The ID stays used. */
+  release(mailbox, id, count, now) {
+    return this.serially(async () => {
+      const day = today(now)
+      const mine = await this.load(`${mailbox}.json`, day)
+      const recent = await this.recent(now)
+      if (Number.isFinite(total(recent))) await this.save('recent.json', { ...recent, [day]: Math.max(0, (recent[day] ?? 0) - count) })
+      if (Number.isFinite(mine.count)) {
+        await this.save(`${mailbox}.json`, { period: day, count: Math.max(0, mine.count - count), ids: mine.ids })
+      }
+    })
+  }
+
+  /** The server's outside recipients for each of the last 31 days, older days dropped. A torn file is
+   *  full, so nothing sends on a count that can't be read. */
+  async recent(now) {
+    const kept = await readIfThere(join(this.folder, 'recent.json'))
+    let days = {}
+    try {
+      days = kept ? JSON.parse(kept) : {}
+    } catch {
+      return { [today(now)]: Infinity }
+    }
+    if (!days || typeof days !== 'object' || Array.isArray(days)) return { [today(now)]: Infinity }
+    const oldest = today(now - (MONTH_DAYS - 1) * DAY)
+    const fresh = {}
+    for (const [day, count] of Object.entries(days)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || typeof count !== 'number' || !(count >= 0)) return { [today(now)]: Infinity }
+      if (day >= oldest) fresh[day] = count
+    }
+    return fresh
+  }
+}
+
+const today = (now) => new Date(now).toISOString().slice(0, 10)
+const total = (days) => Object.values(days).reduce((sum, count) => sum + count, 0)
+
+
 function json(status, value) {
   return { status, body: Buffer.from(JSON.stringify(value)), type: 'application/json' }
 }
@@ -550,10 +785,28 @@ function liveArrivals() {
     return verdict(await reply.json())
   }
 
+  // Outside sending is on only once both are set, so the server can be deployed with it off.
+  const sendURL = process.env.MAIL_SEND_URL
+  const sendSecret = process.env.MAIL_SEND_SECRET
+  async function sendOutside(message) {
+    const reply = await fetch(sendURL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${sendSecret}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(message),
+      signal: AbortSignal.timeout(60_000),
+    })
+    const answer = await reply.json().catch(() => null)
+    if (reply.ok && answer?.sent === true) return { sent: true }
+    // Without a code from the Worker, there's no telling what happened, so it may have gone.
+    if (typeof answer?.code !== 'string') throw new Error('unknown')
+    return { code: answer.code }
+  }
+
   return new Arrivals({
     secret: process.env.MAIL_ARRIVAL_SECRET,
     checkSignIn,
     checkSpam,
+    sendOutside: sendURL && sendSecret ? sendOutside : null,
     mailboxes: new Mailboxes(process.env.MAILBOX_ROOT ?? '/var/lib/totality-mail'),
   })
 }

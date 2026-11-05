@@ -219,13 +219,14 @@ public final class MailComposer: Identifiable {
 
     // MARK: What it says about itself
 
-    /// The honest line for who it's going to. Between Totality accounts it's sealed; anyone else
-    /// can't be sent to yet, and nothing here pretends otherwise.
+    /// The honest line for who it's going to. Between Totality accounts it's sealed; anyone else gets
+    /// ordinary email, and the line says so.
     public var routeNote: (text: String, isSealed: Bool)? {
         let people = draft.recipients
         guard !people.isEmpty else { return nil }
         if people.allSatisfy({ $0.totalityName != nil }) { return (MailWording.betweenAccounts, true) }
-        return (MailWording.outsideNotYet, false)
+        if people.allSatisfy({ $0.totalityName == nil }) { return (MailWording.outsideSending, false) }
+        return (MailWording.mixedSending, false)
     }
 
     public var canSend: Bool {
@@ -297,10 +298,6 @@ public final class MailComposer: Identifiable {
         }
         if let wrong = draft.recipients.first(where: { !$0.isWellFormed }) {
             problem = "\(wrong.address) isn't an email address. Fix it or take it off."
-            return
-        }
-        guard draft.recipients.contains(where: { $0.totalityName != nil }) else {
-            problem = MailWording.outsideNotYet
             return
         }
         // Saved before the window, changed or not, so a quit or a failed send can't lose it.

@@ -85,10 +85,10 @@ public actor SampleMailStore: MailStore {
         let outcomes = draft.recipients.map { address in
             MailSendResult.Recipient(
                 address: address,
-                outcome: !address.isWellFormed ? .notAnAddress : address.totalityName == nil ? .outsideNotYet : .delivered
+                outcome: !address.isWellFormed ? .notAnAddress : address.totalityName == nil ? .sentOutside : .delivered
             )
         }
-        let delivered = Set(outcomes.filter { $0.outcome == .delivered }.map(\.address.key))
+        let delivered = Set(outcomes.filter(\.outcome.left).map(\.address.key))
         var sent: UUID?
         if !delivered.isEmpty {
             let copy = MailMessage(

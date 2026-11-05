@@ -517,7 +517,7 @@ struct MailSendOutcomeView: View {
 
     private func row(_ recipient: MailSendResult.Recipient) -> some View {
         let theme = Theme.current
-        let delivered = recipient.outcome == .delivered
+        let delivered = recipient.outcome == .delivered || recipient.outcome == .sentOutside
         return HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
             Image(systemName: delivered ? "checkmark.circle" : "exclamationmark.circle")
                 .font(Typeface.body)

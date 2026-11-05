@@ -94,7 +94,7 @@ public enum MailWriter {
         return "\(encoded(name)) <\(bare)>"
     }
 
-    private static func cleanID(_ value: String) -> String? {
+    static func cleanID(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: CharacterSet(charactersIn: "<> \t"))
         guard !trimmed.isEmpty, trimmed.count <= 250,
               trimmed.unicodeScalars.allSatisfy({ (0x21...0x7E).contains($0.value) && $0 != "<" && $0 != ">" })
@@ -137,7 +137,7 @@ public enum MailWriter {
         }.joined(separator: ";\r\n")
     }
 
-    private static func mimeType(_ attachment: MailDraftAttachment) -> String {
+    static func mimeType(_ attachment: MailDraftAttachment) -> String {
         let given = attachment.mimeType.lowercased()
         let parts = given.split(separator: "/", omittingEmptySubsequences: false)
         let token = Set("abcdefghijklmnopqrstuvwxyz0123456789!#$&-^_.+".utf8)
