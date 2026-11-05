@@ -293,23 +293,32 @@ Agreed with the owner on 2026-11-02, in issue 37, which holds the full spec. Mai
 
 **Not built yet.**
 
-- Reading mail: there's no list or fetch path until step 4, and the app doesn't publish a key yet, so no real address works.
+- Mail between Totality accounts (step 5) and sending outside (step 6). Reading works: see Mail screens.
 - Account deletion: the app has none yet, so a mailbox outlives an account deleted by hand and keeps accepting mail, sealed to the old key. A new account with that name gets a 409, so it can't inherit that mail, but it can't receive at the address either. Whatever deletes an account has to remove its folder and name file too.
 - No backup, as the owner accepted.
 
 ## Mail screens
 
-Issue 37, step 4. The screens are in `Sources/TotalityMail`, and they run on sample mail for now, because the server has no list or fetch path yet. The app says so on screen, and "Try a state" shows each empty, loading, and error state. Nothing here reads a real mailbox, publishes a key, or sends.
+Issue 37, step 4. The screens are in `Sources/TotalityMail`, and the app runs them on the real mailbox. `SampleMailStore` and `SampleMail` stay for previews and tests only, and `MailSampleNote` shows only on a sample store, so the app never shows it. Nothing here sends.
 
-**Swapping in the real store.** The screens only know `MailStore`: open, save marks, save settings, erase, and read an attachment. The real one downloads what's sealed, opens it with `MailKey`, parses it, keeps it on the device, and syncs `MailMarks` and `MailSettings`, sealed. `SampleMailStore`, `SampleMail`, and `MailSampleNote` go away with it, and so does the line in `RootView` that makes the model without a key.
+**The real store.** The screens only know `MailStore`: open, save marks, save settings, erase, and read an attachment. `ServerMailStore` is the real one. On open it publishes `MailKey.publicKey()` once per store (the server answers 200 for the same key), lists the server's messages, downloads only those the vault doesn't have, with progress, opens each with `MailKey` using the account's ID as the mailbox and the server's message ID, and keeps what opened in `MailVault`. It parses with `MailParser` each time it builds the `Mailbox`, so attachments live inside the kept message and are read back out when asked for. Marks and settings come from the vault, which syncs them.
+
+- **The key gate.** A mailbox's key can never be replaced, so the store publishes, and contacts the server at all, only while `BackupModel.deviceCanSync()` is true: this device's key is the signed-in account's and has joined the key backup. Until then Mail says mail starts once the recovery key is set up, and shows the address. A 409 shows as a problem with the account, and the store remembers it, so it never asks again until the app starts over.
+- **A seal that won't open** is kept with no contents and shown as "Can't be opened", and isn't fetched again. A message that won't parse is the parser's unreadable message.
+- **Offline**, or a sign-in token that can't refresh, returns what the vault has, marked offline. Any other server failure is "Your mail didn't open", with Try again, even when the vault has mail. Treating an unreachable server like offline would need its own wording.
+- **Mailbox full** is the list's `used >= limit`, shown on the list.
+- **Erase** deletes from the server first, then the vault, so a message can't come back on the next download. Offline, it waits in the model.
+- **Deleted on another device.** When publishing answers 200, the mailbox is the one the vault came from, so a message the server no longer lists was deleted on purpose, and it goes from the vault too. When it answers 201, the server made the mailbox afresh, perhaps after losing its disk, and the device keeps everything. If another device republished after such a loss first, this device would see 200 and drop mail the new server doesn't have. That's the no-backup risk the owner accepted, made a little wider.
+- **In the app.** Mail's files are in Application Support/Totality/Mail, in the key ring as a `SealedArea`, so a key move reaches them. `MailWiring` in `ContentSetup.swift` opens one `MailVault` for the key's owner once the content key is open and the owner is known, and closes it when either changes. Sync takes that vault alongside the Reader's, Calendar's, and Web's, only while it's the syncing account's. The server client uses the same sign-in token as Web.
+- **Your address** is `<username>@usetotality.com` (`MailDomain`), shown with Copy and Share in Mail's mailbox list, in the waiting state, and on the profile screen.
 
 - **One account, one key.** `MailAccountModel` makes the store, and it starts a new `MailModel` on a new store whenever the device's owner changes or the content key moves, the same moments Web is told of. Nothing of one person's mail stays on screen, in memory, or waiting to be saved for the next. The real store is made in that closure, for the account it's given.
 - **A fetch is older than the screen.** Mail fetches each time it appears. Anything changed on the device while a fetch was out, including marks, erasures, and settings, goes on top of what comes back, so a slow fetch can't undo a change that already saved.
 - **Undo** takes back only the parts an action changed, and only while they're still as it left them. A folder added or a message read in the meantime stays.
 
 - **What the real store has to work out.** `MailRoute` comes from how a message travelled and never from its address, because anyone can write a Totality address in a From line. `MailProof` comes from the checks Cloudflare writes into the headers. `.unreadable` is for a seal that won't open, where nothing but the date is known.
-- **Block Sender** moves what's already here to Spam and adds to the blocked list. The server can't read a sender, so the real store has to apply that list as mail arrives on the device.
-- **Trash** empties when Mail opens, from `MailMarks.trashedAt`. Anything offline waits in the model and says how many changes are waiting.
+- **Block Sender** moves what's already here to Spam and adds to the blocked list. The server can't read a sender, so `ServerMailStore` puts a blocked sender's mail that has no marks of its own in Spam as it builds the mailbox.
+- **Trash** empties when Mail opens, from `MailMarks.trashedAt`, through the store's erase, so it leaves the server too. Anything offline waits in the model and says how many changes are waiting.
 - **Inline images.** `cid:` images in HTML mail aren't drawn yet, because that needs a parsed message. They should become `data:` URLs in `MailHTML.document`, which the page's policy already allows.
 
 **HTML mail is hostile.** `MailHTML` and `MailPage` show it, and `MailPageSafetyTests` loads a page of hostile tags in a real web view with a listener standing in for the sender's server. Scripts are off, `<link>` elements are renamed before loading, the page's policy refuses every load, a compiled rule list refuses them again, every navigation is cancelled, and a web link tap leaves for Web. While images are off, the web view's only way out is a SOCKS proxy that isn't there.
@@ -320,4 +329,4 @@ Issue 37, step 4. The screens are in `Sources/TotalityMail`, and they run on sam
 - Load Images asks for HTTPS images only. "Always load" only counts for a message that proves its sender and isn't in Spam, or anyone could borrow that sender's address.
 - Attachments are read into memory and drawn only for kinds that can't run anything. HTML and SVG can be saved, never drawn.
 
-**Not built yet.** Compose, reply, and send are steps 5 and 6. The home tile is step 7, and until then it only says "Sample mail". Search stays inside Mail, and the home page's magnifying glass doesn't reach it. The Mac's selecting uses the same check marks as iPhone, not Shift or Command clicks.
+**Not built yet.** Compose, reply, and send are steps 5 and 6. The home tile is step 7, and until then it shows one line: the Inbox's unread count once Mail has opened, or "Open to check your mail". Downloads run one at a time, and Mail fetches only when it appears, since there's no push. Search stays inside Mail, and the home page's magnifying glass doesn't reach it. The Mac's selecting uses the same check marks as iPhone, not Shift or Command clicks.

@@ -44,3 +44,4 @@ App/Local.xcconfig
 server/data/
 server/mailboxes/
 server/cloudflared/
+.wrangler/
