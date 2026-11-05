@@ -60,8 +60,42 @@ private actor FakeReader: ContentReceiver {
     }
 }
 
+/// Holds every fetch after the first until it's let go, like a slow connection. What it hands back
+/// is what it held when Mail opened, so it knows nothing saved since.
+private actor SlowStore: MailStore {
+    let mailbox: Mailbox
+    private var opens = 0
+    private var held: CheckedContinuation<Void, Never>?
+
+    init(_ mailbox: Mailbox) { self.mailbox = mailbox }
+
+    var isHolding: Bool { held != nil }
+
+    func letGo() {
+        held?.resume()
+        held = nil
+    }
+
+    func open(progress: @escaping @Sendable (MailDownload) -> Void) async throws -> MailOpening {
+        opens += 1
+        if opens > 1 { await withCheckedContinuation { held = $0 } }
+        return MailOpening(mailbox: mailbox)
+    }
+
+    func save(_ marks: [UUID: MailMarks]) async throws {}
+    func save(_ settings: MailSettings) async throws {}
+    func erase(_ messages: Set<UUID>) async throws {}
+    func data(of attachment: UUID) async throws -> Data { Data() }
+}
+
+/// Which accounts a store was made for, in order.
+@MainActor private final class Made {
+    var accounts: [String?] = []
+}
+
 private let now = Date(timeIntervalSince1970: 1_800_000_000)
 private let dana = MailAddress(name: "Dana Whitfield", address: "dana@usetotality.com")
+private let sam = MailAddress(name: "Sam Ortiz", address: "sam@ortizbuilds.example")
 
 private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
     MailMessage(
@@ -179,6 +213,114 @@ private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
         #expect(model.conversations.count == 1)
         #expect(model.mailbox.settings.blockedSenders.isEmpty)
         #expect(await store.savedSettings.last?.blockedSenders.isEmpty == true)
+    }
+
+    @Test func undoTakesBackTheActionAndNothingSince() async {
+        let (model, _) = await opened([message(MailMarks(isUnread: true))])
+        let conversation = model.conversations[0]
+        await model.perform(.archive, on: [conversation])
+        await model.markRead(model.mailbox.conversations(in: .folder(.archive))[0])
+        await model.addFolder(named: "Taxes")
+        await model.undoLast()
+        #expect(model.conversations.map(\.id) == [conversation.id])
+        #expect(!model.conversations[0].isUnread)
+        #expect(model.mailbox.settings.folders.map(\.name) == ["Taxes"])
+    }
+
+    @Test func undoingABlockKeepsEveryOtherSetting() async {
+        let (model, store) = await opened([message()])
+        await model.block(dana)
+        await model.addFolder(named: "Taxes")
+        await model.alwaysLoadImages(from: sam)
+        await model.undoLast()
+        #expect(model.conversations.count == 1)
+        #expect(model.mailbox.settings.blockedSenders.isEmpty)
+        #expect(model.mailbox.settings.folders.map(\.name) == ["Taxes"])
+        #expect(model.mailbox.settings.alwaysLoadImages == [sam.key])
+        #expect(await store.savedSettings.last == model.mailbox.settings)
+    }
+
+    @Test func undoingABlockOfSomeoneAlreadyBlockedLeavesThemBlocked() async {
+        let (model, _) = await opened([message()], settings: MailSettings(blockedSenders: [dana.key]))
+        await model.block(dana)
+        await model.undoLast()
+        #expect(model.mailbox.settings.blockedSenders == [dana.key])
+    }
+
+    @Test func whatChangesDuringAFetchOutlivesIt() async {
+        let store = SlowStore(Mailbox(address: "mckay@usetotality.com", messages: [message(), message(), message()]))
+        let model = MailModel(store: store, now: { now })
+        await model.load()
+        let archived = model.conversations[0]
+        let deleted = model.conversations[1]
+        let kept = model.conversations[2]
+        let fetch = Task { await model.load() }
+        while !(await store.isHolding) { await Task.yield() }
+        await model.perform(.archive, on: [archived])
+        await model.deleteForever([deleted])
+        await model.addFolder(named: "Taxes")
+        await store.letGo()
+        await fetch.value
+        #expect(model.conversations.map(\.id) == [kept.id])
+        #expect(model.mailbox.conversations(in: .folder(.archive)).map(\.id) == [archived.id])
+        #expect(model.mailbox.messages.count == 2)
+        #expect(model.mailbox.settings.folders.map(\.name) == ["Taxes"])
+    }
+
+    @Test func aFetchAfterwardsTakesWhatTheStoreSays() async {
+        let store = SlowStore(Mailbox(address: "mckay@usetotality.com", messages: [message()]))
+        let model = MailModel(store: store, now: { now })
+        await model.load()
+        await model.perform(.archive, on: model.conversations)
+        let fetch = Task { await model.load() }
+        while !(await store.isHolding) { await Task.yield() }
+        await store.letGo()
+        await fetch.value
+        #expect(model.conversations.count == 1)
+    }
+
+    @Test func anotherAccountGetsANewModelOnItsOwnStore() async {
+        let made = Made()
+        let mail = MailAccountModel { account in
+            made.accounts.append(account)
+            let messages = account == "dana" ? [message()] : []
+            return FakeStore(Mailbox(address: "\(account ?? "nobody")@usetotality.com", messages: messages))
+        }
+        mail.use(account: "dana")
+        let first = mail.current
+        await first.load()
+        first.query = "Saturday"
+        #expect(first.conversations.count == 1)
+        mail.use(account: "sam")
+        let second = mail.current
+        #expect(second !== first)
+        #expect(second.phase == .loading(nil))
+        #expect(second.mailbox.messages.isEmpty)
+        #expect(second.query.isEmpty)
+        await second.load()
+        #expect(second.mailbox.address == "sam@usetotality.com")
+        #expect(second.conversations.isEmpty)
+        mail.use(account: "sam")
+        #expect(mail.current === second)
+        #expect(made.accounts == [nil, "dana", "sam"])
+    }
+
+    @Test func aKeyChangeStartsOverAndDropsTheReader() async {
+        let made = Made()
+        let mail = MailAccountModel { account in
+            made.accounts.append(account)
+            return FakeStore(Mailbox(address: "mckay@usetotality.com", messages: [message()]))
+        }
+        mail.use(account: "mckay")
+        mail.receiver = FakeReader()
+        let before = mail.current
+        #expect(before.canSaveToReader)
+        mail.keyChanged()
+        #expect(mail.current !== before)
+        #expect(!mail.current.canSaveToReader)
+        #expect(made.accounts == [nil, "mckay", "mckay"])
+        mail.receiver = FakeReader()
+        #expect(mail.current.canSaveToReader)
     }
 
     @Test func offlineChangesWaitSayHowManyAndGoThroughLater() async {

@@ -303,6 +303,10 @@ Issue 37, step 4. The screens are in `Sources/TotalityMail`, and they run on sam
 
 **Swapping in the real store.** The screens only know `MailStore`: open, save marks, save settings, erase, and read an attachment. The real one downloads what's sealed, opens it with `MailKey`, parses it, keeps it on the device, and syncs `MailMarks` and `MailSettings`, sealed. `SampleMailStore`, `SampleMail`, and `MailSampleNote` go away with it, and so does the line in `RootView` that makes the model without a key.
 
+- **One account, one key.** `MailAccountModel` makes the store, and it starts a new `MailModel` on a new store whenever the device's owner changes or the content key moves, the same moments Web is told of. Nothing of one person's mail stays on screen, in memory, or waiting to be saved for the next. The real store is made in that closure, for the account it's given.
+- **A fetch is older than the screen.** Mail fetches each time it appears. Anything changed on the device while a fetch was out, including marks, erasures, and settings, goes on top of what comes back, so a slow fetch can't undo a change that already saved.
+- **Undo** takes back only the parts an action changed, and only while they're still as it left them. A folder added or a message read in the meantime stays.
+
 - **What the real store has to work out.** `MailRoute` comes from how a message travelled and never from its address, because anyone can write a Totality address in a From line. `MailProof` comes from the checks Cloudflare writes into the headers. `.unreadable` is for a seal that won't open, where nothing but the date is known.
 - **Block Sender** moves what's already here to Spam and adds to the blocked list. The server can't read a sender, so the real store has to apply that list as mail arrives on the device.
 - **Trash** empties when Mail opens, from `MailMarks.trashedAt`. Anything offline waits in the model and says how many changes are waiting.

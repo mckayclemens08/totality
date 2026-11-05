@@ -2,12 +2,15 @@ import Foundation
 import Observation
 import TotalityCore
 
-/// A short Undo after an action: what to put back, and what to call it.
+/// A short Undo after an action: what it changed, and what to call it. It takes back that change and
+/// nothing made since.
 public struct MailUndo: Identifiable, Equatable, Sendable {
     public let id = UUID()
     public let label: String
-    let marks: [UUID: MailMarks]
-    var settings: MailSettings?
+    let before: [UUID: MailMarks]
+    let after: [UUID: MailMarks]
+    /// A sender the action blocked, who wasn't blocked before it.
+    var unblocks: String?
 }
 
 /// The Mail screens' state. Changes land on screen first, then go to the store, and a change the store
@@ -38,9 +41,17 @@ public final class MailModel {
     @ObservationIgnored public var onSentToReader: (() -> Void)?
     @ObservationIgnored public let rules = MailRules()
 
+    /// What changed on this device while a fetch was out. The fetched copy is older, so these go on top.
+    private struct Since {
+        var marks: [UUID: MailMarks] = [:]
+        var erased = Set<UUID>()
+        var settings = false
+    }
+
     private var waitingMarks: [UUID: MailMarks] = [:]
     private var waitingErase = Set<UUID>()
     private var settingsWait = false
+    private var since: [UUID: Since] = [:]
     private let now: @Sendable () -> Date
 
     public init(store: any MailStore, now: @escaping @Sendable () -> Date = { Date() }) {
@@ -60,15 +71,22 @@ public final class MailModel {
         Set(waitingMarks.keys).union(waitingErase).count + (settingsWait ? 1 : 0)
     }
 
+    /// Runs each time Mail appears. Whatever changed here while the fetch was out stays changed.
     public func load() async {
         if phase != .ready { phase = .loading(nil) }
+        let fetch = UUID()
+        since[fetch] = Since()
+        defer { since[fetch] = nil }
         do {
             let opening = try await store.open { [weak self] download in
                 Task { @MainActor in self?.showProgress(download) }
             }
-            mailbox = opening.mailbox
-            mailbox.apply(waitingMarks)
-            mailbox.remove(waitingErase)
+            let here = since[fetch] ?? Since()
+            var fresh = opening.mailbox
+            fresh.apply(waitingMarks.merging(here.marks) { _, new in new })
+            fresh.remove(waitingErase.union(here.erased))
+            if here.settings || settingsWait { fresh.settings = mailbox.settings }
+            mailbox = fresh
             isOffline = opening.isOffline
             phase = .ready
             await emptyTrash()
@@ -118,9 +136,9 @@ public final class MailModel {
     public func perform(_ action: MailAction, on conversations: [MailConversation]) async {
         let changed = mailbox.marks(after: action, on: conversations, now: now())
         guard !changed.isEmpty else { return }
-        undo = MailUndo(label: label(action, count: conversations.count), marks: previous(changed))
+        undo = MailUndo(label: label(action, count: conversations.count), before: previous(changed), after: changed)
         endSelecting()
-        mailbox.apply(changed)
+        change(changed)
         await keep(changed)
     }
 
@@ -128,29 +146,41 @@ public final class MailModel {
     public func markRead(_ conversation: MailConversation) async {
         let changed = mailbox.marks(after: .markRead, on: [conversation], now: now())
         guard !changed.isEmpty else { return }
-        mailbox.apply(changed)
+        change(changed)
         await keep(changed)
     }
 
     public func block(_ sender: MailAddress) async {
         let changed = mailbox.marksAfterBlocking(sender)
-        let before = mailbox.settings
-        undo = MailUndo(label: "Blocked \(sender.displayName)", marks: previous(changed), settings: before)
+        let isNew = !mailbox.settings.blockedSenders.contains(sender.key)
+        undo = MailUndo(
+            label: "Blocked \(sender.displayName)", before: previous(changed), after: changed,
+            unblocks: isNew ? sender.key : nil
+        )
         endSelecting()
-        mailbox.apply(changed)
+        change(changed)
         mailbox.settings.blockedSenders.insert(sender.key)
+        settingsChanged()
         await keep(changed)
         await keep(mailbox.settings)
     }
 
+    /// Puts back what the action changed, where it's still as the action left it.
     public func undoLast() async {
         guard let undo else { return }
         self.undo = nil
-        mailbox.apply(undo.marks)
-        await keep(undo.marks)
-        if let settings = undo.settings {
-            mailbox.settings = settings
-            await keep(settings)
+        var restored: [UUID: MailMarks] = [:]
+        for message in mailbox.messages {
+            guard let before = undo.before[message.id], let after = undo.after[message.id] else { continue }
+            let marks = message.marks.undoing(after, back: before)
+            if marks != message.marks { restored[message.id] = marks }
+        }
+        change(restored)
+        await keep(restored)
+        if let sender = undo.unblocks, mailbox.settings.blockedSenders.contains(sender) {
+            mailbox.settings.blockedSenders.remove(sender)
+            settingsChanged()
+            await keep(mailbox.settings)
         }
     }
 
@@ -168,7 +198,17 @@ public final class MailModel {
 
     private func eraseNow(_ ids: Set<UUID>) async {
         mailbox.remove(ids)
+        for fetch in since.keys { since[fetch]?.erased.formUnion(ids) }
         await erase(ids)
+    }
+
+    private func change(_ marks: [UUID: MailMarks]) {
+        mailbox.apply(marks)
+        for fetch in since.keys { since[fetch]?.marks.merge(marks) { _, new in new } }
+    }
+
+    private func settingsChanged() {
+        for fetch in since.keys { since[fetch]?.settings = true }
     }
 
     private func previous(_ changed: [UUID: MailMarks]) -> [UUID: MailMarks] {
@@ -216,6 +256,7 @@ public final class MailModel {
     public func addFolder(named name: String) async {
         guard let name = usableName(name) else { return }
         mailbox.settings.folders.append(MailOwnFolder(name: name))
+        settingsChanged()
         await keep(mailbox.settings)
     }
 
@@ -225,6 +266,7 @@ public final class MailModel {
               let index = mailbox.settings.folders.firstIndex(of: folder)
         else { return }
         mailbox.settings.folders[index].name = name
+        settingsChanged()
         await keep(mailbox.settings)
     }
 
@@ -237,8 +279,9 @@ public final class MailModel {
             changed[message.id] = marks
         }
         if place == .folder(.own(folder.id)) { place = .inbox }
-        mailbox.apply(changed)
+        change(changed)
         mailbox.settings.folders.removeAll { $0.id == folder.id }
+        settingsChanged()
         await keep(changed)
         await keep(mailbox.settings)
     }
@@ -258,6 +301,7 @@ public final class MailModel {
 
     public func alwaysLoadImages(from sender: MailAddress) async {
         mailbox.settings.alwaysLoadImages.insert(sender.key)
+        settingsChanged()
         await keep(mailbox.settings)
     }
 

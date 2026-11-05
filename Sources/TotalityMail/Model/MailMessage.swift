@@ -49,6 +49,20 @@ public struct MailMarks: Hashable, Codable, Sendable {
     }
 }
 
+extension MailMarks {
+    /// Takes back one change and nothing made since: each part goes back only while it's still what
+    /// that change left. Where a message is, with when and from where it was trashed, is one part.
+    func undoing(_ after: MailMarks, back before: MailMarks) -> MailMarks {
+        var marks = self
+        if (folder, trashedAt, trashedFrom) == (after.folder, after.trashedAt, after.trashedFrom) {
+            (marks.folder, marks.trashedAt, marks.trashedFrom) = (before.folder, before.trashedAt, before.trashedFrom)
+        }
+        if isUnread == after.isUnread { marks.isUnread = before.isUnread }
+        if isStarred == after.isStarred { marks.isStarred = before.isStarred }
+        return marks
+    }
+}
+
 /// How a message travelled, which decides what can honestly be said about it. It comes from the path
 /// the message took and never from its address: anyone can write a Totality address in a From line.
 public enum MailRoute: Sendable, Hashable {
