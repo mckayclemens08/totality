@@ -1093,6 +1093,93 @@ describe('the Worker', () => {
   })
 })
 
+describe('Mail two-user test (issue 37)', () => {
+  let root, mailboxes, gate
+  const accounts = new Map()
+  const outside = []
+  const NOW = Date.UTC(2026, 10, 20, 9)
+
+  before(async () => {
+    root = await mkdtemp(join(tmpdir(), 'totality-two-user-'))
+    mailboxes = new Mailboxes(root)
+    gate = new Arrivals({
+      secret: SECRET,
+      checkSignIn: async (token) => accounts.get(token) ?? null,
+      checkSpam: async () => null,
+      mailboxes,
+      clock: () => NOW,
+      sendOutside: async (message) => { outside.push(message); return { sent: true } },
+    })
+  })
+  after(() => rm(root, { recursive: true, force: true }))
+
+  const person = async (name) => {
+    const keys = newKeys()
+    const account = { name, mailbox: randomUUID(), created: Date.UTC(2026, 9, 1) }
+    accounts.set(`two_user_${name}`, account)
+    await mailboxes.publish(name, account.mailbox, keys.publicKey)
+    return { token: `two_user_${name}`, keys, ...account }
+  }
+  const ask = (who, method, path, body) =>
+    gate.respond(method, path, `Bearer ${who.token}`, undefined, async () => body === undefined ? null : Buffer.from(JSON.stringify(body)))
+  const listed = async (who) => JSON.parse((await ask(who, 'GET', '/mail/list')).body).messages.map(({ id }) => id)
+  // What each device sealed for the other. The server never opens these.
+  const INNER = (text) => Buffer.concat([Buffer.from([1]), Buffer.alloc(32, 9), Buffer.from(text)])
+  const facts = (form) => JSON.parse(form.subarray(0, form.indexOf(10)))
+
+  test('user 1 emails user 2, user 2 reads it and replies, and neither can reach the other\'s mailbox or send as them', async () => {
+    const user1 = await person('mckay')
+    const user2 = await person('dana')
+
+    // User 1 writes to user 2.
+    const first = randomUUID()
+    assert.equal((await ask(user1, 'POST', '/mail/deliver', { to: user2.name, id: first, sealed: INNER('saturday plans').toString('base64') })).status, 201)
+    assert.deepEqual(await listed(user2), [first])
+    assert.deepEqual(await listed(user1), [])
+
+    // User 2 reads it, from user 1, as the server took it from the sign-in.
+    const fetched = await ask(user2, 'GET', `/mail/message/${first}`)
+    assert.equal(fetched.status, 200)
+    const form = opened(fetched.body, user2.keys, user2.mailbox, first)
+    assert.deepEqual([facts(form).from, facts(form).to], ['mckay', 'dana'])
+
+    // User 2 replies, and it arrives from user 2, whatever user 2 might claim.
+    const reply = randomUUID()
+    assert.equal((await ask(user2, 'POST', '/mail/deliver', { to: user1.name, from: 'mckay', id: reply, sealed: INNER('see you at 7').toString('base64') })).status, 201)
+    const back = await ask(user1, 'GET', `/mail/message/${reply}`)
+    assert.equal(facts(opened(back.body, user1.keys, user1.mailbox, reply)).from, 'dana')
+
+    // User 2 can't reach user 1's mailbox: not by listing, fetching, deleting, or keeping into it.
+    assert.equal((await ask(user2, 'GET', `/mail/message/${reply}`)).status, 404)
+    assert.deepEqual(JSON.parse((await ask(user2, 'POST', '/mail/delete', { ids: [reply] })).body), { deleted: 0 })
+    assert.deepEqual(await listed(user1), [reply])
+    assert.ok(!(await listed(user2)).includes(reply))
+
+    // User 2 can't send outside as user 1 either: From comes from the sign-in.
+    const out = await ask(user2, 'POST', '/mail/send', { id: randomUUID(), from: 'mckay@usetotality.com', to: ['sam@ortizbuilds.example'], subject: 'Hi', text: 'Hello' })
+    assert.equal(out.status, 200)
+    assert.equal(outside.at(-1).from, 'dana@usetotality.com')
+
+    // And the server's disk holds nothing readable: no words, names, or addresses from any of it.
+    const files = []
+    const walk = async (folder) => {
+      for (const entry of await readdir(folder, { withFileTypes: true })) {
+        const path = join(folder, entry.name)
+        if (entry.isDirectory()) await walk(path)
+        else files.push(path)
+      }
+    }
+    await walk(join(root, 'boxes'))
+    await walk(join(root, 'sending'))
+    for (const file of files) {
+      const bytes = await readFile(file)
+      for (const secret of ['saturday plans', 'see you at 7', 'Hello', 'sam@ortizbuilds', '"from"', 'dana@', 'mckay@']) {
+        assert.equal(bytes.includes(Buffer.from(secret)), false, `${file} holds ${secret}`)
+      }
+    }
+  })
+})
+
 describe('mail to outside addresses', () => {
   let root, mailboxes, gate
   const accounts = new Map()

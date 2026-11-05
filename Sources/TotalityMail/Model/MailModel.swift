@@ -33,6 +33,8 @@ public final class MailModel {
         didSet { endSelecting() }
     }
     public var query = ""
+    /// A conversation the home page asked to open. Mail opens it in the Inbox and clears this.
+    public var requestedConversation: UUID?
     public var isSelecting = false
     public var selection = Set<UUID>()
 
@@ -66,6 +68,40 @@ public final class MailModel {
     }
 
     public var placeName: String { mailbox.name(of: place) }
+
+    // MARK: The home page
+
+    /// The Inbox's newest conversations, for the home tiles. Nothing outside the Inbox shows there.
+    public func homeConversations(_ limit: Int) -> [MailConversation] {
+        Array(mailbox.conversations(in: .inbox).prefix(limit))
+    }
+
+    public var homeUnread: Int { mailbox.unreadCount(in: .inbox) }
+
+    /// The small tile's lines: how much is unread, then who wrote last. Before Mail has opened there's
+    /// nothing to count, so it says that instead.
+    public var glance: ModuleGlance {
+        guard phase == .ready else { return ModuleGlance(lines: ["Open to check your mail"], isQuiet: true) }
+        let unread = homeUnread
+        let count = unread == 0 ? "No unread mail" : unread == 1 ? "1 unread" : "\(unread) unread"
+        guard let newest = homeConversations(1).first, !newest.isUnreadable else {
+            return ModuleGlance(lines: [count], isQuiet: unread == 0)
+        }
+        return ModuleGlance(lines: [count, newest.sender(me: mailbox.address).displayName], isQuiet: unread == 0)
+    }
+
+    /// What a line of the small tile opens: the second line is the newest conversation.
+    public func glanceConversation(at line: Int) -> UUID? {
+        guard phase == .ready, line == 1 else { return nil }
+        return homeConversations(1).first?.id
+    }
+
+    /// Asked for from the home page. The Inbox is where it lives, so that's where it opens.
+    public func requestFromHome(_ conversation: UUID) {
+        place = .inbox
+        query = ""
+        requestedConversation = conversation
+    }
     public var today: Date { now() }
 
     /// How many changes are still on their way.
