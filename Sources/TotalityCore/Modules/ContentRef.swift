@@ -8,6 +8,9 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     case file, note, doc, photo, video, audio, post, event, transaction
     case aiMemory = "ai_memory"
     case bookmark
+    /// One message's marks, and one account's mail settings. Mail itself comes from the mail server.
+    case mailMarks = "mail_marks"
+    case mailSettings = "mail_settings"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {

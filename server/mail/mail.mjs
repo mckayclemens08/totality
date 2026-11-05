@@ -6,7 +6,7 @@ import {
   createCipheriv, createHash, createHmac, createPublicKey, diffieHellman, generateKeyPairSync, randomUUID,
   timingSafeEqual,
 } from 'node:crypto'
-import { link, mkdir, open, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { link, lstat, mkdir, open, readFile, readdir, rm, stat, unlink } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -18,6 +18,8 @@ export const MAILBOX_LIMIT = 1024 ** 3
 // it waits at the sender's server, which tries again.
 export const AT_ONCE = 4
 const MAX_KEY_REQUEST = 1_024
+const MAX_DELETE_REQUEST = 64 * 1024
+export const MAX_DELETE = 500
 // The Worker bounces this for good. It's not 404, because a broken tunnel answers 404 by itself, and
 // that must never bounce someone's mail.
 export const NO_SUCH_ADDRESS = 410
@@ -146,6 +148,8 @@ async function readIfThere(path) {
 
 const NAME = /^[a-z0-9_]{3,24}$/
 const MAILBOX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+// Only a whole message's name, so the key and half-written files never show.
+const MESSAGE_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.sealed$/
 
 /** Everything mail keeps, on this server's disk. Each mailbox is a folder of sealed files and the public
  *  key they're sealed to. `names` says which mailbox an address belongs to, and reserved names like
@@ -207,7 +211,63 @@ export class Mailboxes {
   }
 
   async add(mailbox, message, sealed) {
-    await writeOnce(join(this.folder(mailbox), `${message}.sealed`), sealed)
+    await writeOnce(this.messageFile(mailbox, message), sealed)
+  }
+
+  /** The ID is checked before it becomes part of a path, so it can't name anything but a message in
+   *  this one mailbox. */
+  messageFile(mailbox, message) {
+    if (!MAILBOX.test(message)) throw new Error('not a message')
+    return join(this.folder(mailbox), `${message}.sealed`)
+  }
+
+  /** Every message in a mailbox, newest first, with sizes and arrival times and nothing else. A mailbox
+   *  with no folder yet is simply empty. */
+  async list(mailbox) {
+    const folder = this.folder(mailbox)
+    let names
+    try {
+      names = await readdir(folder)
+    } catch (error) {
+      if (error.code === 'ENOENT') return []
+      throw error
+    }
+    const messages = []
+    for (const name of names) {
+      const id = MESSAGE_FILE.exec(name)?.[1]
+      if (!id) continue
+      let info
+      try {
+        info = await lstat(join(folder, name))
+      } catch (error) {
+        // Deleted by another device since the folder was read.
+        if (error.code === 'ENOENT') continue
+        throw error
+      }
+      if (info.isFile()) messages.push({ id, size: info.size, mtime: info.mtimeMs })
+    }
+    messages.sort((a, b) => b.mtime - a.mtime || (a.id < b.id ? -1 : 1))
+    return messages.map(({ id, size, mtime }) => ({ id, size, received: new Date(mtime).toISOString() }))
+  }
+
+  /** A message's sealed bytes, or null if this mailbox has no such message. */
+  async message(mailbox, message) {
+    return readIfThere(this.messageFile(mailbox, message))
+  }
+
+  /** Removes what's there and ignores what isn't, so asking twice is harmless. Returns how many went. */
+  async remove(mailbox, messages) {
+    const files = [...new Set(messages)].map((message) => this.messageFile(mailbox, message))
+    let removed = 0
+    for (const file of files) {
+      try {
+        await unlink(file)
+        removed += 1
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+      }
+    }
+    return removed
   }
 }
 
@@ -233,32 +293,82 @@ export class Arrivals {
     this.working = 0
   }
 
-  /** Returns only a status, so nothing about a message can leave in a reply. `read` takes a limit, gets
-   *  the body, and returns null past the limit. Nothing is read until the caller is proven. */
+  /** The status alone, for callers that only need to know how it went. */
   async handle(method, path, authorization, to, read) {
-    if (method === 'GET' && path === '/mail/health') return 200
-    if (path !== '/mail/arrive' && path !== '/mail/key') return 404
-    if (method !== 'POST') return 405
+    return (await this.respond(method, path, authorization, to, read)).status
+  }
+
+  /** Returns `{ status, body, type }`. Only `/mail/message/<id>` ever carries a message, and only to the
+   *  account it belongs to. `read` takes a limit, gets the body, and returns null past the limit.
+   *  Nothing is read until the caller is proven. */
+  async respond(method, path, authorization, to, read) {
+    if (method === 'GET' && path === '/mail/health') return { status: 200 }
+    const message = /^\/mail\/message\/([^/]*)$/.exec(path)?.[1]
+    if (message !== undefined) {
+      if (!MAILBOX.test(message)) return { status: 404 }
+      if (method !== 'GET') return { status: 405 }
+    } else if (path === '/mail/list') {
+      if (method !== 'GET') return { status: 405 }
+    } else if (path === '/mail/arrive' || path === '/mail/key' || path === '/mail/delete') {
+      if (method !== 'POST') return { status: 405 }
+    } else {
+      return { status: 404 }
+    }
     try {
-      if (path === '/mail/key') return await this.publishKey(authorization, read)
-      if (!authorization?.startsWith('Bearer ') || !sameSecret(authorization.slice(7), this.secret)) return 401
-      if (this.working >= AT_ONCE) return 503
-      this.working += 1
-      try {
-        return await this.arrive(to, read)
-      } finally {
-        this.working -= 1
-      }
+      if (path === '/mail/arrive') return { status: await this.arriveWithSecret(authorization, to, read) }
+      if (path === '/mail/key') return { status: await this.publishKey(authorization, read) }
+      // The mailbox is always the signed-in account's own, never one named in the request.
+      const account = await this.signedIn(authorization)
+      if (!account) return { status: 401 }
+      if (path === '/mail/list') return await this.list(account)
+      if (path === '/mail/delete') return await this.remove(account, read)
+      const sealed = await this.mailboxes.message(account.mailbox, message)
+      return sealed ? { status: 200, body: sealed, type: 'application/octet-stream' } : { status: 404 }
     } catch {
       // Anything unexpected is a 503, so the Worker fails and the sender's server tries again later.
-      return 503
+      return { status: 503 }
+    }
+  }
+
+  async signedIn(authorization) {
+    if (!authorization?.startsWith('Bearer ')) return null
+    return this.checkSignIn(authorization.slice(7))
+  }
+
+  async list(account) {
+    const messages = await this.mailboxes.list(account.mailbox)
+    const used = messages.reduce((total, { size }) => total + size, 0)
+    return json(200, { messages, used, limit: MAILBOX_LIMIT })
+  }
+
+  async remove(account, read) {
+    const body = await read(MAX_DELETE_REQUEST)
+    if (!body) return { status: 413 }
+    let ids
+    try {
+      ids = JSON.parse(body).ids
+    } catch {
+      return { status: 400 }
+    }
+    if (!Array.isArray(ids) || ids.length > MAX_DELETE) return { status: 400 }
+    if (!ids.every((id) => typeof id === 'string' && MAILBOX.test(id))) return { status: 400 }
+    return json(200, { deleted: await this.mailboxes.remove(account.mailbox, ids) })
+  }
+
+  async arriveWithSecret(authorization, to, read) {
+    if (!authorization?.startsWith('Bearer ') || !sameSecret(authorization.slice(7), this.secret)) return 401
+    if (this.working >= AT_ONCE) return 503
+    this.working += 1
+    try {
+      return await this.arrive(to, read)
+    } finally {
+      this.working -= 1
     }
   }
 
   /** The account comes from the sign-in, never the request, so nobody can publish for someone else. */
   async publishKey(authorization, read) {
-    if (!authorization?.startsWith('Bearer ')) return 401
-    const account = await this.checkSignIn(authorization.slice(7))
+    const account = await this.signedIn(authorization)
     if (!account) return 401
     const body = await read(MAX_KEY_REQUEST)
     if (!body) return 413
@@ -301,6 +411,10 @@ export class Arrivals {
       raw.fill(0)
     }
   }
+}
+
+function json(status, value) {
+  return { status, body: Buffer.from(JSON.stringify(value)), type: 'application/json' }
 }
 
 /** Rspamd's action becomes one yes or no. Its reasons stay behind, because they'd describe the message. */
@@ -360,14 +474,19 @@ export async function readBody(request, limit) {
 export function serve(arrivals, port) {
   const server = createServer(async (request, response) => {
     let tooBig = false
-    const status = await arrivals.handle(request.method, request.url, request.headers.authorization,
+    const { status, body, type } = await arrivals.respond(request.method, request.url, request.headers.authorization,
       request.headers['x-mail-to'], async (limit) => {
-        const body = await readBody(request, limit)
-        tooBig = !body
-        return body
+        const given = await readBody(request, limit)
+        tooBig = !given
+        return given
       })
-    response.writeHead(status, { 'Content-Length': 0, 'Cache-Control': 'no-store', ...(tooBig && { Connection: 'close' }) })
-    response.end()
+    response.writeHead(status, {
+      'Content-Length': body?.length ?? 0,
+      'Cache-Control': 'no-store',
+      ...(type && { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff' }),
+      ...(tooBig && { Connection: 'close' }),
+    })
+    response.end(body)
   })
   server.requestTimeout = 120_000
   server.listen(port, '0.0.0.0')

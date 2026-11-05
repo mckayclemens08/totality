@@ -24,8 +24,10 @@ public final class MailAccountModel {
         current = MailModel(store: makeStore(nil))
     }
 
-    public func use(account: String?) {
-        guard account != self.account else { return }
+    /// `restart` starts over even for the same account, for when what its store is made from has
+    /// changed, like a vault that's just been opened with a new key.
+    public func use(account: String?, restart: Bool = false) {
+        guard restart || account != self.account else { return }
         self.account = account
         startOver()
     }

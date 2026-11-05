@@ -16,9 +16,9 @@ struct RootView: View {
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
     @State private var web: WebModel?
-    // Sample mail until the server can list and fetch, so it needs no key yet. Issue 37, step 4.
-    // The real store is made here, for the account it's given.
-    @State private var mail = MailAccountModel { _ in SampleMailStore() }
+    // The real mailbox, for whoever owns this device's key. `mailWiring` holds that account's vault.
+    @State private var mail: MailAccountModel
+    @State private var mailWiring: MailWiring
     @State private var registry: ModuleRegistry?
     @State private var syncAreas: [any SyncArea] = []
     @State private var contentProblem: ContentProblem?
@@ -34,7 +34,17 @@ struct RootView: View {
     init() {
         let keys = DeviceContentKeys()
         _contentKeys = State(initialValue: keys)
-        _account = State(initialValue: AccountSetup.makeModel(content: keys))
+        let account = AccountSetup.makeModel(content: keys)
+        _account = State(initialValue: account)
+        let wiring = MailWiring()
+        // A mailbox's key can never be replaced, so it's published only from a device whose key is the
+        // signed-in account's and has joined the key backup.
+        wiring.canPublish = { [backup = account?.backup] account in
+            guard let backup, await backup.deviceCanSync() else { return false }
+            return await backup.deviceOwner() == account
+        }
+        _mailWiring = State(initialValue: wiring)
+        _mail = State(initialValue: MailAccountModel { wiring.makeStore(account: $0) })
     }
 
     var body: some View {
@@ -88,6 +98,7 @@ struct RootView: View {
                 reader = nil
                 calendar = nil
                 web = nil
+                await mailWiring.disconnect()
                 mail.keyChanged()
                 registry = nil
                 syncAreas = []
@@ -145,8 +156,16 @@ struct RootView: View {
         glances[.reader] = reader?.glance
         glances[.calendar] = calendar?.glance
         glances[.web] = web?.glance
-        glances[.mail] = ModuleGlance(lines: ["Sample mail"], isQuiet: true)
+        glances[.mail] = mailGlance
         return glances
+    }
+
+    /// Until the home tile is built (issue 37, step 7), the line only says what Mail last found.
+    private var mailGlance: ModuleGlance {
+        let model = mail.current
+        guard model.phase == .ready else { return ModuleGlance(lines: ["Open to check your mail"], isQuiet: true) }
+        let unread = model.mailbox.unreadCount(in: .inbox)
+        return ModuleGlance(lines: [unread == 0 ? "No unread mail" : "\(unread) unread"], isQuiet: unread == 0)
     }
 
     /// A module's own view for a big tile. Nil falls back to the lines, which say why it's quiet.
@@ -231,6 +250,7 @@ struct RootView: View {
             web = content.web
             web?.onSentToReader = { Task { await reader?.load() } }
             web?.onOpenInReader = { show($0) }
+            mailWiring.connect(content.mail)
             mail.receiver = content.registry.receiver(for: .mail)
             mail.onSentToReader = { Task { await reader?.load() } }
             registry = content.registry
@@ -257,7 +277,8 @@ struct RootView: View {
     /// Web keeps things only for the key's owner, and Mail shows only the owner's mailbox.
     private func tellWhoIsHere() async {
         let owner = await account?.backup?.deviceOwner()
-        mail.use(account: owner)
+        let newVault = await mailWiring.use(account: owner)
+        mail.use(account: owner, restart: newVault)
         await web?.use(account: owner)
     }
 
@@ -275,7 +296,12 @@ struct RootView: View {
             guard await backup.deviceCanSync() else { return nil }
             prepareContent()
             guard !syncAreas.isEmpty else { return nil }
-            let engine = SyncEngine(areas: syncAreas, remote: try await remote.forCurrentAccount(), state: FileSyncState(file: try ContentSetup.syncStateFile()))
+            // Mail's vault joins only when it's the syncing account's, which `deviceCanSync` just proved
+            // is the owner's. One opened for someone else would be left out.
+            var areas = syncAreas
+            let owner = await backup.deviceOwner()
+            if let vault = mailWiring.vault, vault.account == owner { areas.append(vault) }
+            let engine = SyncEngine(areas: areas, remote: try await remote.forCurrentAccount(), state: FileSyncState(file: try ContentSetup.syncStateFile()))
             return try await engine.sync(allowLargeRemoval: allowLargeRemoval)
         }
         sync.onFinished = { refreshRecoveryLabels() }
@@ -283,6 +309,8 @@ struct RootView: View {
             await reader?.load()
             await calendar?.load()
             await web?.load()
+            // Marks from another device. Mail only fetches while it's showing.
+            if open == .mail, mail.current.phase == .ready { await mail.current.load() }
         }
         backup.onJoined = { await sync.syncNow() }
         backup.onOwnerChanged = { await tellWhoIsHere() }

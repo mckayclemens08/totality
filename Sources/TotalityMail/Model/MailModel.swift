@@ -21,6 +21,7 @@ public final class MailModel {
     public enum Phase: Equatable {
         case loading(MailDownload?)
         case noKey, failed, ready
+        case noAccount, waitingForBackup, keyConflict
     }
 
     public private(set) var phase = Phase.loading(nil)
@@ -93,6 +94,13 @@ public final class MailModel {
             if !isOffline { await sendWaiting() }
         } catch MailStoreError.noKey {
             phase = .noKey
+        } catch MailStoreError.noAccount {
+            phase = .noAccount
+        } catch MailStoreError.waitingForBackup {
+            if mailbox.address.isEmpty, let address = await store.address() { mailbox.address = address }
+            phase = .waitingForBackup
+        } catch MailStoreError.keyConflict {
+            phase = .keyConflict
         } catch {
             phase = .failed
         }

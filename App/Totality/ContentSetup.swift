@@ -16,12 +16,13 @@ enum ContentSetup {
             .appendingPathComponent("Totality", isDirectory: true)
     }
 
-    private static func stores() throws -> (reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore) {
+    private static func stores() throws -> (reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore) {
         let base = try base()
         return (
             try FileBlobStore(directory: base.appendingPathComponent("Reader", isDirectory: true)),
             try FileBlobStore(directory: base.appendingPathComponent("Calendar", isDirectory: true)),
-            try FileBlobStore(directory: base.appendingPathComponent("Web", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Web", isDirectory: true)),
+            try FileBlobStore(directory: base.appendingPathComponent("Mail", isDirectory: true))
         )
     }
 
@@ -31,6 +32,7 @@ enum ContentSetup {
             SealedArea(store: stores.reader, purposes: ReaderVault.sealedPurposes),
             SealedArea(store: stores.calendar, purposes: CalendarVault.sealedPurposes),
             SealedArea(store: stores.web, purposes: WebVault.sealedPurposes),
+            SealedArea(store: stores.mail, purposes: MailVault.sealedPurposes),
         ])
     }
 
@@ -41,7 +43,10 @@ enum ContentSetup {
     }
 
     /// The key step finishes any move that was interrupted, so this always opens with the right key.
-    static func makeModels() throws -> (reader: ReaderModel, calendar: CalendarModel, web: WebModel, areas: [any SyncArea], registry: ModuleRegistry) {
+    static func makeModels() throws -> (
+        reader: ReaderModel, calendar: CalendarModel, web: WebModel, areas: [any SyncArea], registry: ModuleRegistry,
+        mail: MailContent
+    ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
 
@@ -68,8 +73,70 @@ enum ContentSetup {
                 receiver: registry.receiver(for: .web)
             ),
             [readerVault, calendarVault, webVault],
-            registry
+            registry,
+            MailContent(rootKey: rootKey, store: stores.mail)
         )
+    }
+}
+
+/// What Mail's vault is made from. Mail's vault belongs to one account, which is only known once the
+/// device's owner is, so it's made later than the other modules'.
+struct MailContent {
+    let rootKey: ContentRootKey
+    let store: FileBlobStore
+}
+
+/// Makes Mail's store for whoever owns this device's key. One vault per account and key: a change of
+/// either closes the old one, so nothing of the last person's mail can be read or saved through it.
+@MainActor
+final class MailWiring {
+    private(set) var vault: MailVault?
+    private var content: MailContent?
+    /// Whether this device may publish this account's mailbox key. Set from the account, if there is one.
+    /// It names the account, so a sign-in that changes mid-open can't publish one person's key for another.
+    var canPublish: @Sendable (String) async -> Bool = { _ in false }
+
+    /// The content key is open.
+    func connect(_ content: MailContent) {
+        self.content = content
+    }
+
+    /// The content key is about to move, or has gone.
+    func disconnect() async {
+        await vault?.close()
+        vault = nil
+        content = nil
+    }
+
+    /// Opens the vault for this account. True when it's a different vault from before, so Mail has to
+    /// start over on it.
+    func use(account: String?) async -> Bool {
+        guard let account, let content else {
+            guard let old = vault else { return false }
+            await old.close()
+            vault = nil
+            return true
+        }
+        guard vault?.account != account else { return false }
+        await vault?.close()
+        vault = MailVault(store: content.store, rootKey: content.rootKey, account: account)
+        return true
+    }
+
+    func makeStore(account: String?) -> any MailStore {
+        guard let account else { return UnavailableMailStore(.noAccount) }
+        guard let vault, vault.account == account, let content else { return UnavailableMailStore(.noKey) }
+        guard let token = AccountSetup.searchToken, let username = AccountSetup.username else {
+            return UnavailableMailStore(.noAccount)
+        }
+        do {
+            return try ServerMailStore(
+                account: account, rootKey: content.rootKey, vault: vault, server: MailServerClient(token: token),
+                canPublish: { [canPublish] in await canPublish(account) }, username: username
+            )
+        } catch {
+            return UnavailableMailStore(.noKey)
+        }
     }
 }
 

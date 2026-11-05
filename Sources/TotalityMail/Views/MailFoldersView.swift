@@ -37,12 +37,11 @@ struct MailFoldersView: View {
         let theme = Theme.current
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s1) {
-                Text(model.mailbox.address)
-                    .font(Typeface.caption)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
-                    .padding(.horizontal, Space.s3)
-                    .padding(.bottom, Space.s2)
+                if !model.mailbox.address.isEmpty {
+                    AddressLine("Your address", address: model.mailbox.address)
+                        .padding(.horizontal, Space.s3)
+                        .padding(.bottom, Space.s2)
+                }
                 ForEach(model.mailbox.places, id: \.self) { place in
                     row(place)
                 }

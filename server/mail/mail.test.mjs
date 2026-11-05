@@ -3,11 +3,11 @@ import assert from 'node:assert/strict'
 import {
   createDecipheriv, createPrivateKey, generateKeyPairSync, randomUUID,
 } from 'node:crypto'
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  AT_ONCE, Arrivals, MAILBOX_LIMIT, MAX_MESSAGE, Mailboxes, accountFrom, aead, keySchedule, mailName, readBody, seal,
+  AT_ONCE, Arrivals, MAILBOX_LIMIT, MAX_DELETE, MAX_MESSAGE, Mailboxes, accountFrom, aead, keySchedule, mailName, readBody, seal,
   sealedForm, serve, verdict,
 } from './mail.mjs'
 import worker from '../mail-worker/worker.mjs'
@@ -425,15 +425,260 @@ describe('reading a Supabase user', () => {
   }
 })
 
+describe('reading mail', () => {
+  let root, mailboxes, gate
+  const accounts = new Map()
+  let supabaseDown = false
+
+  before(async () => {
+    root = await mkdtemp(join(tmpdir(), 'totality-mail-'))
+    mailboxes = new Mailboxes(root)
+    gate = new Arrivals({
+      secret: SECRET,
+      checkSignIn: async (token) => {
+        if (supabaseDown) throw new Error('down')
+        return accounts.get(token) ?? null
+      },
+      checkSpam: async () => null,
+      mailboxes,
+    })
+  })
+  after(() => rm(root, { recursive: true, force: true }))
+
+  let n = 0
+  const person = async () => {
+    n += 1
+    const token = `reader_${n}`
+    const keys = newKeys()
+    const signedIn = { name: `reader_${n}`, mailbox: randomUUID() }
+    accounts.set(token, signedIn)
+    await mailboxes.publish(signedIn.name, signedIn.mailbox, keys.publicKey)
+    return { token, keys, ...signedIn, folder: join(root, 'boxes', signedIn.mailbox) }
+  }
+  // Two arrivals can share a timestamp, so the new one is whichever wasn't there before.
+  const deliver = async (to, body = LETTER) => {
+    const before = new Set((await mailboxes.list(to.mailbox)).map(({ id }) => id))
+    assert.equal(await gate.handle('POST', '/mail/arrive', BEARER, `${to.name}@usetotality.com`, async () => Buffer.from(body)), 201)
+    return (await mailboxes.list(to.mailbox)).find(({ id }) => !before.has(id)).id
+  }
+  const ask = (token, method, path, body) =>
+    gate.respond(method, path, token && `Bearer ${token}`, undefined, async () => body === undefined ? null : Buffer.from(body))
+  const listed = async (token) => {
+    const reply = await ask(token, 'GET', '/mail/list')
+    assert.equal(reply.status, 200)
+    assert.equal(reply.type, 'application/json')
+    return JSON.parse(reply.body)
+  }
+  const remove = (token, ids) => ask(token, 'POST', '/mail/delete', JSON.stringify({ ids }))
+
+  test('a mailbox lists its messages newest first, with sizes and arrival times', async () => {
+    const ada = await person()
+    const older = await deliver(ada)
+    const newer = await deliver(ada, 'Subject: Later\r\n\r\nA second note.\r\n')
+    await utimes(join(ada.folder, `${older}.sealed`), new Date('2026-11-01T08:00:00Z'), new Date('2026-11-01T08:00:00Z'))
+    await utimes(join(ada.folder, `${newer}.sealed`), new Date('2026-11-03T09:30:00Z'), new Date('2026-11-03T09:30:00Z'))
+    const { messages, used, limit } = await listed(ada.token)
+    assert.deepEqual(messages.map(({ id }) => id), [newer, older])
+    assert.equal(messages[0].received, '2026-11-03T09:30:00.000Z')
+    assert.equal(messages[0].size, (await stat(join(ada.folder, `${newer}.sealed`))).size)
+    assert.equal(used, messages[0].size + messages[1].size)
+    assert.equal(limit, MAILBOX_LIMIT)
+    assert.deepEqual(Object.keys(messages[0]), ['id', 'size', 'received'])
+  })
+
+  test('an account with no mailbox yet has an empty list', async () => {
+    const token = 'no_folder_yet'
+    accounts.set(token, { name: 'no_folder_yet', mailbox: randomUUID() })
+    assert.deepEqual(await listed(token), { messages: [], used: 0, limit: MAILBOX_LIMIT })
+  })
+
+  test('the list leaves out the key, half-written files, and anything else', async () => {
+    const ada = await person()
+    const id = await deliver(ada)
+    await writeFile(join(ada.folder, `${randomUUID()}.sealed.${randomUUID()}.tmp`), 'half')
+    await writeFile(join(ada.folder, `${randomUUID().toUpperCase()}.sealed`), 'odd')
+    await writeFile(join(ada.folder, 'notes.sealed'), 'odd')
+    await mkdir(join(ada.folder, `${randomUUID()}.sealed`))
+    assert.deepEqual((await listed(ada.token)).messages.map((message) => message.id), [id])
+  })
+
+  test('nothing in the list says what a message holds', async () => {
+    const ada = await person()
+    await deliver(ada)
+    const { body } = await ask(ada.token, 'GET', '/mail/list')
+    for (const word of ['charles', 'Subject', 'gears', ada.name]) assert.equal(body.includes(word), false)
+  })
+
+  test('a fetch returns exactly the sealed bytes, and they still open', async () => {
+    const ada = await person()
+    const id = await deliver(ada)
+    const reply = await ask(ada.token, 'GET', `/mail/message/${id}`)
+    assert.equal(reply.status, 200)
+    assert.equal(reply.type, 'application/octet-stream')
+    assert.deepEqual(reply.body, await readFile(join(ada.folder, `${id}.sealed`)))
+    const form = opened(reply.body, ada.keys, ada.mailbox, id)
+    assert.deepEqual(form.subarray(form.indexOf(10) + 1), LETTER)
+  })
+
+  test('a message that isn\'t there is a 404', async () => {
+    const ada = await person()
+    assert.equal((await ask(ada.token, 'GET', `/mail/message/${randomUUID()}`)).status, 404)
+  })
+
+  test('user 2 cannot list user 1\'s mail', async () => {
+    const [user1, user2] = [await person(), await person()]
+    await deliver(user1)
+    assert.deepEqual((await listed(user2.token)).messages, [])
+  })
+
+  test('user 2 cannot fetch user 1\'s message, even knowing its ID', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const id = await deliver(user1)
+    const reply = await ask(user2.token, 'GET', `/mail/message/${id}`)
+    assert.equal(reply.status, 404)
+    assert.equal(reply.body, undefined)
+  })
+
+  test('user 2 cannot delete user 1\'s message, even knowing its ID', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const id = await deliver(user1)
+    const reply = await remove(user2.token, [id])
+    assert.equal(reply.status, 200)
+    assert.deepEqual(JSON.parse(reply.body), { deleted: 0 })
+    assert.deepEqual((await listed(user1.token)).messages.map((message) => message.id), [id])
+  })
+
+  test('a mailbox named in the request is ignored', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const id = await deliver(user1)
+    const smuggled = JSON.stringify({ ids: [id], mailbox: user1.mailbox, name: user1.name })
+    assert.deepEqual(JSON.parse((await ask(user2.token, 'POST', '/mail/delete', smuggled)).body), { deleted: 0 })
+    assert.equal((await listed(user1.token)).messages.length, 1)
+  })
+
+  for (const path of ['/mail/message/../public.key', '/mail/message/..%2Fpublic.key', '/mail/message/public.key',
+    '/mail/message/%2e%2e%2f%2e%2e%2fnames%2fada', '/mail/message/', '/mail/message',
+    `/mail/message/${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(13)}`, `/mail/message/${randomUUID()}0`,
+    `/mail/message/${randomUUID().toUpperCase()}`, `/mail/message/${randomUUID()}.sealed`,
+    `/mail/message/${randomUUID()}/`, `/mail/message/${randomUUID()}?x=1`]) {
+    test(`${path} is refused`, async () => {
+      const ada = await person()
+      await deliver(ada)
+      const reply = await ask(ada.token, 'GET', path)
+      assert.equal(reply.status, 404)
+      assert.equal(reply.body, undefined)
+    })
+  }
+
+  test('a message cannot be fetched from another account\'s folder by a crafted path', async () => {
+    const [user1, user2] = [await person(), await person()]
+    const id = await deliver(user1)
+    const reply = await ask(user2.token, 'GET', `/mail/message/../${user1.mailbox}/${id}`)
+    assert.equal(reply.status, 404)
+  })
+
+  test('the store itself refuses an ID that isn\'t one', async () => {
+    const ada = await person()
+    await assert.rejects(mailboxes.message(ada.mailbox, '../public.key'), /not a message/)
+    await assert.rejects(mailboxes.remove(ada.mailbox, ['public.key']), /not a message/)
+  })
+
+  test('deleting removes only the caller\'s named messages', async () => {
+    const [ada, other] = [await person(), await person()]
+    const [gone, kept] = [await deliver(ada), await deliver(ada)]
+    const theirs = await deliver(other)
+    assert.deepEqual(JSON.parse((await remove(ada.token, [gone])).body), { deleted: 1 })
+    assert.deepEqual((await listed(ada.token)).messages.map((message) => message.id), [kept])
+    assert.deepEqual((await listed(other.token)).messages.map((message) => message.id), [theirs])
+    assert.equal((await readdir(ada.folder)).includes('public.key'), true)
+  })
+
+  test('deleting twice is harmless, and unknown IDs are ignored', async () => {
+    const ada = await person()
+    const id = await deliver(ada)
+    assert.deepEqual(JSON.parse((await remove(ada.token, [id, id, randomUUID()])).body), { deleted: 1 })
+    assert.deepEqual(JSON.parse((await remove(ada.token, [id])).body), { deleted: 0 })
+  })
+
+  test('deleting nothing deletes nothing', async () => {
+    const ada = await person()
+    await deliver(ada)
+    assert.deepEqual(JSON.parse((await remove(ada.token, [])).body), { deleted: 0 })
+    assert.equal((await listed(ada.token)).messages.length, 1)
+  })
+
+  test(`at most ${MAX_DELETE} messages go in one request`, async () => {
+    const ada = await person()
+    const ids = Array.from({ length: MAX_DELETE + 1 }, () => randomUUID())
+    assert.equal((await remove(ada.token, ids)).status, 400)
+    assert.equal((await remove(ada.token, ids.slice(1))).status, 200)
+  })
+
+  for (const body of ['', 'not json', 'null', '{}', '{"ids":"x"}', '{"ids":[7]}', '{"ids":["../public.key"]}',
+    '{"ids":["public.key"]}', JSON.stringify({ ids: [randomUUID().toUpperCase()] }), JSON.stringify({ ids: [`${randomUUID()}\n`] })]) {
+    test(`a delete of ${JSON.stringify(body)} is refused and removes nothing`, async () => {
+      const ada = await person()
+      await deliver(ada)
+      assert.equal((await ask(ada.token, 'POST', '/mail/delete', body)).status, 400)
+      assert.equal((await listed(ada.token)).messages.length, 1)
+    })
+  }
+
+  test('a delete past the size limit is a 413', async () => {
+    const ada = await person()
+    assert.equal((await gate.respond('POST', '/mail/delete', `Bearer ${ada.token}`, undefined, async () => null)).status, 413)
+  })
+
+  test('without a sign-in nothing is listed, fetched, deleted, or read', async () => {
+    const ada = await person()
+    const id = await deliver(ada)
+    let read = false
+    for (const authorization of [undefined, '', 'Bearer ', 'Bearer nonsense', BEARER, `Basic ${ada.token}`, ada.token]) {
+      for (const [method, path] of [['GET', '/mail/list'], ['GET', `/mail/message/${id}`], ['POST', '/mail/delete']]) {
+        const reply = await gate.respond(method, path, authorization, undefined, async () => { read = true })
+        assert.equal(reply.status, 401)
+        assert.equal(reply.body, undefined)
+      }
+    }
+    assert.equal(read, false)
+    assert.equal((await listed(ada.token)).messages.length, 1)
+  })
+
+  test('if the sign-in can\'t be checked, the device is told to try later', async () => {
+    const ada = await person()
+    const id = await deliver(ada)
+    supabaseDown = true
+    try {
+      assert.equal((await ask(ada.token, 'GET', '/mail/list')).status, 503)
+      assert.equal((await ask(ada.token, 'GET', `/mail/message/${id}`)).status, 503)
+      assert.equal((await remove(ada.token, [id])).status, 503)
+    } finally {
+      supabaseDown = false
+    }
+    assert.equal((await listed(ada.token)).messages.length, 1)
+  })
+
+  test('each path takes only its own method', async () => {
+    const ada = await person()
+    assert.equal((await ask(ada.token, 'POST', '/mail/list', '{}')).status, 405)
+    assert.equal((await ask(ada.token, 'GET', '/mail/delete')).status, 405)
+    assert.equal((await ask(ada.token, 'DELETE', `/mail/message/${randomUUID()}`)).status, 405)
+    assert.equal((await ask(ada.token, 'GET', '/mail/list?x=1')).status, 404)
+    assert.equal((await ask(ada.token, 'GET', '/mail/lists')).status, 404)
+  })
+})
+
 describe('over a real connection', () => {
-  let root, server, url, mailbox
+  let root, server, url, mailbox, keys
 
   before(async () => {
     root = await mkdtemp(join(tmpdir(), 'totality-mail-'))
     mailbox = randomUUID()
+    keys = newKeys()
     const mailboxes = new Mailboxes(root)
-    await mailboxes.publish('ada_lovelace', mailbox, newKeys().publicKey)
-    server = serve(new Arrivals({ secret: SECRET, checkSignIn: async () => null, checkSpam: async () => null, mailboxes }), 0)
+    await mailboxes.publish('ada_lovelace', mailbox, keys.publicKey)
+    const checkSignIn = async (token) => (token === 'ada-session' ? { name: 'ada_lovelace', mailbox } : null)
+    server = serve(new Arrivals({ secret: SECRET, checkSignIn, checkSpam: async () => null, mailboxes }), 0)
     await new Promise((resolve) => { server.once('listening', resolve) })
     url = `http://127.0.0.1:${server.address().port}/mail/arrive`
   })
@@ -464,6 +709,36 @@ describe('over a real connection', () => {
     const before = await sealedCount()
     assert.equal((await post(Buffer.alloc(MAX_MESSAGE + 1))).status, 413)
     assert.equal(await sealedCount(), before)
+  })
+
+  test('a signed-in device lists, fetches, and deletes its mail', async () => {
+    assert.equal((await post(LETTER)).status, 201)
+    const signedIn = { Authorization: 'Bearer ada-session' }
+    const base = url.replace('/arrive', '')
+    const list = await fetch(`${base}/list`, { headers: signedIn })
+    assert.equal(list.status, 200)
+    assert.equal(list.headers.get('content-type'), 'application/json')
+    assert.equal(list.headers.get('cache-control'), 'no-store')
+    const [{ id, size }] = (await list.json()).messages
+    const fetched = await fetch(`${base}/message/${id}`, { headers: signedIn })
+    assert.equal(fetched.headers.get('content-type'), 'application/octet-stream')
+    const sealed = Buffer.from(await fetched.arrayBuffer())
+    assert.equal(sealed.length, size)
+    assert.deepEqual(sealed, await readFile(join(root, 'boxes', mailbox, `${id}.sealed`)))
+    const form = opened(sealed, keys, mailbox, id)
+    assert.deepEqual(form.subarray(form.indexOf(10) + 1), LETTER)
+    const before = await sealedCount()
+    const removed = await fetch(`${base}/delete`, {
+      method: 'POST', headers: { ...signedIn, 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }),
+    })
+    assert.deepEqual(await removed.json(), { deleted: 1 })
+    assert.equal(await sealedCount(), before - 1)
+  })
+
+  test('without a sign-in the reply is empty', async () => {
+    const reply = await fetch(url.replace('/arrive', '/list'))
+    assert.equal(reply.status, 401)
+    assert.equal(await reply.text(), '')
   })
 
   test('readBody hands back everything under the limit', async () => {
@@ -534,6 +809,20 @@ describe('the server setup', () => {
     const compose = (await readFile(new URL('../compose.yml', import.meta.url))).toString()
     assert.equal(compose.match(/^ +core: 1$/gm).length, 2)
     assert.doesNotMatch(compose, /^ +core: 0$/m)
+  })
+
+  test('the tunnel carries exactly the public mail paths', async () => {
+    const tunnel = (await readFile(new URL('../cloudflared.yml', import.meta.url))).toString()
+    const rules = [...tunnel.matchAll(/^ +path: (\^\/mail\/.*)$/gm)].map((match) => new RegExp(match[1]))
+    assert.equal(rules.length, 1)
+    const [rule] = rules
+    for (const path of ['/mail/arrive', '/mail/key', '/mail/list', '/mail/delete', `/mail/message/${randomUUID()}`]) {
+      assert.match(path, rule)
+    }
+    for (const path of ['/mail/health', '/mail/message/public.key', '/mail/message/../x', `/mail/message/${randomUUID()}0`,
+      '/mail/lists', '/mail/', '/mail/list/']) {
+      assert.doesNotMatch(path, rule)
+    }
   })
 
   test('only the mail service gets the arrival secret', async () => {
