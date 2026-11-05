@@ -69,7 +69,7 @@ struct ModuleTests {
 
     @Test func kindsMatchTheDatabaseEnum() {
         #expect(ContentKind.aiMemory.rawValue == "ai_memory")
-        #expect(ContentKind.allCases.count == 13)
+        #expect(ContentKind.allCases.count == 14)
     }
 
     @Test func contentRefSurvivesEncoding() throws {

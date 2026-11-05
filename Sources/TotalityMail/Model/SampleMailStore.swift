@@ -68,6 +68,49 @@ public actor SampleMailStore: MailStore {
         mail.mailbox.remove(messages)
     }
 
+    public func save(_ draft: MailDraft) async throws {
+        mail.mailbox.drafts.removeAll { $0.id == draft.id }
+        mail.mailbox.drafts.insert(draft, at: 0)
+    }
+
+    public func discard(draft: UUID) async throws {
+        mail.mailbox.drafts.removeAll { $0.id == draft }
+    }
+
+    /// Totality addresses get it and anyone else waits for outside sending, as with the real store.
+    /// The Sent copy is made here from the draft, with nothing written or sealed.
+    public func send(_ draft: MailDraft) async throws -> MailSendResult {
+        try draft.checkRecipients()
+        if scene == .offline { throw MailStoreError.offline }
+        let outcomes = draft.recipients.map { address in
+            MailSendResult.Recipient(
+                address: address,
+                outcome: !address.isWellFormed ? .notAnAddress : address.totalityName == nil ? .outsideNotYet : .delivered
+            )
+        }
+        let delivered = Set(outcomes.filter { $0.outcome == .delivered }.map(\.address.key))
+        var sent: UUID?
+        if !delivered.isEmpty {
+            let copy = MailMessage(
+                conversationID: UUID(), from: SampleMail.me, to: draft.to, cc: draft.cc, subject: draft.subject, date: mail.now,
+                body: .plain(draft.body), route: .betweenAccounts, marks: MailMarks(folder: .sent), bcc: draft.bcc
+            )
+            mail.mailbox.messages.append(copy)
+            sent = copy.id
+        }
+        mail.mailbox.drafts.removeAll { $0.id == draft.id }
+        var remaining: MailDraft?
+        if delivered.count < outcomes.count {
+            var rest = draft
+            rest.to.removeAll { delivered.contains($0.key) }
+            rest.cc.removeAll { delivered.contains($0.key) }
+            rest.bcc.removeAll { delivered.contains($0.key) }
+            mail.mailbox.drafts.insert(rest, at: 0)
+            remaining = rest
+        }
+        return MailSendResult(recipients: outcomes, sent: sent, keptCopy: sent != nil, remaining: remaining)
+    }
+
     public func data(of attachment: UUID) async throws -> Data {
         guard let data = mail.attachments[attachment] else { throw MailStoreError.unavailable }
         return data

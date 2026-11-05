@@ -53,6 +53,13 @@ public protocol MailStore: Sendable {
     func data(of attachment: UUID) async throws -> Data
     /// The person's own address, even before any mail can open, so they can hand it out.
     func address() async -> String?
+    /// Kept sealed, and synced. Saving the same draft again replaces it.
+    func save(_ draft: MailDraft) async throws
+    func discard(draft: UUID) async throws
+    /// One send, right now, only ever from a press. The screens hold it for their few seconds of Undo
+    /// before calling this. Throws `MailSendError` when it can't start; otherwise the result says how
+    /// it went for each person.
+    func send(_ draft: MailDraft) async throws -> MailSendResult
 }
 
 extension MailStore {
@@ -72,4 +79,7 @@ public struct UnavailableMailStore: MailStore {
     public func save(_ settings: MailSettings) async throws { throw reason }
     public func erase(_ messages: Set<UUID>) async throws { throw reason }
     public func data(of attachment: UUID) async throws -> Data { throw reason }
+    public func save(_ draft: MailDraft) async throws { throw reason }
+    public func discard(draft: UUID) async throws { throw reason }
+    public func send(_ draft: MailDraft) async throws -> MailSendResult { throw reason }
 }

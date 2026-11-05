@@ -38,6 +38,11 @@ public actor MailVault {
     private static let messageSuffix = ".mail"
     private static let marksSuffix = ".mail.marks"
     private static let settingsSuffix = ".mail.settings"
+    private static let draftSuffix = ".mail.draft"
+    private static let draftBodySuffix = ".mail.draft.body"
+    /// A Sent copy the server didn't take. The message itself is kept like any other; this only says
+    /// it still has to reach the server, so it's never pruned or lost meanwhile. It stays on this device.
+    private static let unkeptSuffix = ".mail.unkept"
 
     /// How each file is sealed, so a key move can reach them without knowing what they are. The IDs are
     /// derived from text only Mail uses, so no other module's blob can share one.
@@ -45,6 +50,9 @@ public actor MailVault {
         messageSuffix: .content,
         marksSuffix: .metadata, marksSuffix + ".trash": .metadata,
         settingsSuffix: .metadata, settingsSuffix + ".trash": .metadata,
+        draftSuffix: .metadata, draftSuffix + ".trash": .metadata,
+        draftBodySuffix: .content, draftBodySuffix + ".trash": .content,
+        unkeptSuffix: .metadata,
     ]
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
 
@@ -59,6 +67,25 @@ public actor MailVault {
         let account: String
         let settings: MailSettings
         let updatedAt: Date
+    }
+
+    /// A draft's words and who it's for. Its files go in the body, so a change to the words alone
+    /// doesn't move them all again.
+    struct DraftRecord: Codable, Equatable {
+        let account: String
+        let draft: MailDraft
+        let updatedAt: Date
+    }
+
+    struct DraftBody: Codable, Equatable {
+        let account: String
+        let draft: UUID
+        let attachments: [MailDraftAttachment]
+    }
+
+    struct UnkeptRecord: Codable, Equatable {
+        let account: String
+        let message: UUID
     }
 
     struct MessageRecord: Codable {
@@ -92,8 +119,16 @@ public actor MailVault {
         UUID(derivedFrom: "totality.mail.marks.\(account).\(message.uuidString.lowercased())")
     }
 
+    static func unkeptID(_ message: UUID, account: String) -> UUID {
+        UUID(derivedFrom: "totality.mail.unkept.\(account).\(message.uuidString.lowercased())")
+    }
+
     static func settingsID(account: String) -> UUID {
         UUID(derivedFrom: "totality.mail.settings.\(account)")
+    }
+
+    static func draftID(_ draft: UUID, account: String) -> UUID {
+        UUID(derivedFrom: "totality.mail.draft.\(account).\(draft.uuidString.lowercased())")
     }
 
     private func name(_ id: UUID, _ suffix: String) -> String { id.uuidString.lowercased() + suffix }
@@ -149,10 +184,37 @@ public actor MailVault {
         }
     }
 
+    // MARK: Sent copies the server didn't take
+
+    /// Kept here, and marked to be tried on the server again.
+    public func keepUnkept(_ message: MailStoredMessage) throws {
+        try keep(message)
+        let id = Self.unkeptID(message.id, account: account)
+        try store.write(try seal(UnkeptRecord(account: account, message: message.id), id: id, purpose: .metadata), as: name(id, Self.unkeptSuffix))
+    }
+
+    /// The Sent copies still waiting for the server. One that won't open is left alone.
+    public func unkept() throws -> [UUID] {
+        try ids(Self.unkeptSuffix).compactMap { id in
+            guard let sealed = try store.read(name(id, Self.unkeptSuffix)),
+                  let record = try? open(UnkeptRecord.self, sealed, id: id, purpose: .metadata),
+                  record.account == account, Self.unkeptID(record.message, account: account) == id
+            else { return nil }
+            return record.message
+        }
+    }
+
+    /// The server has it now, or it's been deleted.
+    public func kept(_ message: UUID) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        try store.delete(name(Self.unkeptID(message, account: account), Self.unkeptSuffix))
+    }
+
     /// For good, with their marks. The marks' removal reaches other devices through sync.
     public func erase(_ messages: Set<UUID>) throws {
         guard !isClosed else { throw MailVaultError.closed }
         for message in messages {
+            try store.delete(name(Self.unkeptID(message, account: account), Self.unkeptSuffix))
             let marks = Self.marksID(message, account: account)
             if try store.read(name(marks, Self.marksSuffix)) != nil {
                 // The record goes first, so a crash can't lose the fact that this was deleted on purpose.
@@ -204,6 +266,62 @@ public actor MailVault {
         try store.write(try seal(record, id: id, purpose: .metadata), as: name(id, Self.settingsSuffix))
     }
 
+    // MARK: Drafts
+
+    /// Every draft that opens, newest first. One that won't is left out and left alone.
+    public func drafts() throws -> [MailDraft] {
+        var found: [(MailDraft, Date)] = []
+        for id in try ids(Self.draftSuffix) {
+            guard let meta = try store.read(name(id, Self.draftSuffix)), let body = try store.read(name(id, Self.draftBodySuffix)),
+                  let opened = try? openedDraft(id: id, meta: meta, body: body)
+            else { continue }
+            found.append(opened)
+        }
+        return found.sorted { ($0.1, $0.0.id.uuidString) > ($1.1, $1.0.id.uuidString) }.map(\.0)
+    }
+
+    public func draft(_ draft: UUID) throws -> MailDraft? {
+        let id = Self.draftID(draft, account: account)
+        guard let meta = try store.read(name(id, Self.draftSuffix)), let body = try store.read(name(id, Self.draftBodySuffix)) else { return nil }
+        return try openedDraft(id: id, meta: meta, body: body).draft
+    }
+
+    public func save(_ draft: MailDraft, at now: Date = Date()) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        let id = Self.draftID(draft.id, account: account)
+        hashes[id] = nil
+        var words = draft
+        words.attachments = draft.attachments.map { MailDraftAttachment(id: $0.id, name: $0.name, mimeType: $0.mimeType, data: Data()) }
+        let body = DraftBody(account: account, draft: draft.id, attachments: draft.attachments)
+        // The body first, so the words never point at files that aren't there yet.
+        try store.write(try seal(body, id: id, purpose: .content), as: name(id, Self.draftBodySuffix))
+        try store.write(try seal(DraftRecord(account: account, draft: words, updatedAt: now), id: id, purpose: .metadata), as: name(id, Self.draftSuffix))
+        try store.delete(deletionName(id))
+    }
+
+    /// Sent or thrown away. The removal reaches other devices through sync.
+    public func deleteDraft(_ draft: UUID) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        let id = Self.draftID(draft, account: account)
+        guard try store.read(name(id, Self.draftSuffix)) != nil || store.read(name(id, Self.draftBodySuffix)) != nil else { return }
+        try store.write(Data(), as: deletionName(id))
+        try store.delete(name(id, Self.draftSuffix))
+        try store.delete(name(id, Self.draftBodySuffix))
+        hashes[id] = nil
+    }
+
+    private func openedDraft(id: UUID, meta: Data, body: Data) throws -> (draft: MailDraft, updatedAt: Date) {
+        let record = try open(DraftRecord.self, meta, id: id, purpose: .metadata)
+        let files = try open(DraftBody.self, body, id: id, purpose: .content)
+        guard record.account == account, files.account == account, files.draft == record.draft.id,
+              Self.draftID(record.draft.id, account: account) == id,
+              files.attachments.map(\.id) == record.draft.attachments.map(\.id)
+        else { throw CryptoError.authenticationFailed }
+        var draft = record.draft
+        draft.attachments = files.attachments
+        return (draft, record.updatedAt)
+    }
+
     private func openedMarks(id: UUID, sealed: Data) throws -> MarksRecord {
         let record = try open(MarksRecord.self, sealed, id: id, purpose: .metadata)
         guard record.account == account, Self.marksID(record.message, account: account) == id else {
@@ -221,8 +339,11 @@ public actor MailVault {
     /// When an object was last changed, after proving it opens and belongs here.
     private func updatedAt(_ object: SealedObject) throws -> Date {
         switch object.kind {
-        case .mailMarks: try openedMarks(id: object.id, sealed: object.meta).updatedAt
-        case .mailSettings: try openedSettings(id: object.id, sealed: object.meta).updatedAt
+        case .mailMarks: return try openedMarks(id: object.id, sealed: object.meta).updatedAt
+        case .mailSettings: return try openedSettings(id: object.id, sealed: object.meta).updatedAt
+        case .mailDraft:
+            guard let body = object.body else { throw CryptoError.malformedCiphertext }
+            return try openedDraft(id: object.id, meta: object.meta, body: body).updatedAt
         default: throw CryptoError.authenticationFailed
         }
     }
@@ -231,6 +352,7 @@ public actor MailVault {
         switch kind {
         case .mailMarks: Self.marksSuffix
         case .mailSettings: Self.settingsSuffix
+        case .mailDraft: Self.draftSuffix
         default: nil
         }
     }
@@ -239,21 +361,24 @@ public actor MailVault {
     private func synced(_ id: UUID) throws -> (kind: ContentKind, data: Data)? {
         if let data = try store.read(name(id, Self.marksSuffix)) { return (.mailMarks, data) }
         if let data = try store.read(name(id, Self.settingsSuffix)) { return (.mailSettings, data) }
+        if let data = try store.read(name(id, Self.draftSuffix)) { return (.mailDraft, data) }
         return nil
     }
 }
 
 extension MailVault: SyncArea {
-    /// Only marks and settings. Messages have no kind here, so sync can never see them.
-    public nonisolated var kinds: Set<ContentKind> { [.mailMarks, .mailSettings] }
+    /// Marks, settings, and drafts. Messages have no kind here, so sync can never see them.
+    public nonisolated var kinds: Set<ContentKind> { [.mailMarks, .mailSettings, .mailDraft] }
 
     /// Only this account's. Another account's files on this device stay out of this account's sync.
     public func sealedObjectIDs() throws -> [UUID] {
         // A crash can stop an erase halfway. The record says what was meant, so finish it.
         if !isClosed {
-            for id in try deletedObjectIDs() where try store.read(name(id, Self.marksSuffix)) != nil {
-                try store.delete(name(id, Self.marksSuffix))
-                hashes[id] = nil
+            for id in try deletedObjectIDs() {
+                for suffix in [Self.marksSuffix, Self.draftSuffix, Self.draftBodySuffix] where try store.read(name(id, suffix)) != nil {
+                    try store.delete(name(id, suffix))
+                    hashes[id] = nil
+                }
             }
         }
         var found: [UUID] = []
@@ -263,6 +388,12 @@ extension MailVault: SyncArea {
         }
         let settings = Self.settingsID(account: account)
         if try store.read(name(settings, Self.settingsSuffix)) != nil { found.append(settings) }
+        for id in try ids(Self.draftSuffix) {
+            guard let meta = try store.read(name(id, Self.draftSuffix)), let body = try store.read(name(id, Self.draftBodySuffix)),
+                  (try? openedDraft(id: id, meta: meta, body: body)) != nil
+            else { continue }
+            found.append(id)
+        }
         return found
     }
 
@@ -274,7 +405,10 @@ extension MailVault: SyncArea {
     }
 
     public func sealedObject(_ id: UUID) throws -> SealedObject? {
-        try synced(id).map { SealedObject(id: id, kind: $0.kind, meta: $0.data, body: nil) }
+        guard let (kind, meta) = try synced(id) else { return nil }
+        guard kind == .mailDraft else { return SealedObject(id: id, kind: kind, meta: meta, body: nil) }
+        guard let body = try store.read(name(id, Self.draftBodySuffix)) else { return nil }
+        return SealedObject(id: id, kind: kind, meta: meta, body: body)
     }
 
     public func verifiedObject(_ id: UUID) throws -> SealedObject? {
@@ -285,10 +419,13 @@ extension MailVault: SyncArea {
 
     public func store(_ object: SealedObject, ifLocalHash expected: String?) throws {
         guard !isClosed else { throw MailVaultError.closed }
-        guard let suffix = suffix(for: object.kind), object.body == nil else { throw CryptoError.authenticationFailed }
+        guard let suffix = suffix(for: object.kind), (object.kind == .mailDraft) == (object.body != nil) else {
+            throw CryptoError.authenticationFailed
+        }
         guard try sealedHash(of: object.id) == expected else { throw SyncError.changedLocally }
         if expected == nil, try store.read(deletionName(object.id)) != nil { throw SyncError.changedLocally }
         _ = try updatedAt(object)
+        if let body = object.body { try store.write(body, as: name(object.id, Self.draftBodySuffix)) }
         try store.write(object.meta, as: name(object.id, suffix))
         hashes[object.id] = nil
     }
@@ -300,6 +437,10 @@ extension MailVault: SyncArea {
         // The stamp goes first, so a crash can't leave trash that's never cleaned up.
         try store.write(Data(ISO8601DateFormatter().string(from: Date()).utf8), as: trashStampName(id))
         try store.write(sealed, as: name(id, suffix) + ".trash")
+        if kind == .mailDraft, let body = try store.read(name(id, Self.draftBodySuffix)) {
+            try store.write(body, as: name(id, Self.draftBodySuffix) + ".trash")
+            try store.delete(name(id, Self.draftBodySuffix))
+        }
         try store.delete(name(id, suffix))
         hashes[id] = nil
     }
@@ -314,6 +455,8 @@ extension MailVault: SyncArea {
             else { continue }
             try store.delete(name(id, Self.marksSuffix) + ".trash")
             try store.delete(name(id, Self.settingsSuffix) + ".trash")
+            try store.delete(name(id, Self.draftSuffix) + ".trash")
+            try store.delete(name(id, Self.draftBodySuffix) + ".trash")
             try store.delete(file)
         }
     }

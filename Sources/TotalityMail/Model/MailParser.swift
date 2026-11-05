@@ -7,6 +7,9 @@ import UniformTypeIdentifiers
 public struct ParsedMail: Sendable {
     public let message: MailMessage
     public let attachments: [UUID: Data]
+    /// Every address in every From line, which proof needs: a message naming more than one isn't proved.
+    var senders: [MailAddress] = []
+    var fromLines = 0
 }
 
 /// Reads what a sealed file holds: one line of JSON with what the server knew, then the message exactly
@@ -23,17 +26,52 @@ public enum MailParser {
     /// `id` is the server's name for the message, which is also what the seal authenticated. `now` is
     /// the date only when the server's own line can't be read.
     public static func parse(_ opened: Data, id: UUID, now: Date = Date()) -> ParsedMail {
-        let bytes = [UInt8](opened)
-        guard let newline = bytes.firstIndex(of: 0x0A),
-              let facts = try? JSONDecoder().decode(Facts.self, from: Data(bytes[..<newline])),
-              facts.version == 1
-        else {
+        guard let envelope = envelope(opened) else {
             return ParsedMail(message: .unreadable(id: id, date: now, marks: MailMarks(isUnread: true)), attachments: [:])
         }
-        let received = isoDate(facts.received) ?? now
-        // A flagged verdict goes to Spam the way Report Spam would leave it.
-        let marks = MailMarks(folder: facts.spam?.flagged == true ? .spam : .inbox, isUnread: true)
-        let raw = withoutCarriageReturns(bytes[(newline + 1)...])
+        let received = envelope.received ?? now
+        // Mail from another Totality account is sealed again inside, and only `ServerMailStore` holds
+        // the key that opens it.
+        guard envelope.from == nil else {
+            return ParsedMail(message: .unreadable(id: id, date: received, marks: MailMarks(isUnread: true)), attachments: [:])
+        }
+        return parseMessage(envelope.rest, id: id, received: received, marks: envelope.marks)
+    }
+
+    /// The server's line, split from what follows it.
+    struct Envelope {
+        let received: Date?
+        let flagged: Bool
+        /// The Totality account that sent it, when it came from one. What follows is sealed again.
+        let from: String?
+        /// The name it was delivered to, which can be a reserved name this account receives for.
+        let to: String?
+        /// This account's own copy of something it sent.
+        let sent: Bool
+        let rest: Data
+
+        /// A flagged verdict goes to Spam the way Report Spam would leave it. A Sent copy was read by
+        /// whoever wrote it.
+        var marks: MailMarks {
+            if sent { return MailMarks(folder: .sent, isUnread: false) }
+            return MailMarks(folder: flagged ? .spam : .inbox, isUnread: true)
+        }
+    }
+
+    static func envelope(_ opened: Data) -> Envelope? {
+        guard let newline = opened.firstIndex(of: 0x0A),
+              let facts = try? JSONDecoder().decode(Facts.self, from: opened[opened.startIndex..<newline]),
+              facts.version == 1
+        else { return nil }
+        return Envelope(
+            received: isoDate(facts.received), flagged: facts.spam?.flagged == true, from: facts.from, to: facts.to,
+            sent: facts.sent == true, rest: Data(opened[(newline + 1)...])
+        )
+    }
+
+    /// A message exactly as it was written, with no line from the server above it.
+    static func parseMessage(_ message: Data, id: UUID, received: Date, marks: MailMarks) -> ParsedMail {
+        let raw = withoutCarriageReturns([UInt8](message)[...])
         guard let top = Part(raw[...], requireHeaders: true) else {
             return ParsedMail(message: .unreadable(id: id, date: received, marks: marks), attachments: [:])
         }
@@ -48,6 +86,9 @@ public enum MailParser {
         let version: Int
         let received: String
         let spam: Verdict?
+        let from: String?
+        let to: String?
+        let sent: Bool?
     }
 
     private static func isoDate(_ value: String) -> Date? {
@@ -64,6 +105,13 @@ public enum MailParser {
         let from = fromFields.flatMap(addresses)
         let to = headers.all("to").flatMap(addresses)
         let cc = headers.all("cc").flatMap(addresses)
+        let bcc = headers.all("bcc").flatMap(addresses)
+        let replyTo = headers.all("reply-to").flatMap(addresses)
+        let messageID = headers.first("message-id").flatMap { messageIDs($0).first }
+        var references = headers.first("references").map(messageIDs) ?? []
+        if references.isEmpty, let answered = headers.first("in-reply-to").flatMap({ messageIDs($0).first }) {
+            references = [answered]
+        }
         let subject = oneLine(words(headers.first("subject") ?? ""))
         let date = headers.first("date").flatMap(date) ?? received
 
@@ -89,9 +137,10 @@ public enum MailParser {
             // Everything in a sealed file came in from outside through Cloudflare. Mail between accounts
             // will travel another way, and the path it took is what decides this, never an address.
             route: .outside,
-            proof: proof(headers, from: from, fromFields: fromFields.count), marks: marks
+            proof: proof(headers, from: from, fromFields: fromFields.count), marks: marks,
+            bcc: bcc, replyTo: replyTo, messageID: messageID, references: references
         )
-        return ParsedMail(message: message, attachments: data)
+        return ParsedMail(message: message, attachments: data, senders: from, fromLines: fromFields.count)
     }
 
     // MARK: - Bytes

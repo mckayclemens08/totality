@@ -11,6 +11,8 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     /// One message's marks, and one account's mail settings. Mail itself comes from the mail server.
     case mailMarks = "mail_marks"
     case mailSettings = "mail_settings"
+    /// A draft being written: its words in the sealed metadata, its files in the sealed body.
+    case mailDraft = "mail_draft"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {

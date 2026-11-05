@@ -47,6 +47,7 @@ public final class MailModel {
         var marks: [UUID: MailMarks] = [:]
         var erased = Set<UUID>()
         var settings = false
+        var drafts = false
     }
 
     private var waitingMarks: [UUID: MailMarks] = [:]
@@ -87,6 +88,7 @@ public final class MailModel {
             fresh.apply(waitingMarks.merging(here.marks) { _, new in new })
             fresh.remove(waitingErase.union(here.erased))
             if here.settings || settingsWait { fresh.settings = mailbox.settings }
+            if here.drafts { fresh.drafts = mailbox.drafts }
             mailbox = fresh
             isOffline = opening.isOffline
             phase = .ready
@@ -333,6 +335,58 @@ public final class MailModel {
         } catch {
             notice = "\(attachment.name) didn't save to the Reader."
         }
+    }
+
+    // MARK: Writing
+
+    /// Written under new messages from here on. Messages already written keep what they have.
+    public func setSignature(_ signature: String) async {
+        let signature = signature.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard signature != mailbox.settings.signature else { return }
+        mailbox.settings.signature = signature
+        settingsChanged()
+        await keep(mailbox.settings)
+    }
+
+    /// Kept sealed on this device, and synced. A draft with nothing in it isn't kept.
+    public func save(_ draft: MailDraft) async {
+        if draft.isEmpty {
+            await discard(draft)
+            return
+        }
+        mailbox.drafts.removeAll { $0.id == draft.id }
+        mailbox.drafts.insert(draft, at: 0)
+        draftsChanged()
+        do {
+            try await store.save(draft)
+        } catch {
+            notice = "Your draft didn't save. Copy anything you need before leaving it."
+        }
+    }
+
+    public func discard(_ draft: MailDraft) async {
+        mailbox.drafts.removeAll { $0.id == draft.id }
+        draftsChanged()
+        do {
+            try await store.discard(draft: draft.id)
+        } catch {
+            notice = "That draft didn't delete. It'll come back when Mail next opens."
+        }
+    }
+
+    /// Sends now. The screens give their few seconds of Undo before calling this, and only from a
+    /// press. Whoever didn't get it stays on the draft, which is still here, and the result says why.
+    public func send(_ draft: MailDraft) async throws -> MailSendResult {
+        let result = try await store.send(draft)
+        mailbox.drafts.removeAll { $0.id == draft.id }
+        if let remaining = result.remaining { mailbox.drafts.insert(remaining, at: 0) }
+        draftsChanged()
+        await load()
+        return result
+    }
+
+    private func draftsChanged() {
+        for fetch in since.keys { since[fetch]?.drafts = true }
     }
 
     // MARK: The store

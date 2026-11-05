@@ -5,6 +5,19 @@ public enum MailServerError: Error, Equatable, Sendable {
     /// A different key already holds this mailbox. Only the server's owner can put that right, so the
     /// screens show it as a problem with the account, never as something to try again.
     case keyConflict
+    /// Over the server's size limit for one message.
+    case tooBig
+    /// Your own mailbox has no room for the Sent copy.
+    case mailboxFull
+}
+
+/// What the server said about delivering to one Totality address.
+public enum MailDeliveryAnswer: Equatable, Sendable {
+    case delivered
+    case noSuchAddress
+    case tooBig
+    /// Their mailbox is full.
+    case recipientFull
 }
 
 /// One stored message as the list names it. The server can't read mail, so this is all it knows.
@@ -46,6 +59,20 @@ public protocol MailServer: Sendable {
     func list() async throws -> MailServerList
     func message(_ id: UUID) async throws -> Data
     func delete(_ ids: Set<UUID>) async throws -> Int
+    /// The public key mail to this Totality name is sealed to, or nil when nobody has the address.
+    func recipientKey(_ name: String) async throws -> Data?
+    /// Hands over what this device sealed for `name`. The server wraps it in the recipient's standard
+    /// seal, naming the signed-in account as the sender, so nobody can send as someone else.
+    func deliver(to name: String, id: UUID, sealed: Data) async throws -> MailDeliveryAnswer
+    /// Keeps something this device already sealed to its own key, like a Sent copy, in its own mailbox.
+    func keep(id: UUID, sealed: Data) async throws
+}
+
+extension MailServer {
+    /// What a Totality name can be. Anything else never reaches the server, so it can't change the path.
+    static func isName(_ name: String) -> Bool {
+        (1...64).contains(name.count) && name.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || "._-".unicodeScalars.contains($0) }
+    }
 }
 
 /// Talks to the mail service on your server. The account always comes from the sign-in, never from the
@@ -124,6 +151,44 @@ public struct MailServerClient: MailServer {
             return try JSONDecoder().decode(Answer.self, from: data).deleted
         } catch {
             throw MailServerError.unavailable
+        }
+    }
+
+    public func recipientKey(_ name: String) async throws -> Data? {
+        guard Self.isName(name) else { return nil }
+        let (status, data) = try await send("mail/recipient/\(name)", method: "GET")
+        if status == 404 { return nil }
+        let body = try expectOK((status, data))
+        struct Answer: Decodable { let publicKey: String }
+        guard let answer = try? JSONDecoder().decode(Answer.self, from: body),
+              let key = Data(base64Encoded: answer.publicKey), key.count == 32
+        else { throw MailServerError.unavailable }
+        return key
+    }
+
+    /// A 409 means a message with this ID is already there, which is this one arriving on an earlier
+    /// try whose answer was lost, so it counts as delivered.
+    public func deliver(to name: String, id: UUID, sealed: Data) async throws -> MailDeliveryAnswer {
+        guard Self.isName(name) else { return .noSuchAddress }
+        let body = try JSONEncoder().encode(["to": name, "id": id.uuidString.lowercased(), "sealed": sealed.base64EncodedString()])
+        let (status, _) = try await send("mail/deliver", method: "POST", body: body)
+        switch status {
+        case 201, 409: return .delivered
+        case 404: return .noSuchAddress
+        case 413: return .tooBig
+        case 507: return .recipientFull
+        default: throw Self.error(for: status)
+        }
+    }
+
+    public func keep(id: UUID, sealed: Data) async throws {
+        let body = try JSONEncoder().encode(["id": id.uuidString.lowercased(), "sealed": sealed.base64EncodedString()])
+        let (status, _) = try await send("mail/keep", method: "POST", body: body)
+        switch status {
+        case 201, 409: return
+        case 413: throw MailServerError.tooBig
+        case 507: throw MailServerError.mailboxFull
+        default: throw Self.error(for: status)
         }
     }
 

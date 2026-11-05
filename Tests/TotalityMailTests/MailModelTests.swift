@@ -40,6 +40,11 @@ private actor FakeStore: MailStore {
     }
 
     func data(of attachment: UUID) async throws -> Data { Data() }
+    func save(_ draft: MailDraft) async throws {}
+    func discard(draft: UUID) async throws {}
+    func send(_ draft: MailDraft) async throws -> MailSendResult {
+        MailSendResult(recipients: [], sent: nil, keptCopy: false, remaining: nil)
+    }
 }
 
 private actor FakeReader: ContentReceiver {
@@ -86,6 +91,11 @@ private actor SlowStore: MailStore {
     func save(_ settings: MailSettings) async throws {}
     func erase(_ messages: Set<UUID>) async throws {}
     func data(of attachment: UUID) async throws -> Data { Data() }
+    func save(_ draft: MailDraft) async throws {}
+    func discard(draft: UUID) async throws {}
+    func send(_ draft: MailDraft) async throws -> MailSendResult {
+        MailSendResult(recipients: [], sent: nil, keptCopy: false, remaining: nil)
+    }
 }
 
 /// Which accounts a store was made for, in order.

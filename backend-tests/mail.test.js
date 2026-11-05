@@ -1,5 +1,5 @@
 // Mail's cases for the brief §6 two-user test, at the database layer. The encryption cases are in
-// Tests/TotalityMailTests. Only marks and settings come here, as ciphertext rows that stay with their
+// Tests/TotalityMailTests. Only marks, settings, and drafts come here, as ciphertext rows that stay with their
 // owner. Messages live on the mail server, sealed to the account's mail key, and have no row at all.
 import { test, before, describe } from 'node:test'
 import assert from 'node:assert/strict'
@@ -24,7 +24,7 @@ const visible = async (user, id) =>
   (await as(db, user, (q) => q('select id from public.content_objects where id = $1', [id]))).length === 1
 
 describe('Mail two-user test', () => {
-  for (const kind of ['mail_marks', 'mail_settings']) {
+  for (const kind of ['mail_marks', 'mail_settings', 'mail_draft']) {
     test(`${kind} is visible to its owner alone`, async () => {
       const [user1, user2] = await pair()
       const id = await insert(user1, kind)
