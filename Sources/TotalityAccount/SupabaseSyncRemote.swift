@@ -92,8 +92,11 @@ public struct SupabaseSyncRemote: SyncRemote {
         return SealedObject(id: id, kind: kind, meta: meta, body: body)
     }
 
+    /// Kinds whose whole content fits in the sealed metadata, so they have no body to store.
+    static let metaOnly: Set<ContentKind> = [.event, .bookmark, .mailMarks, .mailSettings]
+
     public func upload(_ object: SealedObject, expected: String?, replacingDeleted: Bool) async throws {
-        if object.kind != .event, object.body == nil { throw AccountError.failed }
+        if !Self.metaOnly.contains(object.kind), object.body == nil { throw AccountError.failed }
         let owner = try await owner()
         let previous = try await currentKey(of: object.id)
         var key: String?

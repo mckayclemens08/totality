@@ -261,6 +261,12 @@ import TotalityCore
 }
 
 @Suite struct SyncRemoteFormatTests {
+    @Test("Bookmarks, events, and mail marks sync with no body, and everything else needs one")
+    func metaOnlyKinds() {
+        #expect(SupabaseSyncRemote.metaOnly == [.event, .bookmark, .mailMarks, .mailSettings])
+        #expect(!SupabaseSyncRemote.metaOnly.contains(.note))
+    }
+
     @Test("Bytes survive the database's text format")
     func bytesRoundTrip() {
         let data = Data([0, 1, 255, 16])
