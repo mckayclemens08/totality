@@ -132,6 +132,58 @@ private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
         #expect(failed.phase == .failed)
     }
 
+    // MARK: The home page
+
+    @Test func theSmallTileSaysWhatsUnreadAndWhoWroteLast() async {
+        let older = MailMessage(
+            conversationID: UUID(), from: sam, to: [MailAddress(address: "mckay@usetotality.com")], subject: "Deck plans",
+            date: now.addingTimeInterval(-3_600), body: .plain("Attached."), route: .outside, marks: MailMarks(isUnread: true)
+        )
+        let (model, _) = await opened([message(MailMarks(isUnread: true)), older])
+        #expect(model.glance == ModuleGlance(lines: ["2 unread", "Dana Whitfield"]))
+        let newest = model.homeConversations(5)
+        #expect(newest.map(\.subject) == ["Saturday", "Deck plans"])
+        #expect(model.glanceConversation(at: 1) == newest.first?.id)
+        #expect(model.glanceConversation(at: 0) == nil)
+    }
+
+    @Test func aQuietInboxSaysSoWithoutRaisingItsVoice() async {
+        let (model, _) = await opened([message(MailMarks(isUnread: false))])
+        #expect(model.glance == ModuleGlance(lines: ["No unread mail", "Dana Whitfield"], isQuiet: true))
+        let (empty, _) = await opened([])
+        #expect(empty.glance == ModuleGlance(lines: ["No unread mail"], isQuiet: true))
+        #expect(empty.glanceConversation(at: 1) == nil)
+    }
+
+    @Test func beforeMailOpensTheTileOnlyInvitesYouIn() async {
+        let model = MailModel(store: FakeStore(Mailbox(), failure: .noKey))
+        #expect(model.glance == ModuleGlance(lines: ["Open to check your mail"], isQuiet: true))
+        await model.load()
+        #expect(model.glance == ModuleGlance(lines: ["Open to check your mail"], isQuiet: true), "A key problem is shown in Mail, not on the home page")
+        #expect(model.glanceConversation(at: 1) == nil)
+    }
+
+    @Test func onlyTheInboxReachesTheHomePage() async {
+        let spam = MailMessage(
+            conversationID: UUID(), from: sam, to: [MailAddress(address: "mckay@usetotality.com")], subject: "You won a prize",
+            date: now.addingTimeInterval(60), body: .plain("Click here."), route: .outside, marks: MailMarks(folder: .spam, isUnread: true)
+        )
+        let (model, _) = await opened([message(MailMarks(isUnread: false)), spam])
+        #expect(model.homeConversations(5).map { $0.subject } == ["Saturday"])
+        #expect(model.homeUnread == 0)
+    }
+
+    @Test func aConversationTappedOnTheHomePageOpensInTheInbox() async {
+        let (model, _) = await opened([message()])
+        model.place = .folder(.sent)
+        model.query = "plans"
+        let id = model.homeConversations(1)[0].id
+        model.requestFromHome(id)
+        #expect(model.place == .inbox)
+        #expect(model.query.isEmpty)
+        #expect(model.requestedConversation == id)
+    }
+
     @Test func anActionShowsAtOnceAndReachesTheStore() async {
         let (model, store) = await opened([message()])
         await model.perform(.archive, on: model.conversations)

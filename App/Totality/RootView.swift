@@ -156,16 +156,8 @@ struct RootView: View {
         glances[.reader] = reader?.glance
         glances[.calendar] = calendar?.glance
         glances[.web] = web?.glance
-        glances[.mail] = mailGlance
+        glances[.mail] = mail.current.glance
         return glances
-    }
-
-    /// Until the home tile is built (issue 37, step 7), the line only says what Mail last found.
-    private var mailGlance: ModuleGlance {
-        let model = mail.current
-        guard model.phase == .ready else { return ModuleGlance(lines: ["Open to check your mail"], isQuiet: true) }
-        let unread = model.mailbox.unreadCount(in: .inbox)
-        return ModuleGlance(lines: [unread == 0 ? "No unread mail" : "\(unread) unread"], isQuiet: unread == 0)
     }
 
     /// A module's own view for a big tile. Nil falls back to the lines, which say why it's quiet.
@@ -180,6 +172,9 @@ struct RootView: View {
         case .web:
             guard let web, web.glance != nil else { return nil }
             return AnyView(WebHomeTile(model: web, size: size) { bringUp(.web) })
+        case .mail:
+            guard mail.current.phase == .ready else { return nil }
+            return AnyView(MailHomeTile(model: mail.current, size: size) { bringUp(.mail) })
         default:
             return nil
         }
@@ -206,6 +201,12 @@ struct RootView: View {
             return {
                 web?.openFromHome(bookmark)
                 bringUp(.web)
+            }
+        case .mail:
+            guard let id = mail.current.glanceConversation(at: line) else { return nil }
+            return {
+                mail.current.requestFromHome(id)
+                bringUp(.mail)
             }
         default:
             return nil

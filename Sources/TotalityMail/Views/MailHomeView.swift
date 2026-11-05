@@ -81,6 +81,15 @@ public struct MailHomeView: View {
             if !Task.isCancelled { model.notice = nil }
         }
         .onChange(of: model.place) { opened = nil }
+        .onChange(of: model.requestedConversation, initial: true) { openRequested() }
+        .onChange(of: model.phase) { openRequested() }
+    }
+
+    /// A conversation tapped on the home page opens straight away, once it's in the mailbox.
+    private func openRequested() {
+        guard let id = model.requestedConversation, model.phase == .ready else { return }
+        model.requestedConversation = nil
+        if model.mailbox.conversation(id, in: .inbox) != nil { opened = id }
     }
 
     @ViewBuilder private func content(isWide: Bool) -> some View {
