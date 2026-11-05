@@ -155,7 +155,7 @@ final class MailMemorySyncState: SyncStateStore, @unchecked Sendable {
     @Test("Sync sees marks, settings, and drafts, never messages")
     func onlyMarksAndSettingsSync() async throws {
         let vault = MailVault(store: MailMemoryStore(), rootKey: try .generate(), account: alice)
-        #expect(vault.kinds == [.mailMarks, .mailSettings, .mailDraft])
+        #expect(vault.kinds == [.mailMarks, .mailSettings, .mailKeys, .mailDraft])
         try await vault.keep(invoiceMessage)
         #expect(try await vault.sealedObjectIDs().isEmpty)
         try await vault.save([invoice: MailMarks(isStarred: true)])
@@ -276,6 +276,122 @@ final class MailMemorySyncState: SyncStateStore, @unchecked Sendable {
         #expect(report.removedHere == 1)
         #expect(try await mac.marks().isEmpty)
         #expect(try await phone.deletedObjectIDs().isEmpty)
+    }
+
+    // MARK: Pinned keys
+
+    private let danaKey = Data(repeating: 0xD1, count: 32)
+    private let samKey = Data(repeating: 0x5A, count: 32)
+
+    private func devices() throws -> (phone: MailVault, mac: MailVault, phoneSync: SyncEngine, macSync: SyncEngine, remote: MailMemoryRemote) {
+        let key = try ContentRootKey.generate()
+        let remote = MailMemoryRemote()
+        let phone = MailVault(store: MailMemoryStore(), rootKey: key, account: alice)
+        let mac = MailVault(store: MailMemoryStore(), rootKey: key, account: alice)
+        return (phone, mac, SyncEngine(areas: [phone], remote: remote, state: MailMemorySyncState()),
+                SyncEngine(areas: [mac], remote: remote, state: MailMemorySyncState()), remote)
+    }
+
+    @Test("A server-side delete of the pins leaves them here, and the next sync puts them back")
+    func pinsSurviveARemoteDelete() async throws {
+        let (phone, _, phoneSync, _, remote) = try devices()
+        try await phone.pin("dana", key: danaKey, at: received)
+        _ = try await phoneSync.sync()
+        let id = MailVault.keysID(account: alice)
+        let row = try #require(await remote.all().first { $0.id == id })
+
+        // A stolen session deletes the row.
+        try await remote.delete(id, expected: row.hash)
+        _ = try await phoneSync.sync()
+        #expect(try await phone.pins().key(for: "dana") == danaKey)
+        _ = try await phoneSync.sync()
+        #expect(await remote.all().contains { $0.id == id }, "Uploaded again")
+    }
+
+    @Test("An older copy of the pins merges in and never rolls them back")
+    func olderPinsDontRollBack() async throws {
+        let (phone, mac, phoneSync, macSync, remote) = try devices()
+        try await phone.pin("dana", key: danaKey, at: received)
+        _ = try await phoneSync.sync()
+        let id = MailVault.keysID(account: alice)
+        let old = try #require(await remote.all().first { $0.id == id })
+        _ = try await macSync.sync()
+        try await phone.pin("sam", key: samKey, at: received.addingTimeInterval(60))
+        _ = try await phoneSync.sync()
+
+        // A session holder puts the older row back.
+        let current = try #require(await remote.all().first { $0.id == id })
+        try await remote.upload(old, expected: current.hash, replacingDeleted: false)
+        _ = try await phoneSync.sync()
+        #expect(try await phone.pins().key(for: "sam") == samKey, "Pulled and merged, not rolled back")
+        _ = try await phoneSync.sync()
+        _ = try await macSync.sync()
+        for vault in [phone, mac] {
+            let pins = try await vault.pins()
+            #expect(pins.key(for: "dana") == danaKey)
+            #expect(pins.key(for: "sam") == samKey)
+        }
+        let back = try #require(await remote.all().first { $0.id == id })
+        #expect(back.hash != old.hash, "The union went back up")
+
+        // Stored straight over the newer pins, it still can't remove one.
+        try await phone.store(old, ifLocalHash: try await phone.sealedHash(of: id))
+        #expect(try await phone.pins().key(for: "sam") == samKey)
+    }
+
+    @Test("Two devices pinning different people at once both end with both pins")
+    func twoDevicesPinDifferentPeople() async throws {
+        let (phone, mac, phoneSync, macSync, _) = try devices()
+        try await phone.pin("dana", key: danaKey, at: received)
+        try await mac.pin("sam", key: samKey, at: received)
+        _ = try await phoneSync.sync()
+        let report = try await macSync.sync()
+        #expect(report.conflicts == 1)
+        _ = try await macSync.sync()
+        _ = try await phoneSync.sync()
+        for vault in [phone, mac] {
+            let pins = try await vault.pins()
+            #expect(pins.key(for: "dana") == danaKey)
+            #expect(pins.key(for: "sam") == samKey)
+            #expect(pins.disputed.isEmpty)
+        }
+    }
+
+    @Test("Two keys for one name keep the first pinned, and the name is marked on every device")
+    func conflictingKeysKeepTheFirst() async throws {
+        let (phone, mac, phoneSync, macSync, _) = try devices()
+        let other = Data(repeating: 0xEE, count: 32)
+        try await phone.pin("dana", key: danaKey, at: received)
+        try await mac.pin("dana", key: other, at: received.addingTimeInterval(60))
+        _ = try await phoneSync.sync()
+        _ = try await macSync.sync()
+        _ = try await macSync.sync()
+        _ = try await phoneSync.sync()
+        for vault in [phone, mac] {
+            let pins = try await vault.pins()
+            #expect(pins.key(for: "dana") == danaKey)
+            #expect(pins.isDisputed("dana"))
+        }
+        // Settled: another round changes nothing.
+        let report = try await phoneSync.sync()
+        #expect(report.uploaded == 0 && report.downloaded == 0 && report.conflicts == 0)
+
+        // Pinning the other key here doesn't replace the first either.
+        let after = try await phone.pin("dana", key: other, at: received.addingTimeInterval(120))
+        #expect(after.key(for: "dana") == danaKey)
+    }
+
+    @Test("Pins added at once through the vault are all kept")
+    func concurrentPinsAreAllKept() async throws {
+        let vault = MailVault(store: MailMemoryStore(), rootKey: try .generate(), account: alice)
+        let names = (0..<20).map { "hiker\($0)" }
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for (index, name) in names.enumerated() {
+                group.addTask { try await vault.pin(name, key: Data(repeating: UInt8(index), count: 32), at: received) }
+            }
+            try await group.waitForAll()
+        }
+        #expect(Set(try await vault.pins().pins.keys) == Set(names))
     }
 
     @Test("A key move reaches every mail file, and they open under the new key")

@@ -11,6 +11,9 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     /// One message's marks, and one account's mail settings. Mail itself comes from the mail server.
     case mailMarks = "mail_marks"
     case mailSettings = "mail_settings"
+    /// The public keys one account has pinned for the people it mails. Kept apart from the settings so a
+    /// pin is never lost to a settings conflict, a rollback, or a delete.
+    case mailKeys = "mail_keys"
     /// A draft being written: its words in the sealed metadata, its files in the sealed body.
     case mailDraft = "mail_draft"
 }

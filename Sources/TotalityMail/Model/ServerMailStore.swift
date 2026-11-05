@@ -157,7 +157,11 @@ public actor ServerMailStore: MailStore {
     ///
     /// - With a pin, the pin is tried first. If the server now gives a different key, or only that
     ///   different key opens it, the message isn't proved and says the key changed.
-    /// - Without a pin, the server's key is pinned once it opens the message.
+    /// - A name pinned to two different keys, by two devices or two answers from the server, is
+    ///   disputed, and nothing from it is proved again.
+    /// - Without a pin, the server's key is pinned once it opens the message. The pin goes through the
+    ///   vault's one serialised path, so if another task pinned a different key meanwhile, that one
+    ///   stays and this message isn't proved.
     /// - Nothing opening means no key is kept, so the message shows as unreadable.
     ///
     /// Throws only when the key can't be fetched and there's no pin to use instead.
@@ -169,8 +173,9 @@ public actor ServerMailStore: MailStore {
         func opens(_ senderKey: Data) -> Bool {
             (try? key.openDirect(envelope.rest, senderKey: senderKey, from: sender, recipient: recipient, message: message)) != nil
         }
-        var settings = try await vault.settings() ?? MailSettings()
-        let pinned = settings.knownKeys[sender]
+        let pins = try await vault.pins()
+        let pinned = pins.key(for: sender)
+        let disputed = pins.isDisputed(sender)
         let fetched: Data?
         do {
             fetched = try await server.recipientKey(sender)
@@ -178,14 +183,13 @@ public actor ServerMailStore: MailStore {
             fetched = nil
         }
         if let pinned {
-            if opens(pinned) { return SenderCheck(key: pinned, changed: fetched.map { $0 != pinned } ?? false) }
+            if opens(pinned) { return SenderCheck(key: pinned, changed: disputed || (fetched.map { $0 != pinned } ?? false)) }
             if let fetched, fetched != pinned, opens(fetched) { return SenderCheck(key: fetched, changed: true) }
             return SenderCheck(changed: true)
         }
         guard let fetched, opens(fetched) else { return SenderCheck() }
-        settings.knownKeys[sender] = fetched
-        try await vault.save(settings, at: now())
-        return SenderCheck(key: fetched)
+        let after = try await vault.pin(sender, key: fetched, at: now())
+        return SenderCheck(key: fetched, changed: after.key(for: sender) != fetched || after.isDisputed(sender))
     }
 
     /// Another device deleted these for good: the server no longer lists them, and it's the same mailbox
@@ -274,14 +278,9 @@ public actor ServerMailStore: MailStore {
         try await vault.save(marks, at: now())
     }
 
-    /// The screens' copy can be older than the pins this store learned since, and a pin is never lost
-    /// or replaced here, so the pins already kept win.
+    /// Pins aren't settings, so the screens' copy can't touch them.
     public func save(_ settings: MailSettings) async throws {
-        var merged = settings
-        if let kept = try await vault.settings() {
-            merged.knownKeys.merge(kept.knownKeys) { _, kept in kept }
-        }
-        try await vault.save(merged, at: now())
+        try await vault.save(settings, at: now())
     }
 
     /// From the server first, so a message can't come back on the next download. Offline, nothing is
@@ -347,13 +346,10 @@ public actor ServerMailStore: MailStore {
             throw MailStoreError.unavailable
         }
 
-        var settings = try await vault.settings() ?? MailSettings()
-        let pinsBefore = settings.knownKeys
         var outcomes: [MailSendResult.Recipient] = []
         for address in draft.recipients {
-            outcomes.append(MailSendResult.Recipient(address: address, outcome: await deliver(raw, to: address, from: me, pins: &settings.knownKeys)))
+            outcomes.append(MailSendResult.Recipient(address: address, outcome: await deliver(raw, to: address, from: me)))
         }
-        if settings.knownKeys != pinsBefore { try await vault.save(settings, at: now()) }
 
         let delivered = Set(outcomes.filter { $0.outcome == .delivered }.map(\.address.key))
         var sent: UUID?
@@ -391,14 +387,18 @@ public actor ServerMailStore: MailStore {
     }
 
     /// A recipient's key is pinned the first time. A different key later is refused, never sent to:
-    /// it could be the server's own, put there to read the message.
-    private func deliver(_ raw: Data, to address: MailAddress, from me: String, pins: inout [String: Data]) async -> MailSendResult.Outcome {
+    /// it could be the server's own, put there to read the message. So is a name that's disputed. The
+    /// pins are read again after the key arrives, and the pin goes through the vault's one serialised
+    /// path, so a pin `open` made meanwhile is neither lost nor ignored.
+    private func deliver(_ raw: Data, to address: MailAddress, from me: String) async -> MailSendResult.Outcome {
         guard address.isWellFormed else { return .notAnAddress }
         guard let name = address.totalityName?.lowercased() else { return .outsideNotYet }
         do {
             guard let recipientKey = try await server.recipientKey(name) else { return .noSuchAddress }
-            if let pinned = pins[name], pinned != recipientKey { return .keyChanged }
-            pins[name] = recipientKey
+            let known = try await vault.pins()
+            if let pinned = known.key(for: name), pinned != recipientKey { return .keyChanged }
+            let pins = try await vault.pin(name, key: recipientKey, at: now())
+            guard pins.key(for: name) == recipientKey, !pins.isDisputed(name) else { return .keyChanged }
             let id = UUID()
             let sealed = try key.sealDirect(raw, to: recipientKey, from: me, recipient: name, message: id)
             switch try await server.deliver(to: name, id: id, sealed: sealed) {

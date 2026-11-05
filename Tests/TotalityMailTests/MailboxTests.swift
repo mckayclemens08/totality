@@ -194,6 +194,25 @@ private func message(
         #expect(MailWording.route(for: .unreadable(date: Date(), marks: MailMarks())) == nil)
     }
 
+    @Test func unprovedReceivedMailNeverSaysTheSendersDeviceSealedIt() {
+        let sent = MailMessage(
+            conversationID: UUID(), from: MailAddress(address: "mckay@usetotality.com"), to: [MailAddress(address: "dana@usetotality.com")],
+            subject: "Permit fee", date: Date(), body: .plain("Pay it to this account instead."), route: .betweenAccounts,
+            marks: MailMarks(folder: .sent, isUnread: false)
+        )
+        let sentBy = MailAddress(address: "mckay@usetotality.com")
+        let unproved = sent.travelled(.betweenAccounts, proof: .unproved, sentBy: sentBy)
+        let changedKey = sent.travelled(.betweenAccounts, proof: .unproved, sentBy: sentBy, senderKeyChanged: true)
+        // Proved can't come with a changed key from the store, but the line mustn't trust either alone.
+        let provedButChanged = sent.travelled(.betweenAccounts, proof: .proved, sentBy: sentBy, senderKeyChanged: true)
+        for message in [unproved, changedKey, provedButChanged] {
+            #expect(MailWording.route(for: message) == "Totality couldn't confirm who sealed this.")
+            #expect(MailWording.route(for: message) != MailWording.betweenAccountsReceived)
+        }
+        #expect(MailWording.warning(for: unproved) != nil)
+        #expect(MailWording.warning(for: changedKey)?.contains("key has changed") == true)
+    }
+
     @Test func aChangedKeyIsNamedInTheWarning() {
         let message = MailMessage(
             conversationID: UUID(), from: MailAddress(address: "mckay@usetotality.com"), to: [], subject: "Change of plan", date: Date(),
@@ -206,6 +225,7 @@ private func message(
     @Test func nothingClaimsEndToEndEncryption() {
         #expect(!MailWording.route(.betweenAccounts).lowercased().contains("end-to-end"))
         #expect(!MailWording.betweenAccountsReceived.lowercased().contains("end-to-end"))
+        #expect(!MailWording.betweenAccountsUnconfirmed.lowercased().contains("end-to-end"))
         #expect(!MailWording.keyChanged(MailAddress(address: "mckay@usetotality.com")).lowercased().contains("end-to-end"))
         #expect(MailWording.route(.outside).hasPrefix("Email isn't end-to-end encrypted."))
     }

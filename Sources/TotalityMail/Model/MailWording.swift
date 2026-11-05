@@ -6,8 +6,10 @@ import Foundation
 public enum MailWording {
     /// What you send to another account, and your Sent copy of it.
     public static let betweenAccounts = "Sealed by your device. Totality's servers can't read it."
-    /// What another account sent you. Their device sealed it, not yours.
+    /// What another account sent you, when it's proved their device sealed it, not yours.
     public static let betweenAccountsReceived = "Sealed by the sender's device. Totality's servers carry it but can't open it."
+    /// What another account seems to have sent you, when that couldn't be proved. Nothing more is true.
+    public static let betweenAccountsUnconfirmed = "Totality couldn't confirm who sealed this."
     public static let outside = "Email isn't end-to-end encrypted. Totality's server handles it as it arrives or leaves, and so do Cloudflare and the mail servers it passes through. Cloudflare's log keeps the subject and addresses of mail to and from outside. The stored copy is sealed."
 
     public static func route(_ route: MailRoute) -> String {
@@ -18,10 +20,14 @@ public enum MailWording {
     }
 
     /// The line under a message. Mail between accounts says whose device sealed it: only a message that
-    /// arrived from another account names the account that sent it.
+    /// arrived from another account names the account that sent it. That line is only for one that's
+    /// proved, with the sender's pinned key. Anything else could have been sealed by the server with a
+    /// key it handed out, so it says only that nobody could confirm it, beside its warning.
     public static func route(for message: MailMessage) -> String? {
         guard let route = message.route else { return nil }
-        if route == .betweenAccounts, message.sentBy != nil { return betweenAccountsReceived }
+        if route == .betweenAccounts, message.sentBy != nil {
+            return message.proof == .proved && !message.senderKeyChanged ? betweenAccountsReceived : betweenAccountsUnconfirmed
+        }
         return self.route(route)
     }
 

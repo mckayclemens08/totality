@@ -393,7 +393,7 @@ private struct Person {
         let mckay = try await person("mckay", at: office)
         let dana = try await person("dana", at: office)
         #expect(try await mckay.store.send(MailDraft(to: [dana.address], subject: "Saturday", body: "Meet at 7.")).deliveredToEveryone)
-        let pinned = try #require(try await mckay.vault.settings()?.knownKeys["dana"])
+        let pinned = try #require(try await mckay.vault.pins().key(for: "dana"))
         let danaKey = try await office.key(of: "dana")
         #expect(pinned == danaKey)
 
@@ -407,7 +407,7 @@ private struct Person {
         #expect(result.sent == nil)
         #expect(result.remaining == draft)
         #expect(await office.deliveries == before)
-        #expect(try await mckay.vault.settings()?.knownKeys["dana"] == pinned, "The pin is never replaced")
+        #expect(try await mckay.vault.pins().key(for: "dana") == pinned, "The pin is never replaced")
         #expect(MailWording.outcome(.keyChanged).contains("This person's key changed"))
     }
 
@@ -418,7 +418,7 @@ private struct Person {
         let dana = try await person("dana", at: office)
         #expect(try await mckay.store.send(MailDraft(to: [dana.address], subject: "Saturday", body: "Meet at 7.")).deliveredToEveryone)
         #expect(try await inbox(of: dana).first?.proof == .proved)
-        #expect(try await dana.vault.settings()?.knownKeys["mckay"] != nil, "Pinned on first success")
+        #expect(try await dana.vault.pins().key(for: "mckay") != nil, "Pinned on first success")
 
         // The server swaps mckay's key for its own and mints a message from him with it.
         let server = try MailKey(root: try ContentRootKey.generate())
@@ -434,6 +434,7 @@ private struct Person {
         #expect(changed.senderKeyChanged)
         let warning = try #require(MailWording.warning(for: changed))
         #expect(warning.contains("key has changed"))
+        #expect(MailWording.route(for: changed) == "Totality couldn't confirm who sealed this.", "Never says the sender's device sealed it")
         #expect(warning.contains("mckay@usetotality.com"))
 
         // Mail mckay really sealed, with the key that was pinned, is unproved too while the server
@@ -450,28 +451,106 @@ private struct Person {
         let mckay = try await person("mckay", at: office)
         let dana = try await person("dana", at: office)
         _ = try await mckay.store.send(MailDraft(to: [dana.address], subject: "Saturday", body: "Meet at 7."))
-        let pins = try #require(try await mckay.vault.settings()?.knownKeys)
+        let pins = try await mckay.vault.pins()
         let danaKey = try await office.key(of: "dana")
-        #expect(pins["dana"] == danaKey)
+        #expect(pins.key(for: "dana") == danaKey)
 
-        // Settings saved from an older copy keep the pins.
+        // Settings saved from the screens never touch the pins.
         try await mckay.store.save(MailSettings(signature: "McKay"))
-        #expect(try await mckay.vault.settings()?.knownKeys == pins)
+        #expect(try await mckay.vault.pins() == pins)
         #expect(try await mckay.vault.settings()?.signature == "McKay")
 
-        // The sealed settings carry them to another device.
-        let id = MailVault.settingsID(account: mckay.account.uuidString.lowercased())
+        // The sealed pins, apart from the settings, carry them to another device.
+        let id = MailVault.keysID(account: mckay.account.uuidString.lowercased())
         let object = try #require(try await mckay.vault.verifiedObject(id))
+        #expect(object.kind == .mailKeys)
+        #expect(object.body == nil)
         let mac = MailVault(store: MailMemoryStore(), rootKey: mckay.root, account: mckay.account.uuidString.lowercased())
         try await mac.store(object, ifLocalHash: nil)
-        #expect(try await mac.settings()?.knownKeys == pins)
+        #expect(try await mac.pins() == pins)
+        #expect(try await mac.settings() == nil, "Pins arriving don't make settings that could beat the person's")
+    }
 
-        // A new device that has only pinned keys doesn't wipe the settings the person chose.
-        let phone = MailVault(store: MailMemoryStore(), rootKey: mckay.root, account: mckay.account.uuidString.lowercased())
-        try await phone.save(MailSettings(knownKeys: ["sam": Data(repeating: 1, count: 32)]), at: date.addingTimeInterval(60))
-        let onlyPins = try #require(try await phone.verifiedObject(id))
-        #expect(try await mckay.vault.resolveConflict(local: object, remote: onlyPins) == .keepLocal)
-        #expect(try await phone.resolveConflict(local: onlyPins, remote: object) == .keepRemote)
+    @Test("A name pinned to two keys keeps the first, and nothing from or to it is proved")
+    func disputedNameIsntProved() async throws {
+        let office = PostOffice()
+        let mckay = try await person("mckay", at: office)
+        let dana = try await person("dana", at: office)
+        #expect(try await mckay.store.send(MailDraft(to: [dana.address], subject: "Saturday", body: "Meet at 7.")).deliveredToEveryone)
+        #expect(try await inbox(of: dana).first?.proof == .proved)
+        let first = try #require(try await dana.vault.pins().key(for: "mckay"))
+
+        // Dana's other device was handed another key for mckay, later, and its pins arrive by sync.
+        let account = dana.account.uuidString.lowercased()
+        let other = MailVault(store: MailMemoryStore(), rootKey: dana.root, account: account)
+        try await other.pin("mckay", key: try MailKey(root: try ContentRootKey.generate()).publicKey(), at: date.addingTimeInterval(60))
+        let id = MailVault.keysID(account: account)
+        let incoming = try #require(try await other.verifiedObject(id))
+        try await dana.vault.store(incoming, ifLocalHash: try await dana.vault.sealedHash(of: id))
+        let pins = try await dana.vault.pins()
+        #expect(pins.key(for: "mckay") == first, "The first pin stays")
+        #expect(pins.isDisputed("mckay"))
+
+        #expect(try await mckay.store.send(MailDraft(to: [dana.address], subject: "Sunday", body: "Bring water.")).deliveredToEveryone)
+        let sunday = try #require(try await inbox(of: dana).first { $0.subject == "Sunday" })
+        #expect(sunday.proof == .unproved)
+        #expect(MailWording.route(for: sunday) != MailWording.betweenAccountsReceived)
+        let reply = try await dana.store.send(MailDraft(to: [MailAddress(address: "mckay@usetotality.com")], subject: "Re: Sunday", body: "Will do."))
+        #expect(reply.recipients.map(\.outcome) == [.keyChanged])
+    }
+
+    @Test("Sending and opening at once don't lose each other's pins")
+    func sendAndOpenKeepBothPins() async throws {
+        for _ in 0..<5 {
+            let office = PostOffice()
+            let mckay = try await person("mckay", at: office)
+            let dana = try await person("dana", at: office)
+            let sam = try await person("sam", at: office)
+            #expect(try await sam.store.send(MailDraft(to: [mckay.address], subject: "Trailhead", body: "Parking is full by 8.")).deliveredToEveryone)
+
+            async let sent = mckay.store.send(MailDraft(to: [dana.address], subject: "Saturday", body: "Meet at 7."))
+            async let opened = mckay.store.open { _ in }
+            let (result, _) = try await (sent, opened)
+            #expect(result.deliveredToEveryone)
+
+            let pins = try await mckay.vault.pins()
+            let danaKey = try await office.key(of: "dana")
+            let samKey = try await office.key(of: "sam")
+            #expect(pins.key(for: "dana") == danaKey)
+            #expect(pins.key(for: "sam") == samKey)
+        }
+    }
+
+    @Test("Pins kept in settings before they moved out are moved over, not lost")
+    func legacyPinsMoveOver() async throws {
+        let office = PostOffice()
+        let mckay = try await person("mckay", at: office)
+        let account = mckay.account.uuidString.lowercased()
+        let danaKey = Data(repeating: 7, count: 32)
+        // Settings as an older build sealed them, with the pins inside.
+        struct OldSettings: Encodable {
+            let folders: [MailOwnFolder] = []
+            let blockedSenders: [String] = []
+            let alwaysLoadImages: [String] = []
+            let signature = "McKay"
+            let knownKeys: [String: Data]
+        }
+        struct OldRecord: Encodable {
+            let account: String
+            let settings: OldSettings
+            let updatedAt: Date
+        }
+        let id = MailVault.settingsID(account: account)
+        let record = OldRecord(account: account, settings: OldSettings(knownKeys: ["dana": danaKey]), updatedAt: date)
+        let sealed = try ContentCipher.seal(
+            JSONEncoder().encode(record), key: mckay.root.objectKey(for: id, purpose: .metadata), objectID: id
+        )
+        let disk = MailMemoryStore()
+        try disk.write(sealed, as: id.uuidString.lowercased() + ".mail.settings")
+        let vault = MailVault(store: disk, rootKey: mckay.root, account: account)
+        #expect(try await vault.settings()?.signature == "McKay")
+        #expect(try await vault.sealedObjectIDs().contains(MailVault.keysID(account: account)), "Moved over, so they sync")
+        #expect(try await vault.pins().key(for: "dana") == danaKey)
     }
 
     // MARK: Who it goes to

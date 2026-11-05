@@ -50,8 +50,8 @@ public enum MailVaultError: Error, Equatable {
 /// One account's mail on this device. Everything is sealed with the content key, and file names hold
 /// only IDs, so nothing readable reaches the disk.
 ///
-/// Messages stay on this device, because they come from the mail server. Marks and settings sync, as
-/// one sealed object per message's marks and one for the settings. Two devices changing different
+/// Messages stay on this device, because they come from the mail server. Marks, settings, and pinned
+/// keys sync, as one sealed object per message's marks, one for the settings, and one for the pins. Two devices changing different
 /// messages never touch the same object, so neither can overwrite the other, and a conflict on one
 /// message costs only that message's older marks. One object for all marks would make every change on
 /// one device clash with every change on another.
@@ -65,6 +65,7 @@ public actor MailVault {
     private static let messageSuffix = ".mail"
     private static let marksSuffix = ".mail.marks"
     private static let settingsSuffix = ".mail.settings"
+    private static let keysSuffix = ".mail.keys"
     private static let draftSuffix = ".mail.draft"
     private static let draftBodySuffix = ".mail.draft.body"
     /// A Sent copy the server didn't take. The message itself is kept like any other; this only says
@@ -77,6 +78,7 @@ public actor MailVault {
         messageSuffix: .content,
         marksSuffix: .metadata, marksSuffix + ".trash": .metadata,
         settingsSuffix: .metadata, settingsSuffix + ".trash": .metadata,
+        keysSuffix: .metadata,
         draftSuffix: .metadata, draftSuffix + ".trash": .metadata,
         draftBodySuffix: .content, draftBodySuffix + ".trash": .content,
         unkeptSuffix: .metadata,
@@ -93,6 +95,23 @@ public actor MailVault {
     struct SettingsRecord: Codable, Equatable {
         let account: String
         let settings: MailSettings
+        let updatedAt: Date
+    }
+
+    /// Never moved to the trash, so it has no trash file.
+    struct KeysRecord: Codable, Equatable {
+        let account: String
+        let pins: MailPins
+    }
+
+    /// Settings sealed before the pins moved out of them, read only for the pins they still carry.
+    private struct LegacySettingsRecord: Decodable {
+        struct Settings: Decodable {
+            let knownKeys: [String: Data]?
+        }
+
+        let account: String
+        let settings: Settings
         let updatedAt: Date
     }
 
@@ -152,6 +171,10 @@ public actor MailVault {
 
     static func settingsID(account: String) -> UUID {
         UUID(derivedFrom: "totality.mail.settings.\(account)")
+    }
+
+    static func keysID(account: String) -> UUID {
+        UUID(derivedFrom: "totality.mail.keys.\(account)")
     }
 
     static func draftID(_ draft: UUID, account: String) -> UUID {
@@ -293,6 +316,60 @@ public actor MailVault {
         try store.write(try seal(record, id: id, purpose: .metadata), as: name(id, Self.settingsSuffix))
     }
 
+    // MARK: Pinned keys
+
+    /// Every pin this device knows, with any still in settings sealed before the pins moved out of them.
+    /// Those are moved over the first time they're seen, so they sync like the rest.
+    public func pins() throws -> MailPins {
+        let stored = try storedPins()
+        var merged = stored ?? MailPins()
+        if let legacy = try legacyPins() { merged.merge(legacy) }
+        if merged != (stored ?? MailPins()), !isClosed { try write(merged) }
+        return merged
+    }
+
+    /// The one way a pin is added. It reads, merges, and writes with no wait in between, and the vault
+    /// is an actor, so two callers can't overwrite each other's pins. A name that already has a different
+    /// key keeps it and is marked disputed. Returns every pin after the change.
+    @discardableResult
+    public func pin(_ name: String, key: Data, at now: Date = Date()) throws -> MailPins {
+        guard !isClosed else { throw MailVaultError.closed }
+        let before = try pins()
+        var after = before
+        after.add(name, key: key, at: now)
+        if after != before { try write(after) }
+        return after
+    }
+
+    private func storedPins() throws -> MailPins? {
+        let id = Self.keysID(account: account)
+        guard let sealed = try store.read(name(id, Self.keysSuffix)) else { return nil }
+        return try openedKeys(id: id, sealed: sealed).pins
+    }
+
+    private func legacyPins() throws -> MailPins? {
+        let id = Self.settingsID(account: account)
+        guard let sealed = try store.read(name(id, Self.settingsSuffix)),
+              let record = try? open(LegacySettingsRecord.self, sealed, id: id, purpose: .metadata),
+              record.account == account, let known = record.settings.knownKeys, !known.isEmpty
+        else { return nil }
+        var pins = MailPins()
+        for (name, key) in known { pins.add(name, key: key, at: record.updatedAt) }
+        return pins
+    }
+
+    private func write(_ pins: MailPins) throws {
+        let id = Self.keysID(account: account)
+        hashes[id] = nil
+        try store.write(try seal(KeysRecord(account: account, pins: pins), id: id, purpose: .metadata), as: name(id, Self.keysSuffix))
+    }
+
+    private func openedKeys(id: UUID, sealed: Data) throws -> KeysRecord {
+        let record = try open(KeysRecord.self, sealed, id: id, purpose: .metadata)
+        guard record.account == account, Self.keysID(account: account) == id else { throw CryptoError.authenticationFailed }
+        return record
+    }
+
     // MARK: Drafts
 
     /// Every draft that opens, newest first. One that won't is left out and left alone.
@@ -368,6 +445,10 @@ public actor MailVault {
         switch object.kind {
         case .mailMarks: return try openedMarks(id: object.id, sealed: object.meta).updatedAt
         case .mailSettings: return try openedSettings(id: object.id, sealed: object.meta).updatedAt
+        // Pins are merged, never chosen between by date, so this only proves the object opens.
+        case .mailKeys:
+            _ = try openedKeys(id: object.id, sealed: object.meta)
+            return .distantPast
         case .mailDraft:
             guard let body = object.body else { throw CryptoError.malformedCiphertext }
             return try openedDraft(id: object.id, meta: object.meta, body: body).updatedAt
@@ -379,6 +460,7 @@ public actor MailVault {
         switch kind {
         case .mailMarks: Self.marksSuffix
         case .mailSettings: Self.settingsSuffix
+        case .mailKeys: Self.keysSuffix
         case .mailDraft: Self.draftSuffix
         default: nil
         }
@@ -388,14 +470,15 @@ public actor MailVault {
     private func synced(_ id: UUID) throws -> (kind: ContentKind, data: Data)? {
         if let data = try store.read(name(id, Self.marksSuffix)) { return (.mailMarks, data) }
         if let data = try store.read(name(id, Self.settingsSuffix)) { return (.mailSettings, data) }
+        if let data = try store.read(name(id, Self.keysSuffix)) { return (.mailKeys, data) }
         if let data = try store.read(name(id, Self.draftSuffix)) { return (.mailDraft, data) }
         return nil
     }
 }
 
 extension MailVault: SyncArea {
-    /// Marks, settings, and drafts. Messages have no kind here, so sync can never see them.
-    public nonisolated var kinds: Set<ContentKind> { [.mailMarks, .mailSettings, .mailDraft] }
+    /// Marks, settings, pinned keys, and drafts. Messages have no kind here, so sync can never see them.
+    public nonisolated var kinds: Set<ContentKind> { [.mailMarks, .mailSettings, .mailKeys, .mailDraft] }
 
     /// Only this account's. Another account's files on this device stay out of this account's sync.
     public func sealedObjectIDs() throws -> [UUID] {
@@ -415,6 +498,10 @@ extension MailVault: SyncArea {
         }
         let settings = Self.settingsID(account: account)
         if try store.read(name(settings, Self.settingsSuffix)) != nil { found.append(settings) }
+        // Pins still in old settings move over first, so they sync too.
+        if !isClosed { _ = try? pins() }
+        let keys = Self.keysID(account: account)
+        if try store.read(name(keys, Self.keysSuffix)) != nil { found.append(keys) }
         for id in try ids(Self.draftSuffix) {
             guard let meta = try store.read(name(id, Self.draftSuffix)), let body = try store.read(name(id, Self.draftBodySuffix)),
                   (try? openedDraft(id: id, meta: meta, body: body)) != nil
@@ -452,15 +539,19 @@ extension MailVault: SyncArea {
         guard try sealedHash(of: object.id) == expected else { throw SyncError.changedLocally }
         if expected == nil, try store.read(deletionName(object.id)) != nil { throw SyncError.changedLocally }
         _ = try updatedAt(object)
+        if object.kind == .mailKeys { return try merge(object) }
         if let body = object.body { try store.write(body, as: name(object.id, Self.draftBodySuffix)) }
         try store.write(object.meta, as: name(object.id, suffix))
         hashes[object.id] = nil
     }
 
+    /// Pins are never removed because the server says so: a stolen session could delete them, and the
+    /// next message from that person would look like first contact. They stay, and the next sync sends
+    /// them back.
     public func removeObject(_ id: UUID, ifLocalHash expected: String) throws {
         guard !isClosed else { throw MailVaultError.closed }
         guard try sealedHash(of: id) == expected else { throw SyncError.changedLocally }
-        guard let (kind, sealed) = try synced(id), let suffix = suffix(for: kind) else { return }
+        guard let (kind, sealed) = try synced(id), let suffix = suffix(for: kind), kind != .mailKeys else { return }
         // The stamp goes first, so a crash can't leave trash that's never cleaned up.
         try store.write(Data(ISO8601DateFormatter().string(from: Date()).utf8), as: trashStampName(id))
         try store.write(sealed, as: name(id, suffix) + ".trash")
@@ -499,16 +590,30 @@ extension MailVault: SyncArea {
     /// The newest wins. One message's marks or one set of settings is small, and the screens can't show
     /// a second copy of either, so keeping one would only hide it.
     ///
-    /// Settings that hold only pins a device learned by itself never beat settings the person chose,
-    /// whatever their dates: a new device pins keys as its first mail arrives, before sync has brought
-    /// the folders and signature, and mustn't wipe them. Its pins are learned again on the next contact.
+    /// Pins aren't chosen between. Taking the server's copy here means `store`, which merges it into the
+    /// pins already here, so nothing is lost, and the next sync sends the union back.
     public func resolveConflict(local: SealedObject, remote: SealedObject) throws -> ConflictResolution {
         guard local.kind == remote.kind else { throw CryptoError.authenticationFailed }
-        if local.kind == .mailSettings {
-            let mine = try openedSettings(id: local.id, sealed: local.meta).settings
-            let theirs = try openedSettings(id: remote.id, sealed: remote.meta).settings
-            if mine.isOnlyPins != theirs.isOnlyPins { return mine.isOnlyPins ? .keepRemote : .keepLocal }
+        if local.kind == .mailKeys {
+            _ = try updatedAt(local)
+            _ = try updatedAt(remote)
+            return .keepRemote
         }
         return try updatedAt(local) >= updatedAt(remote) ? .keepLocal : .keepRemote
+    }
+
+    /// Whatever arrives, older, newer, or from another device, joins the pins already here. The copy
+    /// that arrived is kept as it is when it already holds everything, so this device and the server
+    /// agree; otherwise the union is kept and goes back up on the next sync.
+    private func merge(_ object: SealedObject) throws {
+        let incoming = try openedKeys(id: object.id, sealed: object.meta).pins
+        let local = try? storedPins()
+        let merged = (local ?? MailPins()).merging(incoming)
+        if merged == incoming {
+            try store.write(object.meta, as: name(object.id, Self.keysSuffix))
+            hashes[object.id] = nil
+        } else if merged != local {
+            try write(merged)
+        }
     }
 }
