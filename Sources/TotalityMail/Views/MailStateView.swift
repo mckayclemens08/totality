@@ -12,6 +12,8 @@ struct MailStateView: View {
     let title: String
     let detail: String
     var action: MailStateAction?
+    /// The person's own address, shown so they can hand it out before mail starts.
+    var address: String = ""
 
     var body: some View {
         let theme = Theme.current
@@ -28,6 +30,11 @@ struct MailStateView: View {
                 .font(Typeface.body)
                 .foregroundStyle(theme.textSecondary.color)
                 .multilineTextAlignment(.center)
+            if !address.isEmpty {
+                AddressLine("Your address", address: address)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.top, Space.s3)
+            }
             if let action {
                 Button(action.label, action: action.run)
                     .font(Typeface.callout)

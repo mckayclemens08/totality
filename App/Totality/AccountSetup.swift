@@ -6,6 +6,8 @@ import TotalityCore
 enum AccountSetup {
     /// The app's sign-in token for web search, or nil when the build has no backend settings.
     private(set) static var searchToken: (@Sendable () async throws -> String)?
+    /// The signed-in username, which is also the mail address's first half.
+    private(set) static var username: (@Sendable () async -> String?)?
 
     static func makeModel(content: any ContentKeyAccess) -> AccountModel? {
         guard let config = AccountConfig.fromBundle() else { return nil }
@@ -15,6 +17,7 @@ enum AccountSetup {
             deviceStore: KeychainKeyStore(service: "app.totality.device")
         )
         searchToken = { try await service.accessToken() }
+        username = { await service.currentUsername() }
         return AccountModel(
             service: service, backup: BackupModel(service: service, content: content),
             sync: SyncModel(), syncRemote: service.syncRemote

@@ -1,7 +1,7 @@
 import Foundation
 
-/// Stands in for the real mailbox until the server can list and fetch mail. Nothing here is the
-/// person's, and the screens say so. It goes away with the real store, along with `MailSampleNote`.
+/// Stands in for the real mailbox in previews and tests. Nothing here is the person's, and the screens
+/// say so through `MailSampleNote`. The app itself uses `ServerMailStore`.
 public actor SampleMailStore: MailStore {
     /// Each state the screens have to show, so they can be looked at before real mail can cause them.
     public enum Scene: String, CaseIterable, Identifiable, Sendable {

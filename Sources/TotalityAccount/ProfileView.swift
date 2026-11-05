@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// The signed-in page: who you are to other people, and the way to change it.
@@ -10,6 +11,10 @@ struct ProfileSummary: View {
     var body: some View {
         if let profile = model.profile {
             ProfileHeader(profile: profile)
+            // Every account's username is also its mail address, for good.
+            AddressLine("Your email address", address: MailDomain.address(for: profile.username))
+                .padding(Space.s4)
+                .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
             AccountButton(title: "Edit profile", isWorking: false, action: onEdit)
         } else if model.profileFailed {
             AccountDetail(text: "Your profile didn't load.")

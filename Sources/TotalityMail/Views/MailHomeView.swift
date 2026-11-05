@@ -95,6 +95,22 @@ public struct MailHomeView: View {
                 action: MailStateAction(label: "Try again") { Task { await model.load() } }
             )
             .overlay(alignment: .top) { MailSampleNote(model: model) }
+        case .noAccount:
+            MailStateView(
+                systemImage: "person.crop.circle.badge.questionmark", title: "Sign in to read your mail",
+                detail: "Mail opens for the account this device's key belongs to. Sign in with that account in Account, then come back."
+            )
+        case .waitingForBackup:
+            MailStateView(
+                systemImage: "key", title: "Mail starts once your recovery key is set up",
+                detail: "Your address can only ever have one key, so Totality waits until this device's key is backed up before giving it out. Set up your recovery key in Account, and mail starts arriving here.",
+                address: model.mailbox.address
+            )
+        case .keyConflict:
+            MailStateView(
+                systemImage: "exclamationmark.lock", title: "There's a problem with your mailbox",
+                detail: "Your address is already held by a different key, so mail sent to it can't open on this device. Trying again won't change that. It has to be put right on Totality's server."
+            )
         case .ready:
             if isWide {
                 HStack(spacing: 0) {

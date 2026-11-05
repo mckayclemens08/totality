@@ -235,8 +235,8 @@ struct MailMailboxNotes: View {
     }
 }
 
-/// Says this isn't real mail, and shows each state the real thing can land in. It goes away with the
-/// sample store.
+/// Says this isn't real mail, and shows each state the real thing can land in. It shows only on the
+/// sample store, which only previews and tests use.
 struct MailSampleNote: View {
     let model: MailModel
 
