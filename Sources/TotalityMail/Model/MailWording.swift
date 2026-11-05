@@ -60,8 +60,12 @@ public enum MailWording {
 
     // MARK: Sending
 
-    /// For a draft with anyone outside Totality on it. It says what happens, and promises nothing more.
+    /// When the server has outside sending switched off.
     public static let outsideNotYet = "Sending outside Totality isn't on yet. Outside addresses stay on the draft until it is."
+    /// For a draft with anyone outside Totality on it, before it goes.
+    public static let outsideSending = "Email to outside addresses isn't end-to-end encrypted. Totality's server and Cloudflare handle it as it leaves, and Cloudflare's log keeps its subject and addresses. Your Sent copy is sealed."
+    /// For a draft with both: Totality people get a sealed copy, and the rest an outside one.
+    public static let mixedSending = "Totality accounts get a copy sealed by your device. Outside addresses get ordinary email, which isn't end-to-end encrypted: Totality's server and Cloudflare handle it as it leaves, and Cloudflare's log keeps its subject and addresses."
 
     /// What happened for one person, in a sentence.
     public static func outcome(_ outcome: MailSendResult.Outcome) -> String {
@@ -69,6 +73,13 @@ public enum MailWording {
         case .delivered: "Delivered."
         case .noSuchAddress: "Not sent. No Totality account has this address, or they haven't opened Mail yet."
         case .outsideNotYet: "Not sent. Sending outside Totality isn't on yet, so this address stays on the draft."
+        case .sentOutside: "Sent. If their mail server turns it down, a notice comes back to your inbox."
+        case .newAccount: "Not sent. New accounts can only email other Totality accounts for their first 7 days."
+        case .dailyLimit: "Not sent. You can email 20 outside addresses a day, and today's are used. It stays a draft."
+        case .monthLimit: "Not sent. Totality's outside email for this month is used up. It stays a draft."
+        case .busy: "Not sent. Too much is sending right now. Try again in a minute."
+        case .refused: "Not sent. The sending service turned this address down."
+        case .mayHaveSent: "Totality couldn't tell whether this went. It's in Sent, and sending it again could send it twice."
         case .notAnAddress: "Not sent. This isn't an email address."
         case .recipientFull: "Not sent. Their mailbox is full."
         case .tooBig: "Not sent. It's too big for their mailbox."

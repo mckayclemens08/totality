@@ -29,6 +29,15 @@ private actor PostOffice {
     private var aliases: [String: String] = [:]
     private func box(for name: String) -> String { aliases[name] ?? name }
     func set(claimedSender: String?) { self.claimedSender = claimedSender }
+    /// What the server answers for outside mail, and what it was handed. Off, as when it isn't set up.
+    private(set) var outside: [(from: String, message: MailOutsideMessage)] = []
+    var outsideAnswer: MailOutsideAnswer = .off
+    func set(outsideAnswer: MailOutsideAnswer) { self.outsideAnswer = outsideAnswer }
+    func sendOutside(from name: String, _ message: MailOutsideMessage) throws -> MailOutsideAnswer {
+        if isOffline { throw MailServerError.offline }
+        outside.append((name, message))
+        return outsideAnswer
+    }
 
     func publish(_ name: String, account: UUID, publicKey: Data) throws -> MailKeyPublication {
         if let box = boxes[name] {
@@ -143,6 +152,10 @@ private struct Counter: MailServer {
     }
 
     func keep(id: UUID, sealed: Data) async throws { try await office.keep(name, id: id, sealed: sealed, at: date) }
+
+    func sendOutside(_ message: MailOutsideMessage) async throws -> MailOutsideAnswer {
+        try await office.sendOutside(from: name, message)
+    }
 }
 
 /// One person on one device: their key, their vault, and their store.
@@ -625,7 +638,7 @@ private struct Person {
         await office.set(offline: true)
         let draft = MailDraft(to: [MailAddress(address: "dana@usetotality.com"), MailAddress(address: "sam@ortizbuilds.example")], subject: "Saturday", body: "Meet at 7.")
         let result = try await mckay.store.send(draft)
-        #expect(result.recipients.map(\.outcome) == [.offline, .outsideNotYet])
+        #expect(result.recipients.map(\.outcome) == [.offline, .offline])
         #expect(result.sent == nil)
         #expect(result.remaining == draft)
         #expect(try await mckay.vault.drafts() == [draft])
@@ -737,6 +750,93 @@ private struct Person {
         await #expect(throws: CryptoError.self) { try await elsewhere.store(noBody, ifLocalHash: nil) }
     }
 
+    // MARK: Outside addresses
+
+    @Test("Outside people get one ordinary message in their own places, and Totality people a sealed copy")
+    func outsideGoesThroughTheServer() async throws {
+        let office = PostOffice()
+        await office.set(outsideAnswer: .sent)
+        let mckay = try await person("mckay", at: office)
+        let dana = try await person("dana", at: office)
+        let sam = MailAddress(name: "Sam Ortiz", address: "sam@ortizbuilds.example")
+        let lee = MailAddress(address: "lee@trailcrew.example")
+        let pat = MailAddress(address: "pat@trailcrew.example")
+        let origin = MailDraftOrigin(kind: .reply, message: UUID(), messageID: "<plan-2@trailcrew.example>", references: ["plan-1@trailcrew.example"])
+        let draft = MailDraft(
+            to: [dana.address, sam], cc: [lee], bcc: [pat], subject: "Re: Saturday\r\nBcc: x@evil.example", body: "Meet at 7.",
+            attachments: [MailDraftAttachment(name: "map.pdf", mimeType: "application/pdf", data: Data("trailhead".utf8))], origin: origin
+        )
+        let result = try await mckay.store.send(draft)
+        #expect(result.recipients.map(\.outcome) == [.delivered, .sentOutside, .sentOutside, .sentOutside])
+        #expect(result.deliveredToEveryone)
+        #expect(result.remaining == nil)
+        #expect(try await mckay.vault.drafts().isEmpty)
+
+        let handed = await office.outside
+        #expect(handed.count == 1)
+        let message = try #require(handed.first?.message)
+        #expect(message.to == ["sam@ortizbuilds.example"], "Dana isn't listed, so she doesn't get a second, unsealed copy")
+        #expect(message.cc == ["lee@trailcrew.example"])
+        #expect(message.bcc == ["pat@trailcrew.example"])
+        #expect(!message.subject.contains("\r") && !message.subject.contains("\n"))
+        #expect(message.text == "Meet at 7.")
+        #expect(message.inReplyTo == "<plan-2@trailcrew.example>")
+        #expect(message.references == ["<plan-1@trailcrew.example>", "<plan-2@trailcrew.example>"])
+        #expect(message.attachments == [MailOutsideMessage.file(named: "map.pdf", type: "application/pdf", data: Data("trailhead".utf8))])
+        #expect(try await inbox(of: dana).first?.proof == .proved)
+
+        // The Sent copy says it went outside, with the honest label.
+        let opened = try await mckay.store.open { _ in }.mailbox.messages
+        let sent = try #require(opened.first { $0.marks.folder == MailFolder.sent })
+        #expect(sent.route == MailRoute.outside)
+        #expect(MailWording.route(for: sent) == MailWording.outside)
+    }
+
+    @Test("Each way the server can turn outside mail down is said plainly, and the draft keeps those people")
+    func outsideRefusals() async throws {
+        let cases: [(MailOutsideAnswer, MailSendResult.Outcome)] = [
+            (.off, .outsideNotYet), (.newAccount, .newAccount), (.dailyLimit, .dailyLimit), (.monthLimit, .monthLimit),
+            (.busy, .busy), (.refused, .refused), (.tooBig, .tooBig), (.failed, .failed),
+        ]
+        for (answer, outcome) in cases {
+            let office = PostOffice()
+            await office.set(outsideAnswer: answer)
+            let mckay = try await person("mckay", at: office)
+            let dana = try await person("dana", at: office)
+            let sam = MailAddress(address: "sam@ortizbuilds.example")
+            let result = try await mckay.store.send(MailDraft(to: [dana.address, sam], subject: "Saturday", body: "Meet at 7."))
+            #expect(result.recipients.map(\.outcome) == [.delivered, outcome])
+            #expect(result.remaining?.to == [sam])
+            #expect(!MailWording.outcome(outcome).isEmpty)
+            #expect(MailWording.outcome(outcome).hasPrefix("Not sent"))
+        }
+    }
+
+    @Test("When it can't tell whether outside mail went, it's not offered again as a draft")
+    func outsideMayHaveSent() async throws {
+        let office = PostOffice()
+        await office.set(outsideAnswer: .unknown)
+        let mckay = try await person("mckay", at: office)
+        let result = try await mckay.store.send(MailDraft(to: [MailAddress(address: "sam@ortizbuilds.example")], subject: "Saturday", body: "Meet at 7."))
+        #expect(result.recipients.map(\.outcome) == [.mayHaveSent])
+        #expect(result.remaining == nil)
+        #expect(result.sent != nil)
+        #expect(MailWording.outcome(.mayHaveSent).contains("twice"))
+    }
+
+    @Test("Sending only to outside people still keeps a sealed Sent copy")
+    func outsideOnlyKeepsSentCopy() async throws {
+        let office = PostOffice()
+        await office.set(outsideAnswer: .sent)
+        let mckay = try await person("mckay", at: office)
+        let result = try await mckay.store.send(MailDraft(to: [MailAddress(address: "sam@ortizbuilds.example")], subject: "Saturday", body: "Meet at 7."))
+        #expect(result.keptCopy)
+        let sentID = try #require(result.sent)
+        let sealed = try #require(await office.files(of: "mckay")[sentID]?.sealed)
+        #expect(sealed.first == MailSentKey.version)
+        #expect(sealed.range(of: Data("Meet at 7.".utf8)) == nil)
+    }
+
     // MARK: The model
 
     @MainActor @Test func theModelKeepsDraftsAndSends() async throws {
@@ -752,12 +852,11 @@ private struct Person {
         #expect(model.mailbox.drafts == [draft])
 
         let result = try await model.send(draft)
-        #expect(result.recipients.map(\.outcome) == [.delivered, .outsideNotYet])
-        #expect(model.mailbox.drafts.map(\.cc) == [[MailAddress(address: "sam@ortizbuilds.example")]])
-        #expect(model.mailbox.drafts.first?.to.isEmpty == true)
+        #expect(result.recipients.map(\.outcome) == [.delivered, .sentOutside])
+        #expect(model.mailbox.drafts.isEmpty)
         #expect(model.mailbox.messages.contains { $0.marks.folder == .sent && $0.subject == "Saturday" })
 
         await model.save(MailDraft())
-        #expect(model.mailbox.drafts.count == 1, "An empty draft isn't kept")
+        #expect(model.mailbox.drafts.isEmpty, "An empty draft isn't kept")
     }
 }

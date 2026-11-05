@@ -47,6 +47,66 @@ public struct MailServerList: Codable, Equatable, Sendable {
     public var isFull: Bool { used >= limit }
 }
 
+/// A message for outside addresses, as the server takes it. There's no From: the server sets it from the
+/// sign-in. It travels readable, because outside mail can't be sealed, and the server only passes it on.
+public struct MailOutsideMessage: Encodable, Equatable, Sendable {
+    public struct File: Encodable, Equatable, Sendable {
+        public let filename: String
+        public let type: String
+        public let content: String
+    }
+
+    public let id: String
+    public let to: [String]
+    public let cc: [String]
+    public let bcc: [String]
+    public let subject: String
+    public let text: String
+    public let inReplyTo: String?
+    public let references: [String]?
+    public let attachments: [File]
+
+    public init(
+        id: UUID, to: [String], cc: [String], bcc: [String], subject: String, text: String,
+        inReplyTo: String?, references: [String]?, attachments: [File]
+    ) {
+        self.id = id.uuidString.lowercased()
+        self.to = to
+        self.cc = cc
+        self.bcc = bcc
+        self.subject = subject
+        self.text = text
+        self.inReplyTo = inReplyTo
+        self.references = references
+        self.attachments = attachments
+    }
+
+    public static func file(named filename: String, type: String, data: Data) -> File {
+        File(filename: filename, type: type, content: data.base64EncodedString())
+    }
+}
+
+/// How handing a message to the outside world went. Only `.sent` means it left.
+public enum MailOutsideAnswer: Equatable, Sendable {
+    case sent
+    /// The server has outside sending switched off.
+    case off
+    /// The account is under seven days old.
+    case newAccount
+    /// This account's twenty outside recipients for today are used.
+    case dailyLimit
+    /// Totality's outside sending for the month is used up.
+    case monthLimit
+    /// Too much is sending right now. Nothing went.
+    case busy
+    /// The sending service turned it down, so nothing went.
+    case refused
+    case tooBig
+    /// It may or may not have gone. Sending again could send it twice.
+    case unknown
+    case failed
+}
+
 public enum MailKeyPublication: Equatable, Sendable {
     case published
     /// The server already had this exact key.
@@ -66,6 +126,8 @@ public protocol MailServer: Sendable {
     func deliver(to name: String, id: UUID, sealed: Data) async throws -> MailDeliveryAnswer
     /// Keeps something this device already sealed to its own key, like a Sent copy, in its own mailbox.
     func keep(id: UUID, sealed: Data) async throws
+    /// Hands a message to outside addresses. The server sets From from the sign-in and applies the limits.
+    func sendOutside(_ message: MailOutsideMessage) async throws -> MailOutsideAnswer
 }
 
 extension MailServer {
@@ -188,6 +250,25 @@ public struct MailServerClient: MailServer {
         case 201, 409: return
         case 413: throw MailServerError.tooBig
         case 507: throw MailServerError.mailboxFull
+        default: throw Self.error(for: status)
+        }
+    }
+
+    public func sendOutside(_ message: MailOutsideMessage) async throws -> MailOutsideAnswer {
+        let (status, data) = try await send("mail/send", method: "POST", body: try JSONEncoder().encode(message))
+        struct Answer: Decodable { let reason: String? }
+        let reason = (try? JSONDecoder().decode(Answer.self, from: data))?.reason
+        switch (status, reason) {
+        case (200, _): return .sent
+        case (503, "off"): return .off
+        case (403, "new"): return .newAccount
+        case (429, "daily"): return .dailyLimit
+        case (429, "monthly"): return .monthLimit
+        case (429, _), (503, "busy"): return .busy
+        case (422, _): return .refused
+        case (413, _): return .tooBig
+        // The ID was used before, so an earlier try reached the server and may have gone.
+        case (409, _), (504, _): return .unknown
         default: throw Self.error(for: status)
         }
     }

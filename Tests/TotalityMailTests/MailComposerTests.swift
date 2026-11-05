@@ -198,15 +198,17 @@ private actor CountingStore: MailStore {
         #expect(await store.saves.last == draft)
     }
 
-    @Test("Only outside addresses never starts the window, and says why")
+    @Test("Only outside addresses goes through the window and sends, like any message")
     func onlyOutside() async throws {
         let store = CountingStore(mailbox())
         let model = await ready(store)
         let composer = MailComposer(draft: MailDraft(to: [sam], subject: "Deck", body: "Plans attached."), model: model, hold: .zero)
+        #expect(composer.routeNote?.text == MailWording.outsideSending)
+        #expect(composer.routeNote?.isSealed == false)
         await composer.pressSend()
-        #expect(composer.phase == .writing)
-        #expect(composer.problem == MailWording.outsideNotYet)
-        #expect(await store.sends.isEmpty)
+        await composer.waitForSend()
+        #expect(composer.problem == nil)
+        #expect(await store.sends.count == 1)
     }
 
     @Test("Something that isn't an address is caught before the window")
@@ -322,8 +324,13 @@ private actor CountingStore: MailStore {
         #expect(composer.routeNote?.text == "Sealed by your device. Totality's servers can't read it.")
         #expect(composer.routeNote?.isSealed == true)
         composer.add(sam, to: .cc)
-        #expect(composer.routeNote?.text == MailWording.outsideNotYet)
-        for outcome: MailSendResult.Outcome in [.delivered, .noSuchAddress, .outsideNotYet, .notAnAddress, .recipientFull, .tooBig, .offline, .failed, .keyChanged] {
+        #expect(composer.routeNote?.text == MailWording.mixedSending)
+        #expect(composer.routeNote?.isSealed == false)
+        #expect(MailWording.outsideSending.contains("isn't end-to-end encrypted"))
+        #expect(MailWording.outsideSending.contains("Cloudflare's log"))
+        #expect(MailWording.mixedSending.contains("isn't end-to-end encrypted"))
+        for outcome: MailSendResult.Outcome in [.delivered, .noSuchAddress, .outsideNotYet, .notAnAddress, .recipientFull, .tooBig, .offline, .failed,
+                                                .keyChanged, .sentOutside, .newAccount, .dailyLimit, .monthLimit, .busy, .refused, .mayHaveSent] {
             #expect(!MailWording.outcome(outcome).localizedCaseInsensitiveContains("end-to-end"))
         }
     }

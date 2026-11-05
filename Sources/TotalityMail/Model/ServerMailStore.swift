@@ -353,11 +353,18 @@ public actor ServerMailStore: MailStore {
         }
 
         var outcomes: [MailSendResult.Recipient] = []
+        let outside = draft.recipients.filter { $0.isWellFormed && $0.totalityName == nil }
+        let outsideOutcome = outside.isEmpty ? nil : await sendOutside(draft, message: messageID)
         for address in draft.recipients {
-            outcomes.append(MailSendResult.Recipient(address: address, outcome: await deliver(raw, to: address, from: me)))
+            let outcome = if let outsideOutcome, address.isWellFormed, address.totalityName == nil {
+                outsideOutcome
+            } else {
+                await deliver(raw, to: address, from: me)
+            }
+            outcomes.append(MailSendResult.Recipient(address: address, outcome: outcome))
         }
 
-        let delivered = Set(outcomes.filter { $0.outcome == .delivered }.map(\.address.key))
+        let delivered = Set(outcomes.filter(\.outcome.left).map(\.address.key))
         var sent: UUID?
         var keptCopy = false
         if !delivered.isEmpty {
@@ -392,13 +399,56 @@ public actor ServerMailStore: MailStore {
         return MailSendResult(recipients: outcomes, sent: sent, keptCopy: keptCopy, remaining: remaining)
     }
 
+    /// Everyone outside Totality gets one ordinary message, in the same To, Cc, and Bcc places as the
+    /// draft. It goes readable, through the server, which sets From from the sign-in. It lists only
+    /// the outside people, because Totality people get their own sealed copy and listing them would
+    /// send them a second, unsealed one. One answer covers them all, since it's one message.
+    private func sendOutside(_ draft: MailDraft, message: UUID) async -> MailSendResult.Outcome {
+        let outside = { (list: [MailAddress]) in list.filter { $0.isWellFormed && $0.totalityName == nil }.map(\.address) }
+        var inReplyTo: String?
+        var references: [String]?
+        if let origin = draft.origin, origin.kind == .reply, let answered = origin.messageID.flatMap(MailWriter.cleanID) {
+            inReplyTo = "<\(answered)>"
+            references = (origin.references.compactMap(MailWriter.cleanID) + [answered])
+                .reduce(into: [String]()) { list, id in if !list.contains(id) { list.append(id) } }
+                .suffix(20)
+                .map { "<\($0)>" }
+        }
+        let request = MailOutsideMessage(
+            id: message, to: outside(draft.to), cc: outside(draft.cc), bcc: outside(draft.bcc),
+            subject: MailWriter.oneLine(draft.subject), text: draft.body, inReplyTo: inReplyTo, references: references,
+            attachments: draft.attachments.map {
+                let name = MailWriter.oneLine($0.name).trimmingCharacters(in: .whitespaces)
+                return MailOutsideMessage.file(named: name.isEmpty ? "attachment" : String(name.prefix(255)), type: MailWriter.mimeType($0), data: $0.data)
+            }
+        )
+        do {
+            switch try await server.sendOutside(request) {
+            case .sent: return .sentOutside
+            case .off: return .outsideNotYet
+            case .newAccount: return .newAccount
+            case .dailyLimit: return .dailyLimit
+            case .monthLimit: return .monthLimit
+            case .busy: return .busy
+            case .refused: return .refused
+            case .tooBig: return .tooBig
+            case .unknown: return .mayHaveSent
+            case .failed: return .failed
+            }
+        } catch let error as MailServerError where error == .offline || error == .signedOut {
+            return .offline
+        } catch {
+            return .failed
+        }
+    }
+
     /// A recipient's key is pinned the first time. A different key later is refused, never sent to:
     /// it could be the server's own, put there to read the message. So is a name that's disputed. The
     /// pins are read again after the key arrives, and the pin goes through the vault's one serialised
     /// path, so a pin `open` made meanwhile is neither lost nor ignored.
     private func deliver(_ raw: Data, to address: MailAddress, from me: String) async -> MailSendResult.Outcome {
         guard address.isWellFormed else { return .notAnAddress }
-        guard let name = address.totalityName?.lowercased() else { return .outsideNotYet }
+        guard let name = address.totalityName?.lowercased() else { return .failed }
         do {
             guard let recipientKey = try await server.recipientKey(name) else { return .noSuchAddress }
             let known = try await vault.pins()

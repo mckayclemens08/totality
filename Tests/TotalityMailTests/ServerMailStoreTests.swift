@@ -60,6 +60,7 @@ private actor FakeMailService: MailServer {
     func recipientKey(_ name: String) async throws -> Data? { nil }
     func deliver(to name: String, id: UUID, sealed: Data) async throws -> MailDeliveryAnswer { .noSuchAddress }
     func keep(id: UUID, sealed: Data) async throws { files[id] = (sealed, Date()) }
+    func sendOutside(_ message: MailOutsideMessage) async throws -> MailOutsideAnswer { .off }
 }
 
 /// Whether the device may publish, which a test can change partway.

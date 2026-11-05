@@ -169,8 +169,23 @@ public struct MailSendResult: Equatable, Sendable {
         case delivered
         /// Nobody has this Totality address, or they haven't opened Mail yet.
         case noSuchAddress
-        /// Sending outside Totality comes in a later step, so this one wasn't sent.
+        /// Outside sending is switched off on the server, so this one wasn't sent.
         case outsideNotYet
+        /// Handed to the outside world. What happens after is up to the other end, and a bounce comes
+        /// back as mail.
+        case sentOutside
+        /// Accounts under seven days old can only mail other Totality accounts.
+        case newAccount
+        /// Today's twenty outside recipients are used.
+        case dailyLimit
+        /// Totality's outside sending for the month is used up.
+        case monthLimit
+        /// Too much was sending at once, or the service was busy. Nothing went.
+        case busy
+        /// The sending service turned this address down.
+        case refused
+        /// It may have gone. Sending again could send it twice.
+        case mayHaveSent
         case notAnAddress
         case recipientFull
         case tooBig
@@ -178,6 +193,10 @@ public struct MailSendResult: Equatable, Sendable {
         case failed
         /// The server gave a different key for this person than the one pinned for them, so nothing went.
         case keyChanged
+
+        /// It left, or may have, so it comes off the draft and goes in Sent: sending it again could
+        /// send it twice.
+        public var left: Bool { self == .delivered || self == .sentOutside || self == .mayHaveSent }
     }
 
     public struct Recipient: Equatable, Sendable {
@@ -206,7 +225,7 @@ public struct MailSendResult: Equatable, Sendable {
         self.remaining = remaining
     }
 
-    public var deliveredToEveryone: Bool { recipients.allSatisfy { $0.outcome == .delivered } }
+    public var deliveredToEveryone: Bool { recipients.allSatisfy(\.outcome.left) }
 }
 
 public enum MailSendError: Error, Equatable {
