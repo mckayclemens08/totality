@@ -27,6 +27,8 @@ public final class ReaderModel {
 
     public let listen: ListenController
     private let vault: ReaderVault
+    /// The latest item's text and its sentences, made ahead so Listen starts sooner.
+    private var prepared: (id: UUID, split: Task<Result<(String, ListenScript), any Error>, Never>)?
 
     public init(vault: ReaderVault, listen: ListenController) {
         self.vault = vault
@@ -75,6 +77,7 @@ public final class ReaderModel {
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
     public func stopForKeyChange() async {
         listen.stop()
+        forgetPrepared()
         await vault.close()
     }
 
@@ -85,6 +88,7 @@ public final class ReaderModel {
             try? await vault.emptyOldTrash()
             let listing = try await vault.list()
             library = ReaderLibrary(items: listing.items, folders: listing.folders, opened: listing.opened)
+            if let id = prepared?.id, !listing.items.contains(where: { $0.id == id }) { forgetPrepared(id) }
             trash = try await vault.trashed()
             unreadable = listing.unreadable
             phase = .ready
@@ -257,7 +261,10 @@ public final class ReaderModel {
 
     public func delete(_ item: ReaderItem) async {
         do {
-            for id in try await vault.delete(item.id) { listen.remove(id) }
+            for id in try await vault.delete(item.id) {
+                listen.remove(id)
+                forgetPrepared(id)
+            }
             await load()
         } catch {
             notice = "\(item.displayTitle) couldn't be deleted."
@@ -265,10 +272,12 @@ public final class ReaderModel {
     }
 
     public func startListening(to id: UUID) async {
-        if let track = await track(for: id) { listen.play(track) }
+        let opened = listen.open(id, title: title(of: id))
+        if let track = await track(for: id) { listen.play(track, opened: opened) } else { listen.cancel(opened) }
     }
 
     public func addToQueue(_ id: UUID) async {
+        guard listen.isActive else { return await startListening(to: id) }
         if let track = await track(for: id) { listen.enqueue(track) }
     }
 
@@ -277,16 +286,29 @@ public final class ReaderModel {
     public func listen(to id: UUID, from offset: Int, on script: ListenScript) async {
         if listen.current?.id == id, listen.current?.script.fingerprint == script.fingerprint {
             listen.jump(to: script.index(at: offset))
-        } else if let track = await track(for: id, from: offset) {
-            listen.play(track)
+        } else {
+            let opened = listen.open(id, title: title(of: id))
+            if let track = await track(for: id, from: offset) { listen.play(track, opened: opened) } else { listen.cancel(opened) }
         }
+    }
+
+    /// For an item that's open, where Listen is likely next: the voice loads, and the text is read and
+    /// split now rather than after the button is pressed. Only the latest item is kept.
+    public func prepareListening(to id: UUID) async {
+        listen.warmUp()
+        _ = await script(for: id)
+    }
+
+    private func title(of id: UUID) -> String {
+        (library.items.first { $0.id == id } ?? library.lastOpened.first { $0.id == id })?.displayTitle ?? ""
     }
 
     private func track(for id: UUID, from offset: Int? = nil) async -> ListenTrack? {
         do {
             let item = try await vault.item(id)
-            let text = try await vault.text(of: id)
-            guard let track = ListenTrack(id: id, title: item.displayTitle, text: text, startOffset: offset ?? item.listenPosition) else {
+            guard let script = try await script(for: id).get(),
+                  let track = ListenTrack(id: id, title: item.displayTitle, script: script, startOffset: offset ?? item.listenPosition)
+            else {
                 notice = "There's nothing to read aloud here yet."
                 return nil
             }
@@ -298,4 +320,41 @@ public final class ReaderModel {
         }
         return nil
     }
+
+    /// Splitting a long book takes about a second on a phone, so it happens away from the main thread,
+    /// and once per version of the text. Nil when the item has nothing to split.
+    private func script(for id: UUID) async -> Result<ListenScript?, any Error> {
+        if prepared?.id != id {
+            let vault = self.vault
+            prepared = (id, Task {
+                do {
+                    let text = try await vault.text(of: id)
+                    let script = await Task.detached(priority: .userInitiated) { ListenScript(text: text) }.value
+                    return .success((text, script))
+                } catch {
+                    return .failure(error)
+                }
+            })
+        }
+        guard let prepared else { return .success(nil) }
+        let result = await prepared.split.value
+        // An edit since, or a failure, means the next ask starts again.
+        do {
+            let (split, made) = try result.get()
+            guard let current = try? await vault.text(of: id), current == split else {
+                if self.prepared?.split == prepared.split { self.prepared = nil }
+                return await script(for: id)
+            }
+            return .success(made)
+        } catch {
+            if self.prepared?.split == prepared.split { self.prepared = nil }
+            return .failure(error)
+        }
+    }
+
+    /// Drops a prepared script, so a deleted item's text doesn't stay in memory.
+    private func forgetPrepared(_ id: UUID? = nil) {
+        if id == nil || prepared?.id == id { prepared = nil }
+    }
 }
+

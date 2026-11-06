@@ -11,6 +11,9 @@ public protocol SpeechEngine: AnyObject {
     func speak(_ text: String, speed: Double)
     /// A hint at what comes next, so it can start straight after this sentence. Nil drops anything held.
     func prepare(_ text: String?)
+    /// Gets the voice loaded before it's needed, so the first sentence starts sooner. `speakingSoon` says a
+    /// sentence is on its way, so nothing else should get in front of it.
+    func warmUp(speakingSoon: Bool)
     func pause()
     func resume()
     func stop()
@@ -18,6 +21,7 @@ public protocol SpeechEngine: AnyObject {
 
 public extension SpeechEngine {
     func prepare(_ text: String?) {}
+    func warmUp(speakingSoon: Bool) {}
 }
 
 @MainActor

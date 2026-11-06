@@ -3,8 +3,18 @@ import FluidAudio
 
 /// Turns text into audio samples. Nothing here leaves the device: only the model is ever downloaded.
 protocol VoiceSynthesizer: Sendable {
+    /// Loads the voice, so it can speak.
     func prepare() async throws
     func speech(for text: String) async throws -> VoiceSpeech
+    /// Lines to say, unheard, once the voice has loaded and nothing is waiting to be read.
+    var warmUpLines: [String] { get }
+    /// Says one warm-up line and throws the sound away. Only a full disk is worth an error.
+    func warmUp(with line: String) async throws
+}
+
+extension VoiceSynthesizer {
+    var warmUpLines: [String] { [] }
+    func warmUp(with line: String) async throws {}
 }
 
 /// Why the voice couldn't load, when that's something the listener can fix.
@@ -44,6 +54,11 @@ final class NaturalSpeechEngine: SpeechEngine {
     private var isReady = false
     /// Shared and never cancelled, because skipping during a load shouldn't start it again.
     private var loading: Task<Void, any Error>?
+    /// Warm-up lines not yet said. Speech that's asked for goes first, so a line only runs when nothing waits.
+    private var warmUpsLeft: [String]?
+    private var warming: Task<Void, Never>?
+    /// A sentence was promised, so no warm-up line starts in front of it.
+    private var isExpecting = false
 
     private var isPaused = false
     private var isPlaying = false
@@ -55,7 +70,24 @@ final class NaturalSpeechEngine: SpeechEngine {
     private var wanted: String?
     private var position: Task<Void, Never>?
     /// What's playing, and the last place reported, so a place is only reported when it changes.
-    private var playing: (length: Int, marks: [VoiceMark]) = (0, [])
+    private var playing: (length: Int, marks: [VoiceMark], shift: Int) = (0, [], 0)
+    /// The second half of a sentence that was made in two, being made while the first half plays.
+    private var rest: Rest?
+
+    private struct Rest {
+        let text: String
+        /// Where it starts in the whole sentence, in UTF-16 units.
+        let shift: Int
+        let speed: Double
+        let speech: Task<VoiceSpeech, any Error>
+    }
+
+    /// A sentence nobody made ahead is said in two when it's long, split after its first clause, so
+    /// speech starts when that clause is made rather than the whole sentence. Kokoro pauses there anyway,
+    /// and splits long text at the same marks itself.
+    static let splitsAbove = 80
+    static let shortestPart = 20
+    static let longestOpening = 120
     private var lastOffset: Int?
     private var failuresInARow = 0
 
@@ -64,16 +96,63 @@ final class NaturalSpeechEngine: SpeechEngine {
         self.output = output
     }
 
+    /// Starts loading the voice before anything is asked for, so the first sentence doesn't wait for it.
+    func warmUp(speakingSoon: Bool) {
+        if speakingSoon { isExpecting = true }
+        _ = load()
+    }
+
+    private func load() -> Task<Void, any Error>? {
+        guard !isReady else { return nil }
+        if let loading { return loading }
+        let synthesizer = self.synthesizer
+        let task = Task { try await synthesizer.prepare() }
+        loading = task
+        if warmUpsLeft == nil { warmUpsLeft = synthesizer.warmUpLines }
+        Task { [weak self] in
+            guard (try? await task.value) != nil else { return }
+            self?.isReady = true
+            self?.warmNext()
+        }
+        return task
+    }
+
+    /// Core ML finishes each model the first time it runs. These lines do that while the voice is idle,
+    /// which keeps the wait out of the middle of a chapter without making the first sentence wait for it.
+    private func warmNext() {
+        guard isReady, !isExpecting, warming == nil, making == nil, ahead == nil, !isPlaying,
+              let line = warmUpsLeft?.first else { return }
+        warmUpsLeft?.removeFirst()
+        let synthesizer = self.synthesizer
+        warming = Task { [weak self] in
+            do {
+                try await synthesizer.warmUp(with: line)
+            } catch {
+                self?.cannotLoad()
+            }
+            self?.warming = nil
+            self?.warmNext()
+        }
+    }
+
+    /// The disk filled up while warming, so the next sentence says why the voice can't run.
+    private func cannotLoad() {
+        isReady = false
+        warmUpsLeft = []
+        loading = Task { throw VoiceLoadError.storageFull }
+    }
+
     func speak(_ text: String, speed: Double) {
         stop()
+        isExpecting = false
         let current = turn
         let held = ahead?.text == text ? ahead?.speech : nil
         if held == nil { ahead?.speech.cancel() }
         ahead = nil
         wanted = nil
         let synthesizer = self.synthesizer
-        let load = isReady ? nil : loading ?? Task { try await synthesizer.prepare() }
-        loading = load
+        let split = held == nil ? Self.firstClause(of: text) : nil
+        let load = load()
         if load != nil {
             isWaiting = true
             onStatus?("Getting the voice ready.")
@@ -90,6 +169,16 @@ final class NaturalSpeechEngine: SpeechEngine {
             }
             self?.isReady = true
             do {
+                if let split {
+                    let opening = try await synthesizer.speech(for: split.opening)
+                    // Only now, so the rest can't hold up the opening.
+                    let rest = Rest(
+                        text: split.rest, shift: split.shift, speed: speed,
+                        speech: Task { try await synthesizer.speech(for: split.rest) }
+                    )
+                    self?.made(opening, text: split.opening, speed: speed, turn: current, rest: rest)
+                    return
+                }
                 let speech = if let held {
                     try await held.value
                 } else {
@@ -118,7 +207,10 @@ final class NaturalSpeechEngine: SpeechEngine {
 
     /// Waits for the sentence being made, so the voice is only ever loaded once.
     private func makeAhead() {
-        guard isReady, making == nil, let wanted else { return }
+        guard isReady, making == nil, let wanted else {
+            warmNext()
+            return
+        }
         self.wanted = nil
         let synthesizer = self.synthesizer
         ahead = (wanted, Task {
@@ -140,6 +232,8 @@ final class NaturalSpeechEngine: SpeechEngine {
         turn += 1
         making?.cancel()
         making = nil
+        rest?.speech.cancel()
+        rest = nil
         position?.cancel()
         position = nil
         isPlaying = false
@@ -157,15 +251,37 @@ final class NaturalSpeechEngine: SpeechEngine {
     }
 
     func reportPosition() {
-        let offset = Self.offset(forFraction: output.playedFraction, inTextOfLength: playing.length, marks: playing.marks)
+        let offset = playing.shift + Self.offset(forFraction: output.playedFraction, inTextOfLength: playing.length, marks: playing.marks)
         guard offset != lastOffset else { return }
         lastOffset = offset
         onWord?(offset)
     }
 
-    private func made(_ speech: VoiceSpeech, text: String, speed: Double, turn: Int) {
-        guard turn == self.turn else { return }
+    /// Where a long sentence that isn't ready can be split, or nil to say it whole.
+    static func firstClause(of text: String) -> (opening: String, rest: String, shift: Int)? {
+        guard text.count > splitsAbove else { return nil }
+        var count = 0
+        for index in text.indices {
+            count += 1
+            guard count <= longestOpening else { return nil }
+            guard count >= shortestPart, ",;:".contains(text[index]) else { continue }
+            let after = text.index(after: index)
+            guard after < text.endIndex, text[after].isWhitespace else { continue }
+            guard let start = text[after...].firstIndex(where: { !$0.isWhitespace }) else { return nil }
+            let rest = String(text[start...])
+            guard rest.count >= shortestPart else { return nil }
+            return (String(text[...index]), rest, start.utf16Offset(in: text))
+        }
+        return nil
+    }
+
+    private func made(_ speech: VoiceSpeech, text: String, speed: Double, turn: Int, shift: Int = 0, rest: Rest? = nil) {
+        guard turn == self.turn else {
+            rest?.speech.cancel()
+            return
+        }
         making = nil
+        self.rest = rest
         doneWaiting()
         if failuresInARow >= Self.failuresBeforeNotice { onStatus?(nil) }
         failuresInARow = 0
@@ -181,7 +297,7 @@ final class NaturalSpeechEngine: SpeechEngine {
         }
         isPlaying = true
         if isPaused { output.pause() }
-        playing = (text.utf16.count, speech.marks)
+        playing = (text.utf16.count, speech.marks, shift)
         lastOffset = nil
         position = Task { [weak self] in
             while !Task.isCancelled {
@@ -189,7 +305,8 @@ final class NaturalSpeechEngine: SpeechEngine {
                 try? await Task.sleep(for: Self.positionPause)
             }
         }
-        makeAhead()
+        // The rest of this sentence comes first, so the next one waits until that's made.
+        if rest == nil { makeAhead() }
     }
 
     private func played(turn: Int) {
@@ -197,6 +314,18 @@ final class NaturalSpeechEngine: SpeechEngine {
         position?.cancel()
         position = nil
         isPlaying = false
+        if let rest {
+            self.rest = nil
+            making = Task { [weak self] in
+                do {
+                    let speech = try await rest.speech.value
+                    self?.made(speech, text: rest.text, speed: rest.speed, turn: turn, shift: rest.shift)
+                } catch {
+                    self?.failed(rest.text, notice: nil, turn: turn)
+                }
+            }
+            return
+        }
         onFinish?()
     }
 
@@ -255,12 +384,16 @@ final class KokoroSynthesizer: VoiceSynthesizer {
         } catch {
             throw isOutOfRoom ? VoiceLoadError.storageFull : error
         }
-        // Core ML finishes compiling a model the first time it runs. Doing that now keeps the wait out of
-        // the middle of a chapter. A locked screen can refuse this for now, so only a full disk ends it.
+    }
+
+    var warmUpLines: [String] {
+        Self.warmUp
+    }
+
+    /// A locked screen can refuse this for now, so only a full disk counts as failing.
+    func warmUp(with line: String) async throws {
         do {
-            for line in Self.warmUp {
-                _ = try await manager.synthesizeDetailed(text: line, voice: Self.voice, speed: 1)
-            }
+            _ = try await manager.synthesizeDetailed(text: line, voice: Self.voice, speed: 1)
         } catch {
             if isOutOfRoom { throw VoiceLoadError.storageFull }
         }
