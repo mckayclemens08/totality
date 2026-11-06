@@ -125,7 +125,10 @@ private struct NoteEditor: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .task { await reload() }
+        .task {
+            await reload()
+            await model.prepareListening(to: item.id)
+        }
         // Listen reads what's saved, so anything just typed has to get there first.
         .onChange(of: readAlong) {
             Task { await save() }
@@ -253,6 +256,8 @@ private struct FileReader: View {
             do {
                 document = try await model.document(of: item.id)
                 text = try await model.text(of: item.id)
+                // Listen is likely next, and a long book takes seconds to split. The page shows first.
+                Task { await model.prepareListening(to: item.id) }
             } catch let error as ReaderError {
                 problem = error.message
             } catch {
@@ -369,6 +374,8 @@ private struct PDFReader: View {
                 } else {
                     document = opened
                     self.data = data
+                    // Listen is likely next, and a long book takes seconds to split. The pages show first.
+                    Task { await model.prepareListening(to: item.id) }
                 }
             } catch let error as ReaderError {
                 problem = error.message

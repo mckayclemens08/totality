@@ -27,12 +27,14 @@ final class FakeSpeechEngine: SpeechEngine {
     private(set) var prepared: [String?] = []
     private(set) var pauses = 0
     private(set) var resumes = 0
+    private(set) var warmUps: [Bool] = []
 
     func speak(_ text: String, speed: Double) {
         spoken.append(text)
         speeds.append(speed)
     }
     func prepare(_ text: String?) { prepared.append(text) }
+    func warmUp(speakingSoon: Bool) { warmUps.append(speakingSoon) }
     func pause() { pauses += 1 }
     func resume() { resumes += 1 }
     func stop() {}

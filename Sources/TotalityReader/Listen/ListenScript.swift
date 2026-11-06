@@ -54,7 +54,7 @@ public struct ListenScript: Sendable, Equatable {
         tokenizer.string = flowing
         var ranges: [Range<String.Index>] = []
         tokenizer.enumerateTokens(in: flowing.startIndex..<flowing.endIndex) { range, _ in
-            if let last = ranges.last, Self.carriesOn(String(flowing[last])) {
+            if let last = ranges.last, Self.carriesOn(flowing[last]) {
                 ranges[ranges.count - 1] = last.lowerBound..<range.upperBound
             } else {
                 ranges.append(range)
@@ -69,53 +69,80 @@ public struct ListenScript: Sendable, Equatable {
     /// PDFs break lines wherever the page ran out, and the tokenizer takes each break for the end of a
     /// sentence. The result is the same length as the text, so offsets still point into the original.
     static func unwrapped(_ text: String) -> String {
-        let lines = text.replacingOccurrences(of: "\r", with: " ").components(separatedBy: "\n")
+        // Lines are looked at where they sit, not copied and tidied, because a book has tens of thousands.
+        let lines = text.replacingOccurrences(of: "\r", with: " ").split(separator: "\n", omittingEmptySubsequences: false)
         var result = ""
-        for (index, line) in lines.enumerated() {
+        result.reserveCapacity(text.utf8.count)
+        for index in lines.indices {
+            let line = lines[index]
             guard index + 1 < lines.count else {
                 result += line
                 break
             }
             let next = lines[index + 1]
             if splitsWord(line, next) {
-                result += line.dropLast(hyphenAndSpaces(line)) + String(repeating: joined, count: hyphenAndSpaces(line) + 1)
+                result += line.dropLast(hyphenAndSpaces(line))
+                result += String(repeating: joined, count: hyphenAndSpaces(line) + 1)
             } else {
-                result += line + (continues(line, next) ? " " : "\n")
+                result += line
+                result += continues(line, next) ? " " : "\n"
             }
         }
         return result
     }
 
-    private static func trimmed(_ line: String) -> String {
+    private static func trimmed(_ line: Substring) -> String {
         line.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
-    private static func hyphenAndSpaces(_ line: String) -> Int {
+    private static func hyphenAndSpaces(_ line: Substring) -> Int {
         line.reversed().prefix(while: \.isWhitespace).count + 1
     }
 
-    private static func splitsWord(_ line: String, _ next: String) -> Bool {
-        let end = trimmed(line)
-        guard end.hasSuffix("-"), end.dropLast().last?.isLetter == true else { return false }
-        return trimmed(next).first?.isLowercase == true
+    /// The line's last character that isn't a space, and the one just before it once runs of spaces are
+    /// one space, which is what tidying the line would leave.
+    private static func ending(_ line: Substring) -> (last: Character, before: Character?)? {
+        guard let end = line.lastIndex(where: { !$0.isWhitespace }) else { return nil }
+        let before = end > line.startIndex ? line[line.index(before: end)] : nil
+        return (line[end], before.map { $0.isWhitespace ? " " : $0 })
     }
 
-    private static func continues(_ line: String, _ next: String) -> Bool {
-        let end = trimmed(line)
-        let start = trimmed(next)
-        guard let last = end.last, let first = start.first else { return false }
-        if ".!?:".contains(last), !carriesOn(end) { return false }
-        if first == "•" || first == "-" || first == "*" || startsList(start) { return false }
-        return first.isLowercase || end.count >= wrappedLine
+    /// Whether the line, tidied, is at least `count` characters long.
+    private static func isLong(_ line: Substring, _ count: Int) -> Bool {
+        var length = 0
+        var inSpace = false
+        for character in line.drop(while: \.isWhitespace) {
+            if character.isWhitespace {
+                inSpace = true
+                continue
+            }
+            length += inSpace ? 2 : 1
+            inSpace = false
+            if length >= count { return true }
+        }
+        return false
     }
 
-    private static func startsList(_ line: String) -> Bool {
-        guard let word = line.split(separator: " ").first, let last = word.last, ".)".contains(last) else { return false }
+    private static func splitsWord(_ line: Substring, _ next: Substring) -> Bool {
+        guard let end = ending(line), end.last == "-", end.before?.isLetter == true else { return false }
+        return next.first { !$0.isWhitespace }?.isLowercase == true
+    }
+
+    private static func continues(_ line: Substring, _ next: Substring) -> Bool {
+        guard let last = ending(line)?.last, let first = next.first(where: { !$0.isWhitespace }) else { return false }
+        if ".!?:".contains(last), !carriesOn(line) { return false }
+        if first == "•" || first == "-" || first == "*" || startsList(next) { return false }
+        return first.isLowercase || isLong(line, wrappedLine)
+    }
+
+    private static func startsList(_ line: Substring) -> Bool {
+        guard let word = line.split(maxSplits: 1, whereSeparator: \.isWhitespace).first, let last = word.last,
+              ".)".contains(last) else { return false }
         return word.dropLast().allSatisfy(\.isNumber)
     }
 
     /// True when text ends mid-sentence: on an abbreviation, an initial, or a list number.
-    private static func carriesOn(_ text: String) -> Bool {
+    private static func carriesOn(_ text: Substring) -> Bool {
         let words = text.split(whereSeparator: \.isWhitespace)
         guard let word = words.last, word.hasSuffix(".") else { return false }
         let bare = word.dropLast().drop { !$0.isLetter && !$0.isNumber }
@@ -132,7 +159,7 @@ public struct ListenScript: Sendable, Equatable {
             if end < range.upperBound, let space = text[start..<end].lastIndex(where: \.isWhitespace), space > start {
                 end = space
             }
-            let piece = trimmed(text[start..<end].filter { $0 != joined })
+            let piece = trimmed(Substring(text[start..<end].filter { $0 != joined }))
             // Bullets, rules, page numbers, and table figures have nothing to read.
             if piece.contains(where: \.isLetter) {
                 pieces.append(Sentence(text: piece, offset: start.utf16Offset(in: text), raw: String(text[start..<end])))

@@ -190,6 +190,61 @@ import TotalityCore
         #expect(ListenBar.label(forSentence: 13, of: 875) == "14 of 875")
     }
 
+    @Test("The bar shows on the press, before the book is split, and the voice starts loading then")
+    func openingShowsAtOnce() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        let played = try track()
+        let opened = listen.open(played.id, title: "Kant and the Critique of Pure Reason")
+        #expect(listen.isActive)
+        #expect(listen.current == nil)
+        #expect(ListenBar.status(listen) == "Getting the book ready.")
+        #expect(engine.warmUps == [true])
+        listen.play(played, opened: opened)
+        #expect(listen.opening == nil)
+        #expect(engine.spoken == ["One."])
+    }
+
+    @Test("A book that arrives after Stop, or after something else was opened, doesn't play")
+    func aLateBookIsDropped() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        let first = try track()
+        let stopped = listen.open(first.id, title: "First")
+        listen.stop()
+        listen.play(first, opened: stopped)
+        #expect(listen.current == nil)
+        #expect(!listen.isActive)
+
+        let old = listen.open(first.id, title: "First")
+        let second = try track("Four. Five.")
+        let newer = listen.open(second.id, title: "Second")
+        listen.play(first, opened: old)
+        #expect(listen.current == nil)
+        listen.play(second, opened: newer)
+        #expect(engine.spoken == ["Four."])
+    }
+
+    @Test func nothingToReadTakesTheBarAway() throws {
+        let listen = ListenController(engine: FakeSpeechEngine())
+        let opened = listen.open(UUID(), title: "Blank")
+        listen.cancel(opened)
+        #expect(!listen.isActive)
+    }
+
+    @Test("Queueing while a book is being got ready waits its turn")
+    func queueingWhileOpening() throws {
+        let engine = FakeSpeechEngine()
+        let listen = ListenController(engine: engine)
+        let first = try track()
+        let opened = listen.open(first.id, title: "First")
+        listen.enqueue(try track("Four. Five."))
+        #expect(engine.spoken.isEmpty)
+        listen.play(first, opened: opened)
+        #expect(engine.spoken == ["One."])
+        #expect(listen.queue.count == 1)
+    }
+
     @Test func resumesFromTheSavedPosition() throws {
         let engine = FakeSpeechEngine()
         ListenController(engine: engine).play(try track(startOffset: 6))

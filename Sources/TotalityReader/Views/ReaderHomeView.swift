@@ -47,7 +47,7 @@ public struct ReaderHomeView: View {
                     .searchable(text: $model.query, prompt: "Search titles and text")
             }
             .tint(Theme.current.accent.color)
-            if model.listen.current != nil {
+            if model.listen.isActive {
                 ListenBar(listen: model.listen)
                     .padding(Space.s3)
                     .background(Theme.current.bg.color)
@@ -58,7 +58,11 @@ public struct ReaderHomeView: View {
         } message: {
             Text(model.notice ?? "")
         }
-        .task { await model.load() }
+        .task {
+            // Loading the voice takes seconds, so it starts when the Reader opens, not when Listen is pressed.
+            model.listen.warmUp()
+            await model.load()
+        }
         .onChange(of: path) {
             guard let id = path.last?.opens else { return }
             Task { await model.markOpened(id) }

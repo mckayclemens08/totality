@@ -9,7 +9,11 @@ public struct ListenTrack: Identifiable, Sendable, Equatable {
 
     /// Nil when there is nothing to say.
     public init?(id: UUID, title: String, text: String, startOffset: Int = 0) {
-        let script = ListenScript(text: text)
+        self.init(id: id, title: title, script: ListenScript(text: text), startOffset: startOffset)
+    }
+
+    /// Nil when there is nothing to say.
+    public init?(id: UUID, title: String, script: ListenScript, startOffset: Int = 0) {
         guard !script.sentences.isEmpty else { return nil }
         self.id = id
         self.title = title
@@ -23,9 +27,18 @@ public struct ListenTrack: Identifiable, Sendable, Equatable {
 @MainActor
 @Observable
 public final class ListenController {
+    /// Something asked for that's still being read and split. The bar shows it straight away, because
+    /// a long book takes seconds to get ready and a button that does nothing for that long looks broken.
+    public struct Opening: Equatable, Sendable {
+        public let id: UUID
+        public let title: String
+        fileprivate let token = UUID()
+    }
+
     public static let speeds: [Double] = [0.75, 1, 1.25, 1.5, 2]
 
     public private(set) var current: ListenTrack?
+    public private(set) var opening: Opening?
     public private(set) var queue: [ListenTrack] = []
     public private(set) var sentence = 0
     /// How far into the current sentence speech has reached. It only moves the bar, so a saved
@@ -49,18 +62,58 @@ public final class ListenController {
         engine.onStatus = { [weak self] in self?.status = $0 }
     }
 
+    /// True while the bar should show: something is playing, or on its way.
+    public var isActive: Bool {
+        current != nil || opening != nil
+    }
+
+    /// Shows the bar for something that's still being got ready, and starts the voice loading meanwhile.
+    /// Whatever was playing stops, its place saved, and the queue stays, as when one track replaces another.
+    public func open(_ id: UUID, title: String) -> Opening {
+        if current != nil {
+            engine.stop()
+            engine.prepare(nil)
+            reportPosition()
+            current = nil
+            sentence = 0
+            isPaused = false
+            restartOnResume = false
+        }
+        let opening = Opening(id: id, title: title)
+        self.opening = opening
+        engine.warmUp(speakingSoon: true)
+        return opening
+    }
+
+    /// Plays what was opened, unless it was stopped or something else was opened since.
+    public func play(_ track: ListenTrack, opened: Opening) {
+        guard opening == opened else { return }
+        play(track)
+    }
+
+    /// What was opened has nothing to read, so the bar goes again.
+    public func cancel(_ opened: Opening) {
+        if opening == opened { opening = nil }
+    }
+
+    /// Loads the voice ahead of time, for when Listen is likely soon.
+    public func warmUp() {
+        engine.warmUp(speakingSoon: false)
+    }
+
     public var progress: Double {
         current?.script.progress(at: sentence, spoken: spoken) ?? 0
     }
 
     public func play(_ track: ListenTrack) {
+        opening = nil
         current = track
         sentence = track.script.index(at: track.startOffset)
         speakCurrent()
     }
 
     public func enqueue(_ track: ListenTrack) {
-        if current == nil { play(track) } else { queue.append(track) }
+        if current == nil, opening == nil { play(track) } else { queue.append(track) }
     }
 
     public func togglePause() {
@@ -97,6 +150,7 @@ public final class ListenController {
         engine.prepare(nil)
         reportPosition()
         current = nil
+        opening = nil
         queue = []
         sentence = 0
         isPaused = false
@@ -106,6 +160,7 @@ public final class ListenController {
     /// Drops an item that no longer exists, so its text does not stay in memory or keep playing.
     public func remove(_ id: UUID) {
         queue.removeAll { $0.id == id }
+        if opening?.id == id { opening = nil }
         guard current?.id == id else { return }
         engine.stop()
         engine.prepare(nil)

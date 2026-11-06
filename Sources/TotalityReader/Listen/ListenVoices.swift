@@ -54,6 +54,11 @@ public final class ListenVoices: SpeechEngine {
         natural?.prepare(text)
     }
 
+    public func warmUp(speakingSoon: Bool) {
+        guard !naturalFailed else { return }
+        natural?.warmUp(speakingSoon: speakingSoon)
+    }
+
     public func pause() {
         speaking?.pause()
     }

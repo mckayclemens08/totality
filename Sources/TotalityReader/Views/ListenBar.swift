@@ -11,7 +11,7 @@ struct ListenBar: View {
         let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s2) {
             HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
-                Text(listen.current?.title ?? "")
+                Text(listen.current?.title ?? listen.opening?.title ?? "")
                     .font(Typeface.callout)
                     .foregroundStyle(theme.textPrimary.color)
                     .lineLimit(1)
@@ -25,7 +25,7 @@ struct ListenBar: View {
                         .accessibilityLabel("Sentence \(Self.label(forSentence: listen.sentence, of: track.script.sentences.count))")
                 }
             }
-            if let status = listen.status {
+            if let status = Self.status(listen) {
                 Text(status)
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
@@ -85,6 +85,12 @@ struct ListenBar: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .accessibilityLabel("Speed")
+    }
+
+    /// The voice's own word comes first. Before there's a track, the bar says what it's waiting for.
+    @MainActor
+    static func status(_ listen: ListenController) -> String? {
+        listen.status ?? (listen.current == nil && listen.opening != nil ? "Getting the book ready." : nil)
     }
 
     static func label(forSentence index: Int, of count: Int) -> String {

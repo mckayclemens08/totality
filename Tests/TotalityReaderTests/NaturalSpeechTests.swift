@@ -6,6 +6,8 @@ import Testing
 private actor FakeVoice: VoiceSynthesizer {
     private(set) var prepared = 0
     private(set) var requests: [String] = []
+    private(set) var warmed: [String] = []
+    nonisolated let warmUpLines: [String]
     private let failsPreparing: Bool
     private let storageFull: Bool
     private let unreadable: Set<String>
@@ -15,8 +17,9 @@ private actor FakeVoice: VoiceSynthesizer {
 
     init(
         failsPreparing: Bool = false, storageFull: Bool = false, unreadable: Set<String> = [], silent: String? = nil,
-        marks: [String: [VoiceMark]] = [:]
+        marks: [String: [VoiceMark]] = [:], warmUpLines: [String] = []
     ) {
+        self.warmUpLines = warmUpLines
         self.marks = marks
         self.failsPreparing = failsPreparing
         self.storageFull = storageFull
@@ -28,6 +31,10 @@ private actor FakeVoice: VoiceSynthesizer {
         prepared += 1
         if storageFull { throw VoiceLoadError.storageFull }
         if failsPreparing { throw CancellationError() }
+    }
+
+    func warmUp(with line: String) async throws {
+        warmed.append(line)
     }
 
     func speech(for text: String) async throws -> VoiceSpeech {
@@ -102,6 +109,91 @@ private func until(_ condition: () async -> Bool) async throws {
         #expect(finished == 0)
         output.onDone?()
         #expect(finished == 1)
+    }
+
+    @Test("Warming up loads the voice before anything is asked for, so a sentence then only waits for itself")
+    func warmingUpLoadsAhead() async throws {
+        let engine = engine()
+        engine.warmUp(speakingSoon: false)
+        try await until { await voice.prepared == 1 }
+        try await speakAndPlay(engine, "One.")
+        #expect(await voice.prepared == 1)
+    }
+
+    @Test("Warm-up lines run while the voice is idle, and not in front of a sentence that's on its way")
+    func warmUpLinesGiveWay() async throws {
+        let voice = FakeVoice(warmUpLines: ["Hello there.", "A longer line."])
+        let idle = engine(voice)
+        idle.warmUp(speakingSoon: false)
+        try await until { await voice.warmed == ["Hello there.", "A longer line."] }
+
+        let waiting = FakeVoice(warmUpLines: ["Hello there."])
+        let soon = NaturalSpeechEngine(synthesizer: waiting, output: output)
+        soon.warmUp(speakingSoon: true)
+        try await until { await waiting.prepared == 1 }
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(await waiting.warmed.isEmpty)
+    }
+
+    @Test("A long sentence nobody made ahead starts after its first clause, and finishes after the rest")
+    func aLongSentenceStartsWithItsFirstClause() async throws {
+        let engine = engine()
+        var finished = 0
+        engine.onFinish = { finished += 1 }
+        let opening = "Kant asks how synthetic knowledge is possible,"
+        let rest = "and he answers that the mind supplies the forms that experience must take."
+        engine.speak(opening + " " + rest, speed: 1)
+        try await until { await voice.isHeld(opening) }
+        #expect(await voice.requests == [opening])
+        await voice.release(opening)
+        try await until { output.played.count == 1 }
+        try await until { await voice.isHeld(rest) }
+        output.onDone?()
+        #expect(finished == 0)
+        await voice.release(rest)
+        try await until { output.played.count == 2 }
+        output.onDone?()
+        #expect(finished == 1)
+    }
+
+    @Test("Where a sentence is split, and where it isn't")
+    func firstClause() throws {
+        let split = try #require(NaturalSpeechEngine.firstClause(
+            of: "Kant asks how synthetic knowledge is possible, and he answers that the mind supplies its forms."
+        ))
+        #expect(split.opening == "Kant asks how synthetic knowledge is possible,")
+        #expect(split.rest == "and he answers that the mind supplies its forms.")
+        #expect(split.shift == "Kant asks how synthetic knowledge is possible, ".utf16.count)
+        // Short enough to make whole.
+        #expect(NaturalSpeechEngine.firstClause(of: "Kant asks how it is possible, and answers.") == nil)
+        // No clause early enough: a comma this late would leave the opening as slow as the whole.
+        let late = String(repeating: "word ", count: 30) + "then, the rest of it carries on for a while."
+        #expect(NaturalSpeechEngine.firstClause(of: late) == nil)
+        // A comma inside a number isn't a clause.
+        #expect(NaturalSpeechEngine.firstClause(
+            of: "The edition printed 1,500 copies in the first year and many more in every year that followed it."
+        ) == nil)
+    }
+
+    @Test("Word places in the second half count from the start of the whole sentence")
+    func theSecondHalfReportsWholeSentencePlaces() async throws {
+        let opening = "Kant asks how synthetic knowledge is possible,"
+        let rest = "and he answers that the mind supplies the forms that experience must take."
+        let voice = FakeVoice(marks: [rest: [VoiceMark(fraction: 0, offset: 0), VoiceMark(fraction: 0.5, offset: 4)]])
+        let engine = engine(voice)
+        var places: [Int] = []
+        engine.onWord = { places.append($0) }
+        engine.speak(opening + " " + rest, speed: 1)
+        try await until { await voice.isHeld(opening) }
+        await voice.release(opening)
+        try await until { output.played.count == 1 }
+        output.onDone?()
+        try await until { await voice.isHeld(rest) }
+        output.playedFraction = 0.6
+        await voice.release(rest)
+        try await until { output.played.count == 2 }
+        engine.reportPosition()
+        #expect(places.last == opening.utf16.count + 1 + 4)
     }
 
     @Test func theModelLoadsOnce() async throws {
