@@ -3,6 +3,7 @@ import TotalityAccount
 import TotalityCalendar
 import TotalityCore
 import TotalityMail
+import TotalityMessages
 import TotalityReader
 import TotalityUI
 import TotalityWeb
@@ -16,6 +17,7 @@ struct RootView: View {
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
     @State private var web: WebModel?
+    @State private var messagesTrial: MessagesTrialModel?
     // The real mailbox, for whoever owns this device's key. `mailWiring` holds that account's vault.
     @State private var mail: MailAccountModel
     @State private var mailWiring: MailWiring
@@ -46,6 +48,9 @@ struct RootView: View {
             return await backup.deviceOwner() == account
         }
         _mailWiring = State(initialValue: wiring)
+        if let pass = AccountSetup.matrixPass, let accountID = AccountSetup.accountID {
+            _messagesTrial = State(initialValue: MessagesTrialModel(account: accountID, pass: pass))
+        }
         _mail = State(initialValue: MailAccountModel { wiring.makeStore(account: $0) })
     }
 
@@ -82,6 +87,16 @@ struct RootView: View {
             case .mail:
                 MailHomeView(model: mail.current, onClose: { open = nil }, onOpenLink: openInWeb)
                     .id(ObjectIdentifier(mail.current))
+            case .messages:
+                if let messagesTrial {
+                    MessagesTrialView(model: messagesTrial) { open = nil }
+                } else {
+                    ModuleMessage(
+                        systemImage: "person.crop.circle.badge.exclamationmark",
+                        title: "Sign-in isn't set up",
+                        detail: "This build has no backend settings, so Messages can't connect."
+                    ) { open = nil }
+                }
             case .some(let module):
                 ModuleMessage(
                     systemImage: "hammer",

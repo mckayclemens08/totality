@@ -110,10 +110,18 @@ extension SupabaseAccountService: KeyBackupService {
         }
     }
 
+    /// A one-minute pass that signs this account in to the Matrix server. The password never leaves the
+    /// account server: this asks with the current sign-in token only.
+    public func matrixPass() async throws -> String {
+        try await mapErrors {
+            let pass: Pass = try await client.functions.invoke("matrix-login", options: FunctionInvokeOptions(method: .post))
+            return pass.token
+        }
+    }
+
     /// A Matrix session lasts for one job and is then thrown away, so no Matrix token is ever stored.
     private func withMatrix<Result: Sendable>(_ work: @Sendable (MatrixSession) async throws -> Result) async throws -> Result {
-        let pass: Pass = try await client.functions.invoke("matrix-login", options: FunctionInvokeOptions(method: .post))
-        let session = try await MatrixSession.signIn(with: pass.token)
+        let session = try await MatrixSession.signIn(with: try await matrixPass())
         do {
             let result = try await work(session)
             await session.signOut()
