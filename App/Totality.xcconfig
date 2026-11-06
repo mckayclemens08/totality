@@ -2,3 +2,7 @@
 #include? "Local.xcconfig"
 
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+
+// The voice pack step reads its cache in ~/Library/Caches, may download with gh, and copies into the
+// built app. Newer Xcode sandboxes build scripts by default, which blocks all three.
+ENABLE_USER_SCRIPT_SANDBOXING = NO
