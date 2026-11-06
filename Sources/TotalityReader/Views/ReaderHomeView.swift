@@ -34,6 +34,7 @@ public struct ReaderHomeView: View {
         VStack(spacing: 0) {
             NavigationStack(path: $path) {
                 ReaderFolderView(folder: nil, model: model, path: $path, onClose: onClose)
+                    .edgeSwipeBack(onClose)
                     .navigationDestination(for: ReaderRoute.self) { route in
                         switch route {
                         case .folder(let id):

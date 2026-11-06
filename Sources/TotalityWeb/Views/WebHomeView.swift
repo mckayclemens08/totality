@@ -37,6 +37,8 @@ public struct WebHomeView: View {
                 if isTyping, !suggestions.isEmpty { suggestionList }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // A page has the browser's own swipe back through its history, so this is only for the rest.
+            .edgeSwipeBack(page == nil ? onClose : nil)
             if finding { findBar }
             controls
         }
