@@ -140,10 +140,12 @@ private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
             date: now.addingTimeInterval(-3_600), body: .plain("Attached."), route: .outside, marks: MailMarks(isUnread: true)
         )
         let (model, _) = await opened([message(MailMarks(isUnread: true)), older])
-        #expect(model.glance == ModuleGlance(lines: ["2 unread", "Dana Whitfield"]))
+        #expect(model.glance == ModuleGlance(lines: ["2 unread", "Dana Whitfield", sam.displayName]))
         let newest = model.homeConversations(5)
         #expect(newest.map(\.subject) == ["Saturday", "Deck plans"])
         #expect(model.glanceConversation(at: 1) == newest.first?.id)
+        #expect(model.glanceConversation(at: 2) == newest.last?.id)
+        #expect(model.glanceConversation(at: 3) == nil)
         #expect(model.glanceConversation(at: 0) == nil)
     }
 
@@ -157,7 +159,7 @@ private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
 
     @Test func beforeMailOpensTheTileOnlyInvitesYouIn() async {
         let model = MailModel(store: FakeStore(Mailbox(), failure: .noKey))
-        #expect(model.glance == ModuleGlance(lines: ["Open to check your mail"], isQuiet: true))
+        #expect(model.glance == ModuleGlance(lines: ["Checking your mail"], isQuiet: true))
         await model.load()
         #expect(model.glance == ModuleGlance(lines: ["Open to check your mail"], isQuiet: true), "A key problem is shown in Mail, not on the home page")
         #expect(model.glanceConversation(at: 1) == nil)
