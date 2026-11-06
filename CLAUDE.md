@@ -13,8 +13,13 @@ the two-user test, and security review of anything touching auth, keys, or user 
 
 The owner overrode the Phase 1 gate on 2026-10-30 ("Override, start Phase 1"), so Phase 1 is being built
 before Phase 0 passes the two-user test. The override covers starting Phase 1 modules, nothing else:
-Phase 2 stays closed, the remaining Phase 0 work still has to land, and no module is done until it meets
-the definition of done below, which needs the app target, a real device, and a real backend.
+the remaining Phase 0 work still has to land, and no module is done until it meets the definition of
+done below, which needs the app target, a real device, and a real backend.
+
+The owner opened Phase 2 on 2026-11-05 ("Agree, open Phase 2"), starting with Messages, before the rest
+of Phase 1 (photos, money, player, AI basic) is built. That covers starting Phase 2 modules, nothing
+else: each still needs an agreed spec, and the definition of done still applies to every one.
+Phase 4 stays closed.
 
 ## Non-negotiables
 
