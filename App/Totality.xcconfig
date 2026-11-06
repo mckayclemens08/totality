@@ -1,4 +1,6 @@
-// Backend settings live in Local.xcconfig, which is not committed. Copy Local.xcconfig.example.
+// The backend settings are public and committed in Backend.xcconfig. Local.xcconfig, which git ignores,
+// can override them, for example to use a different Supabase project. Copy Local.xcconfig.example.
+#include "Backend.xcconfig"
 #include? "Local.xcconfig"
 
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
