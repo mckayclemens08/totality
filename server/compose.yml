@@ -27,7 +27,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
-    depends_on: [tuwunel, gateway, mail, profile]
+    depends_on: [tuwunel, gateway, mail, profile, blobs]
     volumes:
       - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
       - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
@@ -138,6 +138,36 @@ services:
     volumes:
       - ./profile/profile.mjs:/app/profile.mjs:ro
       - ./profiles:/var/lib/totality-profiles
+
+  # The sealed blob store, for Photos and the Reader (issue 54). It only ever gets bytes a device already
+  # sealed, keeps each account in its own folder, and logs nothing. BLOB_LARGE_ACCOUNTS in .env names the
+  # usernames that get 20 GB, and everyone else gets 2 GB.
+  blobs:
+    image: node:24-alpine@sha256:e643984449ad25c88c0ff45094c74916806c9ee9dd1bc26c3593686ba2b853e4
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    memswap_limit: 256m
+    ulimits:
+      core: 1
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?}
+      BLOB_LARGE_ACCOUNTS: ${BLOB_LARGE_ACCOUNTS:-}
+    command: node /app/blobs.mjs
+    logging:
+      driver: none
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/blobs/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./blobs/blobs.mjs:/app/blobs.mjs:ro
+      - ./blobs-data:/var/lib/totality-blobs
 
   # The spam check. Its network has no way out, so nothing about a message can leave this server, and
   # everything it writes stays in memory. That means no blocklists, so it judges by content alone.

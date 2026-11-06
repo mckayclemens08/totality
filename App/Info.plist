@@ -33,6 +33,8 @@
 	<string>$(TOTALITY_BACKEND_URL)</string>
 	<key>TotalityBackendKey</key>
 	<string>$(TOTALITY_BACKEND_KEY)</string>
+	<key>TotalitySealedStoreURL</key>
+	<string>$(TOTALITY_SEALED_STORE_URL)</string>
 	<key>UIUserInterfaceStyle</key>
 	<string>Light</string>
 	<key>UIBackgroundModes</key>

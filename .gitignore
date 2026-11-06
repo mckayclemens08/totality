@@ -44,5 +44,6 @@ App/Local.xcconfig
 server/data/
 server/mailboxes/
 server/profiles/
+server/blobs-data/
 server/cloudflared/
 .wrangler/

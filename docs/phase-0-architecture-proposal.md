@@ -580,6 +580,8 @@ Each is a real product. At ~15 h/week after a 10–14 week Phase 0, Phase 1 as s
 ### H. **Supabase free tier vs the Photos module.** 1 GB Storage total.
 A phone photo library is 20–200 GB. The Photos module cannot run on the Supabase free tier at any scale, which makes the Pi a *prerequisite* for Photos, not an eventual direction. Either Photos moves after the Pi exists, or Photos stores blobs on the Mac/Pi from the start with Supabase holding only metadata. Recommendation: the latter — design `content_objects.storage_key` as a pluggable backend URI from day one so the storage target is configuration.
 
+**Resolved for now.** On 2026-11-05 (issue 54) the owner chose to keep Photos, and Reader files too, on the Oracle server as sealed files until the home server exists. `storage_key` names a blob as `sealed:<id>`, and the server it lives on is the app's `TotalitySealedStoreURL` setting. The server has about 40 GB free, shared with mail and Matrix, and no backup yet. Module contracts, "Sealed blob store", has the rules.
+
 ### I. **§9 and §10 model and pricing claims are not verified here.**
 The brief states specific benchmark numbers, plan prices, and Fable inclusion rules as of October 2026. I have not independently verified any of them and they should be checked against Anthropic's current published pricing before the §10 subscription decision is acted on. Nothing in this architecture depends on them.
 

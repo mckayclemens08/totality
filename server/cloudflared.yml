@@ -25,4 +25,9 @@ ingress:
   - hostname: usetotality.com
     path: ^/(@[A-Za-z0-9_]{3,24}|profile/(publish|unpublish|mine))$
     service: http://profile:8080
+  # The sealed blob store: a signed-in device adding, reading, or removing its own sealed blobs, or
+  # asking how much room it has. Health stays private.
+  - hostname: usetotality.com
+    path: ^/blobs/(usage|list|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$
+    service: http://blobs:8080
   - service: http_status:404

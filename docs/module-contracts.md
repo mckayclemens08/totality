@@ -271,6 +271,35 @@ Agreed with the owner on 2026-10-30. The account page becomes the signed-in pers
 - Before showing other people's photos: treat `avatars` as hostile input. The bucket's JPEG rule checks the declared type, not the bytes, and a client can skip the device's rebuild.
 - Before adding profile visibility controls: a photo stays readable by anyone holding its URL, so a block or a move to private has to change the file's name.
 
+## Sealed blob store
+
+Agreed with the owner on 2026-11-05, in issue 54. Photos keep their bytes here, and Reader files move here
+from Supabase Storage, until the home server exists. It lives in `TotalityCore` and `server/blobs/`, so
+neither module imports the other. Like mail, the Oracle server has no backup yet, which the owner accepted.
+
+- **What it holds.** Bytes a device already sealed with the content key, under random IDs, one folder per
+  account. The account always comes from the sign-in, never from the request, so user 2 asking for user 1's
+  ID only ever reaches user 2's own folder. The server sees each blob's size and when it was stored, and
+  logs nothing. It can't check that what it's given is sealed: that's the device's job (non-negotiable 2).
+- **The target is configuration** (proposal §11-H). The app reads `TotalitySealedStoreURL`, set in
+  `App/Totality.xcconfig` and overridable in `Local.xcconfig`. A row names a blob as `sealed:<id>`
+  (`SealedBlobKey`), never by server, so moving to the home server is copying the folder and changing the
+  setting.
+- **Uploads come in pieces** of 8 MiB, under Cloudflare's 100 MB per request. `PATCH /blobs/<id>` with
+  `Upload-Offset` adds a piece exactly where the upload got to, or answers 409 with where it really is.
+  `HEAD` says `uploading` with the offset, or `done` with the size. `POST /blobs/<id>` with `{size, sha256}`
+  finishes it, only if both match, so nothing damaged on the way takes a real name. A finished blob never
+  changes. A piece cut off partway is taken back out. Unfinished uploads are cleared after 7 days.
+- **Reading** is `GET /blobs/<id>`, with one `Range` for video and resumed downloads. `DELETE` is harmless
+  twice. `GET /blobs/usage` and `GET /blobs/list` give `used`, `limit`, and IDs with sizes.
+- **Limits.** 20 GB for the usernames in `BLOB_LARGE_ACCOUNTS` on the server (the owner), 2 GB for anyone
+  else, counting unfinished uploads. Whatever the limits add up to, uploads stop while the disk has under
+  8 GB free, so mail and Matrix keep room: 507 either way. At most 8 pieces are written at once.
+- **Sign-ins** are checked with Supabase and remembered for a minute by a hash of the token, so a screen of
+  thumbnails doesn't ask once each. A signed-out token can still reach its own blobs for up to that minute.
+- **Two-user cases** are in `server/blobs/blobs.test.mjs`, through real HTTP the way anyone with a sign-in
+  could ask, and the client's half in `SealedStoreTests`.
+
 ## Mail
 
 Agreed with the owner on 2026-11-02, in issue 37, which holds the full spec. Mail stands apart from Supabase and Matrix: mailboxes and public keys live on the Oracle server, and arrival never calls an outside service, so nobody else learns when someone receives mail.

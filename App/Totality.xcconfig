@@ -1,3 +1,7 @@
+// Where sealed photos and Reader files are kept (proposal §11-H, issue 54). Local.xcconfig can point it
+// somewhere else, like the home server once it exists.
+TOTALITY_SEALED_STORE_URL = https:/$()/usetotality.com/blobs/
+
 // Backend settings live in Local.xcconfig, which is not committed. Copy Local.xcconfig.example.
 #include? "Local.xcconfig"
 
