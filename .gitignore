@@ -43,5 +43,6 @@ App/Local.xcconfig
 # Server state and secrets stay on the server.
 server/data/
 server/mailboxes/
+server/profiles/
 server/cloudflared/
 .wrangler/

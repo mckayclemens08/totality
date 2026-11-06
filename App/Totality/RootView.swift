@@ -26,6 +26,8 @@ struct RootView: View {
     @State private var account: AccountModel?
     @State private var showingAccount = false
     @State private var showingSearch = false
+    /// Someone's profile, opened from their link.
+    @State private var linkedProfile: LinkedProfile?
     @AppStorage(HomeStyle.defaultKey) private var defaultHomeStyle = HomeStyle.tiles
     // What the home page's button chose, until the app restarts or the default changes.
     @State private var chosenHomeStyle: HomeStyle?
@@ -130,6 +132,20 @@ struct RootView: View {
                     title: "Sign-in isn't set up",
                     detail: "This build has no backend settings. Your notes aren't affected."
                 ) { showingAccount = false }
+            }
+        }
+        .onOpenURL { url in
+            if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
+        }
+        .sheet(item: $linkedProfile) { linked in
+            if let account {
+                OtherProfileView(model: account, username: linked.username) { linkedProfile = nil }
+            } else {
+                ModuleMessage(
+                    systemImage: "person.crop.circle.badge.exclamationmark",
+                    title: "Sign-in isn't set up",
+                    detail: "This build has no backend settings, so profiles can't open."
+                ) { linkedProfile = nil }
             }
         }
         .sheet(isPresented: $showingSearch) {
@@ -394,4 +410,9 @@ private struct ModuleMessage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.bg.color)
     }
+}
+
+private struct LinkedProfile: Identifiable {
+    let username: String
+    var id: String { username }
 }

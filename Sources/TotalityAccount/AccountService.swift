@@ -41,6 +41,12 @@ public protocol AccountService: Sendable {
     func saveProfile(displayName: String?, bio: String?) async throws
     /// Replaces the public photo, or removes it when given nil. Returns where the new one is.
     func updatePhoto(_ jpeg: Data?) async throws -> URL?
+    /// Whether this account's public web page is up.
+    func webPageIsPublished() async throws -> Bool
+    /// Puts the page up from the profile as the server reads it, or takes it down.
+    func setWebPage(published: Bool) async throws
+    /// Someone else's profile, if they have one this account is allowed to see.
+    func lookUpProfile(_ username: Username) async throws -> Profile?
 }
 
 public enum SignOutResult: Equatable, Sendable {
@@ -174,6 +180,46 @@ public struct SupabaseAccountService: AccountService {
             if jpeg != nil, let previous { _ = try? await photos.remove(paths: [previous]) }
             return try key.map(photoURL)
         }
+    }
+
+    public func webPageIsPublished() async throws -> Bool {
+        try await mapErrors { try await askProfileServer("mine", method: "GET") }
+    }
+
+    public func setWebPage(published: Bool) async throws {
+        try await mapErrors {
+            let now = try await askProfileServer(published ? "publish" : "unpublish", method: "POST")
+            guard now == published else { throw AccountError.failed }
+        }
+    }
+
+    public func lookUpProfile(_ username: Username) async throws -> Profile? {
+        try await mapErrors {
+            let rows: [ProfileRow] = try await client.from("profiles")
+                .select("handle, display_name, bio, avatar_key")
+                .eq("handle", value: username.value)
+                .execute()
+                .value
+            return try rows.first.map(profile(from:))
+        }
+    }
+
+    /// The profile server answers with whether the page is up. It takes the username from the sign-in.
+    private func askProfileServer(_ action: String, method: String) async throws -> Bool {
+        var request = URLRequest(url: Self.profileServer.appending(path: "profile/\(action)"))
+        request.httpMethod = method
+        request.timeoutInterval = 20
+        request.setValue("Bearer \(try await accessToken())", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let status = (response as? HTTPURLResponse)?.statusCode else { throw AccountError.failed }
+        guard status == 200 else { throw status == 429 ? AccountError.rateLimited : AccountError.failed }
+        return try JSONDecoder().decode(PageState.self, from: data).published
+    }
+
+    private static let profileServer = URL(string: "https://\(MailDomain.name)")!
+
+    private struct PageState: Decodable {
+        let published: Bool
     }
 
     private var photos: StorageFileApi { client.storage.from("avatars") }

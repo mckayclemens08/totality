@@ -10,6 +10,7 @@ public struct AccountView: View {
     @State private var confirmation = ""
     @State private var creating = false
     @State private var editing = false
+    @State private var sharing = false
     @State private var showingSettings = false
 
     private static let noticeID = "notice"
@@ -58,6 +59,9 @@ public struct AccountView: View {
             .navigationDestination(isPresented: $editing) {
                 EditProfileView(model: model) { editing = false }
             }
+            .navigationDestination(isPresented: $sharing) {
+                ShareProfileView(model: model) { sharing = false }
+            }
             .navigationDestination(isPresented: $showingSettings) {
                 AccountSettingsView(model: model)
             }
@@ -68,6 +72,7 @@ public struct AccountView: View {
             password = ""
             confirmation = ""
             editing = false
+            sharing = false
             showingSettings = false
         }
     }
@@ -114,7 +119,7 @@ public struct AccountView: View {
             HomeStyleSetting()
                 .padding(.top, Space.s4)
         case .signedIn:
-            ProfileSummary(model: model) { editing = true }
+            ProfileSummary(model: model, onEdit: { editing = true }, onShare: { sharing = true })
         }
     }
 

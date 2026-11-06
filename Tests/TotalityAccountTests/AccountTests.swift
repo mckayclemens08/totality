@@ -70,6 +70,26 @@ actor FakeAccountService: AccountService {
         photoError = photo
     }
 
+    var pageError: AccountError?
+    private(set) var pagePublished = false
+    private(set) var pageChanges: [Bool] = []
+    var others: [String: Profile] = [:]
+    func failPage(_ error: AccountError?) { pageError = error }
+    func addOther(_ profile: Profile) { others[profile.username] = profile }
+    func webPageIsPublished() async throws -> Bool {
+        if let pageError { throw pageError }
+        return pagePublished
+    }
+    func setWebPage(published: Bool) async throws {
+        if let pageError { throw pageError }
+        pageChanges.append(published)
+        pagePublished = published
+    }
+    func lookUpProfile(_ username: Username) async throws -> Profile? {
+        if let profileError { throw profileError }
+        return others[username.value]
+    }
+
     func endSession() { username = nil }
     func holdProfile() { holding = true }
     func waitForHeldLoad() async {

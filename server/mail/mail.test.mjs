@@ -1467,8 +1467,9 @@ describe('the server setup', () => {
   // Docker's limit of 0 doesn't stop a crash report on this host, and a report could hold readable mail.
   test('crashes leave nothing behind', async () => {
     const compose = (await readFile(new URL('../compose.yml', import.meta.url))).toString()
-    assert.equal(compose.match(/^ +core: 1$/gm).length, 2)
-    assert.doesNotMatch(compose, /^ +core: 0$/m)
+    // Every service that sets a limit sets it to 1, and mail and the spam check both do.
+    assert.ok(compose.match(/^ +core: 1$/gm).length >= 2)
+    assert.equal(compose.match(/^ +core: /gm).length, compose.match(/^ +core: 1$/gm).length)
   })
 
   test('the tunnel carries exactly the public mail paths', async () => {
