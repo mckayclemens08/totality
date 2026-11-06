@@ -1,3 +1,4 @@
+// Optional. Only needed to point a build at a different backend from the one in Backend.xcconfig.
 // Copy to Local.xcconfig. The key is Supabase's publishable key, never the secret key.
 // The $() stops xcconfig reading the slashes as a comment.
 TOTALITY_BACKEND_URL = https:/$()/your-project.supabase.co
