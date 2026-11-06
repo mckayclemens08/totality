@@ -25,6 +25,11 @@ public final class AccountModel {
     /// True when the profile couldn't be read, so the screen can offer another try.
     public private(set) var profileFailed = false
     public var notice: String?
+    /// Whether the public web page is up. Nil until the server has said.
+    public private(set) var webPage: Bool?
+    public private(set) var isChangingWebPage = false
+    /// Why the last change to the web page didn't happen, if it didn't.
+    public private(set) var webPageProblem: String?
 
     /// Nil when this build has nothing to back up with.
     public let backup: BackupModel?
@@ -144,6 +149,7 @@ public final class AccountModel {
             profile?.bio = about
             saved = true
         }
+        if saved { await refreshWebPage() }
         return saved
     }
 
@@ -153,15 +159,57 @@ public final class AccountModel {
             return
         }
         await run { profile?.avatarURL = try await service.updatePhoto(jpeg) }
+        await refreshWebPage()
     }
 
     public func removePhoto() async {
         await run { profile?.avatarURL = try await service.updatePhoto(nil) }
+        await refreshWebPage()
+    }
+
+    /// Asks the server whether the page is up. Not knowing changes nothing.
+    public func loadWebPage() async {
+        let requestedFor = phase
+        guard let published = try? await service.webPageIsPublished(), phase == requestedFor else { return }
+        webPage = published
+    }
+
+    /// Puts the page up or takes it down. Returns whether that happened.
+    @discardableResult
+    public func setWebPage(published: Bool) async -> Bool {
+        let requestedFor = phase
+        isChangingWebPage = true
+        defer { isChangingWebPage = false }
+        do {
+            try await service.setWebPage(published: published)
+            guard phase == requestedFor else { return false }
+            webPage = published
+            webPageProblem = nil
+            return true
+        } catch {
+            guard phase == requestedFor else { return false }
+            webPageProblem = (error as? AccountError ?? .failed).message
+            return false
+        }
+    }
+
+    /// Someone else's public profile, or nil if there isn't one this account can see.
+    public func lookUp(_ username: String) async throws -> Profile? {
+        guard let name = Username(username) else { return nil }
+        return try await service.lookUpProfile(name)
+    }
+
+    /// A page that's up shows the profile as it was when it was published, so a change goes up too.
+    private func refreshWebPage() async {
+        guard webPage == true else { return }
+        try? await service.setWebPage(published: true)
     }
 
     private func forgetProfile() {
         profile = nil
         profileFailed = false
+        webPage = nil
+        webPageProblem = nil
     }
 
     private static func cleaned(_ text: String) -> String? {
@@ -173,6 +221,7 @@ public final class AccountModel {
         await backup?.accountSignedIn()
         await registerDevice()
         await loadProfile()
+        await loadWebPage()
     }
 
     private func registerDevice() async {

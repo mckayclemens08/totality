@@ -20,4 +20,9 @@ ingress:
   - hostname: usetotality.com
     path: ^/mail/(arrive|key|list|delete|deliver|keep|send|recipient/[a-z0-9_]{3,24}|message/[0-9a-f-]{36})$
     service: http://mail:8080
+  # Public profile pages, which exist only once their owner shares them, and a signed-in device
+  # publishing, removing, or checking its own. Health stays private.
+  - hostname: usetotality.com
+    path: ^/(@[A-Za-z0-9_]{3,24}|profile/(publish|unpublish|mine))$
+    service: http://profile:8080
   - service: http_status:404

@@ -7,6 +7,7 @@ import TotalityUI
 struct ProfileSummary: View {
     let model: AccountModel
     let onEdit: () -> Void
+    let onShare: () -> Void
 
     var body: some View {
         if let profile = model.profile {
@@ -15,7 +16,10 @@ struct ProfileSummary: View {
             AddressLine("Your email address", address: MailDomain.address(for: profile.username))
                 .padding(Space.s4)
                 .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
-            AccountButton(title: "Edit profile", isWorking: false, action: onEdit)
+            HStack(spacing: Space.s3) {
+                AccountButton(title: "Edit profile", isWorking: false, action: onEdit)
+                AccountButton(title: "Share profile", isWorking: false, action: onShare)
+            }
         } else if model.profileFailed {
             AccountDetail(text: "Your profile didn't load.")
             Button("Try again") { Task { await model.loadProfile() } }
