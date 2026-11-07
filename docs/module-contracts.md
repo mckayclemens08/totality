@@ -282,7 +282,7 @@ neither module imports the other. Like mail, the Oracle server has no backup yet
   ID only ever reaches user 2's own folder. The server sees each blob's size and when it was stored, and
   logs nothing. It can't check that what it's given is sealed: that's the device's job (non-negotiable 2).
 - **The target is configuration** (proposal §11-H). The app reads `TotalitySealedStoreURL`, set in
-  `App/Totality.xcconfig` and overridable in `Local.xcconfig`. A row names a blob as `sealed:<id>`
+  `App/Backend.xcconfig` and overridable in `Local.xcconfig`. A row names a blob as `sealed:<id>`
   (`SealedBlobKey`), never by server, so moving to the home server is copying the folder and changing the
   setting.
 - **Uploads come in pieces** of 8 MiB, under Cloudflare's 100 MB per request. `PATCH /blobs/<id>` with
