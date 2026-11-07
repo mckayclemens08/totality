@@ -70,7 +70,8 @@ struct ModuleTests {
     @Test func kindsMatchTheDatabaseEnum() {
         #expect(ContentKind.aiMemory.rawValue == "ai_memory")
         #expect(ContentKind.mailKeys.rawValue == "mail_keys")
-        #expect(ContentKind.allCases.count == 15)
+        #expect(ContentKind.mailOutside.rawValue == "mail_outside")
+        #expect(ContentKind.allCases.count == 16)
     }
 
     @Test func contentRefSurvivesEncoding() throws {
