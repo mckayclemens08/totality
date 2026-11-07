@@ -27,21 +27,34 @@ public struct SealedStoreTarget: Sendable, Equatable {
     }
 }
 
-/// How a row names a blob in the sealed store, as against a Supabase Storage path: `sealed:<id>`. The
-/// name never says which server, so moving the store changes no rows.
+/// How a row names a blob in the sealed store, as against a Supabase Storage path:
+/// `<owner>/sealed/<blob>`. It starts with the owner, as the database requires of every key, and never
+/// says which server, so moving the store changes no rows.
 public enum SealedBlobKey {
-    public static let prefix = "sealed:"
-
-    public static func key(for id: UUID) -> String {
-        prefix + id.uuidString.lowercased()
+    public static func key(owner: String, blob: UUID) -> String {
+        "\(owner.lowercased())/sealed/\(blob.uuidString.lowercased())"
     }
 
-    /// The blob's ID, or nil when the key is anything else, like a Supabase path.
-    public static func id(in key: String) -> UUID? {
+    /// The blob's ID, or nil when the key is anything else, like a Supabase path or another owner's key.
+    public static func blob(in key: String, owner: String) -> UUID? {
+        let prefix = "\(owner.lowercased())/sealed/"
         guard key.hasPrefix(prefix) else { return nil }
         let rest = key.dropFirst(prefix.count)
         guard rest.count == 36, rest == rest.lowercased() else { return nil }
         return UUID(uuidString: String(rest))
+    }
+
+    /// Whether a key names the sealed store at all, whoever it belongs to.
+    public static func isSealed(_ key: String) -> Bool {
+        let parts = key.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 3 && parts[1] == "sealed"
+    }
+
+    /// The blob for one version of an item's body. The same body always gets the same blob, so a retry
+    /// or another device landing the same bytes never stores them twice. It's made from hashes of
+    /// ciphertext, so it says nothing.
+    public static func blob(owner: String, item: UUID, bodyHash: String) -> UUID {
+        UUID(derivedFrom: "totality/sealed-body/v1/\(owner.lowercased())/\(item.uuidString.lowercased())/\(bodyHash)")
     }
 }
 

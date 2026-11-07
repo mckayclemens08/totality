@@ -215,7 +215,7 @@ Spec: issue #17. A device's content key is locked by a recovery key in Matrix's 
 
 ## Encrypted sync
 
-Notes, files, and events move between one person's devices as sealed bytes. A row in `content_objects` is one item, with its sealed details in `meta_cipher`. A body goes to the `content` Storage bucket at `<owner>/<id>/<bodyHash>.body`. A deleted item keeps a row with `deleted_at` and nothing else. The server sees each item's ID, kind, size, and times, and never what's in it.
+Notes, files, and events move between one person's devices as sealed bytes. A row in `content_objects` is one item, with its sealed details in `meta_cipher`. A body goes to the sealed blob store on the Oracle server, named `<owner>/sealed/<blob>`, where the blob ID comes from the owner, the item, and the body's hash, so one body is never stored twice (issue 54). Bodies from before that are still in the `content` Storage bucket at `<owner>/<id>/<bodyHash>.body`, and are read from there until they move. A deleted item keeps a row with `deleted_at` and nothing else. The server sees each item's ID, kind, size, and times, and never what's in it.
 
 - `SyncEngine` compares three things for each item: this device, the server, and the hash they last agreed on, saved after every item. That's how it tells "I changed this" from "they changed this".
 - Every write names the version it expects, on both sides. The server takes `content_hash` as the check. A vault's `store` and `removeObject` take `ifLocalHash`, so a save that lands during a sync is never overwritten. The next sync sorts it out.
@@ -282,7 +282,7 @@ neither module imports the other. Like mail, the Oracle server has no backup yet
   ID only ever reaches user 2's own folder. The server sees each blob's size and when it was stored, and
   logs nothing. It can't check that what it's given is sealed: that's the device's job (non-negotiable 2).
 - **The target is configuration** (proposal §11-H). The app reads `TotalitySealedStoreURL`, set in
-  `App/Backend.xcconfig` and overridable in `Local.xcconfig`. A row names a blob as `sealed:<id>`
+  `App/Backend.xcconfig` and overridable in `Local.xcconfig`. A row names a blob as `<owner>/sealed/<id>`
   (`SealedBlobKey`), never by server, so moving to the home server is copying the folder and changing the
   setting.
 - **Uploads come in pieces** of 8 MiB, under Cloudflare's 100 MB per request. `PATCH /blobs/<id>` with
@@ -297,6 +297,11 @@ neither module imports the other. Like mail, the Oracle server has no backup yet
   8 GB free, so mail and Matrix keep room: 507 either way. At most 8 pieces are written at once.
 - **Sign-ins** are checked with Supabase and remembered for a minute by a hash of the token, so a screen of
   thumbnails doesn't ask once each. A signed-out token can still reach its own blobs for up to that minute.
+- **Moving Reader files.** After each sync that finishes, `BodyMove` moves up to 25 bodies from the
+  bucket, in an order that loses nothing wherever it stops: read the bucket's copy and check it against
+  the row's hash; store it; read it back and compare; point the row at it, only if the row hasn't changed;
+  and only then remove the bucket's copy. If the Oracle server can't be reached, the row still names the
+  bucket's copy, and the next sync tries again. A row that changed meanwhile keeps its bucket copy.
 - **Two-user cases** are in `server/blobs/blobs.test.mjs`, through real HTTP the way anyone with a sign-in
   could ask, and the client's half in `SealedStoreTests`.
 

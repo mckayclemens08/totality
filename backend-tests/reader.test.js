@@ -150,3 +150,40 @@ describe('encrypted sync two-user test', () => {
       `insert into public.content_objects (owner_id, kind, key_ref) values ($1, 'note', 'plain:')`, [user1.id])), /plain_is_public/)
   })
 })
+
+// Issue 54, step 2: Reader bodies move from Supabase Storage to the sealed store on the Oracle server,
+// and the row names them as <owner>/sealed/<blob>. These pin that the database still keeps that name to
+// the row's owner, so a row can't be pointed at someone else's sealed blob.
+describe('Reader bodies in the sealed store (issue 54)', () => {
+  const sealedKey = (user) => `${user.id}/sealed/${randomUUID()}`
+
+  test('an owner can point their own row at their own sealed blob', async () => {
+    const [user1] = await trio()
+    const id = await insertItem(user1, 'file')
+    const key = sealedKey(user1)
+    await as(db, user1, (q) => q('update public.content_objects set storage_key = $1 where id = $2', [key, id]))
+    const [row] = await as(db, user1, (q) => q('select storage_key from public.content_objects where id = $1', [id]))
+    assert.equal(row.storage_key, key)
+  })
+
+  test("nobody can point a row at another account's sealed blob", async () => {
+    const [user1, user2] = await trio()
+    const id = await insertItem(user1, 'file')
+    await assert.rejects(as(db, user1, (q) => q(
+      'update public.content_objects set storage_key = $1 where id = $2', [sealedKey(user2), id])), /storage_key_in_owner_folder/)
+    const theirs = await insertItem(user2, 'file')
+    await assert.rejects(as(db, user2, (q) => q(
+      'update public.content_objects set storage_key = $1 where id = $2', [sealedKey(user1), theirs])), /storage_key_in_owner_folder/)
+  })
+
+  test("user 2 can't move user 1's body or see where it is", async () => {
+    const [user1, user2] = await trio()
+    const id = await insertItem(user1, 'file')
+    const key = sealedKey(user1)
+    await as(db, user1, (q) => q('update public.content_objects set storage_key = $1 where id = $2', [key, id]))
+    await as(db, user2, (q) => q('update public.content_objects set storage_key = $1 where id = $2', [`${user1.id}/${id}`, id]))
+    assert.deepEqual(await as(db, user2, (q) => q('select storage_key from public.content_objects where id = $1', [id])), [])
+    const [row] = await as(db, user1, (q) => q('select storage_key from public.content_objects where id = $1', [id]))
+    assert.equal(row.storage_key, key)
+  })
+})
