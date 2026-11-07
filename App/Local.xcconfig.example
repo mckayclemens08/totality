@@ -3,3 +3,5 @@
 // The $() stops xcconfig reading the slashes as a comment.
 TOTALITY_BACKEND_URL = https:/$()/your-project.supabase.co
 TOTALITY_BACKEND_KEY = your-publishable-key
+// Optional: where sealed blobs are kept. Leave it out to use the Oracle server.
+// TOTALITY_SEALED_STORE_URL = https:/$()/usetotality.com/blobs/
