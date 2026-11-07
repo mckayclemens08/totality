@@ -109,10 +109,17 @@ public final class MessagesTrialModel {
     public func send(_ text: String, to username: String) async {
         #if canImport(MatrixRustSDK)
         guard let engine else { return }
+        // Someone may type the @ anyway, or paste a name with spaces around it.
+        let username = String(username.trimmingCharacters(in: .whitespacesAndNewlines).drop { $0 == "@" }).lowercased()
+        // The same rule usernames are claimed under: 3 to 24 letters, digits, or underscores.
+        guard username.wholeMatch(of: /[a-z0-9_]{3,24}/) != nil else {
+            status = "That isn't a Totality username."
+            return
+        }
         status = "Sending…"
         do {
-            try await engine.send(text, to: username.lowercased())
-            status = "Sent to @\(username.lowercased())."
+            try await engine.send(text, to: username)
+            status = "Sent to @\(username)."
         } catch {
             status = "Couldn't send: \(MatrixEngine.describe(error))"
         }

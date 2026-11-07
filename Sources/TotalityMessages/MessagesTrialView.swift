@@ -63,14 +63,20 @@ public struct MessagesTrialView: View {
     private var sendForm: some View {
         let theme = Theme.current
         return VStack(alignment: .leading, spacing: Space.s3) {
-            TextField("Their username", text: $username)
-                .textFieldStyle(.plain)
-                .autocorrectionDisabled()
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                #endif
-                .padding(Space.s3)
-                .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
+            // The @ is already there, so people type only the name.
+            HStack(spacing: Space.s1) {
+                Text("@").foregroundStyle(theme.textSecondary.color).accessibilityHidden(true)
+                TextField("username", text: $username)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .accessibilityLabel("Their username")
+            }
+            .font(Typeface.body)
+            .padding(Space.s3)
+            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
             TextField("Message", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .padding(Space.s3)
