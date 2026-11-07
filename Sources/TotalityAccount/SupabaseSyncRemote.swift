@@ -261,10 +261,12 @@ struct SupabaseMovableRows: MovableRows {
     let client: SupabaseClient
     let owner: String
 
-    func bucketRows(limit: Int) async throws -> [BucketRow] {
-        let rows: [Row] = try await client.from("content_objects")
+    func bucketRows(after: UUID?, limit: Int) async throws -> [BucketRow] {
+        var query = client.from("content_objects")
             .select("id, kind, storage_key, content_hash, meta_cipher")
             .eq("owner_id", value: owner)
+        if let after { query = query.gt("id", value: after.uuidString.lowercased()) }
+        let rows: [Row] = try await query
             .is("deleted_at", value: nil)
             .not("storage_key", operator: .is, value: "null")
             .not("storage_key", operator: .like, value: "\(owner)/sealed/%")

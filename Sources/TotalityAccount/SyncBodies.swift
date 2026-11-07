@@ -76,8 +76,9 @@ public struct BucketRow: Sendable, Equatable {
 
 /// The rows the move reads and changes, so tests can stand in for the database.
 public protocol MovableRows: Sendable {
-    /// Some of this account's live rows whose body is still in the bucket, at most `limit`.
-    func bucketRows(limit: Int) async throws -> [BucketRow]
+    /// This account's live rows whose body is still in the bucket, in ID order after `after`, at most
+    /// `limit`.
+    func bucketRows(after: UUID?, limit: Int) async throws -> [BucketRow]
     /// Points the row at `newKey`, only if it still has `oldKey` and `hash`. Returns whether it did.
     func repoint(_ id: UUID, from oldKey: String, hash: String, to newKey: String) async throws -> Bool
     func currentKey(of id: UUID) async throws -> String?
@@ -108,6 +109,8 @@ public struct BodyMoveReport: Sendable, Equatable {
 public struct BodyMove: Sendable {
     /// Items moved per run, so a sync isn't held up for long.
     public static let batch = 25
+    /// Rows looked at per run, moved or not, so rows that can't move never hold up the rest for good.
+    public static let looked = 200
 
     let rows: any MovableRows
     let bodies: SyncBodies
@@ -119,35 +122,52 @@ public struct BodyMove: Sendable {
         self.owner = owner
     }
 
-    public func run(limit: Int = BodyMove.batch) async throws -> BodyMoveReport {
+    public func run(limit: Int = BodyMove.batch, looked: Int = BodyMove.looked) async throws -> BodyMoveReport {
         var report = BodyMoveReport()
-        for row in try await rows.bucketRows(limit: limit) {
-            try Task.checkCancellation()
-            // Only this account's own bucket files, which is all the database lets a row name.
-            guard row.key.hasPrefix("\(owner)/"), !SealedBlobKey.isSealed(row.key) else {
-                report.left += 1
-                continue
+        var after: UUID?
+        var seen = 0
+        while report.moved < limit, seen < looked {
+            let page = try await rows.bucketRows(after: after, limit: min(limit, looked - seen))
+            guard let last = page.last else { break }
+            after = last.id
+            seen += page.count
+            for row in page where report.moved < limit {
+                try await move(row, into: &report)
             }
-            let body = try await bodies.bucket.download(row.key)
-            let object = SealedObject(id: row.id, kind: row.kind, meta: row.meta, body: body)
-            guard object.hash == row.hash, let bodyHash = object.bodyHash else {
-                report.left += 1
-                continue
-            }
-            let key = bodies.key(owner: owner, item: row.id, bodyHash: bodyHash)
-            try await bodies.write(body, at: key, owner: owner)
-            guard try await bodies.read(key, owner: owner) == body else { throw SealedStoreError.mismatch }
-            guard try await rows.repoint(row.id, from: row.key, hash: row.hash, to: key) else {
-                // Another device changed the item meanwhile. The blob stays only if the row now uses it.
-                if try await rows.currentKey(of: row.id) != key { try? await bodies.remove(key, owner: owner) }
-                report.left += 1
-                continue
-            }
-            // The row no longer names it, so a failure here only leaves a stray file in the bucket.
-            try? await bodies.bucket.remove(row.key)
-            report.moved += 1
         }
         return report
+    }
+
+    private func move(_ row: BucketRow, into report: inout BodyMoveReport) async throws {
+        try Task.checkCancellation()
+        // Only this account's own bucket files, which is all the database lets a row name.
+        guard row.key.hasPrefix("\(owner)/"), !SealedBlobKey.isSealed(row.key) else {
+            report.left += 1
+            return
+        }
+        // A file missing from the bucket, or one that won't download, is left for sync to deal with,
+        // so one bad row never stops the rest.
+        guard let body = try? await bodies.bucket.download(row.key) else {
+            report.left += 1
+            return
+        }
+        let object = SealedObject(id: row.id, kind: row.kind, meta: row.meta, body: body)
+        guard object.hash == row.hash, let bodyHash = object.bodyHash else {
+            report.left += 1
+            return
+        }
+        let key = bodies.key(owner: owner, item: row.id, bodyHash: bodyHash)
+        try await bodies.write(body, at: key, owner: owner)
+        guard try await bodies.read(key, owner: owner) == body else { throw SealedStoreError.mismatch }
+        guard try await rows.repoint(row.id, from: row.key, hash: row.hash, to: key) else {
+            // Another device changed the item meanwhile. The blob stays only if the row now uses it.
+            if try await rows.currentKey(of: row.id) != key { try? await bodies.remove(key, owner: owner) }
+            report.left += 1
+            return
+        }
+        // The row no longer names it, so a failure here only leaves a stray file in the bucket.
+        try? await bodies.bucket.remove(row.key)
+        report.moved += 1
     }
 }
 

@@ -66,8 +66,11 @@ private actor FakeRows: MovableRows {
     func setRepointFails() { repointFails = true }
     func changeFirst(_ change: @escaping @Sendable (inout Row) -> Void) { changeBeforeRepoint = change }
 
-    func bucketRows(limit: Int) async throws -> [BucketRow] {
-        rows.filter { !SealedBlobKey.isSealed($0.value.key) }.prefix(limit)
+    func bucketRows(after: UUID?, limit: Int) async throws -> [BucketRow] {
+        let floor = after?.uuidString.lowercased() ?? ""
+        return rows.filter { !SealedBlobKey.isSealed($0.value.key) && $0.key.uuidString.lowercased() > floor }
+            .sorted { $0.key.uuidString.lowercased() < $1.key.uuidString.lowercased() }
+            .prefix(limit)
             .map { BucketRow(id: $0.key, kind: $0.value.kind, key: $0.value.key, hash: $0.value.hash, meta: $0.value.meta) }
     }
 
@@ -105,6 +108,7 @@ private func oldFile(in bucket: FakeBucket, rows: FakeRows) async -> (id: UUID, 
 private extension FakeBucket {
     func addFile(_ path: String, _ data: Data) { files[path] = data }
     func damage(_ path: String) { files[path]?[0] ^= 0xff }
+    func removeFile(_ path: String) { files[path] = nil }
 }
 
 @Suite struct BodyMoveTests {
@@ -198,6 +202,17 @@ private extension FakeBucket {
         #expect(try await move.run() == BodyMoveReport(moved: 0, left: 1))
         #expect(await sealed.blobs.isEmpty)
         #expect(await bucket.files[path] != nil)
+    }
+
+    @Test func rowsThatCantMoveNeverHoldUpTheRest() async throws {
+        let (bucket, _, rows, move) = setUp()
+        for _ in 0..<6 {
+            let file = await oldFile(in: bucket, rows: rows)
+            await bucket.removeFile(file.path)
+        }
+        let good = await oldFile(in: bucket, rows: rows)
+        #expect(try await move.run(limit: 2) == BodyMoveReport(moved: 1, left: 6))
+        #expect(await bucket.files[good.path] == nil)
     }
 
     @Test func movesAFewAtATime() async throws {
