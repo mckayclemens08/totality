@@ -150,7 +150,7 @@ Mac app. Groups are Discord-shaped; DMs are Snapchat-shaped minus the clutter. S
 with a Lemon8-style discovery homepage. Docs are a content type inside the Reader — there is no Docs
 module. Listen is a button inside the Reader — there is no Speechify module. Shopping is
 Amazon-*like*, never an Amazon wrapper. Home is a two-column grid of tiles the person arranges, each showing live content (owner, 2026-10-31). The flower stays as the alternative, one button away, and a setting picks which opens first; tiles are the default. Holding a tile enters edit mode. Web search is a module; search inside Totality is a magnifying glass on the home page, not a module.
-Mail is Totality's own email, never a client for Gmail or any outside account: every account gets `username@usetotality.com`, and sign-up still asks for no email (owner, 2026-11-02, issue 37).
+Mail is Totality's own email: every account gets `username@usetotality.com`, and sign-up still asks for no email (owner, 2026-11-02, issue 37). Outside accounts (iCloud and Gmail first, Outlook later) can sit beside that address. The device connects to them directly, Totality's server never sees their mail or sign-in, and they never replace the Totality address (owner, 2026-11-05, issue 43).
 Federation and E2E are principles, not features. Pi self-hosting is the hosting direction. The Matrix
 server name is `usetotality.com`, and it cannot change.
 
