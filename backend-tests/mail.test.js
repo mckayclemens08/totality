@@ -24,7 +24,7 @@ const visible = async (user, id) =>
   (await as(db, user, (q) => q('select id from public.content_objects where id = $1', [id]))).length === 1
 
 describe('Mail two-user test', () => {
-  for (const kind of ['mail_marks', 'mail_settings', 'mail_keys', 'mail_draft']) {
+  for (const kind of ['mail_marks', 'mail_settings', 'mail_keys', 'mail_draft', 'mail_outside']) {
     test(`${kind} is visible to its owner alone`, async () => {
       const [user1, user2] = await pair()
       const id = await insert(user1, kind)
