@@ -10,6 +10,7 @@ struct MailFoldersView: View {
     @State private var typed = ""
     @State private var removing: MailOwnFolder?
     @State private var editingSignature = false
+    @State private var editingOutside = false
 
     private struct FolderName: Identifiable {
         let id = UUID()
@@ -69,6 +70,19 @@ struct MailFoldersView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                if model.outside != nil {
+                    Button {
+                        editingOutside = true
+                    } label: {
+                        Label("Outside Accounts", systemImage: "person.crop.circle.badge.plus")
+                            .font(Typeface.callout)
+                            .foregroundStyle(theme.textPrimary.color)
+                            .padding(Space.s3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(Space.s3)
         }
@@ -78,6 +92,14 @@ struct MailFoldersView: View {
                 #if os(macOS)
                 .frame(minWidth: Space.s8 * 6, minHeight: Space.s8 * 5)
                 #endif
+        }
+        .sheet(isPresented: $editingOutside) {
+            if let outside = model.outside {
+                OutsideAccountsView(model: outside) { editingOutside = false }
+                    #if os(macOS)
+                    .frame(minWidth: Space.s8 * 7, minHeight: Space.s8 * 7)
+                    #endif
+            }
         }
         .alert(naming?.folder == nil ? "New Folder" : "Rename Folder", isPresented: isNaming) {
             TextField("Folder name", text: $typed)

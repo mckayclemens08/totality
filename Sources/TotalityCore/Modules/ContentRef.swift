@@ -16,6 +16,9 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     case mailKeys = "mail_keys"
     /// A draft being written: its words in the sealed metadata, its files in the sealed body.
     case mailDraft = "mail_draft"
+    /// One outside mail account (iCloud or Gmail) added beside the Totality address: which provider, the
+    /// address, the Send switch, and its app password, all sealed, so the server holds only ciphertext.
+    case mailOutside = "mail_outside"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {

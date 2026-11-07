@@ -119,7 +119,7 @@ final class MailWiring {
         }
         guard vault?.account != account else { return false }
         await vault?.close()
-        vault = MailVault(store: content.store, rootKey: content.rootKey, account: account)
+        vault = MailVault(store: content.store, rootKey: content.rootKey, account: account, secrets: OutsideSecrets.keychain())
         return true
     }
 
@@ -187,6 +187,7 @@ final class DeviceContentKeys: ContentKeyAccess {
 
     func release(by account: String) async throws {
         try ContentSetup.keyRing().release(by: account)
+        OutsideSecrets.forgetAll()
     }
 
     /// The old key goes, so any open module has to go with it.
@@ -194,6 +195,7 @@ final class DeviceContentKeys: ContentKeyAccess {
         await willMove()
         defer { didMove() }
         try ContentSetup.keyRing().resetEmptyDevice()
+        OutsideSecrets.forgetAll()
         // What the last account agreed with its server means nothing to the next one.
         try? FileManager.default.removeItem(at: ContentSetup.syncStateFile())
     }

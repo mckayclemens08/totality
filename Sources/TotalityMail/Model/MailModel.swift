@@ -43,6 +43,8 @@ public final class MailModel {
     @ObservationIgnored public var receiver: (any ContentReceiver)?
     @ObservationIgnored public var onSentToReader: (() -> Void)?
     @ObservationIgnored public let rules = MailRules()
+    /// Outside accounts beside the Totality address, when the store can keep them.
+    @ObservationIgnored public let outside: OutsideAccountsModel?
 
     /// What changed on this device while a fetch was out. The fetched copy is older, so these go on top.
     private struct Since {
@@ -61,6 +63,7 @@ public final class MailModel {
     public init(store: any MailStore, now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
         self.now = now
+        outside = (store as? any OutsideAccountStore).map { OutsideAccountsModel(store: $0) }
     }
 
     public var conversations: [MailConversation] {

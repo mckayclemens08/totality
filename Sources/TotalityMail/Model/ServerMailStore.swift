@@ -18,6 +18,7 @@ public actor ServerMailStore: MailStore {
     private let canPublish: @Sendable () async -> Bool
     private let username: @Sendable () async -> String?
     private let now: @Sendable () -> Date
+    private let outsideCheck: OutsideSignInCheck
 
     /// What publishing answered for this store. `.alreadyThere` means the server's mailbox is the one
     /// mail was downloaded from, so what it no longer lists was deleted on purpose.
@@ -32,7 +33,8 @@ public actor ServerMailStore: MailStore {
         account: String, rootKey: ContentRootKey, vault: MailVault, server: any MailServer,
         canPublish: @escaping @Sendable () async -> Bool,
         username: @escaping @Sendable () async -> String?,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        outsideCheck: OutsideSignInCheck = OutsideSignInCheck()
     ) throws {
         guard let mailboxID = UUID(uuidString: account), vault.account == account else { throw MailStoreError.noAccount }
         self.account = account
@@ -44,6 +46,7 @@ public actor ServerMailStore: MailStore {
         self.canPublish = canPublish
         self.username = username
         self.now = now
+        self.outsideCheck = outsideCheck
     }
 
     // MARK: Opening
@@ -474,5 +477,42 @@ public actor ServerMailStore: MailStore {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
+    }
+}
+
+// MARK: Outside accounts
+
+extension ServerMailStore: OutsideAccountStore {
+    public func outsideAccounts() async throws -> [OutsideAccount] {
+        try await vault.outsideAccounts()
+    }
+
+    public func addOutside(_ signIn: OutsideSignIn) async throws -> OutsideAccount {
+        let candidate = OutsideAccount(provider: signIn.provider, address: signIn.address, addedAt: now())
+        let existing = try await vault.outsideAccounts()
+        guard !existing.contains(where: { $0.isSameMailbox(as: candidate) }) else { throw OutsideAccountError.alreadyAdded }
+        guard existing.count < OutsideAccountLimits.most else { throw OutsideAccountError.tooMany }
+        if let problem = await outsideCheck.checkReading(signIn) { throw OutsideAccountError.problem(problem) }
+        // Checked again after the wait, in case another add landed meanwhile.
+        let latest = try await vault.outsideAccounts()
+        guard !latest.contains(where: { $0.isSameMailbox(as: candidate) }) else { throw OutsideAccountError.alreadyAdded }
+        guard latest.count < OutsideAccountLimits.most else { throw OutsideAccountError.tooMany }
+        try await vault.save(candidate, appPassword: signIn.appPassword, at: now())
+        return candidate
+    }
+
+    public func removeOutside(_ id: UUID) async throws {
+        try await vault.removeOutside(id)
+    }
+
+    public func setOutsideSending(_ id: UUID, on: Bool) async throws {
+        guard var outside = try await vault.outsideAccounts().first(where: { $0.id == id }) else { throw OutsideAccountError.notFound }
+        guard outside.canSend != on else { return }
+        if on {
+            guard let signIn = try await vault.signIn(for: id) else { throw OutsideAccountError.notFound }
+            if let problem = await outsideCheck.checkSending(signIn) { throw OutsideAccountError.problem(problem) }
+        }
+        outside.canSend = on
+        try await vault.update(outside, at: now())
     }
 }
