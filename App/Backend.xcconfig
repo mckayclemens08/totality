@@ -1,0 +1,6 @@
+// Where the app finds Totality's server. Both values are public by design: the URL is Supabase's address,
+// and the key is its publishable key, which ships inside every copy of the app. Row-level security on the
+// server is what protects data, not this key. Never put the secret (service_role / sb_secret_) key here.
+// To point a build at another backend, override these in App/Local.xcconfig, which git ignores.
+TOTALITY_BACKEND_URL = https:/$()/tpekjvhvaehqhkjkqrjc.supabase.co
+TOTALITY_BACKEND_KEY = sb_publishable_uyIS1C9s4RL8_Cub-rdnHQ_l8fSG7LR
