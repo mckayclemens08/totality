@@ -26,6 +26,7 @@ public struct CalendarHomeView: View {
         NavigationStack(path: $path) {
             content
                 .background(theme.bg.color)
+                .edgeSwipeBack(onClose)
                 .navigationDestination(for: CalendarEntry.self) { entry in
                     EventDetailView(entry: entry, model: model, onOpen: onOpen) { path.removeAll() }
                 }

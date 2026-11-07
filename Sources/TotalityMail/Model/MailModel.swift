@@ -78,22 +78,32 @@ public final class MailModel {
 
     public var homeUnread: Int { mailbox.unreadCount(in: .inbox) }
 
-    /// The small tile's lines: how much is unread, then who wrote last. Before Mail has opened there's
-    /// nothing to count, so it says that instead.
+    /// How many senders the small tile lists under the count.
+    static let glanceSenders = 3
+
+    /// The small tile's lines: how much is unread, then who wrote the newest conversations, each of which
+    /// opens. Mail loads from the home page, so it says it's checking until then. A problem with the key
+    /// or the account is shown in Mail itself, never on the home page.
     public var glance: ModuleGlance {
-        guard phase == .ready else { return ModuleGlance(lines: ["Open to check your mail"], isQuiet: true) }
+        guard phase == .ready else {
+            if case .loading = phase { return ModuleGlance(lines: ["Checking your mail"], isQuiet: true) }
+            return ModuleGlance(lines: ["Open to check your mail"], isQuiet: true)
+        }
         let unread = homeUnread
         let count = unread == 0 ? "No unread mail" : unread == 1 ? "1 unread" : "\(unread) unread"
-        guard let newest = homeConversations(1).first, !newest.isUnreadable else {
-            return ModuleGlance(lines: [count], isQuiet: unread == 0)
-        }
-        return ModuleGlance(lines: [count, newest.sender(me: mailbox.address).displayName], isQuiet: unread == 0)
+        let senders = glanceConversations.map { $0.sender(me: mailbox.address).displayName }
+        return ModuleGlance(lines: [count] + senders, isQuiet: unread == 0)
     }
 
-    /// What a line of the small tile opens: the second line is the newest conversation.
+    private var glanceConversations: [MailConversation] {
+        Array(mailbox.conversations(in: .inbox).filter { !$0.isUnreadable }.prefix(Self.glanceSenders))
+    }
+
+    /// What a line of the small tile opens. The first line counts, so it opens Mail itself.
     public func glanceConversation(at line: Int) -> UUID? {
-        guard phase == .ready, line == 1 else { return nil }
-        return homeConversations(1).first?.id
+        guard phase == .ready, line > 0 else { return nil }
+        let shown = glanceConversations
+        return shown.indices.contains(line - 1) ? shown[line - 1].id : nil
     }
 
     /// Asked for from the home page. The Inbox is where it lives, so that's where it opens.

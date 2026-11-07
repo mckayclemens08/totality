@@ -30,6 +30,7 @@ public struct MailHomeView: View {
             NavigationStack {
                 content(isWide: isWide)
                     .background(theme.bg.color)
+                    .edgeSwipeBack(onClose)
                     .toolbar { toolbar(isWide: isWide) }
                     .navigationTitle(model.placeName)
                     #if os(iOS)

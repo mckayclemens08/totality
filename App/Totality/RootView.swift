@@ -289,6 +289,8 @@ struct RootView: View {
         await reader?.load()
         await calendar?.load()
         await tellWhoIsHere()
+        // So the Mail tile has something to show before Mail is opened.
+        if mail.current.phase != .ready { await mail.current.load() }
     }
 
     /// Web keeps things only for the key's owner, and Mail shows only the owner's mailbox.
