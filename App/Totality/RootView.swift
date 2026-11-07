@@ -320,8 +320,13 @@ struct RootView: View {
             var areas = syncAreas
             let owner = await backup.deviceOwner()
             if let vault = mailWiring.vault, vault.account == owner { areas.append(vault) }
-            let engine = SyncEngine(areas: areas, remote: try await remote.forCurrentAccount(), state: FileSyncState(file: try ContentSetup.syncStateFile()))
-            return try await engine.sync(allowLargeRemoval: allowLargeRemoval)
+            let bound = try await remote.forCurrentAccount()
+            let engine = SyncEngine(areas: areas, remote: bound, state: FileSyncState(file: try ContentSetup.syncStateFile()))
+            let report = try await engine.sync(allowLargeRemoval: allowLargeRemoval)
+            // Older files move from Supabase Storage to the sealed store a few at a time (issue 54). It
+            // stops safely wherever it fails, so it never fails the sync.
+            if let movable = bound as? any MovesBodies { _ = try? await movable.moveBodies() }
+            return report
         }
         sync.onFinished = { refreshRecoveryLabels() }
         sync.onChanged = {

@@ -140,13 +140,28 @@ private func sealedBytes(_ count: Int) -> Data {
     }
 
     @Test func aRowNamesTheBlobAndNeverTheServer() {
-        let id = UUID()
-        let key = SealedBlobKey.key(for: id)
-        #expect(key == "sealed:\(id.uuidString.lowercased())")
-        #expect(SealedBlobKey.id(in: key) == id)
-        #expect(SealedBlobKey.id(in: "\(id.uuidString.lowercased())/\(id.uuidString.lowercased())/abc.body") == nil)
-        #expect(SealedBlobKey.id(in: "sealed:\(id.uuidString)") == nil)
-        #expect(SealedBlobKey.id(in: "sealed:../x") == nil)
+        let owner = UUID().uuidString.lowercased()
+        let other = UUID().uuidString.lowercased()
+        let blob = UUID()
+        let key = SealedBlobKey.key(owner: owner, blob: blob)
+        #expect(key == "\(owner)/sealed/\(blob.uuidString.lowercased())")
+        #expect(SealedBlobKey.blob(in: key, owner: owner) == blob)
+        #expect(SealedBlobKey.isSealed(key))
+        // Another owner's key, a Supabase path, and anything odd are never taken for one.
+        #expect(SealedBlobKey.blob(in: key, owner: other) == nil)
+        #expect(SealedBlobKey.blob(in: "\(owner)/\(blob.uuidString.lowercased())/abc.body", owner: owner) == nil)
+        #expect(!SealedBlobKey.isSealed("\(owner)/\(blob.uuidString.lowercased())/abc.body"))
+        #expect(SealedBlobKey.blob(in: "\(owner)/sealed/\(blob.uuidString)", owner: owner) == nil)
+        #expect(SealedBlobKey.blob(in: "\(owner)/sealed/../x", owner: owner) == nil)
+    }
+
+    @Test func oneBodyAlwaysGetsTheSameBlob() {
+        let owner = UUID().uuidString.lowercased()
+        let item = UUID()
+        let blob = SealedBlobKey.blob(owner: owner, item: item, bodyHash: "ab12")
+        #expect(SealedBlobKey.blob(owner: owner, item: item, bodyHash: "ab12") == blob)
+        #expect(SealedBlobKey.blob(owner: owner, item: item, bodyHash: "ab13") != blob)
+        #expect(SealedBlobKey.blob(owner: UUID().uuidString.lowercased(), item: item, bodyHash: "ab12") != blob)
     }
 }
 
