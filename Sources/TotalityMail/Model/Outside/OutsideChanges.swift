@@ -375,7 +375,7 @@ public struct OutsideIMAPInbox: Equatable, Sendable {
         }
         return OutsideAccountPlaces(
             outside: outside, labels: own.map { OutsideLabel(id: $0.name, name: $0.name) }, membership: membership,
-            truncated: Set(own.filter { !$0.complete }.map(\.name)), since: since
+            truncated: Set(own.filter { !$0.complete }.map(\.name)), since: since, folders: folders
         )
     }
 }

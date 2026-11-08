@@ -30,6 +30,8 @@ public actor ServerMailStore: MailStore {
     private var attachmentSources: [UUID: UUID] = [:]
     /// Messages downloaded from outside accounts, which live apart from Totality mail.
     private var fetchedIDs = Set<UUID>()
+    /// Downloaded mail already read and parsed this session, by the ID it shows under.
+    private var fetchedCache: [UUID: FetchedEntry] = [:]
     /// The last change sync with outside accounts, so the next waits for it instead of interleaving.
     private var outsideSync: Task<Void, Never>?
 
@@ -82,6 +84,11 @@ public actor ServerMailStore: MailStore {
         } catch is MailServerError {
             throw MailStoreError.unavailable
         }
+    }
+
+    public func cached() async -> Mailbox? {
+        guard !hasConflict, let mailbox = try? await stored(), !mailbox.messages.isEmpty else { return nil }
+        return mailbox
     }
 
     private func publishIfNeeded() async throws {
@@ -233,9 +240,10 @@ public actor ServerMailStore: MailStore {
         let outside = Dictionary(try await vault.outsideAccounts().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var places: [UUID: OutsideAccountPlaces] = [:]
         for account in outside.keys { places[account] = try await vault.places(of: account) }
-        for (id, stored) in try await vault.fetched() {
+        for (id, entry) in try await fetchedEntries(outside) {
+            let stored = entry.info
             guard let account = outside[stored.outside] else { continue }
-            var message = readFetched(stored, id: id, provider: account.provider).message
+            var message = entry.message
             message.outsideAccount = OutsideAccountLabel(id: account.id, provider: account.provider, address: account.address)
             if account.provider == .gmail {
                 let known = places[account.id]?.labels(of: stored.providerID, received: stored.received)
@@ -335,6 +343,37 @@ public actor ServerMailStore: MailStore {
         return ParsedMail(message: message.travelled(route, proof: .proved), attachments: parsed.attachments)
     }
 
+    /// One downloaded message as it shows, read once and kept in memory: the store only ever adds or
+    /// removes these, so each is decrypted and parsed only the first time it's needed.
+    struct FetchedEntry: Sendable {
+        /// The download as stored, without its raw bytes, which the parsed message already holds.
+        let info: OutsideFetchedMessage
+        let messageID: String?
+        let message: MailMessage
+    }
+
+    /// Every downloaded message from these accounts. Only files not read before are opened.
+    private func fetchedEntries(_ accounts: [UUID: OutsideAccount]) async throws -> [UUID: FetchedEntry] {
+        let ids = Set(try await vault.fetchedIDs())
+        fetchedCache = fetchedCache.filter { ids.contains($0.key) }
+        let unread = ids.filter { fetchedCache[$0] == nil }
+        if !unread.isEmpty {
+            let providers = Dictionary(try await vault.outsideAccounts().map { ($0.id, $0.provider) }, uniquingKeysWith: { first, _ in first })
+            for (id, stored) in try await vault.fetched(Array(unread)) {
+                guard let provider = providers[stored.outside] else { continue }
+                fetchedCache[id] = FetchedEntry(
+                    info: OutsideFetchedMessage(
+                        outside: stored.outside, providerID: stored.providerID, received: stored.received, raw: Data(),
+                        isUnread: stored.isUnread, isStarred: stored.isStarred, labels: stored.labels
+                    ),
+                    messageID: OutsideFolders.messageID(stored.raw),
+                    message: readFetched(stored, id: id, provider: provider).message
+                )
+            }
+        }
+        return fetchedCache.filter { accounts[$0.value.info.outside] != nil }
+    }
+
     /// Downloaded mail is read as the provider gave it. Only the provider's own checks at the top can
     /// prove its sender.
     private func readFetched(_ stored: OutsideFetchedMessage, id: UUID, provider: OutsideProvider) -> ParsedMail {
@@ -369,9 +408,12 @@ public actor ServerMailStore: MailStore {
                 continue
             }
             let vault = vault, counter = OutsideCounter(), view = OutsideViewBox()
+            // What the last open saw, so this one asks only for what's changed since.
+            let previous = try? await vault.places(of: account.id)
+            let isFirst = previous == nil
             // Each Message-ID already here from this account, so mail moved between iCloud's folders isn't kept twice.
             let known: Set<String> = account.provider == .gmail ? [] : Set(
-                ((try? await vault.fetched()) ?? [:]).values.filter { $0.outside == account.id }.compactMap { OutsideFolders.messageID($0.raw) }
+                ((try? await fetchedEntries([account.id: account])) ?? [:]).values.filter { $0.info.outside == account.id }.compactMap(\.messageID)
             )
             defer { if let seen = view.value { views[account.id] = seen } }
             do {
@@ -380,7 +422,9 @@ public actor ServerMailStore: MailStore {
                     have: { try await vault.hasFetched(account.id, providerID: $0) },
                     keep: { message in
                         try await vault.keepFetched(message)
-                        progress(OutsideDownload(address: account.address, done: counter.next()))
+                        // Only an account's first download says how it's going. After that it's quiet.
+                        let done = counter.next()
+                        if isFirst { progress(OutsideDownload(address: account.address, done: done)) }
                     },
                     seen: { seen in
                         view.value = seen
@@ -389,7 +433,8 @@ public actor ServerMailStore: MailStore {
                         case .imap(let folders): try await vault.keepPlaces(folders.places(of: account.id))
                         }
                     },
-                    haveMessage: { known.contains($0) }
+                    haveMessage: { known.contains($0) },
+                    previous: previous, now: now()
                 )
             } catch is CancellationError {
                 break
@@ -452,7 +497,8 @@ public actor ServerMailStore: MailStore {
     /// changed in Totality goes to the provider. Best effort: anything that doesn't go waits for the next try.
     private func syncingOutside(_ views: [UUID: OutsideProviderView]) async {
         guard let accounts = try? await vault.outsideAccounts(), let marks = try? await vault.marks(),
-              let fetched = try? await vault.fetched() else { return }
+              let fetched = try? await fetchedEntries(Dictionary(accounts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
+        else { return }
         let writer = OutsideWriter(maker: outsideCheck.maker, google: google)
         var pulls: [UUID: MailMarks] = [:]
         for account in accounts {
@@ -463,7 +509,8 @@ public actor ServerMailStore: MailStore {
             let view = views[account.id]
             var changes: [OutsideWriter.Change] = []
             var states: [String: OutsideRemoteState] = [:]
-            for (id, stored) in fetched where stored.outside == account.id {
+            for (id, entry) in fetched where entry.info.outside == account.id {
+                let stored = entry.info
                 let base = record.states[stored.providerID] ?? OutsideRemoteState(downloaded: stored)
                 let mine = marks[id].map { OutsideRemoteState($0, location: base.location) }
                 let seen: OutsideSeen = switch view {
@@ -471,7 +518,7 @@ public actor ServerMailStore: MailStore {
                 case .imap(let inbox):
                     inbox.seen(
                         providerID: stored.providerID, location: base.location, received: stored.received,
-                        messageID: OutsideFolders.messageID(stored.raw)
+                        messageID: entry.messageID
                     )
                 case nil: .unknown
                 }

@@ -13,6 +13,7 @@ public struct MailHomeView: View {
     private let onClose: (() -> Void)?
     private let onOpenLink: (URL) -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var opened: UUID?
     @State private var showingFolders = false
     @State private var composing: MailComposer?
@@ -70,7 +71,18 @@ public struct MailHomeView: View {
                 .frame(minWidth: Space.s8 * 8, minHeight: Space.s8 * 9)
                 #endif
         }
-        .task { await model.load() }
+        .task { await model.refresh() }
+        // While Mail is open it keeps itself up to date.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: MailTiming.sync)
+                guard !Task.isCancelled else { return }
+                await model.refresh()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await model.refresh() } }
+        }
         .task(id: model.undo?.id) {
             guard let shown = model.undo?.id else { return }
             try? await Task.sleep(for: MailTiming.undo)
@@ -107,7 +119,7 @@ public struct MailHomeView: View {
             MailStateView(
                 systemImage: "exclamationmark.triangle", title: "Your mail didn't open",
                 detail: "Totality couldn't reach your mailbox, and nothing on this device has changed.",
-                action: MailStateAction(label: "Try again") { Task { await model.load() } }
+                action: MailStateAction(label: "Try again") { Task { await model.refresh() } }
             )
             .overlay(alignment: .top) { MailSampleNote(model: model) }
         case .noAccount:

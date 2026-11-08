@@ -43,6 +43,52 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
     /// A label Gmail won't list, for its own reason.
     var refusedLabel: String?
     private var fetchedIDs: [String] = []
+    /// Every message's labels at each history point Gmail gave out, so history can say what changed since.
+    private var snapshots: [Int: [String: [String]]] = [:]
+    private var nextHistory = 4_812_000
+    /// Gmail has let go of history this old, so it answers 404 and a full listing is needed.
+    var historyGone = false
+
+    /// How many requests went to a Gmail path, such as `/gmail/v1/users/me/history`.
+    func requests(to path: String) -> Int { lock.withLock { sent.filter { $0.url?.path == path }.count } }
+    /// How many times a label was listed in full.
+    var listings: Int { lock.withLock { sent.filter { $0.url?.path == "/gmail/v1/users/me/messages" && $0.url?.query?.contains("labelIds=") == true }.count } }
+
+    private func snapshot() -> Int {
+        let ids = lock.withLock { inbox.map(\.id) }
+        let now = Dictionary(ids.map { ($0, labels(of: $0)) }, uniquingKeysWith: { first, _ in first })
+        return lock.withLock {
+            nextHistory += 17
+            snapshots[nextHistory] = now
+            return nextHistory
+        }
+    }
+
+    private func historyAnswer(_ url: URL) -> (Data, HTTPURLResponse) {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let types = Set(items.filter { $0.name == "historyTypes" }.compactMap(\.value))
+        #expect(types == ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"])
+        guard !historyGone, let start = items.first(where: { $0.name == "startHistoryId" })?.value.flatMap(Int.init),
+              let before = lock.withLock({ snapshots[start] }) else { return Self.json(404, ["error": ["code": 404, "message": "Requested entity was not found."]]) }
+        let id = snapshot()
+        let after = lock.withLock { snapshots[id]! }
+        var record: [String: Any] = [:]
+        let added = after.keys.filter { before[$0] == nil }.sorted()
+        if !added.isEmpty { record["messagesAdded"] = added.map { ["message": ["id": $0, "threadId": $0, "labelIds": after[$0]!]] } }
+        let deleted = before.keys.filter { after[$0] == nil }.sorted()
+        if !deleted.isEmpty { record["messagesDeleted"] = deleted.map { ["message": ["id": $0, "threadId": $0]] } }
+        var labelled: [[String: Any]] = [], unlabelled: [[String: Any]] = []
+        for (message, now) in after.sorted(by: { $0.key < $1.key }) {
+            guard let had = before[message] else { continue }
+            let plus = now.filter { !had.contains($0) }, minus = had.filter { !now.contains($0) }
+            // As Gmail often does, only the message's ID comes with a change of labels.
+            if !plus.isEmpty { labelled.append(["message": ["id": message, "threadId": message], "labelIds": plus]) }
+            if !minus.isEmpty { unlabelled.append(["message": ["id": message, "threadId": message], "labelIds": minus]) }
+        }
+        if !labelled.isEmpty { record["labelsAdded"] = labelled }
+        if !unlabelled.isEmpty { record["labelsRemoved"] = unlabelled }
+        return Self.json(200, ["history": record.isEmpty ? [] : [record.merging(["id": String(id)]) { a, _ in a }], "historyId": String(id)])
+    }
 
     func labels(of id: String) -> [String] {
         lock.withLock {
@@ -128,7 +174,11 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
             return Self.answer(200, ["access_token": "ya29.\(n)", "refresh_token": "1//refresh-\(n)", "scope": scopes, "token_type": "Bearer"])
         case GoogleOAuth.profileURL:
             #expect(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Bearer ya29.") == true)
-            return Self.answer(200, ["emailAddress": address, "messagesTotal": "18342"])
+            return Self.answer(200, ["emailAddress": address, "messagesTotal": "18342", "historyId": String(snapshot())])
+        case _ where url.host == "gmail.googleapis.com" && url.path == "/gmail/v1/users/me/history":
+            #expect(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Bearer ya29.") == true)
+            if refusesMail { return Self.answer(401, [:]) }
+            return historyAnswer(url)
         case GoogleOAuth.revokeURL:
             return Self.answer(200, [:])
         case GoogleOAuth.labelsURL:
