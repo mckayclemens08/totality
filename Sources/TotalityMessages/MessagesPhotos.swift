@@ -48,6 +48,29 @@ public enum PhotoPrep {
     }
 }
 
+/// A group photo, redrawn small and square-ish, with nothing but its pixels.
+public struct GroupPhoto: Sendable, Equatable {
+    public let data: Data
+    public let width: Int
+    public let height: Int
+
+    public static let side = 512
+
+    public static func prepare(_ original: Data) throws -> GroupPhoto {
+        guard let source = CGImageSourceCreateWithData(original as CFData, nil), CGImageSourceGetCount(source) > 0 else {
+            throw MessagesError.failed("That photo couldn't be opened.")
+        }
+        let (data, width, height) = try PhotoPrep.encode(source, side: side, quality: 0.8)
+        return GroupPhoto(data: data, width: width, height: height)
+    }
+
+    /// Someone else's group photo, drawn afresh at a small size so nothing odd in it reaches the screen.
+    static func small(_ downloaded: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(downloaded as CFData, nil), CGImageSourceGetCount(source) > 0 else { return nil }
+        return try? PhotoPrep.encode(source, side: 160, quality: 0.8).0
+    }
+}
+
 /// Opened photos held in memory while a chat is open, a few at a time. (The SDK keeps its own copy in
 /// the account's store, which is encrypted with the key in this device's Keychain.)
 @MainActor

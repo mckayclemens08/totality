@@ -151,12 +151,15 @@ public final class MessagesModel {
     }
 
     /// Starts an encrypted group from typed usernames. Its ID, or nil with `notice` saying why not.
-    public func startGroup(with typed: String) async -> String? {
+    public func startGroup(with typed: String, name: String = "", photo: Data? = nil) async -> String? {
         guard let service else { return nil }
         do {
             notice = nil
             let names = try GroupMembers.parse(typed, own: MessagesUsername.display(service.userID))
-            return try await service.startGroup(with: names)
+            let prepared = try photo.map { original in
+                try GroupPhoto.prepare(original)
+            }
+            return try await service.startGroup(with: names, name: GroupName.clean(name), photo: prepared)
         } catch {
             notice = Self.describe(error)
             return nil
@@ -197,6 +200,17 @@ public final class MessagesModel {
             notice = Self.describe(error)
             return false
         }
+    }
+
+    /// Group photos for the chat list, opened once and kept small in memory.
+    private let groupPhotos = PhotoMemory(limit: 60)
+
+    public func groupPhoto(_ location: String) async -> Data? {
+        if let cached = groupPhotos[location] { return cached }
+        guard let service, let downloaded = try? await service.groupPhoto(location),
+              let small = GroupPhoto.small(downloaded) else { return nil }
+        groupPhotos[location] = small
+        return small
     }
 
     public func open(_ chat: String) async throws -> ChatModel {
@@ -291,7 +305,8 @@ public final class ChatModel {
     public private(set) var sendingPhoto = false
     private let photos = PhotoMemory()
 
-    public let title: String
+    public private(set) var title: String
+    public private(set) var groupPhotoLocation: String?
     public var isGroup: Bool { channel.isGroup }
     public var chatID: String { channel.id }
     public var otherPerson: String? { channel.otherPerson }
@@ -303,6 +318,7 @@ public final class ChatModel {
     init(channel: any ChatChannel, defaults: UserDefaults = .standard) {
         self.channel = channel
         self.title = channel.title
+        self.groupPhotoLocation = channel.photo
         self.defaults = defaults
     }
 
@@ -355,6 +371,33 @@ public final class ChatModel {
         for message in DisappearingRule.due(all, state: disappearingState, now: now) where !removing.contains(message.id) {
             removing.insert(message.id)
             try? await channel.delete(message.id)
+        }
+    }
+
+    /// Renames a group. Nil or empty takes the name away, and it's shown by its members again.
+    public func rename(_ typed: String) async -> Bool {
+        do {
+            notice = nil
+            let name = GroupName.clean(typed)
+            try await channel.rename(name)
+            if let name { title = name }
+            return true
+        } catch {
+            notice = MessagesModel.describe(error)
+            return false
+        }
+    }
+
+    /// Sets or removes a group's photo. It's redrawn on this device first, so no camera details go with it.
+    public func setGroupPhoto(_ original: Data?) async -> Bool {
+        do {
+            notice = nil
+            let prepared = try original.map { try GroupPhoto.prepare($0) }
+            try await channel.setPhoto(prepared)
+            return true
+        } catch {
+            notice = MessagesModel.describe(error)
+            return false
         }
     }
 
