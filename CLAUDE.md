@@ -50,7 +50,12 @@ These fail review, full stop. There is no "just for now" version of any of them.
    of grant scope.
 7. **Modules never import each other.** Cross-module anything goes through `ContentRef` and
    `ModuleRegistry` in `TotalityCore`.
-8. **Plaid is read-only. Google scopes are minimal.** Gmail read is not Gmail send.
+8. **Plaid is read-only. Google scopes are minimal.** Gmail read is not Gmail send. There is one
+   exception, which the owner agreed on 2026-11-07 (issue 43, "Allow it, change the rule"). An outside
+   Gmail account asks for `gmail.modify`, so read state, stars, archiving and Trash made in Totality
+   reach Gmail, and Google lets that grant send. Totality's code still sends from Gmail only after that
+   account's Send switch is turned on and its own `gmail.send` request is allowed, and every send stops
+   for the person's press. Nothing else gets this exception.
 
 ## Definition of done (every module)
 

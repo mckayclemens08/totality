@@ -10,6 +10,11 @@ public struct OutsideAccount: Codable, Equatable, Identifiable, Sendable {
     /// that sending works first.
     public var canSend: Bool
     public let addedAt: Date
+    /// Changes made in Totality reach the provider. False only for a Gmail account added before that was
+    /// asked for, until it's allowed. Worked out from the sign-in, never stored on its own.
+    public internal(set) var keepsInStep = true
+
+    private enum CodingKeys: String, CodingKey { case id, provider, address, canSend, addedAt }
 
     public init(id: UUID = UUID(), provider: OutsideProvider, address: String, canSend: Bool = false, addedAt: Date) {
         self.id = id
@@ -50,11 +55,13 @@ public protocol OutsideAccountStore: Sendable {
     func addOutside(_ signIn: OutsideSignIn) async throws -> OutsideAccount
     /// The page to sign in with Google on: to add a Gmail account, or with an id, to let it send.
     /// Throws `notSetUp` when this build has no Google sign-in.
-    func googleSignIn(sendingFor id: UUID?) async throws -> GoogleSignInRequest
+    func googleSignIn(for id: UUID?, sending: Bool) async throws -> GoogleSignInRequest
     /// Finishes signing in with Google to add a Gmail account that reads, and nothing more.
     func addGoogle(_ request: GoogleSignInRequest, callback: URL) async throws -> OutsideAccount
     /// Finishes signing in with Google to let a Gmail account send, and turns its switch on.
     func allowGoogleSending(_ id: UUID, _ request: GoogleSignInRequest, callback: URL) async throws
+    /// Finishes signing in with Google to let changes made in Totality reach a Gmail account.
+    func allowGoogleChanges(_ id: UUID, _ request: GoogleSignInRequest, callback: URL) async throws
     /// Takes away the sign-in and the account on this device and, through sync, the others. Nothing at
     /// the provider is touched.
     func removeOutside(_ id: UUID) async throws

@@ -88,7 +88,7 @@ private final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
     }
 
     private func addGmail(_ store: ServerMailStore, _ fake: FakeGoogle) async throws -> OutsideAccount {
-        let request = try await store.googleSignIn(sendingFor: nil)
+        let request = try await store.googleSignIn(for: nil, sending: false)
         return try await store.addGoogle(request, callback: fake.page(request.url, request.callbackScheme))
     }
 
@@ -107,7 +107,7 @@ private final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         let outside = result.mailbox.messages.filter { $0.outsideAccount != nil }
         #expect(outside.count == 2)
         let kitchen = try #require(outside.first { $0.subject == "Kitchen drawings" })
-        #expect(kitchen.outsideAccount == OutsideAccountLabel(provider: .gmail, address: "mckay.clemens@gmail.com"))
+        #expect(kitchen.outsideAccount == OutsideAccountLabel(id: added.id, provider: .gmail, address: "mckay.clemens@gmail.com"))
         #expect(kitchen.marks.isUnread && kitchen.marks.folder == .inbox)
         // Google's own checks at the top prove the sender; without them nothing is proved.
         #expect(kitchen.proof == .proved)
@@ -120,6 +120,43 @@ private final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         _ = await store.downloadOutside { _ in }
         #expect(fake.fetched == ["18f3a2b4c5d6e7f8", "18f3a2b4c5d6e7f9", "18f3a2b4c5d6e800"])
         #expect(added.provider == .gmail)
+    }
+
+    @Test func gmailsTabsAndLabelsShowAsTheirOwnPlaces() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [
+            ("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today.addingTimeInterval(-3600)),
+            ("18f3a2b4c5d6e7f9", mail("Maya tagged you in a photo", from: "Instagram <no-reply@mail.instagram.com>"), true, today.addingTimeInterval(-7200)),
+            ("18f3a2b4c5d6e7fa", mail("Your order has shipped", from: "REI <orders@rei.com>"), false, today.addingTimeInterval(-9000)),
+            ("18f3a2b4c5d6e7fb", mail("Q4 planning notes", from: "Dana Ortiz <dana@northwind.co>"), false, today.addingTimeInterval(-86_400)),
+        ]
+        fake.labelsOf = ["18f3a2b4c5d6e7f9": ["CATEGORY_SOCIAL"], "18f3a2b4c5d6e7fa": ["CATEGORY_UPDATES"], "18f3a2b4c5d6e7fb": ["Label_7"]]
+        fake.archived = ["18f3a2b4c5d6e7fb"]
+        fake.userLabels = [("Label_7", "Productivity"), ("Label_9", "Receipts")]
+        let (store, _) = try store(google: fake)
+        let added = try await addGmail(store, fake)
+        let mailbox = try #require(await store.downloadOutside { _ in }).mailbox
+        func subjects(_ place: MailPlace) -> Set<String> {
+            Set(mailbox.conversations(in: place).flatMap(\.messages).map(\.subject))
+        }
+        // The Inbox is Primary, as in Gmail.
+        #expect(subjects(.folder(.inbox)) == ["Kitchen drawings"])
+        #expect(subjects(.outside(added.id, "CATEGORY_SOCIAL")) == ["Maya tagged you in a photo"])
+        #expect(subjects(.outside(added.id, "CATEGORY_UPDATES")) == ["Your order has shipped"])
+        // Under a label but out of the Inbox: archived, and in its label.
+        #expect(subjects(.outside(added.id, "Label_7")) == ["Q4 planning notes"])
+        #expect(subjects(.folder(.archive)) == ["Q4 planning notes"])
+        // Tabs that hold nothing don't show; the person's labels always do.
+        let places = try #require(mailbox.outsidePlaces.first)
+        #expect(places.account.address == "mckay.clemens@gmail.com")
+        #expect(places.labels.map(\.name) == ["Social", "Updates", "Productivity", "Receipts"])
+        #expect(mailbox.name(of: .outside(added.id, "Label_7")) == "Productivity")
+        // Moved to Social at Gmail later: the next open moves it here, without downloading it again.
+        fake.labelsOf["18f3a2b4c5d6e7f8"] = ["CATEGORY_SOCIAL"]
+        let after = try #require(await store.downloadOutside { _ in }).mailbox
+        #expect(after.conversations(in: .folder(.inbox)).isEmpty)
+        #expect(after.conversations(in: .outside(added.id, "CATEGORY_SOCIAL")).count == 2)
+        #expect(fake.fetched.count == 4)
     }
 
     @Test func aCloudflareCheckInsideGmailProvesNothing() async throws {
@@ -269,7 +306,7 @@ private struct OfflineMailServer: MailServer {
             account: alice, rootKey: root, vault: vault, server: OfflineMailServer(), canPublish: { true }, username: { "mckay" },
             now: { today }, google: GoogleOAuth(clientID: clientID, http: fake)
         )
-        let request = try await store.googleSignIn(sendingFor: nil)
+        let request = try await store.googleSignIn(for: nil, sending: false)
         _ = try await store.addGoogle(request, callback: fake.page(request.url, request.callbackScheme))
         let model = MailModel(store: store)
         await model.load()

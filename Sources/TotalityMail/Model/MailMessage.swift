@@ -177,6 +177,11 @@ public struct MailMessage: Identifiable, Hashable, Sendable {
     /// The outside account this was downloaded from, by its address. Nil for Totality mail. Its copy at
     /// the provider isn't sealed, and every screen that shows it says so.
     public var outsideAccount: OutsideAccountLabel?
+    /// The provider's own places it's in, by the provider's ID for each: Gmail's tabs and labels.
+    public var outsideLabels: Set<String> = []
+
+    /// In one of Gmail's other tabs, so not in the Inbox, which is Primary.
+    var isInOtherTab: Bool { !outsideLabels.isDisjoint(with: OutsideLabel.tabs.map(\.id)) }
 
     public init(
         id: UUID = UUID(), conversationID: UUID, from: MailAddress, to: [MailAddress], cc: [MailAddress] = [],
@@ -235,12 +240,46 @@ public struct MailMessage: Identifiable, Hashable, Sendable {
 
 /// Which outside account a downloaded message came from, for its label and its honest wording.
 public struct OutsideAccountLabel: Hashable, Sendable {
+    public let id: UUID
     public let provider: OutsideProvider
     public let address: String
 
-    public init(provider: OutsideProvider, address: String) {
+    public init(id: UUID, provider: OutsideProvider, address: String) {
+        self.id = id
         self.provider = provider
         self.address = address
+    }
+}
+
+/// One of an outside account's own places: one of Gmail's tabs, or a label the person made.
+public struct OutsideLabel: Hashable, Codable, Sendable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    /// Gmail's tabs other than Primary. Primary is the Inbox.
+    public static let tabs = [
+        OutsideLabel(id: "CATEGORY_SOCIAL", name: "Social"),
+        OutsideLabel(id: "CATEGORY_PROMOTIONS", name: "Promotions"),
+        OutsideLabel(id: "CATEGORY_UPDATES", name: "Updates"),
+        OutsideLabel(id: "CATEGORY_FORUMS", name: "Forums"),
+    ]
+
+    public var isTab: Bool { Self.tabs.contains { $0.id == id } }
+}
+
+/// An outside account's places, as the folder list shows them under its address.
+public struct OutsidePlaces: Hashable, Sendable {
+    public let account: OutsideAccountLabel
+    public let labels: [OutsideLabel]
+
+    public init(account: OutsideAccountLabel, labels: [OutsideLabel]) {
+        self.account = account
+        self.labels = labels
     }
 }
 

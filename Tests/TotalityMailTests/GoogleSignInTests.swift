@@ -20,7 +20,16 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
     var refusesMail = false
     /// What's in the Gmail Inbox, newest first.
     var inbox: [(id: String, raw: String, unread: Bool, at: Date)] = []
+    /// Labels each message has beside INBOX, and the ones taken out of the Inbox.
+    var labelsOf: [String: [String]] = [:]
+    var archived: Set<String> = []
+    /// The labels the person made, by ID and name.
+    var userLabels: [(id: String, name: String)] = []
     private var fetchedIDs: [String] = []
+
+    func labels(of id: String) -> [String] {
+        lock.withLock { (archived.contains(id) ? [] : ["INBOX"]) + (labelsOf[id] ?? []) }
+    }
     /// Which messages were downloaded, in order.
     var fetched: [String] { lock.withLock { fetchedIDs } }
 
@@ -64,14 +73,21 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
             return Self.answer(200, ["emailAddress": address, "messagesTotal": "18342"])
         case GoogleOAuth.revokeURL:
             return Self.answer(200, [:])
+        case GoogleOAuth.labelsURL:
+            if refusesMail { return Self.answer(401, [:]) }
+            let own = lock.withLock { userLabels }
+            let system = [["id": "INBOX", "name": "INBOX", "type": "system"], ["id": "CATEGORY_SOCIAL", "name": "CATEGORY_SOCIAL", "type": "system"]]
+            return Self.json(200, ["labels": system + own.map { ["id": $0.id, "name": $0.name, "type": "user"] }])
         case _ where url.host == "gmail.googleapis.com" && url.path.hasPrefix("/gmail/v1/users/me/messages"):
             #expect(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Bearer ya29.") == true)
             if refusesMail { return Self.answer(401, [:]) }
             let messages = lock.withLock { inbox }
             if url.path == "/gmail/v1/users/me/messages" {
                 let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-                #expect(items.first { $0.name == "q" }?.value?.hasPrefix("in:inbox after:") == true)
-                let listing: [String: Any] = ["messages": messages.map { ["id": $0.id, "threadId": $0.id] }, "resultSizeEstimate": messages.count]
+                #expect(items.first { $0.name == "q" }?.value?.hasPrefix("after:") == true)
+                let label = items.first { $0.name == "labelIds" }?.value ?? ""
+                let listed = messages.filter { labels(of: $0.id).contains(label) }
+                let listing: [String: Any] = ["messages": listed.map { ["id": $0.id, "threadId": $0.id] }, "resultSizeEstimate": listed.count]
                 return Self.json(200, listing)
             }
             let id = url.lastPathComponent
@@ -81,7 +97,7 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
                 .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
             return Self.json(200, [
                 "id": id, "raw": raw, "internalDate": String(Int(message.at.timeIntervalSince1970 * 1000)),
-                "labelIds": message.unread ? ["INBOX", "UNREAD"] : ["INBOX"],
+                "labelIds": labels(of: id) + (message.unread ? ["UNREAD"] : []),
             ])
         default:
             Issue.record("reached \(url), which isn't Google's")
@@ -139,7 +155,7 @@ private struct NoMailServer: MailServer {
         let url = try #require(URLComponents(url: request.url, resolvingAgainstBaseURL: false))
         #expect(url.scheme == "https" && url.host == "accounts.google.com" && url.path == "/o/oauth2/v2/auth")
         let items = Dictionary((url.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { $1 })
-        #expect(items["scope"] == "https://www.googleapis.com/auth/gmail.readonly")
+        #expect(items["scope"] == "https://www.googleapis.com/auth/gmail.modify")
         #expect(items["response_type"] == "code" && items["code_challenge_method"] == "S256")
         #expect(items["code_challenge"] == GoogleOAuth.base64URL(Data(SHA256.hash(data: Data(request.verifier.utf8)))))
         #expect(items["state"] == request.state && request.state.count >= 43)
@@ -152,11 +168,11 @@ private struct NoMailServer: MailServer {
 
     @Test func sendingAsksForTheAccountAlreadyAdded() throws {
         let google = try #require(GoogleOAuth(clientID: clientID, http: FakeGoogle()))
-        let items = URLComponents(url: google.request(sendingFor: "mckay.clemens+news@gmail.com").url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let items = URLComponents(url: google.request(.send("mckay.clemens+news@gmail.com")).url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
-        #expect(value("scope") == "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send")
+        #expect(value("scope") == "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send")
         #expect(value("login_hint") == "mckay.clemens+news@gmail.com")
-        #expect(google.request(sendingFor: "mckay.clemens+news@gmail.com").url.absoluteString.contains("mckay.clemens%2Bnews"))
+        #expect(google.request(.send("mckay.clemens+news@gmail.com")).url.absoluteString.contains("mckay.clemens%2Bnews"))
     }
 
     @Test func nothingSecretEverPrints() throws {
@@ -210,12 +226,12 @@ private struct NoMailServer: MailServer {
     }
 
     private func add(_ store: ServerMailStore, _ fake: FakeGoogle) async throws -> OutsideAccount {
-        let request = try await store.googleSignIn(sendingFor: nil)
+        let request = try await store.googleSignIn(for: nil, sending: false)
         return try await store.addGoogle(request, callback: fake.page(request.url, request.callbackScheme))
     }
 
     private func allowSending(_ store: ServerMailStore, _ fake: FakeGoogle, _ id: UUID) async throws {
-        let request = try await store.googleSignIn(sendingFor: id)
+        let request = try await store.googleSignIn(for: id, sending: true)
         try await store.allowGoogleSending(id, request, callback: fake.page(request.url, request.callbackScheme))
     }
 
@@ -260,7 +276,7 @@ private struct NoMailServer: MailServer {
             fake.address = "\(name)@gmail.com"
             _ = try await add(store, fake)
         }
-        await #expect(throws: OutsideAccountError.tooMany) { _ = try await store.googleSignIn(sendingFor: nil) }
+        await #expect(throws: OutsideAccountError.tooMany) { _ = try await store.googleSignIn(for: nil, sending: false) }
     }
 
     @Test func sendingIsAskedForSeparatelyAndOnlyForTheSameAccount() async throws {
@@ -284,17 +300,41 @@ private struct NoMailServer: MailServer {
         let fake = FakeGoogle()
         let (store, vault) = try store(fake)
         let added = try await add(store, fake)
-        fake.allowed = [GoogleOAuth.readScope]
+        fake.allowed = [GoogleOAuth.changeScope]
         await #expect(throws: OutsideAccountError.problem(.notAllowed)) { try await allowSending(store, fake, added.id) }
         #expect(fake.revoked.isEmpty)
         #expect(try await vault.credential(for: added.id) == .google(GoogleGrant(refreshToken: "1//refresh-1", canSend: false)))
+    }
+
+    @Test func aGmailThatOnlyReadsIsAskedOnceToAllowChanges() async throws {
+        let fake = FakeGoogle()
+        let (store, vault) = try store(fake)
+        var added = try await add(store, fake)
+        // As accounts added before changes were asked for are kept.
+        try await vault.save(added, credential: .google(GoogleGrant(refreshToken: "1//refresh-old", canSend: false, canChange: false)))
+        added = try #require(try await store.outsideAccounts().first)
+        #expect(!added.keepsInStep)
+        let request = try await store.googleSignIn(for: added.id, sending: false)
+        #expect(request.scopes == [GoogleOAuth.changeScope])
+        try await store.allowGoogleChanges(added.id, request, callback: fake.page(request.url, request.callbackScheme))
+        #expect(try await store.outsideAccounts().first?.keepsInStep == true)
+        #expect(try await store.outsideAccounts().first?.canSend == false)
+        // Unticked on Google's page: nothing is taken back, and it still reads as before.
+        try await vault.save(added, credential: .google(GoogleGrant(refreshToken: "1//refresh-old", canSend: false, canChange: false)))
+        fake.allowed = [GoogleOAuth.readScope]
+        let again = try await store.googleSignIn(for: added.id, sending: false)
+        await #expect(throws: OutsideAccountError.problem(.notAllowed)) {
+            try await store.allowGoogleChanges(added.id, again, callback: fake.page(again.url, again.callbackScheme))
+        }
+        #expect(fake.revoked.isEmpty)
+        #expect(try await vault.credential(for: added.id) == .google(GoogleGrant(refreshToken: "1//refresh-old", canSend: false, canChange: false)))
     }
 
     @Test func aSignInRequestForAddingCantTurnOnSending() async throws {
         let fake = FakeGoogle()
         let (store, _) = try store(fake)
         let added = try await add(store, fake)
-        let request = try await store.googleSignIn(sendingFor: nil)
+        let request = try await store.googleSignIn(for: nil, sending: false)
         await #expect(throws: OutsideAccountError.notFound) {
             try await store.allowGoogleSending(added.id, request, callback: fake.page(request.url, request.callbackScheme))
         }
@@ -314,7 +354,7 @@ private struct NoMailServer: MailServer {
         let root = try ContentRootKey.generate()
         let vault = MailVault(store: MailMemoryStore(), rootKey: root, account: alice, secrets: MailMemoryKeys())
         let store = try ServerMailStore(account: alice, rootKey: root, vault: vault, server: NoMailServer(), canPublish: { false }, username: { "mckay" })
-        await #expect(throws: OutsideAccountError.notSetUp) { _ = try await store.googleSignIn(sendingFor: nil) }
+        await #expect(throws: OutsideAccountError.notSetUp) { _ = try await store.googleSignIn(for: nil, sending: false) }
     }
 
     @Test func anotherAccountOnTheSameDeviceCantSeeOrUseTheGrant() async throws {
@@ -324,7 +364,7 @@ private struct NoMailServer: MailServer {
         let (theirs, theirVault) = try store(fake, keys: keys, account: bob, blobs: blobs, root: root)
         #expect(try await theirs.outsideAccounts().isEmpty)
         #expect(try await theirVault.credential(for: added.id) == nil)
-        await #expect(throws: OutsideAccountError.notFound) { _ = try await theirs.googleSignIn(sendingFor: added.id) }
+        await #expect(throws: OutsideAccountError.notFound) { _ = try await theirs.googleSignIn(for: added.id, sending: true) }
     }
 }
 

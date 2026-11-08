@@ -120,6 +120,7 @@ public enum MailWording {
         case .folder(.spam): ("No spam", "Mail that looks like spam lands here.")
         case .folder(.trash): ("Trash is empty", "Mail you delete stays here for 30 days, then it's gone for good.")
         case .folder(.own): ("Nothing in this folder", "Move a conversation here to keep it.")
+        case .outside: ("Nothing here", "Mail from the last 90 days with this tab or label shows here.")
         }
     }
 }

@@ -71,7 +71,7 @@ public final class OutsideAccountsModel {
         isAdding = true
         defer { isAdding = false }
         do {
-            let request = try await store.googleSignIn(sendingFor: nil)
+            let request = try await store.googleSignIn(for: nil, sending: false)
             let callback = try await web(request.url, request.callbackScheme)
             _ = try await store.addGoogle(request, callback: callback)
             await load()
@@ -93,9 +93,18 @@ public final class OutsideAccountsModel {
             return
         }
         await change(account) {
-            let request = try await self.store.googleSignIn(sendingFor: account.id)
+            let request = try await self.store.googleSignIn(for: account.id, sending: true)
             let callback = try await web(request.url, request.callbackScheme)
             try await self.store.allowGoogleSending(account.id, request, callback: callback)
+        }
+    }
+
+    /// Asks Google once more, for a Gmail account added when Totality could only read it.
+    public func allowChanges(_ account: OutsideAccount, signingIn web: @escaping OutsideWebSignIn) async {
+        await change(account) {
+            let request = try await self.store.googleSignIn(for: account.id, sending: false)
+            let callback = try await web(request.url, request.callbackScheme)
+            try await self.store.allowGoogleChanges(account.id, request, callback: callback)
         }
     }
 

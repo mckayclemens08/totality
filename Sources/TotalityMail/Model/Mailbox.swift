@@ -4,6 +4,8 @@ import Foundation
 public enum MailPlace: Hashable, Sendable {
     case folder(MailFolder)
     case starred
+    /// One of an outside account's own places: a Gmail tab or label, by the account and the label's ID.
+    case outside(UUID, String)
 
     public static let inbox = MailPlace.folder(.inbox)
     /// In the order the folder list shows them. The person's own folders follow.
@@ -20,8 +22,14 @@ public enum MailPlace: Hashable, Sendable {
 
     func lists(_ message: MailMessage) -> Bool {
         switch self {
+        // Gmail's Inbox is its Primary tab: mail in its other tabs shows there instead.
+        case .folder(.inbox): message.marks.folder == .inbox && !message.isInOtherTab
         case .folder(let folder): message.marks.folder == folder
         case .starred: message.marks.isStarred
+        case .outside(let account, let label):
+            message.outsideAccount?.id == account && message.outsideLabels.contains(label)
+                // A tab only holds what's still in the Inbox, as in Gmail. A label holds it wherever it is.
+                && (!OutsideLabel(id: label, name: "").isTab || message.marks.folder == .inbox)
         }
     }
 
@@ -81,6 +89,8 @@ public struct Mailbox: Sendable, Equatable {
     public var isFull: Bool
     /// What's being written, newest first. Drafts aren't messages until they're sent.
     public var drafts: [MailDraft]
+    /// Each outside account's own places, shown under its address.
+    public var outsidePlaces: [OutsidePlaces] = []
 
     public init(
         address: String = "", messages: [MailMessage] = [], settings: MailSettings = MailSettings(), isFull: Bool = false,
@@ -101,6 +111,8 @@ public struct Mailbox: Sendable, Equatable {
         switch place {
         case .starred: "Starred"
         case .folder(let folder): name(of: folder)
+        case .outside(let account, let label):
+            outsidePlaces.first { $0.account.id == account }?.labels.first { $0.id == label }?.name ?? "Label"
         }
     }
 

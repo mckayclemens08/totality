@@ -38,6 +38,7 @@ public struct GoogleSignInRequest: Sendable, CustomStringConvertible, CustomDebu
     let state: String
     let verifier: String
     let scopes: [String]
+    let purpose: GoogleSignInPurpose
 
     public var description: String { "Google sign-in" }
     public var debugDescription: String { description }
@@ -49,9 +50,13 @@ public struct GoogleSignInRequest: Sendable, CustomStringConvertible, CustomDebu
 /// no client secret, because an app can't keep one. Then Gmail's own API, which is how a Google sign-in
 /// reaches the mail. Every address here is fixed in code.
 public struct GoogleOAuth: Sendable {
-    /// Read only. Asked for when the account is added.
+    /// Read only. What accounts added before 2026-11-07 were given. They're asked once to allow changes.
     public static let readScope = "https://www.googleapis.com/auth/gmail.readonly"
-    /// Send only, never read. Asked for separately, only when the Send switch is turned on.
+    /// Read and change, so read state, stars, archiving and Trash reach Gmail. Asked for when the
+    /// account is added. Google lets this one send too, which the owner agreed (CLAUDE.md rule 8), but
+    /// Totality sends only after `sendScope` is separately allowed for the account.
+    public static let changeScope = "https://www.googleapis.com/auth/gmail.modify"
+    /// Send. Asked for separately, only when the Send switch is turned on.
     public static let sendScope = "https://www.googleapis.com/auth/gmail.send"
 
     static let authorizeURL = URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!
@@ -77,10 +82,11 @@ public struct GoogleOAuth: Sendable {
     var callbackScheme: String { "com.googleusercontent.apps." + clientID.dropLast(Self.clientSuffix.count) }
     var redirectURI: String { callbackScheme + ":/oauth2redirect" }
 
-    /// To add an account: read only, choosing which Google account. To turn sending on: reading and
-    /// sending together, for the account already added.
-    func request(sendingFor address: String? = nil) -> GoogleSignInRequest {
-        let scopes = address == nil ? [Self.readScope] : [Self.readScope, Self.sendScope]
+    /// To add an account, choosing which Google account. To allow changes, or sending as well, for an
+    /// account already added.
+    func request(_ purpose: GoogleSignInPurpose = .add) -> GoogleSignInRequest {
+        let scopes = purpose.sends ? [Self.changeScope, Self.sendScope] : [Self.changeScope]
+        let address = purpose.address
         let state = Self.random(), verifier = Self.random()
         let challenge = Self.base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
         var components = URLComponents(url: Self.authorizeURL, resolvingAgainstBaseURL: false)!
@@ -99,7 +105,9 @@ public struct GoogleOAuth: Sendable {
         components.queryItems = items
         // `+` in a query reads as a space to some servers, so it's always escaped.
         components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-        return GoogleSignInRequest(url: components.url!, callbackScheme: callbackScheme, state: state, verifier: verifier, scopes: scopes)
+        return GoogleSignInRequest(
+            url: components.url!, callbackScheme: callbackScheme, state: state, verifier: verifier, scopes: scopes, purpose: purpose
+        )
     }
 
     /// Checks what Google sent back and swaps it for tokens. It has to be the answer to this request,
@@ -128,7 +136,7 @@ public struct GoogleOAuth: Sendable {
         guard request.scopes.allSatisfy(allowed.contains) else {
             // Taking a token back at Google takes back everything this app was given, so it's only done
             // when nothing was added yet. Turning sending on for an account that reads keeps its reading.
-            if request.scopes == [Self.readScope] { await revoke(refresh) }
+            if request.purpose == .add { await revoke(refresh) }
             throw OutsideMailProblem.notAllowed
         }
         return GoogleTokens(refreshToken: refresh, accessToken: answer.access_token)
@@ -226,6 +234,24 @@ public struct GoogleOAuth: Sendable {
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
     }
+}
+
+/// Why Google's page is being opened.
+enum GoogleSignInPurpose: Equatable, Sendable {
+    case add
+    /// An account added with read only, asked to allow changes.
+    case change(String)
+    /// Sending turned on, with changes as well.
+    case send(String)
+
+    var address: String? {
+        switch self {
+        case .add: nil
+        case .change(let address), .send(let address): address
+        }
+    }
+
+    var sends: Bool { if case .send = self { true } else { false } }
 }
 
 /// What a finished Google sign-in hands back. The access token is used straight away and dropped.
