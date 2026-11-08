@@ -8,6 +8,7 @@ import TotalityUI
 public struct PhotosHomeView: View {
     @Bindable private var model: PhotosModel
     private let onClose: (() -> Void)?
+    private let onOpenAccount: (() -> Void)?
     @State private var picked: [PhotosPickerItem] = []
     @State private var viewing: Viewing?
     @State private var tab = Tab.library
@@ -21,9 +22,11 @@ public struct PhotosHomeView: View {
         let start: UUID
     }
 
-    public init(model: PhotosModel, onClose: (() -> Void)? = nil) {
+    /// `onOpenAccount` shows the account, where signing in and the recovery key live.
+    public init(model: PhotosModel, onClose: (() -> Void)? = nil, onOpenAccount: (() -> Void)? = nil) {
         self.model = model
         self.onClose = onClose
+        self.onOpenAccount = onOpenAccount
     }
 
     public var body: some View {
@@ -64,6 +67,17 @@ public struct PhotosHomeView: View {
             Text(model.notice ?? "")
         }
         .task { await model.load() }
+        .onChange(of: model.requestedItem, initial: true) { openRequested() }
+        .onChange(of: model.phase) { openRequested() }
+    }
+
+    /// A photo picked on the home tile opens in the viewer, over the library.
+    private func openRequested() {
+        guard model.phase == .ready, model.requestedItem != nil else { return }
+        guard let id = model.takeRequest() else { return }
+        tab = .library
+        path.removeAll()
+        viewing = Viewing(scope: .library, start: id)
     }
 
     private func open(_ item: PhotoItem, in scope: PhotosModel.Scope) {
@@ -100,6 +114,18 @@ public struct PhotosHomeView: View {
         #endif
     }
 
+    private var fixButton: (label: String, action: () -> Void)? {
+        switch model.fix {
+        case .openAccount:
+            guard let onOpenAccount else { return nil }
+            return ("Open your account", onOpenAccount)
+        case .tryAgain:
+            return ("Try again", { Task { await model.tryAgain() } })
+        case nil:
+            return nil
+        }
+    }
+
     private func addButton(label: String) -> some View {
         let isAdding = model.isAdding
         return PhotosPicker(selection: $picked, matching: .any(of: [.images, .videos, .livePhotos]), preferredItemEncoding: .current, photoLibrary: .shared()) {
@@ -117,7 +143,18 @@ public struct PhotosHomeView: View {
         case .loading:
             PhotosMessage(systemImage: nil, title: "Opening your photos", detail: nil)
         case .unavailable(let title, let detail):
-            PhotosMessage(systemImage: "lock.slash", title: title, detail: detail)
+            VStack(spacing: Space.s5) {
+                PhotosMessage(systemImage: model.fix == .tryAgain ? "exclamationmark.triangle" : "lock.slash", title: title, detail: detail)
+                if let fix = fixButton {
+                    Button(fix.label, action: fix.action)
+                        .font(Typeface.callout)
+                        .padding(.horizontal, Space.s5)
+                        .padding(.vertical, Space.s3)
+                        .neumorphic(.raised, in: Capsule())
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.current.accent.color)
+                }
+            }
         case .ready where tab == .albums:
             AlbumsScreen(model: model) { path.append($0) }
         case .ready where model.items(in: .library).isEmpty:
@@ -209,9 +246,10 @@ struct LibraryFooter: View {
                 Text(waiting).foregroundStyle(model.isFull ? theme.danger.color : theme.textSecondary.color)
             }
             if model.unreadable > 0 {
-                Text(model.unreadable == 1
+                Text((model.unreadable == 1
                     ? "One photo can't be opened with this device's key."
                     : "\(model.unreadable) photos can't be opened with this device's key.")
+                    + " Check in your account that this device has joined your recovery key.")
                     .foregroundStyle(theme.textSecondary.color)
             }
             if let usage = model.usageLine {
@@ -312,6 +350,10 @@ struct PhotoCell: View {
     }
 
     private var label: String {
+        Self.label(of: item, showsDaysLeft: showsDaysLeft)
+    }
+
+    static func label(of item: PhotoItem, showsDaysLeft: Bool = false) -> String {
         let kind = item.details.isVideo ? "Video" : item.details.isLive ? "Live Photo" : "Photo"
         var parts = ["\(kind) from \(item.date.formatted(date: .long, time: .shortened))"]
         if item.details.isVideo, let duration = item.details.duration { parts.append(PhotosModel.durationText(duration)) }

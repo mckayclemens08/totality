@@ -309,7 +309,8 @@ neither module imports the other. Like mail, the Oracle server has no backup yet
 
 Spec agreed with the owner on 2026-11-05, in issue 54. Step 2 is adding and viewing, and step 3 is
 albums, favourites, captions, Recently Deleted, and saving back to Photos. Step 4 is video, Live Photos,
-and uploads that carry on. Sharing comes in step 5.
+and uploads that carry on. Step 5 is the home tile and the empty and error states. Sharing is not built:
+it's an open decision for the owner (see below).
 
 - **Everything is sealed on the device first** (non-negotiable 2). Each photo has three parts, each sealed
   with its own key from the content key: the original exactly as added (`.photo`), a 480-pixel thumbnail
@@ -363,6 +364,17 @@ and uploads that carry on. Sharing comes in step 5.
 - **Save to Photos** asks iOS for add-only access, so Totality can't read the device's library, and says
   first that the copy there isn't sealed. **Info** reads the camera and place from the original on the
   device, and shows the place as coordinates, never looked up by name.
+- **The home tile** (step 5) shows the newest photos, four to a row, one to three rows by the tile's
+  size, and never Recently Deleted. Thumbnails are opened on the device the same way the library opens
+  them. A photo picked there opens in the viewer only if it's still in that account's library, so a
+  request can't reach another account's photos or one deleted since. The tile shows only when Photos has
+  a library, so a device that can't open one shows the plain module tile.
+- **Empty and error states.** Each reason Photos can't open says so and what to do: signed out, this
+  device not yet joined to the recovery key, the device's key belonging to another account (each with a
+  button to the account), and a library that couldn't be read (Try again).
+- **Sharing is not built.** Sharing a photo means another account reading blobs in the owner's folder,
+  which the blob store refuses by design (each account reads only its own folder), and a schema for
+  grants that the Reader's sharing never got either. Both need the owner's choice, written up in issue 54.
 
 ## Mail
 
