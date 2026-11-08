@@ -60,3 +60,49 @@ describe('Photos two-user test', () => {
     }
   })
 })
+
+const addAlbum = (user, fields = {}) => as(db, user, async (q) => {
+  const id = randomUUID()
+  await q(`insert into public.content_objects (id, owner_id, kind, key_ref, meta_cipher, meta_plain)
+           values ($1, $2, 'photo_album', $3, $4, $5)`,
+    [id, fields.owner ?? user.id, `crk:${id}`, Buffer.from('sealed name'), JSON.stringify(fields.meta_plain ?? {})])
+  return id
+})
+
+describe('Photos two-user test: albums and changes (step 3)', () => {
+  test("user 2 can't list, rename, or delete user 1's albums", async () => {
+    const [user1, user2] = await pair()
+    const id = await addAlbum(user1)
+    const albumsOf = (viewer) => as(db, viewer, (q) => q(`select id from public.content_objects where kind = 'photo_album' and owner_id = $1`, [user1.id]))
+    assert.deepEqual((await albumsOf(user1)).map(({ id }) => id), [id])
+    assert.deepEqual(await albumsOf(user2), [])
+    await as(db, user2, (q) => q('update public.content_objects set meta_cipher = $1 where id = $2', [Buffer.from('x'), id]))
+    await as(db, user2, (q) => q('delete from public.content_objects where id = $1', [id]))
+    const [after] = await as(db, user1, (q) => q('select meta_cipher from public.content_objects where id = $1', [id]))
+    assert.equal(Buffer.from(after.meta_cipher).toString(), 'sealed name')
+  })
+
+  test('an album name can never be stored readable, or planted under someone else', async () => {
+    const [user1, user2] = await pair()
+    await assert.rejects(addAlbum(user1, { meta_plain: { name: 'Zion' } }), /meta_plain_allowlist/)
+    await assert.rejects(addAlbum(user2, { owner: user1.id }))
+  })
+
+  test("user 1 changes and deletes their own photo, and user 2 still can't", async () => {
+    const [user1, user2] = await pair()
+    const id = await addPhoto(user1)
+    // A change only lands if the row is still what the device last saw.
+    const changed = await as(db, user1, (q) => q(
+      'update public.content_objects set meta_cipher = $1, content_hash = $2 where id = $3 and content_hash is not distinct from $4 returning id',
+      [Buffer.from('new sealed details'), Buffer.from('h2'), id, null]))
+    assert.equal(changed.length, 1)
+    const stale = await as(db, user1, (q) => q(
+      'update public.content_objects set meta_cipher = $1 where id = $2 and content_hash = $3 returning id',
+      [Buffer.from('older'), id, Buffer.from('h1')]))
+    assert.equal(stale.length, 0)
+    await as(db, user2, (q) => q('delete from public.content_objects where id = $1', [id]))
+    assert.deepEqual(await photosOf(user1, user1), [id])
+    await as(db, user1, (q) => q('delete from public.content_objects where id = $1', [id]))
+    assert.deepEqual(await photosOf(user1, user1), [])
+  })
+})

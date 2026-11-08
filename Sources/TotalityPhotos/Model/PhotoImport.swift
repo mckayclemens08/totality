@@ -41,6 +41,46 @@ public enum PhotoImport {
         return Prepared(thumbnail: thumbnail, width: width, height: height, taken: takenDate(properties), type: type)
     }
 
+    /// What the original says about itself, for Info. Read on the device, from the opened original.
+    public struct Info: Sendable, Equatable {
+        public var camera: String?
+        public var lens: String?
+        /// Degrees, north and east positive.
+        public var latitude: Double?
+        public var longitude: Double?
+
+        /// The place as coordinates. It's never looked up by name, which would send it to a server.
+        public var place: String? {
+            guard let latitude, let longitude else { return nil }
+            let lat = String(format: "%.4f° %@", abs(latitude), latitude >= 0 ? "N" : "S")
+            let lon = String(format: "%.4f° %@", abs(longitude), longitude >= 0 ? "E" : "W")
+            return "\(lat), \(lon)"
+        }
+    }
+
+    public static func info(from data: Data) -> Info {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        else { return Info() }
+        var info = Info()
+        let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        let make = (tiff[kCGImagePropertyTIFFMake] as? String)?.trimmingCharacters(in: .whitespaces)
+        let model = (tiff[kCGImagePropertyTIFFModel] as? String)?.trimmingCharacters(in: .whitespaces)
+        switch (make, model) {
+        case let (make?, model?) where model.hasPrefix(make): info.camera = model
+        case let (make?, model?): info.camera = "\(make) \(model)"
+        case let (make, model): info.camera = model ?? make
+        }
+        info.lens = exif[kCGImagePropertyExifLensModel] as? String
+        if let gps = properties[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+           let lat = gps[kCGImagePropertyGPSLatitude] as? Double, let lon = gps[kCGImagePropertyGPSLongitude] as? Double {
+            info.latitude = (gps[kCGImagePropertyGPSLatitudeRef] as? String) == "S" ? -lat : lat
+            info.longitude = (gps[kCGImagePropertyGPSLongitudeRef] as? String) == "W" ? -lon : lon
+        }
+        return info
+    }
+
     /// An image no bigger than `side` on its longest edge, the right way up.
     public static func image(from data: Data, side: Int) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
