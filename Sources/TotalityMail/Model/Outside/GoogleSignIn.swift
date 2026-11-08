@@ -147,7 +147,7 @@ public struct GoogleOAuth: Sendable {
     func address(accessToken: String) async throws -> String {
         var request = URLRequest(url: Self.profileURL)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await send(request)
+        let (data, response) = try await sendRequest(request)
         switch response.statusCode {
         case 200: break
         case 401: throw OutsideMailProblem.expired
@@ -167,7 +167,7 @@ public struct GoogleOAuth: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = Self.form(["token": refreshToken])
-        _ = try? await send(request)
+        _ = try? await sendRequest(request)
     }
 
     private struct TokenAnswer: Decodable {
@@ -181,7 +181,7 @@ public struct GoogleOAuth: Sendable {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = Self.form(fields)
-        let (data, response) = try await send(request)
+        let (data, response) = try await sendRequest(request)
         guard response.statusCode == 200 else {
             struct Refusal: Decodable { let error: String }
             let error = try? JSONDecoder().decode(Refusal.self, from: data).error
@@ -195,7 +195,7 @@ public struct GoogleOAuth: Sendable {
         return answer
     }
 
-    private func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    func sendRequest(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {
             return try await http.send(request)
         } catch {

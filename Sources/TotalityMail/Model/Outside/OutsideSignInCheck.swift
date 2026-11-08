@@ -3,7 +3,7 @@ import Foundation
 /// Checks an outside account before anything about it is saved: that it signs in for reading, and, when
 /// its Send switch is turned on, for sending. Each connection signs straight out again.
 public struct OutsideSignInCheck: Sendable {
-    private let maker: any OutsideWireMaker
+    let maker: any OutsideWireMaker
 
     public init(maker: any OutsideWireMaker = StreamTaskWireMaker()) {
         self.maker = maker
