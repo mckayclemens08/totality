@@ -18,7 +18,7 @@
 	<key>NSRequiresAquaSystemAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Lets a site you're on use your camera when you agree. Totality doesn't record or keep anything.</string>
+	<string>Takes a photo to send in Messages, and lets a site you're on use your camera when you agree. Totality keeps nothing you don't send.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Lets a site you're on see your location when you agree. Totality doesn't keep it.</string>
 	<key>NSMicrophoneUsageDescription</key>

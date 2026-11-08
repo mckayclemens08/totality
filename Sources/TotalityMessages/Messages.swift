@@ -48,8 +48,17 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
         case sent
     }
 
+    public enum Kind: Sendable, Equatable {
+        case text
+        /// A photo, sealed on the sender's device. Its size helps lay it out before it opens.
+        case photo(width: Int?, height: Int?)
+        /// Removed by its sender. Only the fact that something was there remains.
+        case deleted
+    }
+
     public let id: String
     public let sender: String
+    /// The text, or a short description for a photo or a deleted message.
     public let body: String
     public let isOwn: Bool
     public let time: Date
@@ -58,10 +67,16 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
     public let decrypted: Bool
     /// Someone else in the chat has read up to this message or past it.
     public var seen: Bool
+    public let kind: Kind
+    public let reactions: [ChatReaction]
+    public let replyTo: ReplyPreview?
+    /// The server has it, so it can be replied to.
+    public let canReply: Bool
 
     public init(
         id: String, sender: String, body: String, isOwn: Bool, time: Date,
-        state: State = .sent, decrypted: Bool = true, seen: Bool = false
+        state: State = .sent, decrypted: Bool = true, seen: Bool = false,
+        kind: Kind = .text, reactions: [ChatReaction] = [], replyTo: ReplyPreview? = nil, canReply: Bool = true
     ) {
         self.id = id
         self.sender = sender
@@ -71,7 +86,46 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
         self.state = state
         self.decrypted = decrypted
         self.seen = seen
+        self.kind = kind
+        self.reactions = reactions
+        self.replyTo = replyTo
+        self.canReply = canReply
     }
+
+    /// Only your own messages, and only once they exist on the server or failed to get there.
+    public var canDelete: Bool { isOwn && kind != .deleted }
+    /// Text you can copy. Photos and deleted messages have none.
+    public var copyableText: String? { kind == .text && decrypted ? body : nil }
+    public var isPhoto: Bool { if case .photo = kind { true } else { false } }
+}
+
+/// One reaction on a message: which emoji, how many people, and whether you're one of them.
+public struct ChatReaction: Sendable, Equatable, Hashable {
+    public let key: String
+    public let count: Int
+    public let mine: Bool
+
+    public init(key: String, count: Int, mine: Bool) {
+        self.key = key
+        self.count = count
+        self.mine = mine
+    }
+}
+
+/// The message a reply answers, shown above it.
+public struct ReplyPreview: Sendable, Equatable {
+    public let sender: String
+    public let text: String
+
+    public init(sender: String, text: String) {
+        self.sender = sender
+        self.text = text
+    }
+}
+
+/// The few reactions a long press offers: four, so they fit in one row of the menu.
+public enum QuickReactions {
+    public static let all = ["❤️", "😂", "👍", "😢"]
 }
 
 /// Whether the device can reach the Matrix server right now.
@@ -186,8 +240,18 @@ public protocol ChatChannel: AnyObject, Sendable {
         typing: @escaping @Sendable ([String]) -> Void
     ) async
     func loadEarlier() async
-    func send(_ text: String) async throws
+    /// Sends text, as a reply when `replyingTo` names a message.
+    func send(_ text: String, replyingTo: String?) async throws
+    /// Sends a photo. The SDK seals it on this device before it's uploaded, and the key travels inside
+    /// the encrypted message.
+    func sendPhoto(_ photo: OutgoingPhoto, replyingTo: String?) async throws
     func retry(_ message: String) async throws
+    /// Adds your reaction, or takes it away if it's already there.
+    func toggleReaction(_ key: String, on message: String) async throws
+    /// Removes your message for everyone in the chat.
+    func delete(_ message: String) async throws
+    /// A photo's bytes, opened on this device. `thumbnail` asks for the small version.
+    func photo(_ message: String, thumbnail: Bool) async throws -> Data
     /// A private receipt when `share` is off, so your own devices still know what you've read.
     func markRead(share: Bool) async
     func setTyping(_ typing: Bool) async
