@@ -140,6 +140,48 @@ private final class Progress: @unchecked Sendable {
         return (store, service, vault, root, gate)
     }
 
+    /// Issue 43's third two-user case: user 1 answers user 2's Totality mail from Gmail, and user 2 gets
+    /// it as outside mail, labelled so, through the same path as any other mail from outside.
+    @Test func aReplyFromUserOnesGmailReachesUserTwoAsOutsideMail() async throws {
+        let fake = FakeGoogle()
+        let userOne = "8d3f6a1e-2b4c-4e5f-9a7b-0c1d2e3f4a5b"
+        let oneRoot = try ContentRootKey.generate()
+        let oneVault = MailVault(store: MailMemoryStore(), rootKey: oneRoot, account: userOne, secrets: MailMemoryKeys())
+        let oneServer = FakeMailService()
+        let one = try ServerMailStore(
+            account: userOne, rootKey: oneRoot, vault: oneVault, server: oneServer, canPublish: { true }, username: { "carter" },
+            google: GoogleOAuth(clientID: "204117362514-q4f8kd2lmz0x7r1t9vbn3c6hwyas5pe0.apps.googleusercontent.com", http: fake)
+        )
+        let adding = try await one.googleSignIn(for: nil, sending: false)
+        let gmail = try await one.addGoogle(adding, callback: fake.page(adding.url, adding.callbackScheme))
+        let sending = try await one.googleSignIn(for: gmail.id, sending: true)
+        try await one.allowGoogleSending(gmail.id, sending, callback: fake.page(sending.url, sending.callbackScheme))
+        let draft = MailDraft(
+            to: [MailAddress(name: "McKay Clemens", address: "mckay@usetotality.com")], subject: "Re: Totality Email U2U Test",
+            body: "Yes, I can see your reply.",
+            origin: MailDraftOrigin(kind: .reply, message: UUID(), messageID: "4c1f0e2a-7b3d-4e5f-9a8b-1c2d3e4f5a6b@usetotality.com", references: []),
+            from: gmail.id
+        )
+        let result = try await one.send(draft)
+        #expect(result.recipients.map(\.outcome) == [.sentOutside])
+        // Nothing went through Totality's server: no sealed copy for user 2, no Sent copy kept there.
+        #expect(await oneServer.files.isEmpty)
+        let raw = try #require(fake.sentMessages.first)
+
+        // Gmail hands it on; Totality's mail server seals it to user 2's key, as it does all outside mail.
+        let (two, service, _, root, _) = try await setUp()
+        let arrived = UUID()
+        let facts = #"{"version":1,"received":"2026-11-08T07:02:11.000Z","spam":{"score":0.3,"flagged":false}}"#
+        let text = facts + "\n" + raw.replacingOccurrences(of: "\r\n", with: "\n")
+        await service.add(arrived, sealed: try sealed(text, to: root, message: arrived), received: received)
+        let message = try #require(try await two.open { _ in }.mailbox.messages.first { $0.id == arrived })
+        #expect(message.from.address == "mckay.clemens@gmail.com" && message.subject == "Re: Totality Email U2U Test")
+        #expect(message.route == .outside && message.outsideAccount == nil)
+        #expect(MailWording.route(for: message) == MailWording.outside)
+        // It names the message it answers, so it joins that conversation.
+        #expect(message.references.contains("4c1f0e2a-7b3d-4e5f-9a8b-1c2d3e4f5a6b@usetotality.com"))
+    }
+
     @Test func openDownloadsOpensParsesAndKeeps() async throws {
         let (store, service, vault, root, _) = try await setUp()
         await service.add(ferry, sealed: try sealed(ferryMail, to: root, message: ferry), received: received)

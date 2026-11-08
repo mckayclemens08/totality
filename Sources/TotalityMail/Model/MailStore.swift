@@ -86,11 +86,15 @@ public protocol MailStore: Sendable {
     /// Downloads new mail from each outside account, straight from the provider, then returns everything
     /// stored. Nil when there are no outside accounts. A problem with one account never stops the others.
     func downloadOutside(progress: @escaping @Sendable (OutsideDownload) -> Void) async -> OutsideDownloadResult?
+    /// Searches each outside account at its provider for older mail and downloads what's found, then
+    /// returns everything stored. Only from the person's press. Nil when there are no outside accounts.
+    func searchOutside(_ query: String) async -> OutsideDownloadResult?
 }
 
 extension MailStore {
     public func address() async -> String? { nil }
     public func downloadOutside(progress: @escaping @Sendable (OutsideDownload) -> Void) async -> OutsideDownloadResult? { nil }
+    public func searchOutside(_ query: String) async -> OutsideDownloadResult? { nil }
 }
 
 /// A mailbox that can't be reached at all, for the reason it gives. Every call says the same thing.

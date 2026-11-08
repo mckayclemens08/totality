@@ -263,6 +263,8 @@ public actor ServerMailStore: MailStore {
         var mailbox = Mailbox(
             address: me.map(MailDomain.address(for:)) ?? "", messages: messages, settings: settings, drafts: try await vault.drafts()
         )
+        mailbox.outsideAccounts = outside.values.sorted { $0.address < $1.address }
+            .map { OutsideAccountLabel(id: $0.id, provider: $0.provider, address: $0.address) }
         mailbox.senders = outside.values.filter(\.canSend).sorted { $0.address < $1.address }
             .map { OutsideAccountLabel(id: $0.id, provider: $0.provider, address: $0.address) }
         mailbox.outsidePlaces = outside.values.sorted { $0.address < $1.address }.compactMap { account in
@@ -393,6 +395,32 @@ public actor ServerMailStore: MailStore {
     public func save(_ marks: [UUID: MailMarks]) async throws {
         try await vault.save(marks, at: now())
         if !fetchedIDs.isDisjoint(with: marks.keys) { await syncOutside([:]) }
+    }
+
+    public func searchOutside(_ query: String) async -> OutsideDownloadResult? {
+        guard let words = OutsideSearch.words(query), let accounts = try? await vault.outsideAccounts(), !accounts.isEmpty else { return nil }
+        let reader = OutsideReader(maker: outsideCheck.maker, google: google)
+        var problems: [String] = []
+        for account in accounts {
+            guard !Task.isCancelled else { break }
+            guard let credential = try? await vault.credential(for: account.id) else { continue }
+            let vault = vault
+            do {
+                try await reader.search(
+                    words, account: account, credential: credential,
+                    have: { try await vault.hasFetched(account.id, providerID: $0) },
+                    keep: { try await vault.keepFetched($0) }
+                )
+            } catch is CancellationError {
+                break
+            } catch {
+                let problem = (error as? OutsideAccountError) ?? .problem(OutsideMailProblem.from(error))
+                guard problem != .cancelled else { continue }
+                problems.append("\(account.address): \(OutsideWording.problem(problem, provider: account.provider))")
+            }
+        }
+        guard let mailbox = try? await stored() else { return nil }
+        return OutsideDownloadResult(mailbox: mailbox, problems: problems)
     }
 
     // MARK: Changes to outside accounts' mail

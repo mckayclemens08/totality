@@ -16,6 +16,24 @@ public enum OutsideWording {
         "This mail is kept by \(provider.keeper), who can read it. Totality doesn't seal it there. Your downloaded copy on this device is sealed."
     }
 
+    /// "Gmail", or "Gmail and iCloud", once each.
+    public static func names(_ providers: [OutsideProvider]) -> String {
+        var seen = Set<OutsideProvider>()
+        return providers.filter { seen.insert($0).inserted }.map(\.name).joined(separator: " and ")
+    }
+
+    public static func searchNote(_ names: String) -> String {
+        "Your search words go to \(names), who already keep that mail. What's found is downloaded to this device and sealed."
+    }
+
+    public static func searched(found: Int, in names: String) -> String {
+        switch found {
+        case 0: "Nothing more was found in \(names)."
+        case 1: "1 older message was found in \(names) and downloaded."
+        default: "\(found) older messages were found in \(names) and downloaded."
+        }
+    }
+
     /// The line in the composer when it's going from an outside account.
     public static func sendingThrough(_ provider: OutsideProvider) -> String {
         "This goes through \(provider.name) as ordinary email. It isn't end-to-end encrypted, even to Totality addresses, and \(provider.keeper) can read it."

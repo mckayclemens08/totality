@@ -45,6 +45,11 @@ struct MailListView: View {
                     ForEach(conversations) { conversation in
                         row(conversation)
                     }
+                    if isSearching {
+                        olderMail
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -89,10 +94,52 @@ struct MailListView: View {
             let words = MailWording.empty(model.place)
             MailStateView(systemImage: "tray", title: words.title, detail: words.detail)
         } else {
-            MailStateView(
-                systemImage: "magnifyingglass", title: "No mail matches",
-                detail: "Search covers the mail on this device, and nothing you type leaves it."
-            )
+            VStack(spacing: Space.s4) {
+                MailStateView(
+                    systemImage: "magnifyingglass", title: "No mail matches",
+                    detail: "Search covers the mail on this device, and nothing you type leaves it."
+                )
+                olderMail
+            }
+        }
+    }
+
+    private var isSearching: Bool {
+        !model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.mailbox.outsideAccounts.isEmpty
+    }
+
+    /// Outside accounts keep mail older than this device's 90 days. Looking there sends the words to
+    /// the provider, so it only happens on a press, and says so.
+    @ViewBuilder private var olderMail: some View {
+        if isSearching {
+            let theme = Theme.current
+            let names = OutsideWording.names(model.mailbox.outsideAccounts.map(\.provider))
+            let query = model.query.trimmingCharacters(in: .whitespacesAndNewlines)
+            let state = model.outsideSearch.flatMap { $0.query == query ? $0 : nil }
+            VStack(alignment: .leading, spacing: Space.s2) {
+                if state?.isSearching == true {
+                    Label("Searching \(names)…", systemImage: "magnifyingglass")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
+                } else if let state {
+                    Text(OutsideWording.searched(found: state.found, in: names))
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
+                    ForEach(state.problems, id: \.self) { problem in
+                        MailStrip(systemImage: "exclamationmark.triangle", text: problem, isWarning: true)
+                    }
+                } else {
+                    Button("Search \(names) for Older Mail", systemImage: "clock.arrow.circlepath") {
+                        Task { await model.searchOutside() }
+                    }
+                    .font(Typeface.body)
+                    Text(OutsideWording.searchNote(names))
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Space.s4)
         }
     }
 

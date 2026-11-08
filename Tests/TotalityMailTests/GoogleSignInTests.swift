@@ -30,6 +30,8 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
     var unreadNow: [String: Bool] = [:]
     private var changeLog: [String] = []
     private var sentLog: [String] = []
+    /// What was typed into Gmail's search, each time.
+    private(set) var searches: [String] = []
     /// Each message Totality handed Gmail to send, as Gmail got it.
     var sentMessages: [String] { lock.withLock { sentLog } }
     /// Each change Totality made at Gmail, as `modify <id> +A -B`, `trash <id>` or `untrash <id>`.
@@ -147,8 +149,18 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
             let messages = lock.withLock { inbox }
             if url.path == "/gmail/v1/users/me/messages" {
                 let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-                #expect(items.first { $0.name == "q" }?.value?.hasPrefix("after:") == true)
-                let label = items.first { $0.name == "labelIds" }?.value ?? ""
+                let q = items.first { $0.name == "q" }?.value ?? ""
+                guard let label = items.first(where: { $0.name == "labelIds" })?.value else {
+                    // Gmail's search box: every word somewhere in the message, Spam and Trash left out.
+                    lock.withLock { searches.append(q) }
+                    let found = messages.filter { message in
+                        let labels = labels(of: message.id)
+                        return !labels.contains("SPAM") && !labels.contains("TRASH")
+                            && q.split(separator: " ").allSatisfy { message.raw.localizedCaseInsensitiveContains($0) }
+                    }
+                    return Self.json(200, ["messages": found.map { ["id": $0.id, "threadId": $0.id] }])
+                }
+                #expect(q.hasPrefix("after:"))
                 let slowDown = lock.withLock { tooFast > 0 ? { tooFast -= 1; return true }() : false }
                 if slowDown {
                     return Self.json(403, ["error": ["code": 403, "message": "User-rate limit exceeded.", "status": "PERMISSION_DENIED",
