@@ -10,4 +10,4 @@ TOTALITY_SEALED_STORE_URL = https:/$()/usetotality.com/blobs/
 // Sign in with Google, for Gmail (issue 43). It's an iOS OAuth client ID, which Google treats as public:
 // an installed app can't keep a secret, so it has none, and PKCE protects each sign-in instead. Empty
 // means Gmail can't be added in this build.
-TOTALITY_GOOGLE_CLIENT_ID =
+TOTALITY_GOOGLE_CLIENT_ID = 973899545310-9lefpoa9mm5sdel8kpf6mte6n6r6rg1f.apps.googleusercontent.com
