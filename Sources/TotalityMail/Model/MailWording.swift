@@ -25,7 +25,9 @@ public enum MailWording {
     /// key it handed out, so it says only that nobody could confirm it, beside its warning.
     public static func route(for message: MailMessage) -> String? {
         // Downloaded from an outside account: the provider keeps it unsealed, and says so first.
-        if let outside = message.outsideAccount { return OutsideWording.kept(by: outside.provider) }
+        if let outside = message.outsideAccount {
+            return message.outsideLabels.contains("SENT") ? OutsideWording.sent(through: outside.provider) : OutsideWording.kept(by: outside.provider)
+        }
         guard let route = message.route else { return nil }
         if route == .betweenAccounts, message.sentBy != nil {
             return message.proof == .proved && !message.senderKeyChanged ? betweenAccountsReceived : betweenAccountsUnconfirmed
@@ -98,6 +100,7 @@ public enum MailWording {
         case MailSendError.tooManyRecipients(let count): "A message can go to \(MailDraft.maxRecipients) people at most, and this one has \(count)."
         case MailSendError.tooBig: "It's over 25 MB. Remove an attachment and try again."
         case MailSendError.noAddress: "Your username isn't known yet, so there's no address to send from. Try again in a moment."
+        case MailSendError.cannotSendFrom: "That account can't send from Totality right now. Turn its Send switch on in Accounts, or send from your Totality address."
         case MailStoreError.offline: "You're offline. It's kept as a draft, so send it when you're back."
         case MailStoreError.waitingForBackup: "Mail can't send until your recovery key is set up. It's kept as a draft."
         case MailStoreError.keyConflict: "There's a problem with your mailbox, so nothing can send. It's kept as a draft."

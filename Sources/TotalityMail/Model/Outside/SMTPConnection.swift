@@ -4,7 +4,7 @@ import Foundation
 /// part only signs in and out, to check an account before its Send switch turns on. Sending comes in
 /// issue 43, step 4.
 final class SMTPConnection {
-    private let reader: WireReader
+    let reader: WireReader
 
     private init(_ wire: any OutsideWire) { reader = WireReader(wire) }
 

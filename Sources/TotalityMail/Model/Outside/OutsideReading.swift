@@ -184,14 +184,21 @@ extension GoogleOAuth {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(body)
         }
+        let data = try await gmailAnswer(request)
+        guard let answer = try? JSONDecoder().decode(Answer.self, from: data) else { throw OutsideMailProblem.unexpected }
+        return answer
+    }
+
+    /// Sends a request to Gmail and returns its answer, waiting out "too fast" and naming every other no.
+    func gmailAnswer(_ request: URLRequest) async throws -> Data {
         var wait = pause
         for attempt in 0... {
             let (data, response) = try await sendRequest(request)
             switch response.statusCode {
-            case 200:
-                guard let answer = try? JSONDecoder().decode(Answer.self, from: data) else { throw OutsideMailProblem.unexpected }
-                return answer
+            case 200: return data
             case 401: throw OutsideMailProblem.expired
+            case 400:
+                throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(GmailRefusal(data).message ?? "Gmail said no (400)."))
             case 403, 429:
                 let refusal = GmailRefusal(data)
                 // Gmail says "too fast" with a 403 as well as a 429. That's waited out, not a missing permission.
@@ -202,7 +209,7 @@ extension GoogleOAuth {
                 guard attempt < 4 else { throw OutsideMailProblem.unreachable }
                 try await Task.sleep(for: wait)
                 wait *= 2
-                case 404: throw GmailMissing.message
+            case 404: throw GmailMissing.message
             default: throw OutsideMailProblem.unreachable
             }
         }

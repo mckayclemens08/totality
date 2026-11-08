@@ -43,7 +43,17 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
     /// Each folder's UIDVALIDITY and messages.
     private var folders: [String: (validity: UInt32, messages: [Message])] = [
         "INBOX": (1_730_000_000, []), "Archive": (1_730_000_100, []), "Junk": (1_730_000_200, []), "Deleted Messages": (1_730_000_300, []),
+        "Sent Messages": (1_730_000_400, []),
     ]
+    /// A literal being read in: the APPEND's tag and how many bytes are still to come.
+    private var appending: (tag: String, left: Int, raw: String)?
+    /// What iCloud's sending server was handed: the envelope and the message, as it'd go out.
+    private(set) var smtpFrom: String?
+    private(set) var smtpTo: [String] = []
+    private(set) var smtpMessage: String?
+    private var smtpData: [String]?
+    /// Recipients the sending server turns down.
+    var refusesRecipients: Set<String> = []
     private var nextUID: UInt32 = 9000
     var acceptsPassword = true
     /// Says where moved mail went, as iCloud does. Off, it's like a server without UIDPLUS.
@@ -86,6 +96,7 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
     }
 
     func open(_ endpoint: OutsideEndpoint) -> any OutsideWire {
+        if endpoint == OutsideProvider.icloud.sending { return sending() }
         #expect(endpoint == OutsideProvider.icloud.reading)
         let accepts = acceptsPassword
         let selected = Locked<String?>(nil)
@@ -95,7 +106,55 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         }
     }
 
+    private func sending() -> any OutsideWire {
+        ScriptedWire(greeting: "220 smtp.mail.me.com ready\r\n") { [weak self] line in
+            guard let self else { return nil }
+            return self.lock.withLock { () -> String? in
+                if var data = self.smtpData {
+                    if line == "." {
+                        self.smtpMessage = data.joined(separator: "\r\n") + "\r\n"
+                        self.smtpData = nil
+                        return "250 2.0.0 Ok: queued\r\n"
+                    }
+                    data.append(line.hasPrefix("..") ? String(line.dropFirst()) : line)
+                    self.smtpData = data
+                    return nil
+                }
+                self.commands.append(line)
+                switch line {
+                case "EHLO [127.0.0.1]": return "250-smtp.mail.me.com\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n"
+                case "STARTTLS": return "220 go ahead\r\n"
+                case "QUIT": return "221 bye\r\n"
+                case "DATA": self.smtpData = []; return "354 go ahead\r\n"
+                case "RSET": return "250 ok\r\n"
+                default:
+                    if line.hasPrefix("AUTH PLAIN ") { return "235 accepted\r\n" }
+                    if line.hasPrefix("MAIL FROM:<") { self.smtpFrom = String(line.dropFirst(11).dropLast()); return "250 ok\r\n" }
+                    if line.hasPrefix("RCPT TO:<") {
+                        let to = String(line.dropFirst(9).dropLast())
+                        if self.refusesRecipients.contains(to) { return "550 5.1.1 no such user\r\n" }
+                        self.smtpTo.append(to)
+                        return "250 ok\r\n"
+                    }
+                    return "500 what\r\n"
+                }
+            }
+        }
+    }
+
     private func answer(_ line: String, accepts: Bool, selected: Locked<String?>) -> String? {
+        if var literal = appending {
+            if literal.left > 0 {
+                literal.left -= line.utf8.count + 2
+                literal.raw += line + "\r\n"
+                appending = literal
+                return nil
+            }
+            appending = nil
+            folders["Sent Messages"]!.messages.insert(Message(uid: nextUID, raw: literal.raw, seen: true), at: 0)
+            nextUID += 1
+            return "\(literal.tag) OK [APPENDUID 1730000400 \(nextUID - 1)] APPEND completed\r\n"
+        }
         commands.append(line)
         let parts = line.split(separator: " ", maxSplits: 2).map(String.init)
         guard parts.count >= 2 else { return nil }
@@ -110,7 +169,8 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
             return "* \(folder.messages.count) EXISTS\r\n* OK [UIDVALIDITY \(folder.validity)] UIDs valid\r\n\(tag) OK \(parts[1]) completed\r\n"
         case "LIST":
             return "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST (\\HasNoChildren \\Archive) \"/\" \"Archive\"\r\n"
-                + "* LIST (\\HasNoChildren \\Junk) \"/\" \"Junk\"\r\n* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted Messages\"\r\n\(tag) OK LIST completed\r\n"
+                + "* LIST (\\HasNoChildren \\Junk) \"/\" \"Junk\"\r\n* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted Messages\"\r\n"
+                + "* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent Messages\"\r\n\(tag) OK LIST completed\r\n"
         case "UID":
             guard let name = selected.value, var folder = folders[name] else { return "\(tag) BAD nothing selected\r\n" }
             if rest.hasPrefix("SEARCH SINCE ") {
@@ -157,6 +217,12 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
                 return said + "* 1 EXPUNGE\r\n\(tag) OK MOVE completed\r\n"
             default: return "\(tag) BAD what\r\n"
             }
+        case "APPEND":
+            guard rest.hasPrefix("\"Sent Messages\" (\\Seen) {"), let size = Int(rest.drop { $0 != "{" }.dropFirst().prefix { $0.isNumber }) else {
+                return "\(tag) NO what\r\n"
+            }
+            appending = (tag, size, "")
+            return "+ Ready for literal data\r\n"
         case "LOGOUT": return "* BYE\r\n\(tag) OK bye\r\n"
         default: return "\(tag) BAD what\r\n"
         }
@@ -443,6 +509,98 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         _ = await store.downloadOutside { _ in }
         #expect(icloud.sent.filter { $0.contains("MOVE") || $0.contains("STORE") }.count == moves)
         #expect(try message(await store.downloadOutside { _ in }?.mailbox, "Photos from the lake").marks.folder == .inbox)
+    }
+
+    // MARK: Sending from an outside account
+
+    private func turnOnGmailSending(_ store: ServerMailStore, _ fake: FakeGoogle, _ id: UUID) async throws {
+        let request = try await store.googleSignIn(for: id, sending: true)
+        try await store.allowGoogleSending(id, request, callback: fake.page(request.url, request.callbackScheme))
+    }
+
+    @Test func gmailSendsFromItsOwnAddressAndKeepsASentCopyHere() async throws {
+        let fake = FakeGoogle()
+        let (store, vault) = try store(google: fake)
+        let added = try await addGmail(store, fake)
+        let draft = MailDraft(
+            to: [MailAddress(name: "Rosa Delgado", address: "rosa@delgado-studio.com"), MailAddress(address: "carterbnielson@usetotality.com")],
+            bcc: [MailAddress(address: "dana.whitfield@icloud.com")], subject: "Kitchen drawings", body: "Thursday at ten works for me.",
+            from: added.id
+        )
+        // Its Send switch is off, so it can't.
+        await #expect(throws: MailSendError.cannotSendFrom) { _ = try await store.send(draft) }
+        #expect(fake.sentMessages.isEmpty)
+        try await vault.save(draft)
+        try await turnOnGmailSending(store, fake, added.id)
+        let result = try await store.send(draft)
+        #expect(result.recipients.map(\.outcome) == [.sentOutside, .sentOutside, .sentOutside])
+        #expect(result.remaining == nil)
+        let sent = try #require(fake.sentMessages.first)
+        #expect(sent.hasPrefix("From: mckay.clemens@gmail.com\r\n"))
+        // Gmail reads Bcc and takes it out itself; Totality addresses get it through Gmail, like anyone.
+        #expect(sent.contains("Bcc: dana.whitfield@icloud.com") && sent.contains("carterbnielson@usetotality.com"))
+        let mailbox = try #require(await store.downloadOutside { _ in }?.mailbox)
+        let copy = try #require(mailbox.messages.first { $0.id == result.sent })
+        #expect(copy.marks.folder == .sent && copy.proof == .proved && !copy.marks.isUnread)
+        #expect(MailWording.route(for: copy) == OutsideWording.sent(through: .gmail))
+        #expect(mailbox.senders.map(\.address) == ["mckay.clemens@gmail.com"])
+        #expect(try await vault.drafts().isEmpty)
+    }
+
+    @Test func iCloudSendsBySMTPAndFilesItInSentMessages() async throws {
+        let icloud = ICloudInbox()
+        icloud.refusesRecipients = ["nobody@nowhere.example"]
+        let (store, _) = try store(icloud: icloud)
+        let added = try await addICloud(store)
+        try await store.setOutsideSending(added.id, on: true)
+        let draft = MailDraft(
+            to: [MailAddress(address: "sam.okafor@me.com"), MailAddress(address: "nobody@nowhere.example")],
+            bcc: [MailAddress(address: "rosa@delgado-studio.com")], subject: "Photos from the lake",
+            body: "Here they are.\n.\nThe dot above stays a dot.", from: added.id
+        )
+        let result = try await store.send(draft)
+        #expect(result.recipients.map(\.outcome) == [.sentOutside, .refused, .sentOutside])
+        #expect(result.remaining?.recipients.map(\.address) == ["nobody@nowhere.example"])
+        #expect(icloud.smtpFrom == "mckay.clemens@icloud.com")
+        #expect(icloud.smtpTo == ["sam.okafor@me.com", "rosa@delgado-studio.com"])
+        let message = try #require(icloud.smtpMessage)
+        // Bcc only on the envelope. A line of one dot goes as quoted-printable, so it arrives whole.
+        #expect(!message.contains("Bcc:") && message.contains("=2E\r\nThe dot above"))
+        #expect(icloud.folder("Sent Messages").first?.raw.contains("Bcc: rosa@delgado-studio.com") == true)
+        let mailbox = try #require(await store.downloadOutside { _ in }?.mailbox)
+        #expect(mailbox.messages.first { $0.id == result.sent }?.marks.folder == .sent)
+    }
+
+    @MainActor @Test func aReplyToOutsideMailComesFromThatAccountWhenItCanSend() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today)]
+        let root = try ContentRootKey.generate()
+        let vault = MailVault(store: MailMemoryStore(), rootKey: root, account: alice, secrets: MailMemoryKeys())
+        let store = try ServerMailStore(
+            account: alice, rootKey: root, vault: vault, server: OfflineMailServer(), canPublish: { true }, username: { "mckay" },
+            now: { today }, google: GoogleOAuth(clientID: clientID, http: fake)
+        )
+        let added = try await addGmail(store, fake)
+        try await turnOnGmailSending(store, fake, added.id)
+        let model = MailModel(store: store)
+        await model.load()
+        let kitchen = try message(model.mailbox, "Kitchen drawings")
+        let composer = MailComposer.reply(to: kitchen, all: true, in: model)
+        #expect(composer.draft.from == added.id)
+        #expect(composer.draft.to.map(\.address) == ["rosa@delgado-studio.com"])
+        #expect(composer.draft.cc.isEmpty)
+        #expect(composer.routeNote?.text == OutsideWording.sendingThrough(.gmail))
+        #expect(composer.fromAddress == "mckay.clemens@gmail.com")
+        composer.send(from: nil)
+        #expect(composer.fromAddress == "mckay@usetotality.com" && composer.routeNote?.isSealed == false)
+    }
+
+    @Test func smtpDotsAndBccAreHandled() {
+        let raw = Data("From: a@icloud.com\r\nBcc: b@me.com,\r\n c@me.com\r\nSubject: x\r\n\r\n.hidden\r\nend\r\n".utf8)
+        #expect(String(decoding: raw.removingBcc, as: UTF8.self) == "From: a@icloud.com\r\nSubject: x\r\n\r\n.hidden\r\nend\r\n")
+        #expect(String(decoding: SMTPConnection.dotStuffed(raw.removingBcc), as: UTF8.self).hasSuffix("\r\n..hidden\r\nend\r\n.\r\n"))
+        #expect(!SMTPConnection.isPlainAddress("a@b.com>\r\nRCPT TO:<c@d.com"))
+        #expect(!SMTPConnection.isPlainAddress("rosa delgado@example.com"))
     }
 
     @Test func eachFieldGoesOneWay() {

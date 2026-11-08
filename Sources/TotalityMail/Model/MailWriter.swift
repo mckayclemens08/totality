@@ -11,8 +11,15 @@ public enum MailWriter {
     public static func write(
         _ draft: MailDraft, from username: String, message: UUID, date: Date, keepingBcc: Bool = false, timeZone: TimeZone = .current
     ) -> Data {
+        write(draft, fromAddress: MailDomain.address(for: username), message: message, date: date, keepingBcc: keepingBcc, timeZone: timeZone)
+    }
+
+    /// From an outside account's own address, to go through its provider.
+    public static func write(
+        _ draft: MailDraft, fromAddress: String, message: UUID, date: Date, keepingBcc: Bool = false, timeZone: TimeZone = .current
+    ) -> Data {
         var headers: [String] = []
-        headers.append("From: " + MailDomain.address(for: username))
+        headers.append("From: " + address(MailAddress(address: fromAddress)))
         if !draft.to.isEmpty { headers.append(addressField("To", draft.to)) }
         if !draft.cc.isEmpty { headers.append(addressField("Cc", draft.cc)) }
         if keepingBcc, !draft.bcc.isEmpty { headers.append(addressField("Bcc", draft.bcc)) }

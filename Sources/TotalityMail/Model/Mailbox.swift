@@ -91,6 +91,8 @@ public struct Mailbox: Sendable, Equatable {
     public var drafts: [MailDraft]
     /// Each outside account's own places, shown under its address.
     public var outsidePlaces: [OutsidePlaces] = []
+    /// Outside accounts that can send, for the From line.
+    public var senders: [OutsideAccountLabel] = []
 
     public init(
         address: String = "", messages: [MailMessage] = [], settings: MailSettings = MailSettings(), isFull: Bool = false,
