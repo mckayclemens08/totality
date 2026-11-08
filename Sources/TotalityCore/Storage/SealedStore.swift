@@ -71,10 +71,16 @@ public enum SealedStoreError: Error, Equatable, Sendable {
 public struct SealedStoreUsage: Codable, Equatable, Sendable {
     public let used: Int
     public let limit: Int
+    /// The server's clock when it answered, from its `Date` header, for anything that mustn't trust
+    /// this device's clock alone.
+    public var serverTime: Date?
 
-    public init(used: Int, limit: Int) {
+    private enum CodingKeys: String, CodingKey { case used, limit }
+
+    public init(used: Int, limit: Int, serverTime: Date? = nil) {
         self.used = used
         self.limit = limit
+        self.serverTime = serverTime
     }
 
     public var left: Int { max(0, limit - used) }
@@ -216,12 +222,22 @@ public struct SealedStoreClient: SealedStore {
     }
 
     public func usage() async throws -> SealedStoreUsage {
-        let (status, _, data) = try await send("usage", method: "GET")
+        let (status, headers, data) = try await send("usage", method: "GET")
         guard status == 200 else { throw Self.error(for: status) }
-        guard let usage = try? JSONDecoder().decode(SealedStoreUsage.self, from: data), usage.used >= 0, usage.limit >= 0 else {
+        guard var usage = try? JSONDecoder().decode(SealedStoreUsage.self, from: data), usage.used >= 0, usage.limit >= 0 else {
             throw SealedStoreError.unavailable
         }
+        usage.serverTime = headers["date"].flatMap(Self.httpDate)
         return usage
+    }
+
+    /// An HTTP date, like `Sun, 08 Nov 2026 06:12:00 GMT`.
+    static func httpDate(_ text: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: text)
     }
 
     public func list() async throws -> [SealedStoreEntry] {

@@ -9,8 +9,17 @@ public struct PhotosHomeView: View {
     @Bindable private var model: PhotosModel
     private let onClose: (() -> Void)?
     @State private var picked: [PhotosPickerItem] = []
-    @State private var viewing: UUID?
-    @State private var pinch: CGFloat = 1
+    @State private var viewing: Viewing?
+    @State private var tab = Tab.library
+    @State private var path: [PhotosModel.Scope] = []
+
+    enum Tab: Hashable { case library, albums }
+
+    /// The photo open full screen, and which photos the viewer moves through.
+    struct Viewing: Equatable {
+        let scope: PhotosModel.Scope
+        let start: UUID
+    }
 
     public init(model: PhotosModel, onClose: (() -> Void)? = nil) {
         self.model = model
@@ -19,12 +28,15 @@ public struct PhotosHomeView: View {
 
     public var body: some View {
         let theme = Theme.current
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(theme.bg.color)
                 .edgeSwipeBack(onClose)
                 .toolbar { toolbar }
+                .navigationDestination(for: PhotosModel.Scope.self) { scope in
+                    ScopeScreen(model: model, scope: scope) { open($0, in: scope) } onAlbumDeleted: { path.removeAll() }
+                }
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 #else
@@ -34,8 +46,10 @@ public struct PhotosHomeView: View {
         .tint(theme.accent.color)
         .overlay {
             if let viewing {
-                PhotoViewer(model: model, start: viewing) { withAnimation(Motion.quick) { self.viewing = nil } }
-                    .transition(.opacity)
+                PhotoViewer(model: model, scope: viewing.scope, start: viewing.start) {
+                    withAnimation(Motion.quick) { self.viewing = nil }
+                }
+                .transition(.opacity)
             }
         }
         .onChange(of: picked) {
@@ -52,6 +66,10 @@ public struct PhotosHomeView: View {
         .task { await model.load() }
     }
 
+    private func open(_ item: PhotoItem, in scope: PhotosModel.Scope) {
+        withAnimation(Motion.quick) { viewing = Viewing(scope: scope, start: item.id) }
+    }
+
     private var noticeShown: Binding<Bool> {
         Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })
     }
@@ -62,14 +80,24 @@ public struct PhotosHomeView: View {
                 Button("Home", systemImage: "circle.hexagongrid", action: onClose)
             }
         }
-        #if os(iOS)
-        ToolbarItem(placement: .principal) {
-            Text("Photos").font(Typeface.headline).foregroundStyle(Theme.current.textPrimary.color)
-        }
-        #endif
         if model.phase == .ready {
+            ToolbarItem(placement: .principal) {
+                Picker("Show", selection: $tab) {
+                    Text("Library").tag(Tab.library)
+                    Text("Albums").tag(Tab.albums)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
             ToolbarItem(placement: .primaryAction) { addButton(label: "Add") }
         }
+        #if os(iOS)
+        if model.phase != .ready {
+            ToolbarItem(placement: .principal) {
+                Text("Photos").font(Typeface.headline).foregroundStyle(Theme.current.textPrimary.color)
+            }
+        }
+        #endif
     }
 
     private func addButton(label: String) -> some View {
@@ -90,7 +118,9 @@ public struct PhotosHomeView: View {
             PhotosMessage(systemImage: nil, title: "Opening your photos", detail: nil)
         case .unavailable(let title, let detail):
             PhotosMessage(systemImage: "lock.slash", title: title, detail: detail)
-        case .ready where model.items.isEmpty:
+        case .ready where tab == .albums:
+            AlbumsScreen(model: model) { path.append($0) }
+        case .ready where model.items(in: .library).isEmpty:
             VStack(spacing: Space.s5) {
                 PhotosMessage(
                     systemImage: "photo.on.rectangle",
@@ -107,24 +137,31 @@ public struct PhotosHomeView: View {
                     .foregroundStyle(Theme.current.accent.color)
             }
         case .ready:
-            library
+            PhotoGrid(model: model, scope: .library) { open($0, in: .library) } footer: { LibraryFooter(model: model) }
         }
     }
+}
 
-    private var library: some View {
+/// Photos in months, newest first. Pinch to see more or fewer in a row.
+struct PhotoGrid<Footer: View>: View {
+    let model: PhotosModel
+    let scope: PhotosModel.Scope
+    let onOpen: (PhotoItem) -> Void
+    @ViewBuilder let footer: () -> Footer
+    @State private var pinch: CGFloat = 1
+
+    var body: some View {
         let theme = Theme.current
         let gap: CGFloat = 2
         let columns = Array(repeating: GridItem(.flexible(), spacing: gap), count: model.columns)
-        return ScrollView {
+        ScrollView {
             LazyVStack(alignment: .leading, spacing: Space.s3, pinnedViews: [.sectionHeaders]) {
-                ForEach(model.months) { month in
+                ForEach(model.months(in: scope)) { month in
                     Section {
                         LazyVGrid(columns: columns, spacing: gap) {
                             ForEach(month.items) { item in
-                                Button {
-                                    withAnimation(Motion.quick) { viewing = item.id }
-                                } label: {
-                                    PhotoCell(model: model, item: item)
+                                Button { onOpen(item) } label: {
+                                    PhotoCell(model: model, item: item, showsDaysLeft: scope == .recentlyDeleted)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -140,7 +177,7 @@ public struct PhotosHomeView: View {
                             .accessibilityAddTraits(.isHeader)
                     }
                 }
-                footer
+                footer()
             }
         }
         .scaleEffect(pinch, anchor: .center)
@@ -159,10 +196,15 @@ public struct PhotosHomeView: View {
         .accessibilityAction(named: "Bigger photos") { model.change(columnsBy: -1) }
         .accessibilityAction(named: "Smaller photos") { model.change(columnsBy: 1) }
     }
+}
 
-    private var footer: some View {
+/// The bottom of the library: what's waiting, what can't open, the space used, and what the server sees.
+struct LibraryFooter: View {
+    let model: PhotosModel
+
+    var body: some View {
         let theme = Theme.current
-        return VStack(spacing: Space.s1) {
+        VStack(spacing: Space.s1) {
             if let waiting = model.waitingLine {
                 Text(waiting).foregroundStyle(model.isFull ? theme.danger.color : theme.textSecondary.color)
             }
@@ -175,7 +217,7 @@ public struct PhotosHomeView: View {
             if let usage = model.usageLine {
                 Text(usage).foregroundStyle(theme.textSecondary.color)
             }
-            Text("End-to-end encrypted. The server sees how many photos you have, their sizes, and when they were added.")
+            Text("End-to-end encrypted. The server sees how many photos and albums you have, their sizes, and when they were added.")
                 .foregroundStyle(theme.textTertiary.color)
         }
         .font(Typeface.caption)
@@ -190,6 +232,7 @@ public struct PhotosHomeView: View {
 struct PhotoCell: View {
     let model: PhotosModel
     let item: PhotoItem
+    var showsDaysLeft = false
     @State private var image: CGImage?
 
     var body: some View {
@@ -206,6 +249,28 @@ struct PhotoCell: View {
                 }
             }
             .clipped()
+            .overlay(alignment: .bottomLeading) {
+                if item.details.favourite {
+                    Image(systemName: "heart.fill")
+                        .font(Typeface.micro)
+                        .foregroundStyle(theme.accent.color)
+                        .padding(Space.s1)
+                        .background(theme.surface.color.opacity(0.85), in: Circle())
+                        .padding(Space.s1)
+                        .accessibilityHidden(true)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if showsDaysLeft, let days = PhotosModel.daysLeft(item) {
+                    Text(days == 1 ? "1 day" : "\(days) days")
+                        .font(Typeface.micro)
+                        .foregroundStyle(theme.textPrimary.color)
+                        .padding(.horizontal, Space.s2)
+                        .background(theme.surface.color.opacity(0.85), in: Capsule())
+                        .padding(Space.s1)
+                        .accessibilityHidden(true)
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if item.isWaiting {
                     Image(systemName: "arrow.up.circle.fill")
@@ -224,8 +289,12 @@ struct PhotoCell: View {
     }
 
     private var label: String {
-        let date = item.date.formatted(date: .long, time: .shortened)
-        return item.isWaiting ? "Photo from \(date), waiting to upload" : "Photo from \(date)"
+        var parts = ["Photo from \(item.date.formatted(date: .long, time: .shortened))"]
+        if item.details.favourite { parts.append("favourite") }
+        if let caption = item.details.caption { parts.append(caption) }
+        if item.isWaiting { parts.append("waiting to upload") }
+        if showsDaysLeft, let days = PhotosModel.daysLeft(item) { parts.append(days == 1 ? "deleted for good in 1 day" : "deleted for good in \(days) days") }
+        return parts.joined(separator: ", ")
     }
 }
 

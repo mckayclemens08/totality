@@ -307,8 +307,8 @@ neither module imports the other. Like mail, the Oracle server has no backup yet
 
 ## Photos
 
-Spec agreed with the owner on 2026-11-05, in issue 54. Step 2 is adding and viewing. Albums, sharing,
-deleting and video come in later steps.
+Spec agreed with the owner on 2026-11-05, in issue 54. Step 2 is adding and viewing, and step 3 is
+albums, favourites, captions, Recently Deleted, and saving back to Photos. Video and sharing come later.
 
 - **Everything is sealed on the device first** (non-negotiable 2). Each photo has three parts, each sealed
   with its own key from the content key: the original exactly as added (`.photo`), a 480-pixel thumbnail
@@ -329,6 +329,24 @@ deleting and video come in later steps.
   sign-in but the account they were made for.
 - **The UI says** "End-to-end encrypted", which is literally true: the server holds only ciphertext and
   the key never leaves the owner's devices and recovery key.
+- **Favourites, captions, albums, and Recently Deleted** (step 3) are fields in each photo's sealed
+  details. A change seals new details on the device and replaces the row's only if its `content_hash` is
+  still what this device last saw. If another device changed it first, the change is made again on top
+  of theirs, up to three times. An album is a row of kind `photo_album` holding only its sealed name
+  (`.photoAlbum`), so the server sees how many albums there are and nothing else. Deleting an album keeps
+  its photos.
+- **Every change raises a revision** inside the sealed details or album, so a server that hands back an
+  older copy is not believed: the device keeps the newer one, and refuses to change on top of the older.
+  A server can still bring back an album that was deleted, since there's nothing left to compare with.
+  Changing or deleting a photo while it uploads waits for the upload, so neither is lost.
+- **Recently Deleted** keeps a photo for 30 days, then whichever device lists the library next deletes it
+  for good. One wrong clock can't do that: the date it was put there must be after it was added and not
+  ahead of the device, the server's own time of that change (`updated_at`) must agree with it to a day,
+  and the server's clock now, from the sealed store's `Date` header, must say 30 days have passed. Deleting for good writes a sealed note on the device first, then removes the row, then both
+  files, so a delete that stops partway is finished on the next upload and the photo never shows again.
+- **Save to Photos** asks iOS for add-only access, so Totality can't read the device's library, and says
+  first that the copy there isn't sealed. **Info** reads the camera and place from the original on the
+  device, and shows the place as coordinates, never looked up by name.
 
 ## Mail
 

@@ -19,6 +19,8 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     /// One outside mail account (iCloud or Gmail) added beside the Totality address: which provider, the
     /// address, the Send switch, and its app password, all sealed, so the server holds only ciphertext.
     case mailOutside = "mail_outside"
+    /// A photo album: its name, sealed. Which photos are in it is in each photo's sealed details.
+    case photoAlbum = "photo_album"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {

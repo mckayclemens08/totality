@@ -9,6 +9,10 @@ import UniformTypeIdentifiers
 /// The sealed store on the Oracle server, in memory, shared by every account's client the way the real
 /// one is: each account sees only its own blobs.
 actor FakeStore {
+    /// The server's clock, sent with usage like a `Date` header.
+    let clock: Clock
+    init(clock: Clock = Clock()) { self.clock = clock }
+
     var blobs: [String: [UUID: Data]] = [:]
     var offline = false
     var limit = Int.max
@@ -36,6 +40,10 @@ actor FakeStore {
     }
 
     func all() -> [Data] { blobs.values.flatMap(\.values) }
+    func remove(_ id: UUID, account: String) throws {
+        if offline { throw SealedStoreError.offline }
+        blobs[account]?[id] = nil
+    }
 }
 
 struct StoreClient: SealedStore {
@@ -44,14 +52,19 @@ struct StoreClient: SealedStore {
     func put(_ sealed: Data, as id: UUID) async throws { try await fake.put(sealed, as: id, account: account) }
     func get(_ id: UUID) async throws -> Data? { try await fake.get(id, account: account) }
     func size(of id: UUID) async throws -> Int? { try await fake.get(id, account: account)?.count }
-    func delete(_ id: UUID) async throws {}
-    func usage() async throws -> SealedStoreUsage { SealedStoreUsage(used: 0, limit: 2_000_000_000) }
+    func delete(_ id: UUID) async throws { try await fake.remove(id, account: account) }
+    func usage() async throws -> SealedStoreUsage { SealedStoreUsage(used: 0, limit: 2_000_000_000, serverTime: fake.clock.now) }
     func list() async throws -> [SealedStoreEntry] { [] }
 }
 
-/// The rows, per account, the way row-level security keeps them.
+/// The rows, per account and kind, the way row-level security keeps them.
 actor FakeRows {
+    /// The server's clock, which stamps each change.
+    let clock: Clock
+    init(clock: Clock = Clock()) { self.clock = clock }
+
     var rows: [String: [UUID: PhotoRow]] = [:]
+    var albumRows: [String: [UUID: PhotoRow]] = [:]
     var offline = false
     var signedInAsSomeoneElse = false
 
@@ -59,23 +72,61 @@ actor FakeRows {
     func setSignedInAsSomeoneElse(_ value: Bool) { signedInAsSomeoneElse = value }
     func plant(_ row: PhotoRow, for account: String) { rows[account, default: [:]][row.id] = row }
 
-    func list(account: String) throws -> [PhotoRow] {
+    private func check() throws {
         if signedInAsSomeoneElse { throw PhotoRowsWrongAccount() }
         if offline { throw SealedStoreError.offline }
-        return Array(rows[account, default: [:]].values)
     }
 
-    func insert(_ row: PhotoRow, account: String) throws {
-        if offline { throw SealedStoreError.offline }
-        rows[account, default: [:]][row.id] = row
+    private func table(_ kind: PhotoRowKind, _ account: String) -> [UUID: PhotoRow] {
+        (kind == .photo ? rows : albumRows)[account, default: [:]]
+    }
+
+    private func set(_ kind: PhotoRowKind, _ account: String, _ id: UUID, _ row: PhotoRow?) {
+        let row = row.map { PhotoRow(id: $0.id, details: $0.details, byteCount: $0.byteCount, changed: clock.now) }
+        if kind == .photo { rows[account, default: [:]][id] = row } else { albumRows[account, default: [:]][id] = row }
+    }
+
+    func list(_ kind: PhotoRowKind, account: String) throws -> [PhotoRow] {
+        try check()
+        return Array(table(kind, account).values)
+    }
+
+    func row(_ id: UUID, kind: PhotoRowKind, account: String) throws -> PhotoRow? {
+        try check()
+        return table(kind, account)[id]
+    }
+
+    /// Puts back an older copy, the way a misbehaving server could.
+    func rollBack(_ row: PhotoRow, for account: String) { rows[account, default: [:]][row.id] = row }
+
+    func insert(_ row: PhotoRow, kind: PhotoRowKind, account: String) throws {
+        try check()
+        set(kind, account, row.id, row)
+    }
+
+    func update(_ row: PhotoRow, kind: PhotoRowKind, replacing old: Data, account: String) throws -> Bool {
+        try check()
+        guard table(kind, account)[row.id]?.details == old else { return false }
+        set(kind, account, row.id, row)
+        return true
+    }
+
+    func delete(_ id: UUID, kind: PhotoRowKind, account: String) throws {
+        try check()
+        set(kind, account, id, nil)
     }
 }
 
 struct RowsClient: PhotoRows {
     let fake: FakeRows
     let account: String
-    func list() async throws -> [PhotoRow] { try await fake.list(account: account) }
-    func insert(_ row: PhotoRow, original: UUID) async throws { try await fake.insert(row, account: account) }
+    func list(_ kind: PhotoRowKind) async throws -> [PhotoRow] { try await fake.list(kind, account: account) }
+    func row(_ id: UUID, kind: PhotoRowKind) async throws -> PhotoRow? { try await fake.row(id, kind: kind, account: account) }
+    func insert(_ row: PhotoRow, kind: PhotoRowKind, original: UUID?) async throws { try await fake.insert(row, kind: kind, account: account) }
+    func update(_ row: PhotoRow, kind: PhotoRowKind, replacing old: Data) async throws -> Bool {
+        try await fake.update(row, kind: kind, replacing: old, account: account)
+    }
+    func delete(_ id: UUID, kind: PhotoRowKind) async throws { try await fake.delete(id, kind: kind, account: account) }
 }
 
 /// A real JPEG, with a camera date and a location in it, drawn here rather than shipped as a file.
@@ -102,11 +153,19 @@ func samplePhoto(width: Int = 1_600, height: Int = 1_200, taken: String = "2026:
 }
 
 private func newLibrary(
-    account: String, key: ContentRootKey, store: FakeStore, rows: FakeRows, cache: FileBlobStore? = nil
+    account: String, key: ContentRootKey, store: FakeStore, rows: FakeRows, cache: FileBlobStore? = nil, clock: Clock = Clock()
 ) throws -> (PhotoLibrary, FileBlobStore) {
     let cache = try cache ?? FileBlobStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("photos-\(UUID().uuidString)"))
     return (PhotoLibrary(account: account, rootKey: key, cache: cache, rows: RowsClient(fake: rows, account: account),
-                         store: StoreClient(fake: store, account: account)), cache)
+                         store: StoreClient(fake: store, account: account), clock: { clock.now }), cache)
+}
+
+/// A clock the tests move on.
+final class Clock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = Date(timeIntervalSince1970: 1_793_000_000)
+    var now: Date { lock.withLock { current } }
+    func advance(days: Double) { lock.withLock { current += days * 86_400 } }
 }
 
 @Suite struct PhotoImportTests {
@@ -261,6 +320,211 @@ private func newLibrary(
         let item = try #require(try await mac.list().items.first)
         await #expect(throws: PhotoError.tooBig) { try await mac.original(of: item) }
         await #expect(throws: PhotoError.tooBig) { try await mac.thumbnail(of: item) }
+    }
+
+    /// Uploads one photo and returns it as the server has it.
+    private func uploaded(_ library: PhotoLibrary) async throws -> PhotoItem {
+        _ = try await library.add(samplePhoto())
+        _ = await library.upload()
+        return try #require(try await library.list().items.first { !$0.isWaiting })
+    }
+
+    @Test func favouritesCaptionsAndAlbumsAreSealedAndReachTheOtherDevice() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (phone, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let item = try await uploaded(phone)
+        let album = try await phone.makeAlbum(named: "  Zion, October  ")
+        #expect(album.name == "Zion, October")
+        try await phone.change(item) { $0.isFavourite = true }
+        try await phone.change(item) { $0.caption = "Angels Landing at sunrise" }
+        try await phone.change(item) { $0.albums = [album.id] }
+
+        for row in Array(await rows.rows[mckay]!.values) + Array(await rows.albumRows[mckay]!.values) {
+            #expect(row.details.range(of: Data("Angels Landing".utf8)) == nil)
+            #expect(row.details.range(of: Data("Zion".utf8)) == nil)
+        }
+        let (mac, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let seen = try #require(try await mac.list().items.first)
+        #expect(seen.details.favourite)
+        #expect(seen.details.caption == "Angels Landing at sunrise")
+        #expect(seen.details.albumIDs == [album.id])
+        #expect(try await mac.albums().albums == [album])
+        let renamed = try await mac.rename(album, to: "Zion")
+        #expect(try await phone.albums().albums.map(\.name) == ["Zion"])
+        try await phone.deleteAlbum(renamed)
+        #expect(try await mac.albums().albums.isEmpty)
+        // The photo stays, and the album's ID left in it shows nowhere.
+        let after = try await mac.list().items
+        #expect(after.count == 1)
+        #expect(PhotosModel.items(after, in: .album(album.id), albums: []).isEmpty)
+    }
+
+    @Test func aChangeFromAnotherDeviceIsKeptAndThisOneLandsOnTop() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (phone, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let (mac, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let item = try await uploaded(phone)
+        _ = try await mac.list()
+        // The Mac favourites it while the phone still has the details from before.
+        try await mac.change(item) { $0.isFavourite = true }
+        let changed = try await phone.change(item) { $0.caption = "Bryce Canyon" }
+        #expect(changed.details.caption == "Bryce Canyon")
+        #expect(changed.details.favourite)
+        let (third, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        #expect(try await third.list().items.first?.details == changed.details)
+    }
+
+    @Test func recentlyDeletedKeepsAPhotoForThirtyDaysThenItGoesForGood() async throws {
+        let clock = Clock()
+        let store = FakeStore(clock: clock)
+        let rows = FakeRows(clock: clock)
+        let (library, cache) = try newLibrary(account: mckay, key: key, store: store, rows: rows, clock: clock)
+        let item = try await uploaded(library)
+        try await library.change(item) { $0.trashed = clock.now }
+        #expect(PhotosModel.items(try await library.list().items, in: .library, albums: []).isEmpty)
+        #expect(PhotosModel.items(try await library.list().items, in: .recentlyDeleted, albums: []).count == 1)
+
+        clock.advance(days: 29)
+        #expect(try await library.list().items.count == 1)
+        clock.advance(days: 2)
+        #expect(try await library.list().items.isEmpty)
+        #expect(await rows.rows[mckay]?.isEmpty == true)
+        #expect(await store.all().isEmpty)
+        #expect(try cache.names().isEmpty)
+    }
+
+    @Test func aDeleteCutOffPartwayIsFinishedAndNeverShowsAgain() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (library, cache) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let item = try await uploaded(library)
+        await store.setOffline(true)
+        await #expect(throws: SealedStoreError.offline) { try await library.deleteForGood(item) }
+        await store.setOffline(false)
+        // The row went first, so no device lists it. The files are still there until the next upload.
+        #expect(try await library.list().items.isEmpty)
+        #expect(await store.all().count == 2)
+        _ = await library.upload()
+        #expect(await store.all().isEmpty)
+        #expect(try cache.names().isEmpty)
+    }
+
+    @Test func aRowDeleteThatFailsLeavesThePhotoHiddenUntilItsDone() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (library, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let item = try await uploaded(library)
+        await rows.setOffline(true)
+        await #expect(throws: SealedStoreError.offline) { try await library.deleteForGood(item) }
+        #expect(try await library.list().items.isEmpty)
+        await rows.setOffline(false)
+        #expect(try await library.list().items.isEmpty)
+        _ = await library.upload()
+        #expect(await rows.rows[mckay]?.isEmpty == true)
+        #expect(await store.all().isEmpty)
+    }
+
+    @Test func aWaitingPhotoCanBeChangedAndDeletedBeforeItUploads() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        await store.setOffline(true)
+        let (library, cache) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let item = try await library.add(samplePhoto())
+        let changed = try await library.change(item) { $0.caption = "Kolob Canyons" }
+        #expect(changed.isWaiting)
+        #expect(try await library.list().items.first?.details.caption == "Kolob Canyons")
+        try await library.deleteForGood(changed)
+        #expect(try cache.names().isEmpty)
+    }
+
+    @Test func albumsFromAnotherAccountOrSwappedBetweenAlbumsNeverOpen() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let dana = UUID().uuidString.lowercased()
+        let (mine, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let (hers, _) = try newLibrary(account: dana, key: key, store: store, rows: rows)
+        let first = try await mine.makeAlbum(named: "Moab")
+        let second = try await mine.makeAlbum(named: "Arches")
+        // A server planting my album under her account, or swapping two albums' names, gets nowhere.
+        for row in await rows.albumRows[mckay]!.values { try await rows.insert(row, kind: .album, account: dana) }
+        #expect(try await hers.albums().albums.isEmpty)
+        let a = try #require(await rows.albumRows[mckay]?[first.id])
+        let b = try #require(await rows.albumRows[mckay]?[second.id])
+        try await rows.insert(PhotoRow(id: a.id, details: b.details, byteCount: 0), kind: .album, account: mckay)
+        #expect(try await mine.albums().albums == [second])
+    }
+
+    @Test func aWrongClockCantDeleteAnythingForGood() async throws {
+        let server = Clock()
+        let store = FakeStore(clock: server)
+        let rows = FakeRows(clock: server)
+        let phone = Clock()
+        let (library, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows, clock: phone)
+        let item = try await uploaded(library)
+        // Put there with a date far in the past, by a device whose clock was wrong.
+        try await library.change(item) { $0.trashed = Date(timeIntervalSince1970: 0) }
+        phone.advance(days: 40)
+        server.advance(days: 40)
+        #expect(try await library.list().items.count == 1)
+        // Put there today, then listed by a device whose clock is years ahead: the server's clock says no.
+        let current = try #require(try await library.list().items.first)
+        try await library.change(current) { $0.trashed = phone.now }
+        _ = try await library.list()
+        phone.advance(days: 900)
+        #expect(try await library.list().items.count == 1)
+        // Once the server's clock agrees too, it goes.
+        server.advance(days: 31)
+        #expect(try await library.list().items.isEmpty)
+    }
+
+    @Test func aServerRollingAChangeBackIsNotBelieved() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (library, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let item = try await uploaded(library)
+        try await library.change(item) { $0.caption = "First" }
+        let older = try #require(await rows.rows[mckay]?[item.id])
+        try await library.change(item) { $0.trashed = Date() }
+        await rows.rollBack(older, for: mckay)
+        let seen = try #require(try await library.list().items.first)
+        #expect(seen.details.trashed != nil)
+        await #expect(throws: PhotoError.changedElsewhere) { try await library.change(seen) { $0.caption = "Second" } }
+    }
+
+    @Test func aChangeMadeWhileAPhotoUploadsIsntLost() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (library, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let item = try await library.add(samplePhoto())
+        async let upload = library.upload()
+        async let changed = library.change(item) { $0.caption = "Delicate Arch" }
+        _ = await upload
+        _ = try await changed
+        let (mac, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        #expect(try await mac.list().items.first?.details.caption == "Delicate Arch")
+    }
+
+    @Test func aPhotoDeletedForGoodWhileItUploadsStaysDeleted() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (library, cache) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let item = try await library.add(samplePhoto())
+        async let upload = library.upload()
+        async let deleted: Void = library.deleteForGood(item)
+        _ = await upload
+        try await deleted
+        _ = await library.upload()
+        #expect(await rows.rows[mckay]?.isEmpty ?? true)
+        #expect(await store.all().isEmpty)
+        #expect(try cache.names().isEmpty)
+    }
+
+    @Test func emptyAlbumNamesAreRefused() async throws {
+        let (library, _) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        await #expect(throws: PhotoError.emptyName) { try await library.makeAlbum(named: "   ") }
+        #expect(PhotoAlbum.tidy(String(repeating: "a", count: 500))?.count == PhotoAlbum.nameLimit)
     }
 
     /// Photos' case for the brief §6 two-user test, on the device. The store's own half, with direct
