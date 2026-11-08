@@ -354,7 +354,7 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
             body = "Message deleted"
         case .message(let content):
             if case .image(let image) = content.msgType {
-                kind = .photo(width: image.info?.width.map(Int.init), height: image.info?.height.map(Int.init))
+                kind = .photo(width: image.info?.width.map { Int(clamping: $0) }, height: image.info?.height.map { Int(clamping: $0) })
                 body = "Photo"
                 photoSources[id] = (image.source, image.info?.thumbnailSource)
             } else {

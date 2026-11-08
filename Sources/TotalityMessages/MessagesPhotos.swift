@@ -48,7 +48,8 @@ public enum PhotoPrep {
     }
 }
 
-/// Opened photos, kept in memory only and only a few at a time. Nothing opened is written to disk.
+/// Opened photos held in memory while a chat is open, a few at a time. (The SDK keeps its own copy in
+/// the account's store, which is encrypted with the key in this device's Keychain.)
 @MainActor
 final class PhotoMemory {
     private var store: [String: Data] = [:]
