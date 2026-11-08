@@ -30,6 +30,8 @@ public actor ServerMailStore: MailStore {
     private var attachmentSources: [UUID: UUID] = [:]
     /// Messages downloaded from outside accounts, which live apart from Totality mail.
     private var fetchedIDs = Set<UUID>()
+    /// The last change sync with outside accounts, so the next waits for it instead of interleaving.
+    private var outsideSync: Task<Void, Never>?
 
     /// `account` is the account's ID, which is also the server's name for its mailbox. It has to be the
     /// vault's account, or nothing would line up.
@@ -337,13 +339,15 @@ public actor ServerMailStore: MailStore {
         let reader = OutsideReader(maker: outsideCheck.maker, google: google)
         let since = OutsideReading.since(now())
         var problems: [String] = []
+        var views: [UUID: OutsideProviderView] = [:]
         for account in accounts {
             guard !Task.isCancelled else { break }
             guard let credential = try? await vault.credential(for: account.id) else {
                 problems.append("\(account.address): \(OutsideWording.problem(.notFound, provider: account.provider))")
                 continue
             }
-            let vault = vault, counter = OutsideCounter()
+            let vault = vault, counter = OutsideCounter(), view = OutsideViewBox()
+            defer { if let seen = view.value { views[account.id] = seen } }
             do {
                 try await reader.download(
                     account, credential: credential, since: since,
@@ -352,7 +356,10 @@ public actor ServerMailStore: MailStore {
                         try await vault.keepFetched(message)
                         progress(OutsideDownload(address: account.address, done: counter.next()))
                     },
-                    places: { try await vault.keepPlaces($0) }
+                    seen: { seen in
+                        view.value = seen
+                        if case .gmail(let places) = seen { try await vault.keepPlaces(places) }
+                    }
                 )
             } catch is CancellationError {
                 break
@@ -362,6 +369,8 @@ public actor ServerMailStore: MailStore {
                 problems.append("\(account.address): \(OutsideWording.problem(problem, provider: account.provider))")
             }
         }
+        // Changes made at each provider come in, and changes made here go out, before it's shown.
+        if !Task.isCancelled { await syncOutside(views) }
         guard let mailbox = try? await stored() else { return nil }
         return OutsideDownloadResult(mailbox: mailbox, problems: problems)
     }
@@ -370,6 +379,92 @@ public actor ServerMailStore: MailStore {
 
     public func save(_ marks: [UUID: MailMarks]) async throws {
         try await vault.save(marks, at: now())
+        if !fetchedIDs.isDisjoint(with: marks.keys) { await syncOutside([:]) }
+    }
+
+    // MARK: Changes to outside accounts' mail
+
+    /// One sync at a time: each waits for the one before.
+    private func syncOutside(_ views: [UUID: OutsideProviderView]) async {
+        let previous = outsideSync
+        let task = Task { await previous?.value; await self.syncingOutside(views) }
+        outsideSync = task
+        await task.value
+    }
+
+    /// For each outside account: what changed at the provider comes into Totality's marks, and what
+    /// changed in Totality goes to the provider. Best effort: anything that doesn't go waits for the next try.
+    private func syncingOutside(_ views: [UUID: OutsideProviderView]) async {
+        guard let accounts = try? await vault.outsideAccounts(), let marks = try? await vault.marks(),
+              let fetched = try? await vault.fetched() else { return }
+        let writer = OutsideWriter(maker: outsideCheck.maker, google: google)
+        var pulls: [UUID: MailMarks] = [:]
+        for account in accounts {
+            guard !Task.isCancelled else { break }
+            var record = (try? await vault.remote(of: account.id)) ?? OutsideRemoteRecord(outside: account.id)
+            // Already in the provider's Trash: nothing left to do for it.
+            record.erased = record.erased.filter { $0.value.place != .trash }
+            let view = views[account.id]
+            var changes: [OutsideWriter.Change] = []
+            var states: [String: OutsideRemoteState] = [:]
+            for (id, stored) in fetched where stored.outside == account.id {
+                let base = record.states[stored.providerID] ?? OutsideRemoteState(downloaded: stored)
+                let mine = marks[id].map { OutsideRemoteState($0, location: base.location) }
+                let seen: OutsideSeen = switch view {
+                case .gmail(let places): places.seen(stored.providerID, received: stored.received)
+                case .imap(let inbox): inbox.seen(providerID: stored.providerID, location: base.location, received: stored.received)
+                case nil: .unknown
+                }
+                var outcome = OutsideReconcile.outcome(base: base, mine: mine, seen: seen)
+                if case .imap = view, let pulled = outcome.pull, pulled.place != base.place, pulled.place != .inbox {
+                    // It left the Inbox at iCloud for a folder that isn't known, so it can't be followed there.
+                    outcome.agreed.location = .lost
+                    outcome.agreedIfPushFails.location = .lost
+                }
+                if let pull = outcome.pull {
+                    let shown = marks[id] ?? MailMarks(folder: Self.folder(base.place), isUnread: base.isUnread, isStarred: base.isStarred)
+                    pulls[id] = OutsideReconcile.marks(shown, after: pull, now: now())
+                }
+                if outcome.push != nil {
+                    changes.append(.init(providerID: stored.providerID, from: outcome.agreedIfPushFails, to: outcome.agreed))
+                }
+                states[stored.providerID] = outcome.agreedIfPushFails
+            }
+            // Deleted here: moved to the provider's Trash, never deleted for good there.
+            for (providerID, state) in record.erased {
+                var trashed = state
+                trashed.place = .trash
+                changes.append(.init(providerID: providerID, from: state, to: trashed))
+            }
+            if !changes.isEmpty, let credential = try? await vault.credential(for: account.id) {
+                for (providerID, outcome) in await writer.push(account, credential: credential, changes: changes) {
+                    let wanted = changes.first { $0.providerID == providerID }?.to
+                    switch outcome {
+                    case .done(let after):
+                        if record.erased[providerID] != nil { record.erased[providerID] = nil; continue }
+                        states[providerID] = after
+                        if let moved = after.location, moved.mailbox == "INBOX" {
+                            try? await vault.noteFetchedAlias(account.id, providerID: "\(moved.validity).\(moved.uid)")
+                        }
+                    case .lost:
+                        if record.erased[providerID] != nil { record.erased[providerID] = nil; continue }
+                        if var wanted { wanted.location = .lost; states[providerID] = wanted }
+                    }
+                }
+            }
+            record.states = states
+            try? await vault.keepRemote(record)
+        }
+        if !pulls.isEmpty { try? await vault.save(pulls, at: now()) }
+    }
+
+    private static func folder(_ place: OutsidePlace) -> MailFolder {
+        switch place {
+        case .inbox: .inbox
+        case .archive: .archive
+        case .spam: .spam
+        case .trash: .trash
+        }
     }
 
     /// Pins aren't settings, so the screens' copy can't touch them.
@@ -380,12 +475,15 @@ public actor ServerMailStore: MailStore {
     /// From the server first, so a message can't come back on the next download. Offline, nothing is
     /// touched and the model keeps it waiting.
     public func erase(_ messages: Set<UUID>) async throws {
-        // Downloaded mail is deleted from this device only, for now. Nothing at the provider changes.
+        // Downloaded mail goes from this device, and to the provider's Trash, where the provider deletes
+        // it in its own time. Nothing is deleted for good at the provider.
         let fetched = messages.intersection(fetchedIDs)
         if !fetched.isEmpty {
+            await noteErased(fetched)
             try await vault.eraseFetched(fetched)
             try await vault.erase(fetched)
             fetchedIDs.subtract(fetched)
+            await syncOutside([:])
         }
         let messages = messages.subtracting(fetched)
         guard !messages.isEmpty else { return }
@@ -697,5 +795,37 @@ private final class OutsideCounter: @unchecked Sendable {
             count += 1
             return count
         }
+    }
+}
+
+extension ServerMailStore {
+    /// Remembers which provider messages were deleted here, so they go to the provider's Trash.
+    fileprivate func noteErased(_ ids: Set<UUID>) async {
+        var records: [UUID: OutsideRemoteRecord] = [:]
+        let marks = (try? await vault.marks()) ?? [:]
+        for id in ids {
+            guard let stored = try? await vault.fetchedMessage(id) else { continue }
+            if records[stored.outside] == nil {
+                records[stored.outside] = (try? await vault.remote(of: stored.outside)) ?? OutsideRemoteRecord(outside: stored.outside)
+            }
+            let agreed = records[stored.outside]?.states[stored.providerID] ?? OutsideRemoteState(downloaded: stored)
+            // Where it is at the provider as far as Totality knows, so the move starts from there.
+            var state = agreed
+            if let mine = marks[id] { state.isUnread = mine.isUnread; state.isStarred = mine.isStarred }
+            records[stored.outside]?.states[stored.providerID] = nil
+            records[stored.outside]?.erased[stored.providerID] = state
+        }
+        for record in records.values { try? await vault.keepRemote(record) }
+    }
+}
+
+/// What one provider showed during a download, handed back from the reader's callback.
+private final class OutsideViewBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var held: OutsideProviderView?
+
+    var value: OutsideProviderView? {
+        get { lock.withLock { held } }
+        set { lock.withLock { held = newValue } }
     }
 }

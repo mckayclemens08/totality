@@ -47,16 +47,34 @@ public struct OutsideFetchedMessage: Codable, Equatable, Sendable {
 public struct OutsideAccountPlaces: Codable, Equatable, Sendable {
     public let outside: UUID
     public let labels: [OutsideLabel]
-    /// Each listed message's places. INBOX is among them while it's in the Inbox.
+    /// Each listed message's labels: INBOX, UNREAD, STARRED, SPAM and TRASH among them, as well as the
+    /// tabs and the person's own.
     public let membership: [String: [String]]
-    /// Every place was listed in full since `since`, so a message from then that isn't listed is in none.
-    public let complete: Bool
+    /// Labels that weren't listed in full, so a message missing from one might still have it.
+    public let truncated: Set<String>
     public let since: Date
+
+    /// Gmail's own labels that say where a message is and how it's marked, listed besides the places.
+    static let marking = ["INBOX", "UNREAD", "STARRED", "SPAM", "TRASH"]
 
     /// Its places at the provider, or nil when this says nothing about it.
     func labels(of providerID: String, received: Date) -> Set<String>? {
         if let found = membership[providerID] { return Set(found) }
-        return complete && received >= since ? [] : nil
+        return received >= since ? [] : nil
+    }
+
+    /// Whether it has a label: nil when that can't be told.
+    func has(_ label: String, _ providerID: String, received: Date) -> Bool? {
+        if membership[providerID]?.contains(label) == true { return true }
+        return !truncated.contains(label) && received >= since ? false : nil
+    }
+
+    func seen(_ providerID: String, received: Date) -> OutsideSeen {
+        func has(_ label: String) -> Bool? { self.has(label, providerID, received: received) }
+        let trash = has("TRASH"), spam = has("SPAM"), inbox = has("INBOX")
+        let place: OutsidePlace? = if trash == true { .trash } else if spam == true { .spam } else if inbox == true { .inbox }
+            else if trash == false && spam == false && inbox == false { .archive } else { nil }
+        return OutsideSeen(place: place, isUnread: has("UNREAD"), isStarred: has("STARRED"))
     }
 }
 
@@ -114,6 +132,7 @@ extension GoogleOAuth {
                 URLQueryItem(name: "q", value: "after:\(Int(since.timeIntervalSince1970))"),
                 URLQueryItem(name: "maxResults", value: String(min(500, limit - ids.count))),
             ]
+            if label == "SPAM" || label == "TRASH" { items.append(URLQueryItem(name: "includeSpamTrash", value: "true")) }
             if let page { items.append(URLQueryItem(name: "pageToken", value: page)) }
             components.queryItems = items
             struct Listing: Decodable {
@@ -183,13 +202,22 @@ extension GoogleOAuth {
                 guard attempt < 4 else { throw OutsideMailProblem.unreachable }
                 try await Task.sleep(for: wait)
                 wait *= 2
-            case 404: throw OutsideMailProblem.unexpected
+                case 404: throw GmailMissing.message
             default: throw OutsideMailProblem.unreachable
             }
         }
         throw OutsideMailProblem.unreachable
     }
 }
+
+/// What the provider showed on one open, for changes made there to come into Totality.
+public enum OutsideProviderView: Sendable {
+    case gmail(OutsideAccountPlaces)
+    case imap(OutsideIMAPInbox)
+}
+
+/// Gmail no longer has the message: deleted forever there.
+enum GmailMissing: Error { case message }
 
 /// What Gmail says when it turns a request down, as far as Totality needs to know.
 struct GmailRefusal {
@@ -340,7 +368,7 @@ struct OutsideReader: Sendable {
     func download(
         _ account: OutsideAccount, credential: OutsideCredential, since: Date,
         have: @Sendable (String) async throws -> Bool, keep: @Sendable (OutsideFetchedMessage) async throws -> Void,
-        places: @Sendable (OutsideAccountPlaces) async throws -> Void = { _ in }
+        seen: @Sendable (OutsideProviderView) async throws -> Void = { _ in }
     ) async throws {
         switch credential {
         case .google(let grant):
@@ -350,30 +378,40 @@ struct OutsideReader: Sendable {
             let labels = OutsideLabel.tabs + (try await google.userLabels(accessToken: token))
             var membership: [String: [String]] = [:]
             var order: [String] = []
-            var complete = true
-            for label in ["INBOX"] + labels.map(\.id) {
+            var truncated = Set<String>()
+            for label in OutsideAccountPlaces.marking + labels.map(\.id) {
                 try Task.checkCancellation()
                 let listed: (ids: [String], truncated: Bool)
                 do {
                     listed = try await google.ids(in: label, accessToken: token, since: since, limit: OutsideReading.mostListed)
                 } catch let problem as OutsideMailProblem where label != "INBOX" && problem != .expired && problem != .offline {
                     // One label that won't list doesn't stop the rest. What's in it is just less certain.
-                    complete = false
+                    truncated.insert(label)
                     continue
                 }
-                complete = complete && !listed.truncated
+                if listed.truncated { truncated.insert(label) }
+                // Mail is downloaded from the Inbox and the places shown, never only for being unread or in Spam.
+                let downloads = !["UNREAD", "STARRED", "SPAM", "TRASH"].contains(label)
                 for id in listed.ids {
-                    if membership[id] == nil { order.append(id) }
+                    if downloads, !order.contains(id) { order.append(id) }
                     membership[id, default: []].append(label)
                 }
             }
-            try await places(OutsideAccountPlaces(outside: account.id, labels: labels, membership: membership, complete: complete, since: since))
+            try await seen(.gmail(OutsideAccountPlaces(
+                outside: account.id, labels: labels, membership: membership, truncated: truncated, since: since
+            )))
             var downloaded = 0
             for id in order where downloaded < OutsideReading.mostPerOpen {
                 try Task.checkCancellation()
                 guard try await !have(id) else { continue }
                 downloaded += 1
-                let message = try await google.message(id, accessToken: token)
+                let message: (raw: Data, received: Date, isUnread: Bool, isStarred: Bool, labels: [String])
+                do {
+                    message = try await google.message(id, accessToken: token)
+                } catch GmailMissing.message {
+                    // Deleted at Gmail since it was listed.
+                    continue
+                }
                 try await keep(OutsideFetchedMessage(
                     outside: account.id, providerID: id, received: message.received, raw: message.raw, isUnread: message.isUnread,
                     isStarred: message.isStarred, labels: message.labels
@@ -386,8 +424,13 @@ struct OutsideReader: Sendable {
             let connection = try await IMAPConnection.signIn(signIn, with: maker)
             do {
                 let validity = try await connection.examineInbox()
+                let all = try await connection.uids(since: since)
+                // How each one is marked now, so changes made at iCloud show here too.
+                let listed = Array(all.prefix(OutsideReading.mostListed))
+                let flags = try await connection.flags(listed).mapValues { OutsideIMAPInbox.OutsideFlags(isUnread: $0.isUnread, isStarred: $0.isStarred) }
+                try await seen(.imap(OutsideIMAPInbox(validity: validity, since: since, flags: flags, complete: listed.count == all.count)))
                 var missing: [UInt32] = []
-                for uid in try await connection.uids(since: since).prefix(OutsideReading.mostPerOpen) where try await !have("\(validity).\(uid)") {
+                for uid in all.prefix(OutsideReading.mostPerOpen) where try await !have("\(validity).\(uid)") {
                     missing.append(uid)
                 }
                 // A few at a time, so one huge message doesn't hold up the rest.

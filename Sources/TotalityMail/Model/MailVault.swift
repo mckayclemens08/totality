@@ -81,6 +81,8 @@ public actor MailVault {
     private static let fetchedGoneSuffix = ".mail.fetched.gone"
     /// An outside account's own places and what's in each, as last seen at the provider. On this device only.
     private static let placesSuffix = ".mail.places"
+    /// What Totality and each outside account last agreed about its downloaded mail. On this device only.
+    private static let remoteSuffix = ".mail.remote"
 
     /// How each file is sealed, so a key move can reach them without knowing what they are. The IDs are
     /// derived from text only Mail uses, so no other module's blob can share one.
@@ -95,6 +97,7 @@ public actor MailVault {
         outsideSuffix: .metadata,
         fetchedSuffix: .content,
         placesSuffix: .content,
+        remoteSuffix: .content,
     ]
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
 
@@ -359,9 +362,43 @@ public actor MailVault {
         return record.places
     }
 
+    struct RemoteRecord: Codable {
+        let account: String
+        let remote: OutsideRemoteRecord
+    }
+
+    static func remoteID(_ outside: UUID, account: String) -> UUID {
+        UUID(derivedFrom: "totality.mail.remote.\(account).\(outside.uuidString.lowercased())")
+    }
+
+    public func keepRemote(_ remote: OutsideRemoteRecord) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        guard try outsideRecord(remote.outside) != nil else { throw OutsideAccountError.notFound }
+        let id = Self.remoteID(remote.outside, account: account)
+        try store.write(try seal(RemoteRecord(account: account, remote: remote), id: id, purpose: .content), as: name(id, Self.remoteSuffix))
+    }
+
+    public func remote(of outside: UUID) throws -> OutsideRemoteRecord? {
+        let id = Self.remoteID(outside, account: account)
+        guard let sealed = try store.read(name(id, Self.remoteSuffix)),
+              let record = try? open(RemoteRecord.self, sealed, id: id, purpose: .content),
+              record.account == account, record.remote.outside == outside
+        else { return nil }
+        return record.remote
+    }
+
+    /// A message Totality moved back into an iCloud Inbox gets a new UID there. It's the same message,
+    /// so that UID is marked as had, and the next download doesn't bring it in twice.
+    public func noteFetchedAlias(_ outside: UUID, providerID: String) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        let id = Self.fetchedID(outside, providerID: providerID, account: account)
+        if try store.read(name(id, Self.fetchedSuffix)) == nil { try store.write(Data(), as: name(id, Self.fetchedGoneSuffix)) }
+    }
+
     /// Everything downloaded from one outside account, and what was deleted from it, for when it goes.
     private func forgetFetched(from outside: UUID) throws {
         try store.delete(name(Self.placesID(outside, account: account), Self.placesSuffix))
+        try store.delete(name(Self.remoteID(outside, account: account), Self.remoteSuffix))
         for id in try ids(Self.fetchedSuffix) {
             guard let sealed = try store.read(name(id, Self.fetchedSuffix)) else { continue }
             if let record = try? open(FetchedRecord.self, sealed, id: id, purpose: .content), record.account == account,

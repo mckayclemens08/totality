@@ -170,7 +170,7 @@ struct MailActionBar: View {
                 }
             }
         } message: {
-            Text("This can't be undone.")
+            Text(OutsideWording.deletingForever(conversations.flatMap(\.messages)))
         }
     }
 
