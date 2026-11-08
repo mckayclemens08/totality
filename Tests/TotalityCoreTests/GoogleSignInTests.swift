@@ -221,6 +221,7 @@ private final class MemoryKeychain: KeyStore, @unchecked Sendable {
         ] {
             let fake = FakeTokens()
             fake.claims = claims
+            fake.granted = calendarScope
             let keychain = MemoryKeychain()
             let accounts = try accounts(fake, keychain)
             let authorization = accounts.authorization(for: [calendarScope])
@@ -229,6 +230,17 @@ private final class MemoryKeychain: KeyStore, @unchecked Sendable {
             #expect(keychain.names.isEmpty)
             #expect(fake.revoked.count == 1)
         }
+    }
+
+    /// A bad answer for an account Mail already uses isn't taken back at Google, which would end Mail too.
+    @Test func leavesOtherModulesAloneOnABadAnswer() async throws {
+        let fake = FakeTokens()
+        fake.claims = nil
+        fake.granted = "\(calendarScope) https://www.googleapis.com/auth/gmail.modify"
+        let accounts = try accounts(fake)
+        let authorization = accounts.authorization(for: [calendarScope], account: "mckay.clemens@gmail.com")
+        await #expect(throws: GoogleSignInError.unexpected) { try await accounts.finish(authorization, callback: callback(for: authorization)) }
+        #expect(fake.revoked.isEmpty)
     }
 
     /// Mail's Gmail sign-ins from before sharing: an older token that carries less never replaces a newer one.

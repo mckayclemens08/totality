@@ -74,7 +74,11 @@ public struct GoogleAccounts: Sendable {
     public func finish(_ authorization: GoogleAuthorization, callback: URL) async throws -> GoogleConnection {
         let tokens = try await signIn.finish(authorization, callback: callback)
         guard let address = tokens.email else {
-            await signIn.revoke(tokens.refreshToken)
+            // Taking the token back at Google takes back the whole account's grant, so it's only done
+            // when the token carries nothing another part of Totality already relies on.
+            if GoogleUse.uses(of: tokens.granted).isSubset(of: GoogleUse.uses(of: Set(authorization.scopes))) {
+                await signIn.revoke(tokens.refreshToken)
+            }
             throw GoogleSignInError.unexpected
         }
         return try keep(address: address, refreshToken: tokens.refreshToken, granted: tokens.granted)
