@@ -79,6 +79,8 @@ public actor MailVault {
     private static let fetchedSuffix = ".mail.fetched"
     /// Empty, and says a downloaded message was deleted here, so it isn't downloaded again.
     private static let fetchedGoneSuffix = ".mail.fetched.gone"
+    /// An outside account's own places and what's in each, as last seen at the provider. On this device only.
+    private static let placesSuffix = ".mail.places"
 
     /// How each file is sealed, so a key move can reach them without knowing what they are. The IDs are
     /// derived from text only Mail uses, so no other module's blob can share one.
@@ -92,6 +94,7 @@ public actor MailVault {
         unkeptSuffix: .metadata,
         outsideSuffix: .metadata,
         fetchedSuffix: .content,
+        placesSuffix: .content,
     ]
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
 
@@ -330,8 +333,35 @@ public actor MailVault {
         }
     }
 
+    struct PlacesRecord: Codable {
+        let account: String
+        let places: OutsideAccountPlaces
+    }
+
+    static func placesID(_ outside: UUID, account: String) -> UUID {
+        UUID(derivedFrom: "totality.mail.places.\(account).\(outside.uuidString.lowercased())")
+    }
+
+    /// What's in each of an outside account's places, replacing what was seen before.
+    public func keepPlaces(_ places: OutsideAccountPlaces) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        guard try outsideRecord(places.outside) != nil else { throw OutsideAccountError.notFound }
+        let id = Self.placesID(places.outside, account: account)
+        try store.write(try seal(PlacesRecord(account: account, places: places), id: id, purpose: .content), as: name(id, Self.placesSuffix))
+    }
+
+    public func places(of outside: UUID) throws -> OutsideAccountPlaces? {
+        let id = Self.placesID(outside, account: account)
+        guard let sealed = try store.read(name(id, Self.placesSuffix)),
+              let record = try? open(PlacesRecord.self, sealed, id: id, purpose: .content),
+              record.account == account, record.places.outside == outside
+        else { return nil }
+        return record.places
+    }
+
     /// Everything downloaded from one outside account, and what was deleted from it, for when it goes.
     private func forgetFetched(from outside: UUID) throws {
+        try store.delete(name(Self.placesID(outside, account: account), Self.placesSuffix))
         for id in try ids(Self.fetchedSuffix) {
             guard let sealed = try store.read(name(id, Self.fetchedSuffix)) else { continue }
             if let record = try? open(FetchedRecord.self, sealed, id: id, purpose: .content), record.account == account,
@@ -483,7 +513,11 @@ public actor MailVault {
     /// This account's outside accounts, oldest first. One that won't open, or is someone else's, is
     /// left out and left alone.
     public func outsideAccounts() throws -> [OutsideAccount] {
-        try outsideRecords().map(\.outside).sorted { ($0.addedAt, $0.id.uuidString) < ($1.addedAt, $1.id.uuidString) }
+        try outsideRecords().map { record in
+            var outside = record.outside
+            if case .google(let grant) = record.credential { outside.keepsInStep = grant.canChange }
+            return outside
+        }.sorted { ($0.addedAt, $0.id.uuidString) < ($1.addedAt, $1.id.uuidString) }
     }
 
     /// Keeps the account and its sign-in, or replaces them. The keychain is written first, so a saved

@@ -30,7 +30,7 @@ public enum OutsideWording {
         ]
         case .gmail: [
             "Sign in on Google's own page. Totality never sees your Google password.",
-            "Totality asks only to read your mail. Sending is asked for separately, if you turn it on.",
+            "Google's page asks to let Totality read and change your mail, so what you read, star, archive or delete here matches the Gmail app. Google's wording says this also allows sending. Totality only sends from Gmail after you turn on Send for the account, and every message waits for your press.",
             "Your iPhone or Mac talks to Google directly. Totality's server never sees your sign-in or your mail.",
         ]
         }
@@ -38,6 +38,9 @@ public enum OutsideWording {
 
     /// Google shows this warning until it has reviewed Totality, so it's said first.
     public static let googleUnverified = "Google may say it hasn't verified Totality yet. That's expected for now: choose Advanced, then Go to Totality."
+
+    /// For a Gmail account added when Totality could only read it.
+    public static let readOnly = "Changes you make in Totality stay here. Allow changes to keep the Gmail app in step: Google will ask once more."
 
     public static func removing(_ account: OutsideAccount) -> String {
         account.provider.signsInWithGoogle

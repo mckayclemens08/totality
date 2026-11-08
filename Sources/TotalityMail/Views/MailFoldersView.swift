@@ -27,6 +27,11 @@ struct MailFoldersView: View {
         case .folder(.spam): "exclamationmark.octagon"
         case .folder(.trash): "trash"
         case .folder(.own): "folder"
+        case .outside(_, "CATEGORY_SOCIAL"): "person.2"
+        case .outside(_, "CATEGORY_PROMOTIONS"): "tag"
+        case .outside(_, "CATEGORY_UPDATES"): "info.circle"
+        case .outside(_, "CATEGORY_FORUMS"): "bubble.left.and.bubble.right"
+        case .outside: "folder"
         }
     }
 
@@ -46,6 +51,18 @@ struct MailFoldersView: View {
                 }
                 ForEach(model.mailbox.places, id: \.self) { place in
                     row(place)
+                }
+                ForEach(model.mailbox.outsidePlaces, id: \.self) { group in
+                    Text(group.account.address)
+                        .font(Typeface.micro)
+                        .foregroundStyle(theme.textSecondary.color)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, Space.s3)
+                        .padding(.top, Space.s3)
+                    ForEach(group.labels, id: \.self) { label in
+                        row(.outside(group.account.id, label.id))
+                    }
                 }
                 Button {
                     typed = ""

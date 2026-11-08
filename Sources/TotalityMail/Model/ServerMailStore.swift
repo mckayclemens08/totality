@@ -229,10 +229,19 @@ public actor ServerMailStore: MailStore {
         }
         var fetched = Set<UUID>()
         let outside = Dictionary(try await vault.outsideAccounts().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var places: [UUID: OutsideAccountPlaces] = [:]
+        for account in outside.keys { places[account] = try await vault.places(of: account) }
         for (id, stored) in try await vault.fetched() {
             guard let account = outside[stored.outside] else { continue }
             var message = readFetched(stored, id: id, provider: account.provider).message
-            message.outsideAccount = OutsideAccountLabel(provider: account.provider, address: account.address)
+            message.outsideAccount = OutsideAccountLabel(id: account.id, provider: account.provider, address: account.address)
+            if account.provider == .gmail {
+                let known = places[account.id]?.labels(of: stored.providerID, received: stored.received)
+                let labels = known ?? Set(stored.labels)
+                message.outsideLabels = labels.subtracting(["INBOX", "UNREAD", "STARRED", "IMPORTANT", "SENT", "DRAFT", "CATEGORY_PERSONAL"])
+                // Gmail archives by taking INBOX away, so mail it holds without INBOX is archived here.
+                if known != nil || !stored.labels.isEmpty, !labels.contains("INBOX") { message.marks.folder = .archive }
+            }
             if let synced = marks[id] {
                 message.marks = synced
             } else if message.marks.folder == .inbox, settings.blockedSenders.contains(message.from.key) {
@@ -244,9 +253,18 @@ public actor ServerMailStore: MailStore {
         }
         fetchedIDs = fetched
         attachmentSources = sources
-        return Mailbox(
+        var mailbox = Mailbox(
             address: me.map(MailDomain.address(for:)) ?? "", messages: messages, settings: settings, drafts: try await vault.drafts()
         )
+        mailbox.outsidePlaces = outside.values.sorted { $0.address < $1.address }.compactMap { account in
+            guard let known = places[account.id] else { return nil }
+            let label = OutsideAccountLabel(id: account.id, provider: account.provider, address: account.address)
+            let used = Set(messages.filter { $0.outsideAccount?.id == account.id }.flatMap(\.outsideLabels))
+            // A tab shows once it holds something, since Gmail hides the ones turned off. Labels always show.
+            let shown = known.labels.filter { !$0.isTab || used.contains($0.id) }
+            return shown.isEmpty ? nil : OutsidePlaces(account: label, labels: shown)
+        }
+        return mailbox
     }
 
     /// What a kept message says, and what the path it took proves about it.
@@ -303,7 +321,7 @@ public actor ServerMailStore: MailStore {
     /// prove its sender.
     private func readFetched(_ stored: OutsideFetchedMessage, id: UUID, provider: OutsideProvider) -> ParsedMail {
         MailParser.parseMessage(
-            stored.raw, id: id, received: stored.received, marks: MailMarks(isUnread: stored.isUnread),
+            stored.raw, id: id, received: stored.received, marks: MailMarks(isUnread: stored.isUnread, isStarred: stored.isStarred),
             checkedBy: OutsideReading.checkedBy(provider)
         )
     }
@@ -333,7 +351,8 @@ public actor ServerMailStore: MailStore {
                     keep: { message in
                         try await vault.keepFetched(message)
                         progress(OutsideDownload(address: account.address, done: counter.next()))
-                    }
+                    },
+                    places: { try await vault.keepPlaces($0) }
                 )
             } catch is CancellationError {
                 break
@@ -578,20 +597,21 @@ extension ServerMailStore: OutsideAccountStore {
         return candidate
     }
 
-    public func googleSignIn(sendingFor id: UUID?) async throws -> GoogleSignInRequest {
+    public func googleSignIn(for id: UUID?, sending: Bool) async throws -> GoogleSignInRequest {
         guard let google else { throw OutsideAccountError.notSetUp }
         guard let id else {
             guard try await vault.outsideAccounts().count < OutsideAccountLimits.most else { throw OutsideAccountError.tooMany }
-            return google.request()
+            return google.request(.add)
         }
         guard let outside = try await vault.outsideAccounts().first(where: { $0.id == id }),
               outside.provider.signsInWithGoogle else { throw OutsideAccountError.notFound }
-        return google.request(sendingFor: outside.address)
+        // An account that already sends keeps sending when it's asked to allow changes.
+        return google.request(sending || outside.canSend ? .send(outside.address) : .change(outside.address))
     }
 
     public func addGoogle(_ request: GoogleSignInRequest, callback: URL) async throws -> OutsideAccount {
         guard let google else { throw OutsideAccountError.notSetUp }
-        guard request.scopes == [GoogleOAuth.readScope] else { throw OutsideAccountError.notFound }
+        guard request.purpose == .add else { throw OutsideAccountError.notFound }
         let tokens = try await googleAnswer { try await google.finish(request, callback: callback) }
         let address = try await googleAnswer { try await google.address(accessToken: tokens.accessToken) }
         let candidate = OutsideAccount(provider: .gmail, address: address, addedAt: now())
@@ -603,16 +623,31 @@ extension ServerMailStore: OutsideAccountStore {
     }
 
     public func allowGoogleSending(_ id: UUID, _ request: GoogleSignInRequest, callback: URL) async throws {
+        guard request.purpose.sends else { throw OutsideAccountError.notFound }
+        try await regrant(id, request, callback: callback)
+    }
+
+    /// Never turns sending on: a request that sends is only taken for an account that already sends.
+    public func allowGoogleChanges(_ id: UUID, _ request: GoogleSignInRequest, callback: URL) async throws {
+        guard request.purpose != .add else { throw OutsideAccountError.notFound }
+        if request.purpose.sends {
+            guard try await vault.outsideAccounts().first(where: { $0.id == id })?.canSend == true else { throw OutsideAccountError.notFound }
+        }
+        try await regrant(id, request, callback: callback)
+    }
+
+    /// Swaps an account's Google token for a new one, for the same Google account only.
+    private func regrant(_ id: UUID, _ request: GoogleSignInRequest, callback: URL) async throws {
         guard let google else { throw OutsideAccountError.notSetUp }
-        guard request.scopes.contains(GoogleOAuth.sendScope),
-              var outside = try await vault.outsideAccounts().first(where: { $0.id == id }),
-              outside.provider.signsInWithGoogle else { throw OutsideAccountError.notFound }
+        guard var outside = try await vault.outsideAccounts().first(where: { $0.id == id }), outside.provider.signsInWithGoogle,
+              request.purpose.address?.lowercased() == outside.address.lowercased()
+        else { throw OutsideAccountError.notFound }
         let tokens = try await googleAnswer { try await google.finish(request, callback: callback) }
         let address = try await googleAnswer { try await google.address(accessToken: tokens.accessToken) }
         // The page lets the person pick any Google account, and only this one's mail is being changed.
         guard address.lowercased() == outside.address.lowercased() else { throw OutsideAccountError.differentAccount }
-        outside.canSend = true
-        try await vault.save(outside, credential: .google(GoogleGrant(refreshToken: tokens.refreshToken, canSend: true)), at: now())
+        outside.canSend = request.purpose.sends
+        try await vault.save(outside, credential: .google(GoogleGrant(refreshToken: tokens.refreshToken, canSend: request.purpose.sends)), at: now())
     }
 
     /// Takes the sign-in off every device. A Google account's access is taken back at Google too,

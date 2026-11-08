@@ -133,6 +133,20 @@ struct OutsideAccountsView: View {
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .fixedSize(horizontal: false, vertical: true)
+            if !account.keepsInStep {
+                Text(OutsideWording.readOnly)
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Allow Changes") {
+                    let signIn = webSignIn(webAuthenticationSession)
+                    Task { await model.allowChanges(account, signingIn: signIn) }
+                }
+                .font(Typeface.callout)
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.accent.color)
+                .disabled(isBusy)
+            }
             Toggle(OutsideWording.sendSwitch, isOn: Binding(
                 get: { account.canSend },
                 set: { on in
