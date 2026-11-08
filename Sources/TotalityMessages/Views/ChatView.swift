@@ -6,13 +6,14 @@ import TotalityUI
 struct ChatScreen: View {
     let messages: MessagesModel
     let chatID: String
+    @Environment(\.dismiss) private var dismiss
     @State private var chat: ChatModel?
     @State private var problem: String?
 
     var body: some View {
         Group {
             if let chat {
-                ChatView(model: chat)
+                ChatView(model: chat, messages: messages) { dismiss() }
             } else if let problem {
                 MessagesStateView(systemImage: "exclamationmark.bubble", title: "This chat couldn't open", detail: problem)
             } else {
@@ -34,7 +35,13 @@ struct ChatScreen: View {
 /// A conversation: messages oldest at the top, who's typing, and the box to write in.
 struct ChatView: View {
     @Bindable var model: ChatModel
+    let messages: MessagesModel
+    /// Goes back to the list, after leaving the chat or blocking the person in it.
+    let onGone: () -> Void
     @FocusState private var writing: Bool
+    @State private var playing: ChatMessage?
+    @State private var confirmingBlock = false
+    @State private var confirmingLeave = false
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var viewing: ChatMessage?
     @State private var deleting: ChatMessage?
@@ -47,6 +54,9 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: Space.s2) {
                         EncryptionNote()
+                        if model.disappearing != .off {
+                            DisappearingNote(setting: model.disappearing)
+                        }
                         if model.loaded && model.messages.isEmpty {
                             Text("No messages yet. Say hello.")
                                 .font(Typeface.body)
@@ -60,7 +70,7 @@ struct ChatView: View {
                                 showsSender: !message.isOwn && (index == 0 || model.messages[index - 1].sender != message.sender),
                                 showsSeen: message.seen && model.messages[(index + 1)...].allSatisfy { !$0.isOwn || !$0.seen },
                                 onRetry: { Task { await model.retry(message) } },
-                                onOpenPhoto: { viewing = message },
+                                onOpenPhoto: { if message.isVideo { playing = message } else { viewing = message } },
                                 onReply: {
                                     model.replyingTo = message
                                     writing = true
@@ -105,7 +115,13 @@ struct ChatView: View {
             guard let item = pickedPhoto else { return }
             pickedPhoto = nil
             Task {
-                if let data = try? await item.loadTransferable(type: Data.self) {
+                if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
+                    if let movie = try? await item.loadTransferable(type: PickedMovie.self) {
+                        await model.sendVideo(movie.url)
+                    } else {
+                        model.notice = "That video couldn't be opened."
+                    }
+                } else if let data = try? await item.loadTransferable(type: Data.self) {
                     await model.sendPhoto(data)
                 } else {
                     model.notice = "That photo couldn't be opened."
@@ -115,11 +131,42 @@ struct ChatView: View {
         .sheet(item: $viewing) { message in
             PhotoViewer(message: message, model: model) { viewing = nil }
         }
+        .sheet(item: $playing) { message in
+            VideoViewer(message: message, model: model) { playing = nil }
+        }
+        .toolbar { chatMenu }
+        .confirmationDialog(
+            "Block \(model.otherPerson.map(MessagesUsername.display) ?? "them")?",
+            isPresented: $confirmingBlock, titleVisibility: .visible
+        ) {
+            Button("Block", role: .destructive) {
+                guard let person = model.otherPerson else { return }
+                Task { if await messages.block(person: person, leaving: model.chatID) { onGone() } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Nothing more from them reaches you, and this chat closes. They aren't told. You can unblock them from Messages' menu.")
+        }
+        .confirmationDialog(
+            model.isGroup ? "Leave this group?" : "Leave this chat?",
+            isPresented: $confirmingLeave, titleVisibility: .visible
+        ) {
+            Button("Leave", role: .destructive) {
+                Task { if await messages.leave(model.chatID) { onGone() } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It goes from your list, and you won't get new messages from it unless someone adds you again.")
+        }
         #if os(iOS)
         .fullScreenCover(isPresented: $showingCamera) {
-            CameraPicker { data in
+            CameraPicker { result in
                 showingCamera = false
-                if let data { Task { await model.sendPhoto(data) } }
+                switch result {
+                case .photo(let data): Task { await model.sendPhoto(data) }
+                case .video(let url): Task { await model.sendVideo(url) }
+                case nil: break
+                }
             }
             .ignoresSafeArea()
         }
@@ -139,10 +186,37 @@ struct ChatView: View {
         }
     }
 
+    @ToolbarContentBuilder private var chatMenu: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Picker("Disappearing messages", selection: Binding(
+                    get: { model.disappearing },
+                    set: { setting in Task { await model.setDisappearing(setting) } }
+                )) {
+                    ForEach(Disappearing.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.menu)
+                if model.otherPerson != nil {
+                    Button("Block \(MessagesUsername.display(model.otherPerson ?? ""))", systemImage: "hand.raised", role: .destructive) {
+                        confirmingBlock = true
+                    }
+                }
+                Button(model.isGroup ? "Leave group" : "Leave chat", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                    confirmingLeave = true
+                }
+            } label: {
+                Image(systemName: model.disappearing == .off ? "ellipsis.circle" : "timer")
+                    .font(Typeface.body)
+                    .imageScale(.large)
+            }
+            .accessibilityLabel("Chat settings")
+        }
+    }
+
     private var composer: some View {
         let theme = Theme.current
         let empty = model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let busy = model.sendingPhoto
+        let busy = model.sendingPhoto || model.sendingVideo
         let accent = theme.accent.color
         return HStack(alignment: .bottom, spacing: Space.s3) {
             #if os(iOS)
@@ -151,14 +225,14 @@ struct ChatView: View {
                     .padding(.bottom, Space.s2)
             }
             #endif
-            PhotosPicker(selection: $pickedPhoto, matching: .images, preferredItemEncoding: .compatible) {
+            PhotosPicker(selection: $pickedPhoto, matching: .any(of: [.images, .videos]), preferredItemEncoding: .compatible) {
                 Image(systemName: busy ? "hourglass" : "photo")
                     .font(Typeface.title)
                     .foregroundStyle(accent)
                     .frame(width: 32, height: 32)
             }
             .disabled(busy)
-            .accessibilityLabel("Send a photo")
+            .accessibilityLabel("Send a photo or video")
             .padding(.bottom, Space.s2)
             TextField("Message", text: $model.draft, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -190,6 +264,21 @@ private struct EncryptionNote: View {
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.vertical, Space.s3)
+    }
+}
+
+/// Shown at the top of a chat while disappearing messages are on, with what it can't do.
+private struct DisappearingNote: View {
+    let setting: Disappearing
+
+    var body: some View {
+        let theme = Theme.current
+        Label("Disappearing messages: \(setting.label.lowercased()). They can't stop a screenshot or another camera.", systemImage: "timer")
+            .font(Typeface.caption)
+            .foregroundStyle(theme.textSecondary.color)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, Space.s2)
     }
 }
 
@@ -268,6 +357,8 @@ private struct Bubble: View {
         switch message.kind {
         case .photo:
             PhotoBubble(message: message, model: model, onOpen: onOpenPhoto)
+        case .video:
+            VideoBubble(message: message, model: model, onOpen: onOpenPhoto)
         case .deleted:
             Text("Message deleted")
                 .font(Typeface.caption)

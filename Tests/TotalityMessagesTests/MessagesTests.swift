@@ -62,6 +62,32 @@ private final class FakeService: MessagesService, @unchecked Sendable {
 
     func openChat(_ chat: String) async throws -> any ChatChannel { FakeChannel() }
 
+    private(set) var blockedList: [String] = []
+
+    func startGroup(with usernames: [String]) async throws -> String {
+        record("group \(usernames.joined(separator: ","))")
+        guard usernames.allSatisfy(known.contains) else { throw MessagesError.noSuchPerson }
+        return "!group"
+    }
+
+    func block(person: String, leaving chat: String?) async throws {
+        record("block \(person) \(chat ?? "-")")
+        lock.withLock { blockedList.append(person) }
+        if let chat { update { $0.removeAll { $0.id == chat } } }
+    }
+
+    func blocked() async throws -> [String] { lock.withLock { blockedList } }
+
+    func unblock(_ person: String) async throws {
+        record("unblock \(person)")
+        lock.withLock { blockedList.removeAll { $0 == person } }
+    }
+
+    func leave(_ chat: String) async throws {
+        record("leave \(chat)")
+        update { $0.removeAll { $0.id == chat } }
+    }
+
     func stop() async { lock.withLock { stopped = true } }
 
     private func record(_ action: String) { lock.withLock { actions.append(action) } }
@@ -82,9 +108,27 @@ private final class FakeChannel: ChatChannel, @unchecked Sendable {
     private(set) var photos: [OutgoingPhoto] = []
     private(set) var reactions: [String] = []
     private(set) var deleted: [String] = []
+    private(set) var videos: [OutgoingVideo] = []
+    private(set) var settings: [Disappearing] = []
     var failSending = false
+    var startingSetting: Disappearing = .off
+    var startingMessages: [ChatMessage] = []
+    let id = "!chat"
+    let otherPerson: String? = "@mckay_test:usetotality.com"
+    let isGroup = false
 
-    func observe(messages: @escaping @Sendable ([ChatMessage]) -> Void, typing: @escaping @Sendable ([String]) -> Void) async {}
+    func observe(messages: @escaping @Sendable ([ChatMessage]) -> Void, typing: @escaping @Sendable ([String]) -> Void) async {
+        messages(startingMessages)
+    }
+    func observeDisappearing(_ onChange: @escaping @Sendable (Disappearing) -> Void) async { onChange(startingSetting) }
+    func setDisappearing(_ setting: Disappearing) async throws {
+        if failSending { throw MessagesError.offline }
+        lock.withLock { settings.append(setting) }
+    }
+    func sendVideo(_ video: OutgoingVideo, replyingTo: String?) async throws {
+        lock.withLock { videos.append(video) }
+    }
+    func video(_ message: String) async throws -> Data { Data(message.utf8) }
     func loadEarlier() async {}
     func send(_ text: String, replyingTo: String?) async throws {
         if failSending { throw MessagesError.offline }
@@ -530,4 +574,136 @@ private func properties(_ data: Data) throws -> [CFString: Any] {
 private final class Signed: @unchecked Sendable {
     var value: String?
     init(_ value: String?) { self.value = value }
+}
+
+// MARK: Step 4: disappearing messages, groups, blocking
+
+@Test func disappearingSettingsRoundTripThroughTheRoomState() {
+    for setting in Disappearing.allCases {
+        #expect(Disappearing(stateJSON: setting.stateJSON) == setting, "\(setting)")
+    }
+    #expect(Disappearing(stateJSON: "not json") == .off)
+    #expect(Disappearing(stateJSON: "{\"max_lifetime\":3600000}") == .day)
+    #expect(Disappearing(stateJSON: "{\"max_lifetime\":2592000000}") == .week)
+    #expect(Disappearing(stateJSON: "{\"max_lifetime\":0}") == .off)
+}
+
+@Test func timedMessagesHideOnceTheyExpire() {
+    let messages = [
+        ChatMessage(id: "old", sender: "@ana:x", body: "From two days ago", isOwn: false, time: jan1),
+        ChatMessage(id: "new", sender: "@ana:x", body: "From an hour ago", isOwn: false, time: jan1.addingTimeInterval(47 * 3600)),
+    ]
+    let now = jan1.addingTimeInterval(48 * 3600)
+    #expect(DisappearingRule.visible(messages, setting: .day, now: now, viewedUpTo: nil).map(\.id) == ["new"])
+    #expect(DisappearingRule.visible(messages, setting: .week, now: now, viewedUpTo: nil).map(\.id) == ["old", "new"])
+    #expect(DisappearingRule.visible(messages, setting: .off, now: now, viewedUpTo: nil).count == 2)
+}
+
+@Test func afterViewingHidesWhatYouveAlreadySeenFromOthers() {
+    let messages = [
+        ChatMessage(id: "seen", sender: "@ana:x", body: "The gate code is 4417", isOwn: false, time: jan1),
+        ChatMessage(id: "mine", sender: "@me:x", body: "Got it", isOwn: true, time: jan1),
+        ChatMessage(id: "fresh", sender: "@ana:x", body: "Parking is round the back", isOwn: false, time: jan1.addingTimeInterval(60)),
+    ]
+    let shown = DisappearingRule.visible(messages, setting: .afterViewing, now: jan1.addingTimeInterval(120), viewedUpTo: jan1)
+    #expect(shown.map(\.id) == ["mine", "fresh"])
+}
+
+@Test func onlyYourOwnSentMessagesAreDue() {
+    let late = jan1.addingTimeInterval(2 * 86_400)
+    let messages = [
+        ChatMessage(id: "mine", sender: "@me:x", body: "Dinner's at seven", isOwn: true, time: jan1),
+        ChatMessage(id: "sending", sender: "@me:x", body: "Bring the salad", isOwn: true, time: jan1, state: .sending),
+        ChatMessage(id: "theirs", sender: "@ana:x", body: "Will do", isOwn: false, time: jan1),
+        ChatMessage(id: "seen", sender: "@me:x", body: "Door's open", isOwn: true, time: late, seen: true),
+    ]
+    #expect(DisappearingRule.due(messages, setting: .day, now: late).map(\.id) == ["mine"])
+    #expect(DisappearingRule.due(messages, setting: .afterViewing, now: late).map(\.id) == ["seen"])
+    #expect(DisappearingRule.due(messages, setting: .off, now: late).isEmpty)
+}
+
+@Test func groupUsernamesAreCheckedAndTidied() throws {
+    #expect(try GroupMembers.parse("@ana_ruiz, mckay_test  ana_ruiz, mckay_clemens", own: "mckay_clemens") == ["ana_ruiz", "mckay_test"])
+    #expect(throws: MessagesError.self) { try GroupMembers.parse("ana_ruiz", own: "mckay_clemens") }
+    #expect(throws: MessagesError.self) { try GroupMembers.parse("ana_ruiz, mckay clemens!", own: "x_y_z") }
+    let twenty = (1...20).map { "friend_\($0)" }.joined(separator: ",")
+    #expect(throws: MessagesError.self) { try GroupMembers.parse(twenty, own: "mckay_clemens") }
+    let nineteen = (1...19).map { "friend_\($0)" }.joined(separator: ",")
+    #expect(try GroupMembers.parse(nineteen, own: "mckay_clemens").count == 19)
+}
+
+@MainActor
+@Test func dueMessagesAreRemovedOnceEach() async throws {
+    let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+    let channel = FakeChannel()
+    channel.startingSetting = .day
+    channel.startingMessages = [
+        ChatMessage(id: "$old", sender: "@me:x", body: "Lunch at noon?", isOwn: true, time: Date().addingTimeInterval(-2 * 86_400)),
+        ChatMessage(id: "$new", sender: "@me:x", body: "Running five late", isOwn: true, time: Date()),
+    ]
+    let chat = ChatModel(channel: channel, defaults: defaults)
+    await chat.start()
+    await settle()
+    await chat.removeDue()
+    #expect(channel.deleted == ["$old"])
+    #expect(chat.messages.map(\.id) == ["$new"])
+    chat.close()
+}
+
+@MainActor
+@Test func leavingAnAfterViewingChatRemembersWhatYouSaw() async throws {
+    let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+    let channel = FakeChannel()
+    channel.startingSetting = .afterViewing
+    channel.startingMessages = [
+        ChatMessage(id: "$a", sender: "@ana:x", body: "The gate code is 4417", isOwn: false, time: jan1),
+    ]
+    let chat = ChatModel(channel: channel, defaults: defaults)
+    await chat.start()
+    await settle()
+    #expect(chat.messages.count == 1)
+    chat.close()
+    #expect(defaults.object(forKey: "messages.viewedUpTo.!chat") as? Date == jan1)
+
+    let again = ChatModel(channel: channel, defaults: defaults)
+    await again.start()
+    await settle()
+    #expect(again.messages.isEmpty)
+    again.close()
+}
+
+@MainActor
+@Test func changingTheSettingKeepsTheOldOneWhenItFails() async {
+    let channel = FakeChannel()
+    let chat = ChatModel(channel: channel)
+    await chat.setDisappearing(.week)
+    #expect(chat.disappearing == .week)
+    channel.failSending = true
+    await chat.setDisappearing(.off)
+    #expect(chat.disappearing == .week)
+    #expect(chat.notice == MessagesError.offline.message)
+}
+
+@MainActor
+@Test func groupsStartFromTypedNamesAndBlockingCanBeUndone() async {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [
+        ChatSummary(id: "!dm", title: "mckay_test", lastMessage: "Hi", lastActivity: jan1),
+    ])
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    await model.connect()
+    await settle()
+
+    #expect(await model.startGroup(with: "ana_ruiz, @mckay_test") == "!group")
+    #expect(await model.startGroup(with: "ana_ruiz") == nil)
+    #expect(model.notice != nil)
+    #expect(await model.startGroup(with: "ana_ruiz, nobody_here") == nil)
+
+    #expect(await model.block(person: "@mckay_test:usetotality.com", leaving: "!dm"))
+    await settle()
+    #expect(model.chats.isEmpty)
+    await model.loadBlocked()
+    #expect(model.blockedPeople == ["@mckay_test:usetotality.com"])
+    await model.unblock("@mckay_test:usetotality.com")
+    #expect(model.blockedPeople.isEmpty)
+    #expect(service.actions.contains("group ana_ruiz,mckay_test"))
 }

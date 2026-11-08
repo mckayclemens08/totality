@@ -14,12 +14,15 @@ public struct ChatSummary: Identifiable, Sendable, Equatable {
     public let lastMessage: String?
     public let lastActivity: Date?
     public let unread: Int
+    /// A small group rather than a chat with one person.
+    public let isGroup: Bool
 
     public init(
         id: String, title: String, isRequest: Bool = false, from: String? = nil,
-        lastMessage: String? = nil, lastActivity: Date? = nil, unread: Int = 0
+        lastMessage: String? = nil, lastActivity: Date? = nil, unread: Int = 0, isGroup: Bool = false
     ) {
         self.id = id
+        self.isGroup = isGroup
         self.title = title
         self.isRequest = isRequest
         self.from = from
@@ -52,6 +55,8 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
         case text
         /// A photo, sealed on the sender's device. Its size helps lay it out before it opens.
         case photo(width: Int?, height: Int?)
+        /// A short video, sealed the same way.
+        case video(seconds: Double?)
         /// Removed by its sender. Only the fact that something was there remains.
         case deleted
     }
@@ -97,6 +102,7 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
     /// Text you can copy. Photos and deleted messages have none.
     public var copyableText: String? { kind == .text && decrypted ? body : nil }
     public var isPhoto: Bool { if case .photo = kind { true } else { false } }
+    public var isVideo: Bool { if case .video = kind { true } else { false } }
 }
 
 /// One reaction on a message: which emoji, how many people, and whether you're one of them.
@@ -229,6 +235,14 @@ public protocol MessagesService: AnyObject, Sendable {
     /// Finds the direct chat with that username, or starts an encrypted one. Returns its ID.
     func startChat(with username: String) async throws -> String
     func openChat(_ chat: String) async throws -> any ChatChannel
+    /// Starts an encrypted group with these usernames. It has no name of its own: a Matrix room
+    /// name isn't end-to-end encrypted, so the group is shown by who's in it.
+    func startGroup(with usernames: [String]) async throws -> String
+    /// Ignores this person, so nothing more from them arrives, and leaves your chat with them.
+    func block(person: String, leaving chat: String?) async throws
+    func blocked() async throws -> [String]
+    func unblock(_ person: String) async throws
+    func leave(_ chat: String) async throws
     func stop() async
 }
 
@@ -245,6 +259,8 @@ public protocol ChatChannel: AnyObject, Sendable {
     /// Sends a photo. The SDK seals it on this device before it's uploaded, and the key travels inside
     /// the encrypted message.
     func sendPhoto(_ photo: OutgoingPhoto, replyingTo: String?) async throws
+    /// Sends a short video, sealed the same way as a photo. Its file is removed once it's queued.
+    func sendVideo(_ video: OutgoingVideo, replyingTo: String?) async throws
     func retry(_ message: String) async throws
     /// Adds your reaction, or takes it away if it's already there.
     func toggleReaction(_ key: String, on message: String) async throws
@@ -252,6 +268,16 @@ public protocol ChatChannel: AnyObject, Sendable {
     func delete(_ message: String) async throws
     /// A photo's bytes, opened on this device. `thumbnail` asks for the small version.
     func photo(_ message: String, thumbnail: Bool) async throws -> Data
+    /// A video's bytes, opened on this device.
+    func video(_ message: String) async throws -> Data
+    /// This chat's ID, so per-chat settings on this device can be kept apart.
+    var id: String { get }
+    /// The other person in a one-to-one chat. Nil in a group.
+    var otherPerson: String? { get }
+    var isGroup: Bool { get }
+    /// The chat's disappearing setting, now and whenever someone changes it.
+    func observeDisappearing(_ onChange: @escaping @Sendable (Disappearing) -> Void) async
+    func setDisappearing(_ setting: Disappearing) async throws
     /// A private receipt when `share` is off, so your own devices still know what you've read.
     func markRead(share: Bool) async
     func setTyping(_ typing: Bool) async
@@ -267,5 +293,102 @@ public enum MessagesPreferences {
 
     public static func shareReadAndTyping(_ defaults: UserDefaults = .standard) -> Bool {
         defaults.object(forKey: shareReadAndTypingKey) as? Bool ?? true
+    }
+}
+
+/// Disappearing messages, per chat and off by default (owner, 2026-11-05).
+public enum Disappearing: String, Sendable, Equatable, CaseIterable, Identifiable {
+    case off
+    case afterViewing
+    case day
+    case week
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .off: "Off"
+        case .afterViewing: "After viewing"
+        case .day: "After 24 hours"
+        case .week: "After 7 days"
+        }
+    }
+
+    /// How long a message lasts, for the timed choices.
+    public var lifetime: TimeInterval? {
+        switch self {
+        case .day: 86_400
+        case .week: 7 * 86_400
+        case .off, .afterViewing: nil
+        }
+    }
+
+    /// Kept in the room's standard retention setting, which every member's app can read. The server
+    /// can see that it's on and for how long, but never the messages.
+    public static let afterViewingKey = "app.totality.after_viewing"
+
+    public var stateJSON: String {
+        switch self {
+        case .off: "{}"
+        case .afterViewing: "{\"\(Self.afterViewingKey)\":true}"
+        case .day, .week: "{\"max_lifetime\":\(Int(lifetime! * 1000))}"
+        }
+    }
+
+    public init(stateJSON: String) {
+        guard let object = (try? JSONSerialization.jsonObject(with: Data(stateJSON.utf8))) as? [String: Any] else {
+            self = .off
+            return
+        }
+        if object[Self.afterViewingKey] as? Bool == true {
+            self = .afterViewing
+        } else if let ms = (object["max_lifetime"] as? NSNumber)?.doubleValue, ms > 0 {
+            self = ms <= 86_400_000 ? .day : .week
+        } else {
+            self = .off
+        }
+    }
+}
+
+/// Which messages a disappearing chat still shows, and which of your own to remove from the server.
+public enum DisappearingRule {
+    /// Hides other people's messages once they've expired here, even if their sender hasn't removed
+    /// them yet. `viewedUpTo` is the newest message time you'd already seen when you last left the chat.
+    public static func visible(
+        _ messages: [ChatMessage], setting: Disappearing, now: Date, viewedUpTo: Date?
+    ) -> [ChatMessage] {
+        messages.filter { message in
+            guard message.kind != .deleted else { return true }
+            if let lifetime = setting.lifetime { return message.time.addingTimeInterval(lifetime) > now }
+            if setting == .afterViewing, !message.isOwn, let viewedUpTo { return message.time > viewedUpTo }
+            return true
+        }
+    }
+
+    /// Your own messages that are due to go: past their time, or seen by someone when it's after viewing.
+    public static func due(_ messages: [ChatMessage], setting: Disappearing, now: Date) -> [ChatMessage] {
+        messages.filter { message in
+            guard message.isOwn, message.state == .sent, message.kind != .deleted else { return false }
+            if let lifetime = setting.lifetime { return message.time.addingTimeInterval(lifetime) <= now }
+            return setting == .afterViewing && message.seen
+        }
+    }
+}
+
+/// Usernames typed for a group, separated by commas or spaces.
+public enum GroupMembers {
+    /// Up to 20 people, you included.
+    public static let limit = 20
+
+    public static func parse(_ typed: String, own: String) throws -> [String] {
+        let parts = typed.split(whereSeparator: { $0 == "," || $0.isWhitespace }).map(String.init).filter { !$0.isEmpty }
+        var names: [String] = []
+        for part in parts {
+            guard let name = MessagesUsername.normalized(part) else { throw MessagesError.failed("“\(part)” isn't a Totality username.") }
+            if name != own && !names.contains(name) { names.append(name) }
+        }
+        guard names.count >= 2 else { throw MessagesError.failed("A group needs at least two other people. For one person, start a chat.") }
+        guard names.count < limit else { throw MessagesError.failed("A group can have up to \(limit) people, you included.") }
+        return names
     }
 }

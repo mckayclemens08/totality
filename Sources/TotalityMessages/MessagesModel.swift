@@ -21,6 +21,8 @@ public final class MessagesModel {
     public private(set) var chats: [ChatSummary] = []
     public private(set) var requests: [ChatSummary] = []
     public private(set) var connection: Connection = .connecting
+    /// People you've blocked, loaded when the list is opened.
+    public private(set) var blockedPeople: [String] = []
     /// The last thing that went wrong with an action, shown until the next one.
     public var notice: String?
 
@@ -63,6 +65,7 @@ public final class MessagesModel {
         generation += 1
         let mine = generation
         phase = .loading
+        VideoFiles.emptyFolder()
         do {
             let service = try await connector(current)
             guard mine == generation else { return await service.stop() }
@@ -126,6 +129,73 @@ public final class MessagesModel {
         } catch {
             notice = Self.describe(error)
             return nil
+        }
+    }
+
+    /// Sends a camera video straight into a chat. True once it's queued. The file is removed either way.
+    public func sendVideo(_ original: URL, to chat: String) async -> Bool {
+        defer { try? FileManager.default.removeItem(at: original) }
+        guard let service else { return false }
+        do {
+            notice = nil
+            let video = try await VideoPrep.prepare(original)
+            defer { try? FileManager.default.removeItem(at: video.file) }
+            let channel = try await service.openChat(chat)
+            defer { channel.close() }
+            try await channel.sendVideo(video, replyingTo: nil)
+            return true
+        } catch {
+            notice = Self.describe(error)
+            return false
+        }
+    }
+
+    /// Starts an encrypted group from typed usernames. Its ID, or nil with `notice` saying why not.
+    public func startGroup(with typed: String) async -> String? {
+        guard let service else { return nil }
+        do {
+            notice = nil
+            let names = try GroupMembers.parse(typed, own: MessagesUsername.display(service.userID))
+            return try await service.startGroup(with: names)
+        } catch {
+            notice = Self.describe(error)
+            return nil
+        }
+    }
+
+    /// Only ever called after the person confirmed it. Leaves the chat with them too.
+    public func block(person: String, leaving chat: String?) async -> Bool {
+        guard let service else { return false }
+        do {
+            notice = nil
+            try await service.block(person: person, leaving: chat)
+            return true
+        } catch {
+            notice = Self.describe(error)
+            return false
+        }
+    }
+
+    public func loadBlocked() async {
+        guard let service else { return }
+        do { blockedPeople = try await service.blocked().sorted() } catch { notice = Self.describe(error) }
+    }
+
+    public func unblock(_ person: String) async {
+        await act { try await $0.unblock(person) }
+        await loadBlocked()
+    }
+
+    /// Only ever called after the person confirmed it.
+    public func leave(_ chat: String) async -> Bool {
+        guard let service else { return false }
+        do {
+            notice = nil
+            try await service.leave(chat)
+            return true
+        } catch {
+            notice = Self.describe(error)
+            return false
         }
     }
 
@@ -197,7 +267,17 @@ public final class MessagesModel {
 @MainActor
 @Observable
 public final class ChatModel {
-    public private(set) var messages: [ChatMessage] = []
+    /// What the chat shows: everything, minus anything a disappearing setting has expired.
+    public var messages: [ChatMessage] {
+        DisappearingRule.visible(all, setting: disappearing, now: now, viewedUpTo: viewedUpTo)
+    }
+    private var all: [ChatMessage] = []
+    public private(set) var disappearing: Disappearing = .off
+    /// Moved on every half minute while the chat is open, so timed messages go on time.
+    private var now = Date()
+    private var viewedUpTo: Date?
+    private var removing: Set<String> = []
+    private var clock: Task<Void, Never>?
     public private(set) var typing: [String] = []
     public private(set) var loaded = false
     public var draft = ""
@@ -209,6 +289,10 @@ public final class ChatModel {
     private let photos = PhotoMemory()
 
     public let title: String
+    public var isGroup: Bool { channel.isGroup }
+    public var chatID: String { channel.id }
+    public var otherPerson: String? { channel.otherPerson }
+    public private(set) var sendingVideo = false
     private let channel: any ChatChannel
     private var typingSent = false
     private let defaults: UserDefaults
@@ -221,15 +305,35 @@ public final class ChatModel {
 
     private var share: Bool { MessagesPreferences.shareReadAndTyping(defaults) }
 
+    private var viewedKey: String { "messages.viewedUpTo.\(channel.id)" }
+
     public func start() async {
+        viewedUpTo = defaults.object(forKey: viewedKey) as? Date
+        await channel.observeDisappearing { [weak self] setting in
+            Task { @MainActor in
+                self?.disappearing = setting
+                await self?.removeDue()
+            }
+        }
+        clock?.cancel()
+        clock = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self else { return }
+                self.now = Date()
+                await self.removeDue()
+            }
+        }
         await channel.observe(
             messages: { [weak self] messages in
                 Task { @MainActor in
                     guard let self else { return }
-                    let grew = messages.last?.id != self.messages.last?.id
-                    self.messages = messages
+                    let grew = messages.last?.id != self.all.last?.id
+                    self.all = messages
+                    self.now = Date()
                     self.loaded = true
                     if grew { await self.channel.markRead(share: self.share) }
+                    await self.removeDue()
                 }
             },
             typing: { [weak self] names in
@@ -242,6 +346,52 @@ public final class ChatModel {
     }
 
     public func loadEarlier() async { await channel.loadEarlier() }
+
+    /// Removes your own messages that a disappearing setting says are due, once each.
+    func removeDue() async {
+        for message in DisappearingRule.due(all, setting: disappearing, now: now) where !removing.contains(message.id) {
+            removing.insert(message.id)
+            try? await channel.delete(message.id)
+        }
+    }
+
+    public func setDisappearing(_ setting: Disappearing) async {
+        do {
+            notice = nil
+            try await channel.setDisappearing(setting)
+            disappearing = setting
+        } catch {
+            notice = MessagesModel.describe(error)
+        }
+    }
+
+    /// Prepares a short video off the main thread, then queues it.
+    public func sendVideo(_ original: URL) async {
+        guard !sendingVideo else { return }
+        sendingVideo = true
+        defer {
+            sendingVideo = false
+            try? FileManager.default.removeItem(at: original)
+        }
+        let reply = replyingTo
+        replyingTo = nil
+        do {
+            notice = nil
+            let video = try await VideoPrep.prepare(original)
+            defer { try? FileManager.default.removeItem(at: video.file) }
+            try await channel.sendVideo(video, replyingTo: reply?.id)
+        } catch {
+            replyingTo = reply
+            notice = MessagesModel.describe(error)
+        }
+    }
+
+    /// A video opened on this device, written briefly where the player can read it. The caller
+    /// removes the file when the player closes.
+    public func playableVideo(_ message: ChatMessage) async -> URL? {
+        guard let data = try? await channel.video(message.id) else { return nil }
+        return try? VideoFiles.playable(data)
+    }
 
     public func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -325,6 +475,12 @@ public final class ChatModel {
     }
 
     public func close() {
+        clock?.cancel()
+        clock = nil
+        // After viewing: what you've seen now won't show next time you open the chat.
+        if disappearing == .afterViewing, let newest = all.filter({ !$0.isOwn }).map(\.time).max() {
+            defaults.set(newest, forKey: viewedKey)
+        }
         photos.removeAll()
         let wasTyping = typingSent
         typingSent = false
