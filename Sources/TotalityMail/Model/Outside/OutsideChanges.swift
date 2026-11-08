@@ -56,6 +56,8 @@ public struct OutsideSeen: Equatable, Sendable {
     public var place: OutsidePlace?
     public var isUnread: Bool?
     public var isStarred: Bool?
+    /// iCloud only: where it's been found, when that isn't where it was last known to be.
+    public var location: OutsideIMAPLocation?
 
     public static let unknown = OutsideSeen()
 }
@@ -178,24 +180,7 @@ extension GoogleOAuth {
 extension IMAPConnection {
     /// The folders that Archive, Junk and Trash go to, by their special-use flags, or their usual names.
     func specialMailboxes() async throws -> [OutsidePlace: String] {
-        let tag = takeTag()
-        try await reader.send("\(tag) LIST \"\" \"*\"")
-        let (untagged, answer) = try await readUntilTagged(tag)
-        guard answer.status == .ok else { throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(answer.text)) }
-        var found: [OutsidePlace: String] = [:], names: [String] = []
-        for line in untagged {
-            guard let (flags, name) = Self.listed(line) else { continue }
-            names.append(name)
-            if flags.contains("\\archive") { found[.archive] = found[.archive] ?? name }
-            if flags.contains("\\junk") { found[.spam] = found[.spam] ?? name }
-            if flags.contains("\\trash") { found[.trash] = found[.trash] ?? name }
-        }
-        func named(_ options: [String]) -> String? { options.lazy.compactMap { option in names.first { $0.caseInsensitiveCompare(option) == .orderedSame } }.first }
-        found[.archive] = found[.archive] ?? named(["Archive"])
-        found[.spam] = found[.spam] ?? named(["Junk", "Spam"])
-        found[.trash] = found[.trash] ?? named(["Deleted Messages", "Trash"])
-        found[.inbox] = "INBOX"
-        return found
+        OutsideFolders.specialNames(try await folders())
     }
 
     /// `* LIST (\HasNoChildren \Trash) "/" "Deleted Messages"`: its flags, lowercased, and its name.
@@ -334,34 +319,64 @@ extension IMAPConnection {
     }
 }
 
-/// What an iCloud Inbox showed on this open: its UIDVALIDITY, and the flags of each message from `since`.
+/// What iCloud showed on this open: the Inbox and each other folder looked in, from `since`.
 public struct OutsideIMAPInbox: Equatable, Sendable {
-    let validity: UInt32
     let since: Date
-    let flags: [UInt32: OutsideFlags]
-    /// Every message since `since` was looked at, so one that isn't here has left the Inbox.
-    let complete: Bool
+    /// The Inbox first.
+    let folders: [OutsideIMAPFolder]
+    /// Where each `Message-ID` was found, when it was found only once.
+    private let found: [String: OutsideIMAPLocation]
 
-    struct OutsideFlags: Equatable, Sendable {
-        let isUnread: Bool
-        let isStarred: Bool
+    init(since: Date, folders: [OutsideIMAPFolder]) {
+        self.since = since
+        self.folders = folders
+        var found: [String: OutsideIMAPLocation] = [:], twice = Set<String>()
+        for folder in folders {
+            for (uid, entry) in folder.entries {
+                guard let id = entry.messageID else { continue }
+                if found[id] != nil { twice.insert(id) }
+                found[id] = OutsideIMAPLocation(mailbox: folder.name, validity: folder.validity, uid: uid)
+            }
+        }
+        // Anyone can write any Message-ID into a message, so one found more than once isn't followed: a
+        // change made here could otherwise land on someone else's copy.
+        for id in twice { found[id] = nil }
+        self.found = found
     }
 
-    /// What it shows for one message that's where it was downloaded, or at `location` in the Inbox.
-    func seen(providerID: String, location: OutsideIMAPLocation?, received: Date) -> OutsideSeen {
-        let validity: UInt32, uid: UInt32
-        if let location {
-            guard location.mailbox == "INBOX" else { return .unknown }
-            (validity, uid) = (location.validity, location.uid)
-        } else {
-            let parts = providerID.split(separator: ".")
-            guard parts.count == 2, let v = UInt32(parts[0]), let u = UInt32(parts[1]) else { return .unknown }
-            (validity, uid) = (v, u)
+    private func folder(_ location: OutsideIMAPLocation) -> OutsideIMAPFolder? {
+        folders.first { $0.name == location.mailbox && $0.validity == location.validity }
+    }
+
+    /// What it shows for one downloaded message: where it was last known to be, at `location` once moved,
+    /// or wherever its `Message-ID` turned up.
+    func seen(providerID: String, location: OutsideIMAPLocation?, received: Date, messageID: String?) -> OutsideSeen {
+        let at = location ?? OutsideIMAPLocation.downloaded(providerID)
+        if let at, let folder = folder(at), let entry = folder.entries[at.uid] {
+            return OutsideSeen(place: folder.kind.place, isUnread: entry.isUnread, isStarred: entry.isStarred)
         }
-        guard validity == self.validity else { return .unknown }
-        if let found = flags[uid] { return OutsideSeen(place: .inbox, isUnread: found.isUnread, isStarred: found.isStarred) }
-        // Gone from the Inbox at iCloud. Where to isn't known, so it's archived here.
-        return complete && received >= since ? OutsideSeen(place: .archive) : .unknown
+        // Moved at iCloud, so it has a new UID: followed by its Message-ID.
+        if let messageID, let moved = found[messageID], let folder = folder(moved), let entry = folder.entries[moved.uid] {
+            return OutsideSeen(place: folder.kind.place, isUnread: entry.isUnread, isStarred: entry.isStarred, location: moved)
+        }
+        // Gone from the Inbox to a folder that wasn't looked in. Where to isn't known, so it's archived here.
+        guard let at, at != .lost, let folder = folder(at), folder.kind == .inbox, folder.complete, received >= since else { return .unknown }
+        return OutsideSeen(place: .archive, location: .lost)
+    }
+
+    /// The person's own folders, and which messages are in each by `Message-ID`, for Mailboxes.
+    func places(of outside: UUID) -> OutsideAccountPlaces {
+        let own = folders.filter { $0.kind == .own }
+        var membership: [String: [String]] = [:]
+        for folder in own {
+            for entry in folder.entries.values {
+                if let id = entry.messageID { membership[id, default: []].append(folder.name) }
+            }
+        }
+        return OutsideAccountPlaces(
+            outside: outside, labels: own.map { OutsideLabel(id: $0.name, name: $0.name) }, membership: membership,
+            truncated: Set(own.filter { !$0.complete }.map(\.name)), since: since
+        )
     }
 }
 
@@ -377,15 +392,7 @@ struct OutsideIMAPWriter {
     mutating func change(
         providerID: String, from: OutsideRemoteState, to: OutsideRemoteState
     ) async throws -> OutsideRemoteState? {
-        let location: OutsideIMAPLocation
-        if let moved = from.location {
-            location = moved
-        } else {
-            let parts = providerID.split(separator: ".")
-            guard parts.count == 2, let validity = UInt32(parts[0]), let uid = UInt32(parts[1]) else { return nil }
-            location = OutsideIMAPLocation(mailbox: "INBOX", validity: validity, uid: uid)
-        }
-        guard location != .lost else { return nil }
+        guard let location = from.location ?? OutsideIMAPLocation.downloaded(providerID), location != .lost else { return nil }
         if selected?.name != location.mailbox {
             selected = (location.mailbox, try await connection.select(location.mailbox))
         }

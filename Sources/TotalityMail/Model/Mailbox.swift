@@ -30,6 +30,8 @@ public enum MailPlace: Hashable, Sendable {
             message.outsideAccount?.id == account && message.outsideLabels.contains(label)
                 // A tab only holds what's still in the Inbox, as in Gmail. A label holds it wherever it is.
                 && (!OutsideLabel(id: label, name: "").isTab || message.marks.folder == .inbox)
+                // An iCloud folder holds it while it's out of the Inbox, as at iCloud.
+                && (message.outsideAccount?.provider != .icloud || message.marks.folder == .archive)
         }
     }
 
