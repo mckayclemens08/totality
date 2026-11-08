@@ -61,6 +61,8 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
     var acceptsPassword = true
     /// Says where moved mail went, as iCloud does. Off, it's like a server without UIDPLUS.
     var saysCopyUID = true
+    /// Says HIGHESTMODSEQ when a folder opens, as a server with CONDSTORE does.
+    var saysModseq = true
     private(set) var commands: [String] = []
 
     /// The Inbox, newest first, as the test fills it.
@@ -180,7 +182,12 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
             let name = unquote(rest)
             guard let folder = folders[name] else { return "\(tag) NO no such folder\r\n" }
             selected.update { $0 = name }
-            return "* \(folder.messages.count) EXISTS\r\n* OK [UIDVALIDITY \(folder.validity)] UIDs valid\r\n\(tag) OK \(parts[1]) completed\r\n"
+            let next = (folder.messages.map(\.uid).max() ?? 0) + 1
+            // Stands in for CONDSTORE's number: it changes whenever anything in the folder does.
+            let modseq = UInt64(UInt(bitPattern: folder.messages.map { "\($0.uid)\($0.seen)\($0.flagged)" }.joined(separator: ",").hashValue) % 1_000_000_000) + 1
+            let condstore = saysModseq ? "* OK [HIGHESTMODSEQ \(modseq)] Highest\r\n" : ""
+            return "* \(folder.messages.count) EXISTS\r\n* OK [UIDVALIDITY \(folder.validity)] UIDs valid\r\n* OK [UIDNEXT \(next)] Predicted next UID\r\n"
+                + condstore + "\(tag) OK \(parts[1]) completed\r\n"
         case "LIST":
             return "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST (\\HasNoChildren \\Archive) \"/\" \"Archive\"\r\n"
                 + "* LIST (\\HasNoChildren \\Junk) \"/\" \"Junk\"\r\n* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted Messages\"\r\n"
@@ -544,6 +551,103 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
     }
 
     // MARK: iCloud's folders as places
+
+    // MARK: Quick sync
+
+    @Test func gmailsNextOpenAsksOnlyForWhatChanged() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [
+            ("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today.addingTimeInterval(-3600)),
+            ("18f3a2b4c5d6e7f9", mail("Tile samples"), true, today.addingTimeInterval(-7200)),
+        ]
+        let (store, _) = try store(google: fake)
+        _ = try await addGmail(store, fake)
+        _ = await store.downloadOutside { _ in }
+        let listings = fake.listings
+        #expect(listings > 0 && fake.requests(to: "/gmail/v1/users/me/history") == 0)
+        // At Gmail: one new message, one archived, one read.
+        fake.inbox.insert(("18f3a2b4c5d6e800", mail("Countertop quote"), true, today), at: 0)
+        fake.archived = ["18f3a2b4c5d6e7f9"]
+        fake.unreadNow["18f3a2b4c5d6e7f8"] = false
+        let mailbox = try #require(await store.downloadOutside { _ in }?.mailbox)
+        #expect(fake.listings == listings && fake.requests(to: "/gmail/v1/users/me/history") == 1)
+        #expect(fake.fetched == ["18f3a2b4c5d6e7f8", "18f3a2b4c5d6e7f9", "18f3a2b4c5d6e800"])
+        #expect(try message(mailbox, "Countertop quote").marks.isUnread)
+        #expect(try message(mailbox, "Tile samples").marks.folder == .archive)
+        #expect(try !message(mailbox, "Kitchen drawings").marks.isUnread)
+        // Nothing changed: one question, and nothing downloaded.
+        _ = await store.downloadOutside { _ in }
+        #expect(fake.listings == listings && fake.fetched.count == 3)
+    }
+
+    @Test func gmailListsInFullWhenItsHistoryIsGone() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today.addingTimeInterval(-3600))]
+        let (store, _) = try store(google: fake)
+        _ = try await addGmail(store, fake)
+        _ = await store.downloadOutside { _ in }
+        let listings = fake.listings
+        fake.historyGone = true
+        fake.inbox.insert(("18f3a2b4c5d6e800", mail("Countertop quote"), true, today), at: 0)
+        let mailbox = try #require(await store.downloadOutside { _ in }?.mailbox)
+        #expect(fake.listings == 2 * listings)
+        #expect(try message(mailbox, "Countertop quote").marks.isUnread)
+    }
+
+    @Test func onlyTheFirstDownloadSaysHowItsGoing() async throws {
+        let icloud = ICloudInbox()
+        icloud.messages = [(4211, mail("Rent for December"), false)]
+        let (store, _) = try store(icloud: icloud)
+        _ = try await addICloud(store)
+        let first = Locked<[OutsideDownload]>([])
+        _ = await store.downloadOutside { download in first.update { $0.append(download) } }
+        #expect(first.value.map(\.done) == [1])
+        icloud.messages = [(4212, mail("Water bill"), false), (4211, mail("Rent for December"), false)]
+        let later = Locked<[OutsideDownload]>([])
+        let mailbox = await store.downloadOutside { download in later.update { $0.append(download) } }?.mailbox
+        #expect(later.value.isEmpty)
+        #expect(try message(mailbox, "Water bill").marks.isUnread)
+        // What's on the device shows without the network.
+        #expect(await store.cached()?.messages.contains { $0.subject == "Water bill" } == true)
+    }
+
+    @Test func anICloudFolderThatHasntChangedIsntReadAgain() async throws {
+        let icloud = ICloudInbox()
+        icloud.messages = [(4211, mail("Rent for December"), false), (4210, mail("Photos from the lake"), false)]
+        icloud.put("Receipts", 77, mail("Order 4471 has shipped"))
+        let (store, _) = try store(icloud: icloud)
+        _ = try await addICloud(store)
+        _ = await store.downloadOutside { _ in }
+        let before = icloud.sent.count
+        _ = await store.downloadOutside { _ in }
+        let quiet = icloud.sent.dropFirst(before)
+        #expect(!quiet.contains { $0.contains("SEARCH") || $0.contains("FETCH") })
+        #expect(quiet.contains { $0.hasSuffix("EXAMINE INBOX") } && quiet.contains { $0.hasSuffix(#"EXAMINE "Receipts""#) })
+        // Read in another app: the Inbox is looked at again, by flags only, and nothing is downloaded.
+        icloud.change(4211, seen: true)
+        let changed = icloud.sent.count
+        let mailbox = await store.downloadOutside { _ in }?.mailbox
+        let looked = icloud.sent.dropFirst(changed)
+        #expect(looked.contains { $0.hasSuffix("(UID FLAGS)") })
+        #expect(!looked.contains { $0.contains("BODY") })
+        #expect(try !message(mailbox, "Rent for December").marks.isUnread)
+    }
+
+    @Test func withoutCondstoreOnlyNewMailsHeadersAreFetched() async throws {
+        let icloud = ICloudInbox()
+        icloud.saysModseq = false
+        icloud.messages = [(4211, mail("Rent for December"), false)]
+        let (store, _) = try store(icloud: icloud)
+        _ = try await addICloud(store)
+        _ = await store.downloadOutside { _ in }
+        icloud.messages = [(4212, mail("Water bill"), false), (4211, mail("Rent for December"), false)]
+        let before = icloud.sent.count
+        let mailbox = await store.downloadOutside { _ in }?.mailbox
+        let asked = icloud.sent.dropFirst(before)
+        #expect(asked.contains { $0.hasSuffix("UID FETCH 4212 (UID FLAGS BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])") })
+        #expect(asked.contains { $0.hasSuffix("UID FETCH 4211 (UID FLAGS)") })
+        #expect(try message(mailbox, "Water bill").marks.isUnread)
+    }
 
     @Test func mailInAnICloudFolderOfTheirOwnShowsInItsPlace() async throws {
         let icloud = ICloudInbox()

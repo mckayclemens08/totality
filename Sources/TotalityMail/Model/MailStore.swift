@@ -89,9 +89,13 @@ public protocol MailStore: Sendable {
     /// Searches each outside account at its provider for older mail and downloads what's found, then
     /// returns everything stored. Only from the person's press. Nil when there are no outside accounts.
     func searchOutside(_ query: String) async -> OutsideDownloadResult?
+    /// What's already on this device, read without the network, so Mail shows it at once. Nil when
+    /// nothing can be read yet.
+    func cached() async -> Mailbox?
 }
 
 extension MailStore {
+    public func cached() async -> Mailbox? { nil }
     public func address() async -> String? { nil }
     public func downloadOutside(progress: @escaping @Sendable (OutsideDownload) -> Void) async -> OutsideDownloadResult? { nil }
     public func searchOutside(_ query: String) async -> OutsideDownloadResult? { nil }
