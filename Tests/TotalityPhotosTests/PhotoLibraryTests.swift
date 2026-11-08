@@ -642,3 +642,99 @@ final class Clock: @unchecked Sendable {
         #expect(model.takeRequest() == nil)
     }
 }
+
+
+/// Stands in for Messages: keeps what it was handed, and can be made to fail.
+@MainActor
+final class FakeSender: PersonSender {
+    var unavailableReason: String?
+    var longestVideo: Double = 60
+    var failAfter: Int?
+    private(set) var sentTo: [String] = []
+    private(set) var notes: [String] = []
+    private(set) var photos: [Data] = []
+
+    func send(
+        _ items: [@Sendable () async throws -> OutgoingItem], note: String?, to username: String, progress: @MainActor (Int) -> Void
+    ) async -> PersonSendResult {
+        sentTo.append(username)
+        if let note { notes.append(note) }
+        var result = PersonSendResult()
+        for load in items {
+            if let failAfter, result.sent >= failAfter {
+                result.failed += 1
+                result.problem = result.problem ?? "The chat couldn't be reached."
+                continue
+            }
+            guard case .photo(let data) = try! await load() else { continue }
+            photos.append(data)
+            result.sent += 1
+            progress(result.sent)
+        }
+        return result
+    }
+}
+
+@Suite struct PhotoSharingTests {
+    @MainActor private func loaded(_ count: Int) async throws -> (PhotosModel, [Data]) {
+        let (library, _) = try newLibrary(account: UUID().uuidString.lowercased(), key: try ContentRootKey.generate(), store: FakeStore(), rows: FakeRows())
+        var originals: [Data] = []
+        for side in 0..<count {
+            let photo = samplePhoto(width: 300 + side, height: 200)
+            originals.append(photo)
+            _ = try await library.add(photo)
+        }
+        let model = PhotosModel(library: library)
+        await model.load()
+        return (model, originals)
+    }
+
+    @Test @MainActor func withNoSenderThereIsNothingToShareThrough() async throws {
+        let (model, _) = try await loaded(1)
+        #expect(await model.share(model.items(in: .library), to: "dana") == "Sharing isn't available here.")
+    }
+
+    @Test @MainActor func aShareSendsTheOriginalsOpenedOnTheDeviceAndAnAlbumGoesUnderItsName() async throws {
+        let (model, originals) = try await loaded(3)
+        let sender = FakeSender()
+        model.sender = sender
+        #expect(await model.share(model.items(in: .library), albumName: "Moab, October", to: "dana") == nil)
+        #expect(sender.sentTo == ["dana"])
+        #expect(sender.notes == ["Moab, October, 3 photos"])
+        #expect(Set(sender.photos) == Set(originals))
+        #expect(model.lastShareSent == 3)
+        #expect(model.sharing == nil)
+    }
+
+    @Test @MainActor func recentlyDeletedIsNeverSharedAndAGonePhotoIsLeftOut() async throws {
+        let (model, _) = try await loaded(3)
+        let sender = FakeSender()
+        model.sender = sender
+        let all = model.items(in: .library)
+        await model.moveToRecentlyDeleted(all[0])
+        let plan = model.sharePlan(all)
+        #expect(plan.items.map(\.id) == Array(all.dropFirst()).map(\.id))
+        #expect(await model.share([all[0]], to: "dana") == "There's nothing here to share.")
+        #expect(sender.photos.isEmpty)
+    }
+
+    @Test @MainActor func whatDidntGoIsSaidPlainly() async throws {
+        let (model, _) = try await loaded(3)
+        let sender = FakeSender()
+        sender.failAfter = 1
+        model.sender = sender
+        let notice = await model.share(model.items(in: .library), to: "dana")
+        #expect(notice == "2 items weren't sent. The chat couldn't be reached.")
+        #expect(model.lastShareSent == 1)
+
+        sender.unavailableReason = "Messages runs in the iPhone app."
+        #expect(await model.share(model.items(in: .library), to: "dana") == "Messages runs in the iPhone app.")
+    }
+
+    @Test func longVideosAndBigSharesAreNamed() {
+        let plan = PhotosModel.SharePlan(items: [], tooLong: 2, overLimit: 4)
+        #expect(PhotosModel.shareNotice(PersonSendResult(sent: 50), plan: plan, longest: 60)
+            == "2 videos were too long to share. Only the first 50 were sent. Share the rest separately.")
+        #expect(PhotosModel.tooLongNotice(60) == "Videos over a minute can't be shared in a chat.")
+    }
+}

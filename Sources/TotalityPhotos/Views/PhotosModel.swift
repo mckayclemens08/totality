@@ -39,6 +39,12 @@ public final class PhotosModel {
     public var notice: String?
     /// What would let Photos open, when it can't. Nil when there's nothing the person can do here.
     public private(set) var fix: Fix?
+    /// What carries a share to another person, set by the app where that runs. Nil hides Share.
+    public var sender: (any PersonSender)?
+    /// How far a share has got, while one is going.
+    public private(set) var sharing: (done: Int, total: Int)?
+    /// How many items the last share got through.
+    public private(set) var lastShareSent = 0
     /// A photo the home tile asked for. Photos opens it in the viewer and clears this.
     public var requestedItem: UUID?
 
@@ -361,6 +367,76 @@ public final class PhotosModel {
         default:
             "Photos couldn't \(action). Try again in a moment."
         }
+    }
+
+    // MARK: Sharing
+
+    /// The most one share sends, so an album can't turn into hundreds of messages by accident.
+    public nonisolated static let shareLimit = 50
+
+    /// What a share would send, and what it leaves out, before the person confirms it.
+    public struct SharePlan: Equatable {
+        public let items: [PhotoItem]
+        public let tooLong: Int
+        public let overLimit: Int
+    }
+
+    public func sharePlan(_ chosen: [PhotoItem]) -> SharePlan {
+        let longest = sender?.longestVideo ?? 0
+        // Only what's still in the library, as it is now. Recently Deleted is never shared.
+        let present = chosen.compactMap { self.current($0) }.filter { $0.details.trashed == nil }
+        let fits = present.filter { !$0.details.isVideo || ($0.details.duration ?? .infinity) <= longest + 0.5 }
+        return SharePlan(
+            items: Array(fits.prefix(Self.shareLimit)),
+            tooLong: present.count - fits.count,
+            overLimit: max(fits.count - Self.shareLimit, 0)
+        )
+    }
+
+    /// Sends a copy of each photo to `username` in an encrypted chat. Videos go as videos, and a Live
+    /// Photo as its still. A shared album is a snapshot: its name first, then its photos. `nil` means it
+    /// all went; otherwise the words say what didn't.
+    public func share(_ chosen: [PhotoItem], albumName: String? = nil, to username: String) async -> String? {
+        guard let sender else { return "Sharing isn't available here." }
+        if let reason = sender.unavailableReason { return reason }
+        guard sharing == nil else { return "A share is still going. Wait for it to finish." }
+        let plan = sharePlan(chosen)
+        guard !plan.items.isEmpty else {
+            return plan.tooLong > 0 ? Self.tooLongNotice(sender.longestVideo) : "There's nothing here to share."
+        }
+        let loaders: [@Sendable () async throws -> OutgoingItem] = plan.items.map { item in
+            if item.details.isVideo {
+                return { [self] in .video(try await exportMovie(item)) }
+            }
+            return { [self] in .photo(try await original(item)) }
+        }
+        let note = albumName.map { name in
+            plan.items.count == 1 ? "\(name), 1 photo" : "\(name), \(plan.items.count) photos"
+        }
+        sharing = (0, plan.items.count)
+        lastShareSent = 0
+        defer { sharing = nil }
+        let result = await sender.send(loaders, note: note, to: username) { [weak self] done in
+            self?.sharing = (done, plan.items.count)
+        }
+        lastShareSent = result.sent
+        return Self.shareNotice(result, plan: plan, longest: sender.longestVideo)
+    }
+
+    nonisolated static func tooLongNotice(_ longest: Double) -> String {
+        "Videos over \(longest == 60 ? "a minute" : durationText(longest)) can't be shared in a chat."
+    }
+
+    nonisolated static func shareNotice(_ result: PersonSendResult, plan: SharePlan, longest: Double) -> String? {
+        var parts: [String] = []
+        if result.failed > 0 || (result.sent == 0 && result.problem != nil) {
+            let failed = max(result.failed, plan.items.count - result.sent)
+            parts.append(failed == 1 ? "One item wasn't sent." : "\(failed) items weren't sent.")
+            if let problem = result.problem { parts.append(problem) }
+        }
+        if plan.tooLong > 0 { parts.append(plan.tooLong == 1 ? "One video was too long to share." : "\(plan.tooLong) videos were too long to share.") }
+        if plan.overLimit > 0 { parts.append("Only the first \(shareLimit) were sent. Share the rest separately.") }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     // MARK: Saving out

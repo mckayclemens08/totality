@@ -309,8 +309,7 @@ neither module imports the other. Like mail, the Oracle server has no backup yet
 
 Spec agreed with the owner on 2026-11-05, in issue 54. Step 2 is adding and viewing, and step 3 is
 albums, favourites, captions, Recently Deleted, and saving back to Photos. Step 4 is video, Live Photos,
-and uploads that carry on. Step 5 is the home tile and the empty and error states. Sharing is not built:
-it's an open decision for the owner (see below).
+and uploads that carry on. Step 5 is the home tile, the empty and error states, and sharing.
 
 - **Everything is sealed on the device first** (non-negotiable 2). Each photo has three parts, each sealed
   with its own key from the content key: the original exactly as added (`.photo`), a 480-pixel thumbnail
@@ -372,9 +371,15 @@ it's an open decision for the owner (see below).
 - **Empty and error states.** Each reason Photos can't open says so and what to do: signed out, this
   device not yet joined to the recovery key, the device's key belonging to another account (each with a
   button to the account), and a library that couldn't be read (Try again).
-- **Sharing is not built.** Sharing a photo means another account reading blobs in the owner's folder,
-  which the blob store refuses by design (each account reads only its own folder), and a schema for
-  grants that the Reader's sharing never got either. Both need the owner's choice, written up in issue 54.
+- **Sharing** (decided 2026-11-08, issue 54, option b) sends a copy into an end-to-end encrypted
+  Messages chat with the person, found or started by username. The blob store never serves another
+  account's folder, and no grant table is needed: Matrix carries the key and the membership. Photos opens
+  the sealed original on the device and hands it through `PersonSender` in core. The app's
+  `MessagesSender` passes it to Messages, which re-encodes it and drops where, when and on what it was
+  taken. Photos go at up to 2048 pixels, videos up to a minute, and a Live Photo as its still. An album
+  goes as a snapshot: its name as a message, then up to 50 photos. Recently Deleted is never shared.
+  Nothing goes until Send is pressed, and the sheet says that deleting the message stops new opens but
+  can't take back a copy already seen or saved. Share shows only where Messages runs (the iPhone app).
 
 ## Mail
 
