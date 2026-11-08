@@ -23,6 +23,14 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
     /// Labels each message has beside INBOX, and the ones taken out of the Inbox.
     var labelsOf: [String: [String]] = [:]
     var archived: Set<String> = []
+    var starred: Set<String> = []
+    var spam: Set<String> = []
+    var trashed: Set<String> = []
+    /// Read or unread changed since it arrived.
+    var unreadNow: [String: Bool] = [:]
+    private var changeLog: [String] = []
+    /// Each change Totality made at Gmail, as `modify <id> +A -B`, `trash <id>` or `untrash <id>`.
+    var changes: [String] { lock.withLock { changeLog } }
     /// The labels the person made, by ID and name.
     var userLabels: [(id: String, name: String)] = []
     /// How many listings Gmail turns down as too fast before answering.
@@ -32,7 +40,48 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
     private var fetchedIDs: [String] = []
 
     func labels(of id: String) -> [String] {
-        lock.withLock { (archived.contains(id) ? [] : ["INBOX"]) + (labelsOf[id] ?? []) }
+        lock.withLock {
+            var labels = labelsOf[id] ?? []
+            if trashed.contains(id) { labels.append("TRASH") } else if spam.contains(id) { labels.append("SPAM") } else if !archived.contains(id) { labels.append("INBOX") }
+            if unreadNow[id] ?? inbox.first(where: { $0.id == id })?.unread ?? false { labels.append("UNREAD") }
+            if starred.contains(id) { labels.append("STARRED") }
+            return labels
+        }
+    }
+
+    private func changeAnswer(_ request: URLRequest, id: String, action: String) -> (Data, HTTPURLResponse) {
+        #expect(request.httpMethod == "POST")
+        guard lock.withLock({ inbox.contains { $0.id == id } }) else { return Self.answer(404, [:]) }
+        switch action {
+        case "trash": lock.withLock { trashed.insert(id); changeLog.append("trash \(id)") }
+        case "untrash": lock.withLock { trashed.remove(id); changeLog.append("untrash \(id)") }
+        case "modify":
+            struct Body: Decodable { let addLabelIds: [String]; let removeLabelIds: [String] }
+            guard let body = request.httpBody.flatMap({ try? JSONDecoder().decode(Body.self, from: $0) }) else { return Self.answer(400, [:]) }
+            lock.withLock {
+                for label in body.addLabelIds {
+                    switch label {
+                    case "INBOX": archived.remove(id)
+                    case "SPAM": spam.insert(id)
+                    case "UNREAD": unreadNow[id] = true
+                    case "STARRED": starred.insert(id)
+                    default: Issue.record("added \(label)")
+                    }
+                }
+                for label in body.removeLabelIds {
+                    switch label {
+                    case "INBOX": archived.insert(id)
+                    case "SPAM": spam.remove(id)
+                    case "UNREAD": unreadNow[id] = false
+                    case "STARRED": starred.remove(id)
+                    default: Issue.record("removed \(label)")
+                    }
+                }
+                changeLog.append((["modify", id] + body.addLabelIds.map { "+" + $0 } + body.removeLabelIds.map { "-" + $0 }).joined(separator: " "))
+            }
+        default: return Self.answer(404, [:])
+        }
+        return Self.json(200, ["id": id])
     }
     /// Which messages were downloaded, in order.
     var fetched: [String] { lock.withLock { fetchedIDs } }
@@ -98,10 +147,16 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
                 if label == refusedLabel {
                     return Self.json(403, ["error": ["code": 403, "message": "Label not reachable.", "errors": [["reason": "forbidden"]]]])
                 }
-                let listed = messages.filter { labels(of: $0.id).contains(label) }
+                let spamToo = items.first { $0.name == "includeSpamTrash" }?.value == "true"
+                let listed = messages.filter {
+                    let labels = labels(of: $0.id)
+                    return labels.contains(label) && (spamToo || !labels.contains("SPAM") && !labels.contains("TRASH"))
+                }
                 let listing: [String: Any] = ["messages": listed.map { ["id": $0.id, "threadId": $0.id] }, "resultSizeEstimate": listed.count]
                 return Self.json(200, listing)
             }
+            let parts = url.pathComponents
+            if parts.count == 8 { return changeAnswer(request, id: parts[6], action: parts[7]) }
             let id = url.lastPathComponent
             guard let message = messages.first(where: { $0.id == id }) else { return Self.answer(404, [:]) }
             lock.withLock { fetchedIDs.append(id) }
@@ -109,7 +164,7 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
                 .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
             return Self.json(200, [
                 "id": id, "raw": raw, "internalDate": String(Int(message.at.timeIntervalSince1970 * 1000)),
-                "labelIds": labels(of: id) + (message.unread ? ["UNREAD"] : []),
+                "labelIds": labels(of: id),
             ])
         default:
             Issue.record("reached \(url), which isn't Google's")

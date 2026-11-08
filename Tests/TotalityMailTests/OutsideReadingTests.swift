@@ -36,37 +36,129 @@ private struct NoMailServer: MailServer {
     func sendOutside(_ message: MailOutsideMessage) async throws -> MailOutsideAnswer { throw MailServerError.unavailable }
 }
 
-/// iCloud's IMAP server, with an Inbox the test fills.
-private final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
+/// iCloud's IMAP server, with an Inbox the test fills, and the folders messages can be moved to.
+final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
+    struct Message { var uid: UInt32; var raw: String; var seen: Bool; var flagged = false }
     private let lock = NSLock()
-    var messages: [(uid: UInt32, raw: String, seen: Bool)] = []
+    /// Each folder's UIDVALIDITY and messages.
+    private var folders: [String: (validity: UInt32, messages: [Message])] = [
+        "INBOX": (1_730_000_000, []), "Archive": (1_730_000_100, []), "Junk": (1_730_000_200, []), "Deleted Messages": (1_730_000_300, []),
+    ]
+    private var nextUID: UInt32 = 9000
     var acceptsPassword = true
+    /// Says where moved mail went, as iCloud does. Off, it's like a server without UIDPLUS.
+    var saysCopyUID = true
     private(set) var commands: [String] = []
+
+    /// The Inbox, newest first, as the test fills it.
+    var messages: [(uid: UInt32, raw: String, seen: Bool)] {
+        get { lock.withLock { folders["INBOX"]!.messages.map { ($0.uid, $0.raw, $0.seen) } } }
+        set { lock.withLock { folders["INBOX"]!.messages = newValue.map { Message(uid: $0.uid, raw: $0.raw, seen: $0.seen) } } }
+    }
+
+    func folder(_ name: String) -> [Message] { lock.withLock { folders[name]?.messages ?? [] } }
+
+    func change(_ uid: UInt32, seen: Bool? = nil, flagged: Bool? = nil) {
+        lock.withLock {
+            guard let index = folders["INBOX"]!.messages.firstIndex(where: { $0.uid == uid }) else { return }
+            if let seen { folders["INBOX"]!.messages[index].seen = seen }
+            if let flagged { folders["INBOX"]!.messages[index].flagged = flagged }
+        }
+    }
+
+    /// Moved at iCloud, by the person in another app.
+    func moveAway(_ uid: UInt32, to name: String) {
+        lock.withLock {
+            guard let index = folders["INBOX"]!.messages.firstIndex(where: { $0.uid == uid }) else { return }
+            var message = folders["INBOX"]!.messages.remove(at: index)
+            message.uid = nextUID; nextUID += 1
+            folders[name]!.messages.insert(message, at: 0)
+        }
+    }
+
+    static func uids(_ set: Substring) -> Set<UInt32> {
+        var found = Set<UInt32>()
+        for part in set.split(separator: ",") {
+            let ends = part.split(separator: ":").compactMap { UInt32($0) }
+            if ends.count == 2 { found.formUnion(ends[0]...ends[1]) } else if let one = ends.first { found.insert(one) }
+        }
+        return found
+    }
 
     func open(_ endpoint: OutsideEndpoint) -> any OutsideWire {
         #expect(endpoint == OutsideProvider.icloud.reading)
-        let messages = self.messages, accepts = acceptsPassword
-        return ScriptedWire(greeting: "* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready\r\n") { [weak self] line in
-            self?.lock.withLock { self?.commands.append(line) }
-            let parts = line.split(separator: " ", maxSplits: 2).map(String.init)
-            guard parts.count >= 2 else { return nil }
-            let tag = parts[0], rest = parts.count > 2 ? parts[2] : ""
-            switch parts[1] {
-            case "AUTHENTICATE": return accepts ? "\(tag) OK signed in\r\n" : "\(tag) NO [AUTHENTICATIONFAILED] Authentication failed.\r\n"
-            case "EXAMINE": return "* \(messages.count) EXISTS\r\n* OK [UIDVALIDITY 1730000000] UIDs valid\r\n\(tag) OK [READ-ONLY] EXAMINE completed\r\n"
-            case "UID" where rest.hasPrefix("SEARCH SINCE "):
-                return "* SEARCH \(messages.map { String($0.uid) }.joined(separator: " "))\r\n\(tag) OK SEARCH completed\r\n"
-            case "UID" where rest.hasPrefix("FETCH "):
-                let wanted = Set(rest.dropFirst(6).prefix { $0 != " " }.split(separator: ",").compactMap { UInt32($0) })
+        let accepts = acceptsPassword
+        let selected = Locked<String?>(nil)
+        return ScriptedWire(greeting: "* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN MOVE UIDPLUS] ready\r\n") { [weak self] line in
+            guard let self else { return nil }
+            return self.lock.withLock { self.answer(line, accepts: accepts, selected: selected) }
+        }
+    }
+
+    private func answer(_ line: String, accepts: Bool, selected: Locked<String?>) -> String? {
+        commands.append(line)
+        let parts = line.split(separator: " ", maxSplits: 2).map(String.init)
+        guard parts.count >= 2 else { return nil }
+        let tag = parts[0], rest = parts.count > 2 ? parts[2] : ""
+        func unquote(_ text: String) -> String { text.hasPrefix("\"") ? String(text.dropFirst().dropLast()) : text }
+        switch parts[1] {
+        case "AUTHENTICATE": return accepts ? "\(tag) OK signed in\r\n" : "\(tag) NO [AUTHENTICATIONFAILED] Authentication failed.\r\n"
+        case "EXAMINE", "SELECT":
+            let name = unquote(rest)
+            guard let folder = folders[name] else { return "\(tag) NO no such folder\r\n" }
+            selected.update { $0 = name }
+            return "* \(folder.messages.count) EXISTS\r\n* OK [UIDVALIDITY \(folder.validity)] UIDs valid\r\n\(tag) OK \(parts[1]) completed\r\n"
+        case "LIST":
+            return "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST (\\HasNoChildren \\Archive) \"/\" \"Archive\"\r\n"
+                + "* LIST (\\HasNoChildren \\Junk) \"/\" \"Junk\"\r\n* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted Messages\"\r\n\(tag) OK LIST completed\r\n"
+        case "UID":
+            guard let name = selected.value, var folder = folders[name] else { return "\(tag) BAD nothing selected\r\n" }
+            if rest.hasPrefix("SEARCH SINCE ") {
+                return "* SEARCH \(folder.messages.map { String($0.uid) }.joined(separator: " "))\r\n\(tag) OK SEARCH completed\r\n"
+            }
+            let words = rest.split(separator: " ", maxSplits: 2)
+            guard words.count >= 2 else { return "\(tag) BAD what\r\n" }
+            let wanted = Self.uids(words[1])
+            switch words[0] {
+            case "FETCH":
                 var answer = ""
-                for (index, message) in messages.enumerated() where wanted.contains(message.uid) {
-                    let flags = message.seen ? "\\Seen" : ""
-                    answer += "* \(index + 1) FETCH (UID \(message.uid) FLAGS (\(flags)) INTERNALDATE \"06-Nov-2026 16:20:00 +0000\" BODY[] {\(message.raw.utf8.count)}\r\n\(message.raw))\r\n"
+                for (index, message) in folder.messages.enumerated() where wanted.contains(message.uid) {
+                    let flags = [message.seen ? "\\Seen" : nil, message.flagged ? "\\Flagged" : nil].compactMap { $0 }.joined(separator: " ")
+                    if rest.hasSuffix("(UID FLAGS)") {
+                        answer += "* \(index + 1) FETCH (UID \(message.uid) FLAGS (\(flags)))\r\n"
+                    } else {
+                        answer += "* \(index + 1) FETCH (UID \(message.uid) FLAGS (\(flags)) INTERNALDATE \"06-Nov-2026 16:20:00 +0000\" BODY[] {\(message.raw.utf8.count)}\r\n\(message.raw))\r\n"
+                    }
                 }
                 return answer + "\(tag) OK FETCH completed\r\n"
-            case "LOGOUT": return "* BYE\r\n\(tag) OK bye\r\n"
+            case "STORE":
+                let change = String(words[2])
+                for index in folder.messages.indices where wanted.contains(folder.messages[index].uid) {
+                    let on = change.hasPrefix("+")
+                    if change.contains("\\Seen") { folder.messages[index].seen = on }
+                    if change.contains("\\Flagged") { folder.messages[index].flagged = on }
+                }
+                folders[name] = folder
+                return "\(tag) OK STORE completed\r\n"
+            case "MOVE":
+                let target = unquote(String(words[2]))
+                guard folders[target] != nil else { return "\(tag) NO no such folder\r\n" }
+                var copied: [String] = [], made: [String] = []
+                for message in folder.messages where wanted.contains(message.uid) {
+                    var moved = message
+                    moved.uid = nextUID; nextUID += 1
+                    folders[target]!.messages.insert(moved, at: 0)
+                    copied.append(String(message.uid)); made.append(String(moved.uid))
+                }
+                folder.messages.removeAll { wanted.contains($0.uid) }
+                folders[name] = folder
+                guard !copied.isEmpty else { return "\(tag) OK MOVE completed\r\n" }
+                let said = saysCopyUID ? "* OK [COPYUID \(folders[target]!.validity) \(copied.joined(separator: ",")) \(made.joined(separator: ","))] Moved\r\n" : ""
+                return said + "* 1 EXPUNGE\r\n\(tag) OK MOVE completed\r\n"
             default: return "\(tag) BAD what\r\n"
             }
+        case "LOGOUT": return "* BYE\r\n\(tag) OK bye\r\n"
+        default: return "\(tag) BAD what\r\n"
         }
     }
 
@@ -186,6 +278,186 @@ private final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         #expect(result.problems == ["mckay.clemens@gmail.com: Gmail said: Label not reachable."])
     }
 
+    // MARK: Changes going both ways
+
+    private func addICloud(_ store: ServerMailStore) async throws -> OutsideAccount {
+        try await store.addOutside(OutsideSignIn(provider: .icloud, address: "mckay.clemens@icloud.com", appPassword: "hjkl-qwer-tyui-asdf")!)
+    }
+
+    private func message(_ mailbox: Mailbox?, _ subject: String) throws -> MailMessage {
+        try #require(mailbox?.messages.first { $0.subject == subject })
+    }
+
+    @Test func readStarAndArchiveInTotalityReachGmail() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today)]
+        let (store, _) = try store(google: fake)
+        _ = try await addGmail(store, fake)
+        var kitchen = try message(await store.downloadOutside { _ in }?.mailbox, "Kitchen drawings")
+        kitchen.marks.isUnread = false
+        kitchen.marks.isStarred = true
+        kitchen.marks.folder = .archive
+        try await store.save([kitchen.id: kitchen.marks])
+        #expect(fake.changes == ["modify 18f3a2b4c5d6e7f8 +STARRED -UNREAD -INBOX -SPAM"])
+        #expect(fake.labels(of: "18f3a2b4c5d6e7f8") == ["STARRED"])
+        // The next open agrees with Gmail, so nothing goes again and nothing comes back.
+        let after = try message(await store.downloadOutside { _ in }?.mailbox, "Kitchen drawings")
+        #expect(fake.changes.count == 1)
+        #expect(after.marks.folder == .archive && !after.marks.isUnread && after.marks.isStarred)
+        // Back to the Inbox.
+        try await store.save([kitchen.id: MailMarks(folder: .inbox, isUnread: false, isStarred: true)])
+        #expect(fake.changes.last == "modify 18f3a2b4c5d6e7f8 +INBOX -SPAM")
+    }
+
+    @Test func changesMadeInGmailComeIntoTotality() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [
+            ("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today),
+            ("18f3a2b4c5d6e7f9", mail("Invoice 2041", from: "Harbor Electric <billing@harborelectric.com>"), true, today.addingTimeInterval(-60)),
+            ("18f3a2b4c5d6e7fa", mail("You won a cruise", from: "Prize Desk <win@prize.example>"), true, today.addingTimeInterval(-120)),
+        ]
+        let (store, _) = try store(google: fake)
+        _ = try await addGmail(store, fake)
+        _ = await store.downloadOutside { _ in }
+        fake.unreadNow["18f3a2b4c5d6e7f8"] = false
+        fake.starred.insert("18f3a2b4c5d6e7f8")
+        fake.archived.insert("18f3a2b4c5d6e7f8")
+        fake.trashed.insert("18f3a2b4c5d6e7f9")
+        fake.spam.insert("18f3a2b4c5d6e7fa")
+        let mailbox = await store.downloadOutside { _ in }?.mailbox
+        let kitchen = try message(mailbox, "Kitchen drawings")
+        #expect(kitchen.marks.folder == .archive && !kitchen.marks.isUnread && kitchen.marks.isStarred)
+        let invoice = try message(mailbox, "Invoice 2041")
+        #expect(invoice.marks.folder == .trash && invoice.marks.trashedAt == today && invoice.marks.trashedFrom == .inbox)
+        #expect(try message(mailbox, "You won a cruise").marks.folder == .spam)
+        // None of it goes back to Gmail.
+        #expect(fake.changes.isEmpty)
+    }
+
+    @Test func whenBothChangeTheSameThingTotallysChangeWins() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today)]
+        let (store, vault) = try store(google: fake)
+        let added = try await addGmail(store, fake)
+        let kitchen = try message(await store.downloadOutside { _ in }?.mailbox, "Kitchen drawings")
+        // Changes made offline here: Gmail isn't reached when it's saved.
+        try await vault.save(added, credential: .google(GoogleGrant(refreshToken: "1//refresh-1", canSend: false, canChange: false)))
+        try await store.save([kitchen.id: MailMarks(folder: .inbox, isUnread: false, isStarred: false)])
+        #expect(fake.changes.isEmpty)
+        // At Gmail, meanwhile: read stays unread there but it's starred and archived.
+        fake.starred.insert("18f3a2b4c5d6e7f8")
+        fake.archived.insert("18f3a2b4c5d6e7f8")
+        try await vault.save(added, credential: .google(GoogleGrant(refreshToken: "1//refresh-1", canSend: false)))
+        let after = try message(await store.downloadOutside { _ in }?.mailbox, "Kitchen drawings")
+        // Read here goes there; starred and archived there come here.
+        #expect(fake.changes == ["modify 18f3a2b4c5d6e7f8 -UNREAD"])
+        #expect(!after.marks.isUnread && after.marks.isStarred && after.marks.folder == .archive)
+    }
+
+    @Test func aGmailThatOnlyReadsKeepsItsChangesUntilAllowed() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today)]
+        let (store, vault) = try store(google: fake)
+        var added = try await addGmail(store, fake)
+        try await vault.save(added, credential: .google(GoogleGrant(refreshToken: "1//refresh-old", canSend: false, canChange: false)))
+        let kitchen = try message(await store.downloadOutside { _ in }?.mailbox, "Kitchen drawings")
+        try await store.save([kitchen.id: MailMarks(folder: .trash, isUnread: false, trashedAt: today, trashedFrom: .inbox)])
+        _ = await store.downloadOutside { _ in }
+        #expect(fake.changes.isEmpty)
+        // Gmail still says unread and in the Inbox, and Totality keeps what was done here.
+        #expect(try message(await store.downloadOutside { _ in }?.mailbox, "Kitchen drawings").marks.folder == .trash)
+        added = try #require(try await store.outsideAccounts().first)
+        let request = try await store.googleSignIn(for: added.id, sending: false)
+        try await store.allowGoogleChanges(added.id, request, callback: fake.page(request.url, request.callbackScheme))
+        _ = await store.downloadOutside { _ in }
+        #expect(fake.changes == ["trash 18f3a2b4c5d6e7f8", "modify 18f3a2b4c5d6e7f8 -UNREAD"])
+    }
+
+    @Test func deletingForeverMovesGmailsCopyToItsTrashOnly() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today)]
+        let (store, vault) = try store(google: fake)
+        _ = try await addGmail(store, fake)
+        let id = try message(await store.downloadOutside { _ in }?.mailbox, "Kitchen drawings").id
+        try await store.erase([id])
+        #expect(fake.changes == ["trash 18f3a2b4c5d6e7f8"])
+        _ = await store.downloadOutside { _ in }
+        #expect(fake.changes.count == 1)
+        #expect(try await vault.fetched().isEmpty)
+    }
+
+    @Test func readFlaggedAndMovedInTotalityReachICloud() async throws {
+        let icloud = ICloudInbox()
+        icloud.messages = [(4211, mail("Rent for December"), false), (4210, mail("Photos from the lake"), false)]
+        let (store, _) = try store(icloud: icloud)
+        _ = try await addICloud(store)
+        let mailbox = await store.downloadOutside { _ in }?.mailbox
+        let rent = try message(mailbox, "Rent for December"), photos = try message(mailbox, "Photos from the lake")
+        try await store.save([
+            rent.id: MailMarks(folder: .inbox, isUnread: false, isStarred: true),
+            photos.id: MailMarks(folder: .archive, isUnread: true),
+        ])
+        let commands = icloud.sent.map { $0.split(separator: " ").dropFirst().joined(separator: " ") }
+        #expect(commands.contains("UID STORE 4211 +FLAGS.SILENT (\\Seen)"))
+        #expect(commands.contains("UID STORE 4211 +FLAGS.SILENT (\\Flagged)"))
+        #expect(commands.contains("UID MOVE 4210 \"Archive\""))
+        #expect(icloud.folder("Archive").map(\.raw) == [mail("Photos from the lake")])
+        #expect(icloud.messages.map(\.uid) == [4211])
+        // Back to the Inbox: it gets a new UID there, and isn't downloaded twice.
+        try await store.save([photos.id: MailMarks(folder: .inbox, isUnread: true)])
+        #expect(icloud.messages.count == 2)
+        let after = await store.downloadOutside { _ in }?.mailbox
+        #expect(after?.messages.filter { $0.subject == "Photos from the lake" }.count == 1)
+        #expect(try message(after, "Photos from the lake").marks.folder == .inbox)
+        // Deleted forever here: to iCloud's Deleted Messages.
+        try await store.erase([rent.id])
+        #expect(icloud.folder("Deleted Messages").count == 1)
+    }
+
+    @Test func changesMadeInICloudComeIntoTotality() async throws {
+        let icloud = ICloudInbox()
+        icloud.messages = [(4211, mail("Rent for December"), false), (4210, mail("Photos from the lake"), false)]
+        let (store, _) = try store(icloud: icloud)
+        _ = try await addICloud(store)
+        _ = await store.downloadOutside { _ in }
+        icloud.change(4211, seen: true, flagged: true)
+        icloud.moveAway(4210, to: "Archive")
+        let mailbox = await store.downloadOutside { _ in }?.mailbox
+        let rent = try message(mailbox, "Rent for December")
+        #expect(!rent.marks.isUnread && rent.marks.isStarred && rent.marks.folder == .inbox)
+        #expect(try message(mailbox, "Photos from the lake").marks.folder == .archive)
+        #expect(!icloud.sent.contains { $0.contains("STORE") || $0.contains("MOVE") })
+    }
+
+    @Test func iCloudMailMovedWithoutANewUIDIsLeftAlone() async throws {
+        let icloud = ICloudInbox()
+        icloud.saysCopyUID = false
+        icloud.messages = [(4210, mail("Photos from the lake"), false)]
+        let (store, _) = try store(icloud: icloud)
+        _ = try await addICloud(store)
+        let photos = try message(await store.downloadOutside { _ in }?.mailbox, "Photos from the lake")
+        try await store.save([photos.id: MailMarks(folder: .archive, isUnread: true)])
+        #expect(icloud.folder("Archive").count == 1)
+        let moves = icloud.sent.filter { $0.contains("MOVE") }.count
+        try await store.save([photos.id: MailMarks(folder: .inbox, isUnread: false)])
+        _ = await store.downloadOutside { _ in }
+        #expect(icloud.sent.filter { $0.contains("MOVE") || $0.contains("STORE") }.count == moves)
+        #expect(try message(await store.downloadOutside { _ in }?.mailbox, "Photos from the lake").marks.folder == .inbox)
+    }
+
+    @Test func eachFieldGoesOneWay() {
+        let base = OutsideRemoteState(place: .inbox, isUnread: true, isStarred: false)
+        let mine = OutsideRemoteState(place: .inbox, isUnread: false, isStarred: false)
+        let outcome = OutsideReconcile.outcome(base: base, mine: mine, seen: OutsideSeen(place: .archive, isUnread: true, isStarred: true))
+        #expect(outcome.push == OutsideRemoteState(place: .archive, isUnread: false, isStarred: true))
+        #expect(outcome.agreedIfPushFails == OutsideRemoteState(place: .archive, isUnread: true, isStarred: true))
+        #expect(OutsideReconcile.outcome(base: base, mine: nil, seen: .unknown) == .init(push: nil, pull: nil, agreed: base, agreedIfPushFails: base))
+        #expect(IMAPConnection.uidSet([7, 3, 4, 5, 9, 10]) == "3:5,7,9:10")
+        let line = Data("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted Messages\"".utf8)
+        #expect(IMAPConnection.listed(line)?.name == "Deleted Messages" && IMAPConnection.listed(line)?.flags.contains("\\trash") == true)
+        #expect(IMAPConnection.listed(Data("* LIST () \"/\" \"Bad\r\nName\"".utf8)) == nil)
+    }
+
     @Test func aCloudflareCheckInsideGmailProvesNothing() async throws {
         let fake = FakeGoogle()
         fake.inbox = [("18f3a2b4c5d6e7f8", mail("Wire the deposit today", from: "Bank <alerts@bank.example>", checks: "mx.cloudflare.net; dmarc=pass header.from=bank.example"), true, today)]
@@ -217,7 +489,7 @@ private final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         #expect(!commands.contains { $0.hasPrefix("SELECT") || $0.contains("STORE") })
         // Nothing new, so the second pass fetches nothing.
         _ = await store.downloadOutside { _ in }
-        #expect(icloud.sent.filter { $0.contains("UID FETCH") }.count == 1)
+        #expect(icloud.sent.filter { $0.contains("BODY.PEEK[]") }.count == 1)
     }
 
     @Test func oneAccountsProblemSaysWhichAndTheOthersStillDownload() async throws {

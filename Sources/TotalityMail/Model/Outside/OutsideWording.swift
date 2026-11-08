@@ -5,6 +5,13 @@ import Foundation
 /// or end-to-end encrypted at the provider.
 public enum OutsideWording {
     /// On every outside account, and on its mail once reading lands.
+    /// Deleting forever in Totality moves an outside account's copy to that account's Trash, and no further.
+    public static func deletingForever(_ messages: [MailMessage]) -> String {
+        let names = Set(messages.compactMap { $0.outsideAccount?.provider }).map(\.name).sorted()
+        guard !names.isEmpty else { return "This can't be undone." }
+        return "This can't be undone here. The copy in \(names.joined(separator: " and ")) goes to its Trash there."
+    }
+
     public static func kept(by provider: OutsideProvider) -> String {
         "This mail is kept by \(provider.keeper), who can read it. Totality doesn't seal it there. Your downloaded copy on this device is sealed."
     }
