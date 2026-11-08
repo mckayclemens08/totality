@@ -17,6 +17,12 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
     /// What the person leaves ticked on Google's page. Nil means everything asked for.
     var allowed: [String]?
     var refusesRefresh = false
+    var refusesMail = false
+    /// What's in the Gmail Inbox, newest first.
+    var inbox: [(id: String, raw: String, unread: Bool, at: Date)] = []
+    private var fetchedIDs: [String] = []
+    /// Which messages were downloaded, in order.
+    var fetched: [String] { lock.withLock { fetchedIDs } }
 
     var requests: [URLRequest] { lock.withLock { sent } }
     var revoked: [String] {
@@ -58,6 +64,25 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
             return Self.answer(200, ["emailAddress": address, "messagesTotal": "18342"])
         case GoogleOAuth.revokeURL:
             return Self.answer(200, [:])
+        case _ where url.host == "gmail.googleapis.com" && url.path.hasPrefix("/gmail/v1/users/me/messages"):
+            #expect(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Bearer ya29.") == true)
+            if refusesMail { return Self.answer(401, [:]) }
+            let messages = lock.withLock { inbox }
+            if url.path == "/gmail/v1/users/me/messages" {
+                let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                #expect(items.first { $0.name == "q" }?.value?.hasPrefix("in:inbox after:") == true)
+                let listing: [String: Any] = ["messages": messages.map { ["id": $0.id, "threadId": $0.id] }, "resultSizeEstimate": messages.count]
+                return Self.json(200, listing)
+            }
+            let id = url.lastPathComponent
+            guard let message = messages.first(where: { $0.id == id }) else { return Self.answer(404, [:]) }
+            lock.withLock { fetchedIDs.append(id) }
+            let raw = Data(message.raw.utf8).base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+            return Self.json(200, [
+                "id": id, "raw": raw, "internalDate": String(Int(message.at.timeIntervalSince1970 * 1000)),
+                "labelIds": message.unread ? ["INBOX", "UNREAD"] : ["INBOX"],
+            ])
         default:
             Issue.record("reached \(url), which isn't Google's")
             throw URLError(.unsupportedURL)
@@ -73,6 +98,11 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
         let scopes = Data((allowed ?? value("scope").split(separator: " ").map(String.init)).joined(separator: " ").utf8)
             .base64EncodedString().replacingOccurrences(of: "+", with: "%2B").replacingOccurrences(of: "/", with: "%2F").replacingOccurrences(of: "=", with: "%3D")
         return URL(string: "\(scheme):/oauth2redirect?state=\(value("state"))&code=4/0AQ.\(scopes).\(value("code_challenge"))&scope=x")!
+    }
+
+    private static func json(_ status: Int, _ body: [String: Any]) -> (Data, HTTPURLResponse) {
+        let data = try! JSONSerialization.data(withJSONObject: body)
+        return (data, HTTPURLResponse(url: GoogleOAuth.tokenURL, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!)
     }
 
     private static func answer(_ status: Int, _ body: [String: String]) -> (Data, HTTPURLResponse) {

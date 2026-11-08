@@ -28,6 +28,8 @@ public actor ServerMailStore: MailStore {
     private var hasConflict = false
     /// Which message each attachment came from, so its bytes are read back out of the vault when asked.
     private var attachmentSources: [UUID: UUID] = [:]
+    /// Messages downloaded from outside accounts, which live apart from Totality mail.
+    private var fetchedIDs = Set<UUID>()
 
     /// `account` is the account's ID, which is also the server's name for its mailbox. It has to be the
     /// vault's account, or nothing would line up.
@@ -225,6 +227,22 @@ public actor ServerMailStore: MailStore {
             for attachment in message.attachments { sources[attachment.id] = stored.id }
             messages.append(message)
         }
+        var fetched = Set<UUID>()
+        let outside = Dictionary(try await vault.outsideAccounts().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for (id, stored) in try await vault.fetched() {
+            guard let account = outside[stored.outside] else { continue }
+            var message = readFetched(stored, id: id, provider: account.provider).message
+            message.outsideAccount = OutsideAccountLabel(provider: account.provider, address: account.address)
+            if let synced = marks[id] {
+                message.marks = synced
+            } else if message.marks.folder == .inbox, settings.blockedSenders.contains(message.from.key) {
+                message.marks.folder = .spam
+            }
+            for attachment in message.attachments { sources[attachment.id] = id }
+            fetched.insert(id)
+            messages.append(message)
+        }
+        fetchedIDs = fetched
         attachmentSources = sources
         return Mailbox(
             address: me.map(MailDomain.address(for:)) ?? "", messages: messages, settings: settings, drafts: try await vault.drafts()
@@ -281,8 +299,52 @@ public actor ServerMailStore: MailStore {
         return ParsedMail(message: message.travelled(route, proof: .proved), attachments: parsed.attachments)
     }
 
+    /// Downloaded mail is read as the provider gave it. Only the provider's own checks at the top can
+    /// prove its sender.
+    private func readFetched(_ stored: OutsideFetchedMessage, id: UUID, provider: OutsideProvider) -> ParsedMail {
+        MailParser.parseMessage(
+            stored.raw, id: id, received: stored.received, marks: MailMarks(isUnread: stored.isUnread),
+            checkedBy: OutsideReading.checkedBy(provider)
+        )
+    }
+
     public func address() async -> String? {
         await username().map(MailDomain.address(for:))
+    }
+
+    // MARK: Outside accounts' mail
+
+    public func downloadOutside(progress: @escaping @Sendable (OutsideDownload) -> Void) async -> OutsideDownloadResult? {
+        guard let accounts = try? await vault.outsideAccounts(), !accounts.isEmpty else { return nil }
+        let reader = OutsideReader(maker: outsideCheck.maker, google: google)
+        let since = OutsideReading.since(now())
+        var problems: [String] = []
+        for account in accounts {
+            guard !Task.isCancelled else { break }
+            guard let credential = try? await vault.credential(for: account.id) else {
+                problems.append("\(account.address): \(OutsideWording.problem(.notFound, provider: account.provider))")
+                continue
+            }
+            let vault = vault, counter = OutsideCounter()
+            do {
+                try await reader.download(
+                    account, credential: credential, since: since,
+                    have: { try await vault.hasFetched(account.id, providerID: $0) },
+                    keep: { message in
+                        try await vault.keepFetched(message)
+                        progress(OutsideDownload(address: account.address, done: counter.next()))
+                    }
+                )
+            } catch is CancellationError {
+                break
+            } catch {
+                let problem = (error as? OutsideAccountError) ?? .problem(OutsideMailProblem.from(error))
+                guard problem != .cancelled else { continue }
+                problems.append("\(account.address): \(OutsideWording.problem(problem, provider: account.provider))")
+            }
+        }
+        guard let mailbox = try? await stored() else { return nil }
+        return OutsideDownloadResult(mailbox: mailbox, problems: problems)
     }
 
     // MARK: Changes
@@ -299,6 +361,14 @@ public actor ServerMailStore: MailStore {
     /// From the server first, so a message can't come back on the next download. Offline, nothing is
     /// touched and the model keeps it waiting.
     public func erase(_ messages: Set<UUID>) async throws {
+        // Downloaded mail is deleted from this device only, for now. Nothing at the provider changes.
+        let fetched = messages.intersection(fetchedIDs)
+        if !fetched.isEmpty {
+            try await vault.eraseFetched(fetched)
+            try await vault.erase(fetched)
+            fetchedIDs.subtract(fetched)
+        }
+        let messages = messages.subtracting(fetched)
         guard !messages.isEmpty else { return }
         do {
             _ = try await server.delete(messages)
@@ -312,6 +382,13 @@ public actor ServerMailStore: MailStore {
     }
 
     public func data(of attachment: UUID) async throws -> Data {
+        if let source = attachmentSources[attachment], fetchedIDs.contains(source) {
+            guard let stored = try await vault.fetchedMessage(source),
+                  let account = try await vault.outsideAccounts().first(where: { $0.id == stored.outside }),
+                  let data = readFetched(stored, id: source, provider: account.provider).attachments[attachment]
+            else { throw MailStoreError.unavailable }
+            return data
+        }
         guard let source = attachmentSources[attachment], let stored = try await vault.message(source),
               let data = read(stored, me: await username(), pins: try await vault.pins()).attachments[attachment]
         else { throw MailStoreError.unavailable }
@@ -571,6 +648,19 @@ extension ServerMailStore: OutsideAccountStore {
             return try await work()
         } catch let problem as OutsideMailProblem {
             throw OutsideAccountError.problem(problem)
+        }
+    }
+}
+
+/// Counts what one account has downloaded so far, for the progress line.
+private final class OutsideCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func next() -> Int {
+        lock.withLock {
+            count += 1
+            return count
         }
     }
 }

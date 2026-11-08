@@ -41,6 +41,29 @@ public struct MailOpening: Sendable {
     }
 }
 
+/// What a pass over the outside accounts left: everything stored, with the new mail in it, and what
+/// went wrong with any account, worded for the screen.
+public struct OutsideDownloadResult: Sendable {
+    public let mailbox: Mailbox
+    public let problems: [String]
+
+    public init(mailbox: Mailbox, problems: [String]) {
+        self.mailbox = mailbox
+        self.problems = problems
+    }
+}
+
+/// How far downloading from one outside account has got.
+public struct OutsideDownload: Equatable, Sendable {
+    public let address: String
+    public let done: Int
+
+    public init(address: String, done: Int) {
+        self.address = address
+        self.done = done
+    }
+}
+
 /// All the screens need from wherever mail lives. `ServerMailStore` is the real one: it downloads and
 /// opens what's sealed, keeps it on the device, and syncs marks and settings. `SampleMailStore` stands
 /// in for previews and tests.
@@ -60,10 +83,14 @@ public protocol MailStore: Sendable {
     /// before calling this. Throws `MailSendError` when it can't start; otherwise the result says how
     /// it went for each person.
     func send(_ draft: MailDraft) async throws -> MailSendResult
+    /// Downloads new mail from each outside account, straight from the provider, then returns everything
+    /// stored. Nil when there are no outside accounts. A problem with one account never stops the others.
+    func downloadOutside(progress: @escaping @Sendable (OutsideDownload) -> Void) async -> OutsideDownloadResult?
 }
 
 extension MailStore {
     public func address() async -> String? { nil }
+    public func downloadOutside(progress: @escaping @Sendable (OutsideDownload) -> Void) async -> OutsideDownloadResult? { nil }
 }
 
 /// A mailbox that can't be reached at all, for the reason it gives. Every call says the same thing.

@@ -24,6 +24,8 @@ public enum MailWording {
     /// proved, with the sender's pinned key. Anything else could have been sealed by the server with a
     /// key it handed out, so it says only that nobody could confirm it, beside its warning.
     public static func route(for message: MailMessage) -> String? {
+        // Downloaded from an outside account: the provider keeps it unsealed, and says so first.
+        if let outside = message.outsideAccount { return OutsideWording.kept(by: outside.provider) }
         guard let route = message.route else { return nil }
         if route == .betweenAccounts, message.sentBy != nil {
             return message.proof == .proved && !message.senderKeyChanged ? betweenAccountsReceived : betweenAccountsUnconfirmed

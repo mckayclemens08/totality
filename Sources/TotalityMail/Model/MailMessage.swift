@@ -174,6 +174,9 @@ public struct MailMessage: Identifiable, Hashable, Sendable {
     /// For mail between Totality accounts, the sender's key wasn't the one pinned for them, so it can't
     /// be proved and says why.
     public let senderKeyChanged: Bool
+    /// The outside account this was downloaded from, by its address. Nil for Totality mail. Its copy at
+    /// the provider isn't sealed, and every screen that shows it says so.
+    public var outsideAccount: OutsideAccountLabel?
 
     public init(
         id: UUID = UUID(), conversationID: UUID, from: MailAddress, to: [MailAddress], cc: [MailAddress] = [],
@@ -227,6 +230,17 @@ public struct MailMessage: Identifiable, Hashable, Sendable {
 
     var preview: String {
         body.text.split(whereSeparator: \.isWhitespace).prefix(30).joined(separator: " ")
+    }
+}
+
+/// Which outside account a downloaded message came from, for its label and its honest wording.
+public struct OutsideAccountLabel: Hashable, Sendable {
+    public let provider: OutsideProvider
+    public let address: String
+
+    public init(provider: OutsideProvider, address: String) {
+        self.provider = provider
+        self.address = address
     }
 }
 
