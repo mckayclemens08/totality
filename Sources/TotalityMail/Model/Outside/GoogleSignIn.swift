@@ -68,14 +68,17 @@ public struct GoogleOAuth: Sendable {
 
     public let clientID: String
     private let http: any OutsideHTTP
+    /// How long to wait the first time Gmail says it's being asked too fast. Doubles each time after.
+    let pause: Duration
 
     /// Nil when this build has no Google client, or it isn't the shape Google gives an iOS app.
-    public init?(clientID: String?, http: any OutsideHTTP = EphemeralHTTP()) {
+    public init?(clientID: String?, http: any OutsideHTTP = EphemeralHTTP(), pause: Duration = .seconds(1)) {
         guard let clientID = clientID?.trimmingCharacters(in: .whitespaces), clientID.hasSuffix(Self.clientSuffix) else { return nil }
         let name = clientID.dropLast(Self.clientSuffix.count)
         guard !name.isEmpty, name.count <= 200, name.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }) else { return nil }
         self.clientID = clientID
         self.http = http
+        self.pause = pause
     }
 
     /// Google's iOS clients come back on their own reversed ID.

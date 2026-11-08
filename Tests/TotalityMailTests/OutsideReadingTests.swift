@@ -82,7 +82,7 @@ private final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         let vault = MailVault(store: blobs, rootKey: root, account: account, secrets: keys)
         let store = try ServerMailStore(
             account: account, rootKey: root, vault: vault, server: NoMailServer(), canPublish: { false }, username: { "mckay" },
-            now: { today }, outsideCheck: OutsideSignInCheck(maker: icloud), google: GoogleOAuth(clientID: clientID, http: fake)
+            now: { today }, outsideCheck: OutsideSignInCheck(maker: icloud), google: GoogleOAuth(clientID: clientID, http: fake, pause: .zero)
         )
         return (store, vault)
     }
@@ -157,6 +157,33 @@ private final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         #expect(after.conversations(in: .folder(.inbox)).isEmpty)
         #expect(after.conversations(in: .outside(added.id, "CATEGORY_SOCIAL")).count == 2)
         #expect(fake.fetched.count == 4)
+    }
+
+    @Test func gmailSayingTooFastIsWaitedOutAndOneBadLabelIsSkipped() async throws {
+        let fake = FakeGoogle()
+        fake.inbox = [
+            ("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today),
+            ("18f3a2b4c5d6e7fb", mail("Q4 planning notes"), false, today.addingTimeInterval(-60)),
+        ]
+        fake.labelsOf = ["18f3a2b4c5d6e7fb": ["Label_7"]]
+        fake.userLabels = [("Label_7", "Productivity"), ("Label_9", "Receipts")]
+        fake.tooFast = 3
+        fake.refusedLabel = "Label_9"
+        let (store, _) = try store(google: fake)
+        let added = try await addGmail(store, fake)
+        let result = try #require(await store.downloadOutside { _ in })
+        #expect(result.problems.isEmpty)
+        #expect(result.mailbox.conversations(in: .outside(added.id, "Label_7")).count == 1)
+        #expect(result.mailbox.conversations(in: .folder(.inbox)).count == 2)
+    }
+
+    @Test func gmailTurningTheInboxDownSaysWhy() async throws {
+        let fake = FakeGoogle()
+        fake.refusedLabel = "INBOX"
+        let (store, _) = try store(google: fake)
+        _ = try await addGmail(store, fake)
+        let result = try #require(await store.downloadOutside { _ in })
+        #expect(result.problems == ["mckay.clemens@gmail.com: Gmail said: Label not reachable."])
     }
 
     @Test func aCloudflareCheckInsideGmailProvesNothing() async throws {

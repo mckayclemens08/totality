@@ -25,6 +25,10 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
     var archived: Set<String> = []
     /// The labels the person made, by ID and name.
     var userLabels: [(id: String, name: String)] = []
+    /// How many listings Gmail turns down as too fast before answering.
+    var tooFast = 0
+    /// A label Gmail won't list, for its own reason.
+    var refusedLabel: String?
     private var fetchedIDs: [String] = []
 
     func labels(of id: String) -> [String] {
@@ -86,6 +90,14 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
                 let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
                 #expect(items.first { $0.name == "q" }?.value?.hasPrefix("after:") == true)
                 let label = items.first { $0.name == "labelIds" }?.value ?? ""
+                let slowDown = lock.withLock { tooFast > 0 ? { tooFast -= 1; return true }() : false }
+                if slowDown {
+                    return Self.json(403, ["error": ["code": 403, "message": "User-rate limit exceeded.", "status": "PERMISSION_DENIED",
+                                                     "errors": [["reason": "userRateLimitExceeded", "domain": "usageLimits"]]]])
+                }
+                if label == refusedLabel {
+                    return Self.json(403, ["error": ["code": 403, "message": "Label not reachable.", "errors": [["reason": "forbidden"]]]])
+                }
                 let listed = messages.filter { labels(of: $0.id).contains(label) }
                 let listing: [String: Any] = ["messages": listed.map { ["id": $0.id, "threadId": $0.id] }, "resultSizeEstimate": listed.count]
                 return Self.json(200, listing)

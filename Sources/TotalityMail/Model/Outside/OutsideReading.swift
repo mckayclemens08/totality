@@ -165,16 +165,60 @@ extension GoogleOAuth {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(body)
         }
-        let (data, response) = try await sendRequest(request)
-        switch response.statusCode {
-        case 200: break
-        case 401: throw OutsideMailProblem.expired
-        case 403: throw OutsideMailProblem.notAllowed
-        case 404: throw OutsideMailProblem.unexpected
-        default: throw OutsideMailProblem.unreachable
+        var wait = pause
+        for attempt in 0... {
+            let (data, response) = try await sendRequest(request)
+            switch response.statusCode {
+            case 200:
+                guard let answer = try? JSONDecoder().decode(Answer.self, from: data) else { throw OutsideMailProblem.unexpected }
+                return answer
+            case 401: throw OutsideMailProblem.expired
+            case 403, 429:
+                let refusal = GmailRefusal(data)
+                // Gmail says "too fast" with a 403 as well as a 429. That's waited out, not a missing permission.
+                guard response.statusCode == 429 || refusal.isTooFast else {
+                    if refusal.isMissingPermission { throw OutsideMailProblem.notAllowed }
+                    throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(refusal.message ?? "Gmail said no (\(response.statusCode))."))
+                }
+                guard attempt < 4 else { throw OutsideMailProblem.unreachable }
+                try await Task.sleep(for: wait)
+                wait *= 2
+            case 404: throw OutsideMailProblem.unexpected
+            default: throw OutsideMailProblem.unreachable
+            }
         }
-        guard let answer = try? JSONDecoder().decode(Answer.self, from: data) else { throw OutsideMailProblem.unexpected }
-        return answer
+        throw OutsideMailProblem.unreachable
+    }
+}
+
+/// What Gmail says when it turns a request down, as far as Totality needs to know.
+struct GmailRefusal {
+    let reasons: [String]
+    let status: String?
+    let message: String?
+
+    init(_ data: Data) {
+        struct Answer: Decodable {
+            struct Body: Decodable {
+                struct Reason: Decodable { let reason: String? }
+                let message: String?
+                let status: String?
+                let errors: [Reason]?
+            }
+            let error: Body?
+        }
+        let body = (try? JSONDecoder().decode(Answer.self, from: data))?.error
+        reasons = (body?.errors ?? []).compactMap(\.reason)
+        status = body?.status
+        message = body?.message
+    }
+
+    var isTooFast: Bool {
+        status == "RESOURCE_EXHAUSTED" || reasons.contains { ["rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"].contains($0) }
+    }
+
+    var isMissingPermission: Bool {
+        reasons.contains("insufficientPermissions") || message?.contains("insufficient authentication scopes") == true
     }
 }
 
@@ -309,7 +353,14 @@ struct OutsideReader: Sendable {
             var complete = true
             for label in ["INBOX"] + labels.map(\.id) {
                 try Task.checkCancellation()
-                let listed = try await google.ids(in: label, accessToken: token, since: since, limit: OutsideReading.mostListed)
+                let listed: (ids: [String], truncated: Bool)
+                do {
+                    listed = try await google.ids(in: label, accessToken: token, since: since, limit: OutsideReading.mostListed)
+                } catch let problem as OutsideMailProblem where label != "INBOX" && problem != .expired && problem != .offline {
+                    // One label that won't list doesn't stop the rest. What's in it is just less certain.
+                    complete = false
+                    continue
+                }
                 complete = complete && !listed.truncated
                 for id in listed.ids {
                     if membership[id] == nil { order.append(id) }
