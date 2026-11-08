@@ -342,6 +342,17 @@ private struct NoMailServer: MailServer {
         #expect(try await vault.credential(for: added.id) == .google(GoogleGrant(refreshToken: "1//refresh-old", canSend: false, canChange: false)))
     }
 
+    @Test func allowingChangesCantTurnOnSending() async throws {
+        let fake = FakeGoogle()
+        let (store, _) = try store(fake)
+        let added = try await add(store, fake)
+        let sending = try await store.googleSignIn(for: added.id, sending: true)
+        await #expect(throws: OutsideAccountError.notFound) {
+            try await store.allowGoogleChanges(added.id, sending, callback: fake.page(sending.url, sending.callbackScheme))
+        }
+        #expect(try await store.outsideAccounts().first?.canSend == false)
+    }
+
     @Test func aSignInRequestForAddingCantTurnOnSending() async throws {
         let fake = FakeGoogle()
         let (store, _) = try store(fake)

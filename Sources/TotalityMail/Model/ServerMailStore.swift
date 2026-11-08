@@ -627,8 +627,12 @@ extension ServerMailStore: OutsideAccountStore {
         try await regrant(id, request, callback: callback)
     }
 
+    /// Never turns sending on: a request that sends is only taken for an account that already sends.
     public func allowGoogleChanges(_ id: UUID, _ request: GoogleSignInRequest, callback: URL) async throws {
         guard request.purpose != .add else { throw OutsideAccountError.notFound }
+        if request.purpose.sends {
+            guard try await vault.outsideAccounts().first(where: { $0.id == id })?.canSend == true else { throw OutsideAccountError.notFound }
+        }
         try await regrant(id, request, callback: callback)
     }
 
