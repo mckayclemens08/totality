@@ -17,7 +17,7 @@ final class SMTPConnection {
     static let greetingName = "[127.0.0.1]"
 
     static func signIn(_ signIn: OutsideSignIn, with maker: any OutsideWireMaker) async throws -> SMTPConnection {
-        let endpoint = signIn.provider.sending
+        guard let endpoint = signIn.provider.sending else { throw OutsideMailProblem.unexpected }
         precondition(endpoint.security == .startTLS, "submission is only spoken after STARTTLS")
         let connection = SMTPConnection(maker.open(endpoint))
         do {

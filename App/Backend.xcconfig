@@ -7,3 +7,7 @@ TOTALITY_BACKEND_KEY = sb_publishable_uyIS1C9s4RL8_Cub-rdnHQ_l8fSG7LR
 // Where sealed photos and Reader files are kept (proposal §11-H, issue 54). Point it at the home server
 // once it exists, after its folder of blobs has been copied there.
 TOTALITY_SEALED_STORE_URL = https:/$()/usetotality.com/blobs/
+// Sign in with Google, for Gmail (issue 43). It's an iOS OAuth client ID, which Google treats as public:
+// an installed app can't keep a secret, so it has none, and PKCE protects each sign-in instead. Empty
+// means Gmail can't be added in this build.
+TOTALITY_GOOGLE_CLIENT_ID =

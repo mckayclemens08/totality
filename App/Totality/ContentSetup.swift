@@ -132,7 +132,8 @@ final class MailWiring {
         do {
             return try ServerMailStore(
                 account: account, rootKey: content.rootKey, vault: vault, server: MailServerClient(token: token),
-                canPublish: { [canPublish] in await canPublish(account) }, username: username
+                canPublish: { [canPublish] in await canPublish(account) }, username: username,
+                google: GoogleOAuth(clientID: Bundle.main.object(forInfoDictionaryKey: "TotalityGoogleClientID") as? String)
             )
         } catch {
             return UnavailableMailStore(.noKey)

@@ -138,12 +138,12 @@ public actor MailVault {
         let message: UUID
     }
 
-    /// The app password travels only inside this seal. On the device it's also in the keychain, which
-    /// is where it's used from.
+    /// The app password or Google's token travels only inside this seal. On the device it's also in
+    /// the keychain, which is where it's used from.
     struct OutsideRecord: Codable, Equatable {
         let account: String
         let outside: OutsideAccount
-        let appPassword: String
+        let credential: OutsideCredential
         let updatedAt: Date
     }
 
@@ -155,7 +155,7 @@ public actor MailVault {
     private let store: any BlobStore
     private let rootKey: ContentRootKey
     public nonisolated let account: String
-    /// Where outside accounts' app passwords are used from. Nil means this vault keeps none.
+    /// Where outside accounts' sign-ins are used from. Nil means this vault keeps none.
     private let secrets: (any KeyStore)?
     private var isClosed = false
     private var hashes: [UUID: String] = [:]
@@ -406,12 +406,12 @@ public actor MailVault {
 
     /// Keeps the account and its sign-in, or replaces them. The keychain is written first, so a saved
     /// account always has its sign-in here.
-    public func save(_ outside: OutsideAccount, appPassword: String, at now: Date = Date()) throws {
+    public func save(_ outside: OutsideAccount, credential: OutsideCredential, at now: Date = Date()) throws {
         guard !isClosed else { throw MailVaultError.closed }
         guard let secrets else { throw OutsideAccountError.unavailable }
         let id = Self.outsideID(outside.id, account: account)
-        try secrets.save(Data(appPassword.utf8), as: Self.secretName(outside.id, account: account))
-        let record = OutsideRecord(account: account, outside: outside, appPassword: appPassword, updatedAt: now)
+        try secrets.save(try credential.keychainData, as: Self.secretName(outside.id, account: account))
+        let record = OutsideRecord(account: account, outside: outside, credential: credential, updatedAt: now)
         try store.write(try seal(record, id: id, purpose: .metadata), as: name(id, Self.outsideSuffix))
         try store.delete(deletionName(id))
         hashes[id] = nil
@@ -420,20 +420,26 @@ public actor MailVault {
     /// Changes what's kept about the account, with the sign-in it already has.
     public func update(_ outside: OutsideAccount, at now: Date = Date()) throws {
         guard let record = try outsideRecord(outside.id) else { throw OutsideAccountError.notFound }
-        try save(outside, appPassword: record.appPassword, at: now)
+        try save(outside, credential: record.credential, at: now)
     }
 
     /// The account's sign-in, from the keychain. A device that got the account through sync and lost
     /// the keychain copy gets it back from the sealed record.
-    public func signIn(for outside: UUID) throws -> OutsideSignIn? {
+    public func credential(for outside: UUID) throws -> OutsideCredential? {
         guard let secrets, let record = try outsideRecord(outside) else { return nil }
         let secret = Self.secretName(outside, account: account)
-        var password = try secrets.load(secret).map { String(decoding: $0, as: UTF8.self) }
-        if password != record.appPassword {
-            try secrets.save(Data(record.appPassword.utf8), as: secret)
-            password = record.appPassword
+        let kept = try secrets.load(secret).flatMap { try? OutsideCredential(keychainData: $0) }
+        if kept != record.credential {
+            try secrets.save(try record.credential.keychainData, as: secret)
         }
-        return password.flatMap { OutsideSignIn(provider: record.outside.provider, address: record.outside.address, appPassword: $0) }
+        return record.credential
+    }
+
+    /// An app-password account's sign-in, ready for IMAP or SMTP.
+    public func signIn(for outside: UUID) throws -> OutsideSignIn? {
+        guard case .appPassword(let password) = try credential(for: outside),
+              let record = try outsideRecord(outside) else { return nil }
+        return OutsideSignIn(provider: record.outside.provider, address: record.outside.address, appPassword: password)
     }
 
     /// The sign-in leaves the keychain first, then the record goes, and the removal reaches the other
@@ -472,7 +478,7 @@ public actor MailVault {
     /// Keeps the keychain in step with a record that arrived through sync.
     private func keepSecret(of object: SealedObject) throws {
         let record = try openedOutside(id: object.id, sealed: object.meta)
-        try secrets?.save(Data(record.appPassword.utf8), as: Self.secretName(record.outside.id, account: account))
+        try secrets?.save(try record.credential.keychainData, as: Self.secretName(record.outside.id, account: account))
     }
 
     // MARK: Drafts

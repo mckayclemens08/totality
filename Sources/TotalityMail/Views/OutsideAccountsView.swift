@@ -1,5 +1,15 @@
+import AuthenticationServices
 import SwiftUI
 import TotalityUI
+
+/// Google's own sign-in page, in the system's sign-in sheet. It shares Safari's sign-ins, so someone
+/// already signed in to Google there just picks their account.
+@MainActor
+private func webSignIn(_ session: WebAuthenticationSession) -> OutsideWebSignIn {
+    { page, scheme in
+        try await session.authenticate(using: page, callbackURLScheme: scheme, preferredBrowserSession: .shared)
+    }
+}
 
 /// iCloud and Gmail accounts beside the Totality address: each one's honest label, its Send switch,
 /// and Remove. Adding one opens `OutsideAddAccountView`.
@@ -9,6 +19,7 @@ struct OutsideAccountsView: View {
 
     @State private var adding = false
     @State private var removing: OutsideAccount?
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
         let theme = Theme.current
@@ -124,12 +135,15 @@ struct OutsideAccountsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Toggle(OutsideWording.sendSwitch, isOn: Binding(
                 get: { account.canSend },
-                set: { on in Task { await model.setSending(account, on: on) } }
+                set: { on in
+                    let signIn = webSignIn(webAuthenticationSession)
+                    Task { await model.setSending(account, on: on, signingIn: signIn) }
+                }
             ))
             .font(Typeface.callout)
             .foregroundStyle(theme.textPrimary.color)
             .disabled(isBusy)
-            Text(account.canSend ? OutsideWording.sent(through: account.provider) : OutsideWording.sendSwitchOff)
+            Text(account.canSend ? OutsideWording.sent(through: account.provider) : OutsideWording.sendSwitchOff(account.provider))
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .fixedSize(horizontal: false, vertical: true)
@@ -149,15 +163,17 @@ struct OutsideAccountsView: View {
     }
 }
 
-/// Asks for the address and app password, checks them with the provider, and only then keeps them.
+/// Gmail signs in on Google's own page. iCloud asks for the address and an app password. Either way the
+/// provider checks it before anything is kept.
 struct OutsideAddAccountView: View {
     let model: OutsideAccountsModel
     let onDone: () -> Void
 
-    @State private var provider = OutsideProvider.icloud
+    @State private var provider = OutsideProvider.gmail
     @State private var address = ""
     @State private var password = ""
     @State private var problem: String?
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
         let theme = Theme.current
@@ -176,21 +192,17 @@ struct OutsideAddAccountView: View {
                                 .foregroundStyle(theme.textSecondary.color)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        Link("How to make an app password", destination: provider.appPasswordHelp)
-                            .font(Typeface.callout)
+                        if provider.signsInWithGoogle {
+                            Text(OutsideWording.googleUnverified)
+                                .font(Typeface.caption)
+                                .foregroundStyle(theme.textSecondary.color)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    field {
-                        TextField("Address", text: $address)
-                            .textContentType(.emailAddress)
-                            #if os(iOS)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            #endif
-                            .autocorrectionDisabled()
-                    }
-                    field {
-                        SecureField("App password", text: $password)
-                            .autocorrectionDisabled()
+                    if provider.signsInWithGoogle {
+                        googleButton
+                    } else {
+                        appPasswordFields
                     }
                     if let problem {
                         Text(problem)
@@ -218,14 +230,61 @@ struct OutsideAddAccountView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: close).disabled(model.isAdding)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", action: add)
-                        .disabled(model.isAdding || address.isEmpty || password.isEmpty)
+                if !provider.signsInWithGoogle {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Add", action: add)
+                            .disabled(model.isAdding || address.isEmpty || password.isEmpty)
+                    }
                 }
             }
         }
         .tint(theme.accent.color)
         .onChange(of: provider) { problem = nil }
+    }
+
+    private var googleButton: some View {
+        let theme = Theme.current
+        return Button(action: addGoogle) {
+            Label("Sign in with Google", systemImage: "person.crop.circle")
+                .font(Typeface.headline)
+                .foregroundStyle(theme.accent.color)
+                .padding(Space.s3)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md))
+        .disabled(model.isAdding)
+    }
+
+    @ViewBuilder
+    private var appPasswordFields: some View {
+        if let page = provider.appPasswordPage {
+            Link(destination: page) {
+                Label("Make an App Password", systemImage: "key")
+                    .font(Typeface.callout)
+                    .padding(Space.s3)
+                    .frame(maxWidth: .infinity)
+            }
+            .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md))
+        }
+        if let help = provider.appPasswordHelp {
+            Link("Apple's help on app passwords", destination: help)
+                .font(Typeface.caption)
+        }
+        field {
+            TextField("Address", text: $address)
+                .textContentType(.emailAddress)
+                #if os(iOS)
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                #endif
+                .autocorrectionDisabled()
+        }
+        field {
+            SecureField("App password", text: $password)
+                .autocorrectionDisabled()
+        }
     }
 
     private func field(@ViewBuilder _ content: () -> some View) -> some View {
@@ -235,6 +294,18 @@ struct OutsideAddAccountView: View {
             .padding(Space.s3)
             .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
             .disabled(model.isAdding)
+    }
+
+    private func addGoogle() {
+        problem = nil
+        let signIn = webSignIn(webAuthenticationSession)
+        Task {
+            switch await model.addGoogle(signingIn: signIn) {
+            case .added: close()
+            case .cancelled: break
+            case .failed(let said): problem = said
+            }
+        }
     }
 
     private func add() {

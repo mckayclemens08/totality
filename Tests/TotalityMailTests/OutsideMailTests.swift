@@ -54,16 +54,16 @@ struct ScriptedMaker: OutsideWireMaker {
     }
 }
 
-private let signIn = OutsideSignIn(provider: .gmail, address: "mckay.clemens@gmail.com", appPassword: "abcd efgh ijkl mnop")!
+private let signIn = OutsideSignIn(provider: .icloud, address: "mckay.clemens@icloud.com", appPassword: "abcd efgh ijkl mnop")!
 
 private func imap(_ answer: @escaping @Sendable (String) -> String?, greeting: String = "* OK Gimap ready\r\n") -> (ScriptedWire, OutsideSignInCheck) {
     let wire = ScriptedWire(greeting: greeting, answer: answer)
-    return (wire, OutsideSignInCheck(maker: ScriptedMaker(wire: wire, expected: OutsideProvider.gmail.reading)))
+    return (wire, OutsideSignInCheck(maker: ScriptedMaker(wire: wire, expected: OutsideProvider.icloud.reading!)))
 }
 
 private func smtp(_ answer: @escaping @Sendable (String) -> String?, greeting: String = "220 smtp.gmail.com ESMTP ready\r\n") -> (ScriptedWire, OutsideSignInCheck) {
     let wire = ScriptedWire(greeting: greeting, answer: answer)
-    return (wire, OutsideSignInCheck(maker: ScriptedMaker(wire: wire, expected: OutsideProvider.gmail.sending)))
+    return (wire, OutsideSignInCheck(maker: ScriptedMaker(wire: wire, expected: OutsideProvider.icloud.sending!)))
 }
 
 /// Answers a Gmail-like submission server would give, with the sign-in's answer chosen by the test.
@@ -79,17 +79,19 @@ private func smtp(_ answer: @escaping @Sendable (String) -> String?, greeting: S
 }
 
 @Suite struct OutsideProviderTests {
-    @Test func everyProviderUsesItsPublishedServersWithTLS() {
-        #expect(OutsideProvider.icloud.reading == OutsideProvider.icloud.reading)
-        #expect(OutsideProvider.icloud.reading.host == "imap.mail.me.com")
-        #expect(OutsideProvider.icloud.sending.host == "smtp.mail.me.com")
-        #expect(OutsideProvider.gmail.reading.host == "imap.gmail.com")
-        #expect(OutsideProvider.gmail.sending.host == "smtp.gmail.com")
-        for provider in OutsideProvider.allCases {
-            #expect(provider.reading.port == 993 && provider.reading.security == .tls)
-            #expect(provider.sending.port == 587 && provider.sending.security == .startTLS)
-            #expect(provider.appPasswordHelp.scheme == "https")
-        }
+    @Test func iCloudUsesItsPublishedServersWithTLS() throws {
+        let reading = try #require(OutsideProvider.icloud.reading), sending = try #require(OutsideProvider.icloud.sending)
+        #expect(reading.host == "imap.mail.me.com" && reading.port == 993 && reading.security == .tls)
+        #expect(sending.host == "smtp.mail.me.com" && sending.port == 587 && sending.security == .startTLS)
+        #expect(OutsideProvider.icloud.appPasswordHelp?.scheme == "https")
+        #expect(OutsideProvider.icloud.appPasswordPage?.host == "account.apple.com")
+    }
+
+    @Test func gmailHasNoPasswordServersSoNothingIsEverSentToThem() {
+        #expect(OutsideProvider.gmail.signsInWithGoogle && !OutsideProvider.icloud.signsInWithGoogle)
+        #expect(OutsideProvider.gmail.reading == nil && OutsideProvider.gmail.sending == nil)
+        #expect(OutsideProvider.gmail.appPasswordPage == nil)
+        #expect(OutsideSignIn(provider: .gmail, address: "mckay.clemens@gmail.com", appPassword: "abcd efgh ijkl mnop") == nil)
     }
 
     @Test func outlookIsNotOfferedYet() {
@@ -102,13 +104,13 @@ private func smtp(_ answer: @escaping @Sendable (String) -> String?, greeting: S
             #expect(!shown.contains("abcd"))
             #expect(!shown.contains("efgh"))
         }
-        #expect(String(describing: signIn).contains("mckay.clemens@gmail.com"))
+        #expect(String(describing: signIn).contains("mckay.clemens@icloud.com"))
     }
 
     @Test func spacesInTheAppPasswordAreDropped() {
         #expect(signIn.appPassword == "abcdefghijklmnop")
         let decoded = Data(base64Encoded: signIn.plain).map { String(decoding: $0, as: UTF8.self) }
-        #expect(decoded == "\0mckay.clemens@gmail.com\0abcdefghijklmnop")
+        #expect(decoded == "\0mckay.clemens@icloud.com\0abcdefghijklmnop")
     }
 
     @Test func anAddressOrPasswordThatCantBeRightIsRefused() {

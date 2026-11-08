@@ -2,7 +2,9 @@ import Foundation
 
 /// An outside mail service the device connects to directly, the way Apple Mail does. Totality's server is
 /// never in the path. Each provider's servers are fixed here, so nothing a person types, and nothing a
-/// message or a server says, can point a sign-in anywhere else. Outlook isn't here: Microsoft's sign-in
+/// message or a server says, can point a sign-in anywhere else. Gmail signs in with Google and reads
+/// through Gmail's own API; iCloud has no sign-in like that for other apps, so it takes an app password
+/// over IMAP and SMTP. Outlook isn't here: Microsoft's sign-in
 /// needs an app registration that isn't confirmed to cost nothing (issue 43, trial of 2026-11-05).
 public enum OutsideProvider: String, Codable, CaseIterable, Sendable {
     case icloud
@@ -23,27 +25,40 @@ public enum OutsideProvider: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// Where reading happens: IMAP, with TLS from the first byte.
-    public var reading: OutsideEndpoint {
+    /// True when the person signs in on the provider's own page and Totality never takes a password.
+    public var signsInWithGoogle: Bool { self == .gmail }
+
+    /// Where reading happens for an app password: IMAP, with TLS from the first byte. Gmail has none,
+    /// so no Google sign-in is ever sent to IMAP.
+    public var reading: OutsideEndpoint? {
         switch self {
         case .icloud: OutsideEndpoint(host: "imap.mail.me.com", port: 993, security: .tls)
-        case .gmail: OutsideEndpoint(host: "imap.gmail.com", port: 993, security: .tls)
+        case .gmail: nil
         }
     }
 
-    /// Where sending happens: SMTP submission, which has to switch to TLS before anything is signed in.
-    public var sending: OutsideEndpoint {
+    /// Where sending happens for an app password: SMTP submission, which has to switch to TLS before
+    /// anything is signed in.
+    public var sending: OutsideEndpoint? {
         switch self {
         case .icloud: OutsideEndpoint(host: "smtp.mail.me.com", port: 587, security: .startTLS)
-        case .gmail: OutsideEndpoint(host: "smtp.gmail.com", port: 587, security: .startTLS)
+        case .gmail: nil
         }
     }
 
-    /// The provider's own page on making an app password, which is the only password Totality takes.
-    public var appPasswordHelp: URL {
+    /// Where the person makes an app password: Apple's own page for it, which asks them to sign in.
+    public var appPasswordPage: URL? {
+        switch self {
+        case .icloud: URL(string: "https://account.apple.com/account/manage")!
+        case .gmail: nil
+        }
+    }
+
+    /// The provider's own help on app passwords.
+    public var appPasswordHelp: URL? {
         switch self {
         case .icloud: URL(string: "https://support.apple.com/en-us/102654")!
-        case .gmail: URL(string: "https://support.google.com/accounts/answer/185833")!
+        case .gmail: nil
         }
     }
 }
@@ -68,7 +83,7 @@ public struct OutsideEndpoint: Equatable, Sendable {
     }
 }
 
-/// An address and app password for one outside account. The password never prints: not in a log, a
+/// An address and app password for one outside account that takes one, which is iCloud. The password never prints: not in a log, a
 /// crash report, a test failure, or a debugger's description.
 public struct OutsideSignIn: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public let provider: OutsideProvider
@@ -80,7 +95,7 @@ public struct OutsideSignIn: Equatable, Sendable, CustomStringConvertible, Custo
     public init?(provider: OutsideProvider, address: String, appPassword: String) {
         let address = address.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = appPassword.filter { !$0.isWhitespace }
-        guard Self.isAddress(address), (1...256).contains(password.count),
+        guard provider.reading != nil, Self.isAddress(address), (1...256).contains(password.count),
               password.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else { return nil }
         self.provider = provider
         self.address = address

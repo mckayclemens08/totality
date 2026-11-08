@@ -19,6 +19,8 @@ public actor ServerMailStore: MailStore {
     private let username: @Sendable () async -> String?
     private let now: @Sendable () -> Date
     private let outsideCheck: OutsideSignInCheck
+    /// Nil when this build has no Google sign-in, so Gmail can't be added.
+    private let google: GoogleOAuth?
 
     /// What publishing answered for this store. `.alreadyThere` means the server's mailbox is the one
     /// mail was downloaded from, so what it no longer lists was deleted on purpose.
@@ -34,7 +36,8 @@ public actor ServerMailStore: MailStore {
         canPublish: @escaping @Sendable () async -> Bool,
         username: @escaping @Sendable () async -> String?,
         now: @escaping @Sendable () -> Date = { Date() },
-        outsideCheck: OutsideSignInCheck = OutsideSignInCheck()
+        outsideCheck: OutsideSignInCheck = OutsideSignInCheck(),
+        google: GoogleOAuth? = nil
     ) throws {
         guard let mailboxID = UUID(uuidString: account), vault.account == account else { throw MailStoreError.noAccount }
         self.account = account
@@ -47,6 +50,7 @@ public actor ServerMailStore: MailStore {
         self.username = username
         self.now = now
         self.outsideCheck = outsideCheck
+        self.google = google
     }
 
     // MARK: Opening
@@ -489,30 +493,84 @@ extension ServerMailStore: OutsideAccountStore {
 
     public func addOutside(_ signIn: OutsideSignIn) async throws -> OutsideAccount {
         let candidate = OutsideAccount(provider: signIn.provider, address: signIn.address, addedAt: now())
-        let existing = try await vault.outsideAccounts()
-        guard !existing.contains(where: { $0.isSameMailbox(as: candidate) }) else { throw OutsideAccountError.alreadyAdded }
-        guard existing.count < OutsideAccountLimits.most else { throw OutsideAccountError.tooMany }
+        try await checkRoom(for: candidate)
         if let problem = await outsideCheck.checkReading(signIn) { throw OutsideAccountError.problem(problem) }
         // Checked again after the wait, in case another add landed meanwhile.
-        let latest = try await vault.outsideAccounts()
-        guard !latest.contains(where: { $0.isSameMailbox(as: candidate) }) else { throw OutsideAccountError.alreadyAdded }
-        guard latest.count < OutsideAccountLimits.most else { throw OutsideAccountError.tooMany }
-        try await vault.save(candidate, appPassword: signIn.appPassword, at: now())
+        try await checkRoom(for: candidate)
+        try await vault.save(candidate, credential: .appPassword(signIn.appPassword), at: now())
         return candidate
     }
 
+    public func googleSignIn(sendingFor id: UUID?) async throws -> GoogleSignInRequest {
+        guard let google else { throw OutsideAccountError.notSetUp }
+        guard let id else {
+            guard try await vault.outsideAccounts().count < OutsideAccountLimits.most else { throw OutsideAccountError.tooMany }
+            return google.request()
+        }
+        guard let outside = try await vault.outsideAccounts().first(where: { $0.id == id }),
+              outside.provider.signsInWithGoogle else { throw OutsideAccountError.notFound }
+        return google.request(sendingFor: outside.address)
+    }
+
+    public func addGoogle(_ request: GoogleSignInRequest, callback: URL) async throws -> OutsideAccount {
+        guard let google else { throw OutsideAccountError.notSetUp }
+        guard request.scopes == [GoogleOAuth.readScope] else { throw OutsideAccountError.notFound }
+        let tokens = try await googleAnswer { try await google.finish(request, callback: callback) }
+        let address = try await googleAnswer { try await google.address(accessToken: tokens.accessToken) }
+        let candidate = OutsideAccount(provider: .gmail, address: address, addedAt: now())
+        // An account already here keeps its own token. Taking this one back at Google would take back
+        // the other's too, so it's just dropped.
+        try await checkRoom(for: candidate)
+        try await vault.save(candidate, credential: .google(GoogleGrant(refreshToken: tokens.refreshToken, canSend: false)), at: now())
+        return candidate
+    }
+
+    public func allowGoogleSending(_ id: UUID, _ request: GoogleSignInRequest, callback: URL) async throws {
+        guard let google else { throw OutsideAccountError.notSetUp }
+        guard request.scopes.contains(GoogleOAuth.sendScope),
+              var outside = try await vault.outsideAccounts().first(where: { $0.id == id }),
+              outside.provider.signsInWithGoogle else { throw OutsideAccountError.notFound }
+        let tokens = try await googleAnswer { try await google.finish(request, callback: callback) }
+        let address = try await googleAnswer { try await google.address(accessToken: tokens.accessToken) }
+        // The page lets the person pick any Google account, and only this one's mail is being changed.
+        guard address.lowercased() == outside.address.lowercased() else { throw OutsideAccountError.differentAccount }
+        outside.canSend = true
+        try await vault.save(outside, credential: .google(GoogleGrant(refreshToken: tokens.refreshToken, canSend: true)), at: now())
+    }
+
+    /// Takes the sign-in off every device. A Google account's access is taken back at Google too,
+    /// which is the one change at the provider: no mail there is touched.
     public func removeOutside(_ id: UUID) async throws {
+        let credential = try? await vault.credential(for: id)
         try await vault.removeOutside(id)
+        if case .google(let grant) = credential, let google { await google.revoke(grant.refreshToken) }
     }
 
     public func setOutsideSending(_ id: UUID, on: Bool) async throws {
         guard var outside = try await vault.outsideAccounts().first(where: { $0.id == id }) else { throw OutsideAccountError.notFound }
         guard outside.canSend != on else { return }
         if on {
+            // Google asks the person first, on its own page.
+            guard !outside.provider.signsInWithGoogle else { throw OutsideAccountError.notFound }
             guard let signIn = try await vault.signIn(for: id) else { throw OutsideAccountError.notFound }
             if let problem = await outsideCheck.checkSending(signIn) { throw OutsideAccountError.problem(problem) }
         }
         outside.canSend = on
         try await vault.update(outside, at: now())
+    }
+
+    private func checkRoom(for candidate: OutsideAccount) async throws {
+        let existing = try await vault.outsideAccounts()
+        guard !existing.contains(where: { $0.isSameMailbox(as: candidate) }) else { throw OutsideAccountError.alreadyAdded }
+        guard existing.count < OutsideAccountLimits.most else { throw OutsideAccountError.tooMany }
+    }
+
+    /// Google's problems become the account's, and closing the page stays a close.
+    private func googleAnswer<T: Sendable>(_ work: () async throws -> T) async throws -> T {
+        do {
+            return try await work()
+        } catch let problem as OutsideMailProblem {
+            throw OutsideAccountError.problem(problem)
+        }
     }
 }

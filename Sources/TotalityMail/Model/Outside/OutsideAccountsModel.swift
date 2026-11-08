@@ -1,5 +1,18 @@
+import AuthenticationServices
 import Foundation
 import Observation
+
+/// Opens a provider's own sign-in page and hands back the address it returned to. The screen supplies
+/// this, from SwiftUI's web authentication session.
+public typealias OutsideWebSignIn = @MainActor (_ page: URL, _ callbackScheme: String) async throws -> URL
+
+/// How adding an account ended.
+public enum OutsideAddOutcome: Equatable, Sendable {
+    case added
+    /// The person closed the sign-in page, so nothing needs saying.
+    case cancelled
+    case failed(String)
+}
 
 /// The outside accounts screen's state. Nothing is shown as added until the provider accepted the
 /// sign-in and it was kept, and a change that fails says why and leaves things as they were.
@@ -52,12 +65,48 @@ public final class OutsideAccountsModel {
         }
     }
 
+    /// Signs in on Google's own page, asking only to read, then keeps the account.
+    public func addGoogle(signingIn web: OutsideWebSignIn) async -> OutsideAddOutcome {
+        guard !isAdding else { return .failed("Still checking the last one.") }
+        isAdding = true
+        defer { isAdding = false }
+        do {
+            let request = try await store.googleSignIn(sendingFor: nil)
+            let callback = try await web(request.url, request.callbackScheme)
+            _ = try await store.addGoogle(request, callback: callback)
+            await load()
+            return .added
+        } catch {
+            guard let error = Self.accountError(error) else { return .cancelled }
+            return .failed(OutsideWording.problem(error, provider: .gmail))
+        }
+    }
+
     public func remove(_ account: OutsideAccount) async {
         await change(account) { try await self.store.removeOutside(account.id) }
     }
 
-    public func setSending(_ account: OutsideAccount, on: Bool) async {
-        await change(account) { try await self.store.setOutsideSending(account.id, on: on) }
+    /// Turning a Gmail account's sending on asks Google first, on its own page.
+    public func setSending(_ account: OutsideAccount, on: Bool, signingIn web: @escaping OutsideWebSignIn) async {
+        guard on, account.provider.signsInWithGoogle else {
+            await change(account) { try await self.store.setOutsideSending(account.id, on: on) }
+            return
+        }
+        await change(account) {
+            let request = try await self.store.googleSignIn(sendingFor: account.id)
+            let callback = try await web(request.url, request.callbackScheme)
+            try await self.store.allowGoogleSending(account.id, request, callback: callback)
+        }
+    }
+
+    /// Nil for a closed sign-in page, which isn't a problem to show.
+    static func accountError(_ error: any Error) -> OutsideAccountError? {
+        if let error = error as? OutsideAccountError { return error == .cancelled ? nil : error }
+        if let error = error as? ASWebAuthenticationSessionError {
+            return error.code == .canceledLogin ? nil : .problem(.unexpected)
+        }
+        if error is CancellationError { return nil }
+        return .unavailable
     }
 
     private func change(_ account: OutsideAccount, _ work: @escaping () async throws -> Void) async {
@@ -67,10 +116,8 @@ public final class OutsideAccountsModel {
         do {
             try await work()
             notice = nil
-        } catch let error as OutsideAccountError {
-            notice = OutsideWording.problem(error, provider: account.provider)
         } catch {
-            notice = OutsideWording.problem(.unavailable, provider: account.provider)
+            notice = Self.accountError(error).map { OutsideWording.problem($0, provider: account.provider) }
         }
         await load()
     }

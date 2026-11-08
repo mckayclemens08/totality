@@ -66,12 +66,12 @@ private struct UntouchedMailServer: MailServer {
         let blobs = MailMemoryStore()
         let keys = MailMemoryKeys()
         let vault = MailVault(store: blobs, rootKey: try .generate(), account: alice, secrets: keys)
-        try await vault.save(icloud, appPassword: "hjkl-qwer-tyui-asdf", at: added)
+        try await vault.save(icloud, credential: .appPassword("hjkl-qwer-tyui-asdf"), at: added)
         #expect(try await vault.outsideAccounts() == [icloud])
         let signIn = try #require(try await vault.signIn(for: icloud.id))
         #expect(signIn.address == "mckay.clemens@icloud.com")
         #expect(signIn.appPassword == "hjkl-qwer-tyui-asdf")
-        #expect(try keys.load(MailVault.secretName(icloud.id, account: alice)) == Data("hjkl-qwer-tyui-asdf".utf8))
+        #expect(try keys.load(MailVault.secretName(icloud.id, account: alice)).map { try OutsideCredential(keychainData: $0) } == .appPassword("hjkl-qwer-tyui-asdf"))
         // Nothing readable on the disk: not the password, the address, or the provider.
         for name in try blobs.names() {
             let bytes = try #require(try blobs.read(name))
@@ -85,7 +85,7 @@ private struct UntouchedMailServer: MailServer {
     @Test func removingTakesTheSignInAndTellsSync() async throws {
         let keys = MailMemoryKeys()
         let vault = MailVault(store: MailMemoryStore(), rootKey: try .generate(), account: alice, secrets: keys)
-        try await vault.save(icloud, appPassword: "hjkl-qwer-tyui-asdf", at: added)
+        try await vault.save(icloud, credential: .appPassword("hjkl-qwer-tyui-asdf"), at: added)
         try await vault.removeOutside(icloud.id)
         #expect(try await vault.outsideAccounts().isEmpty)
         #expect(try keys.load(MailVault.secretName(icloud.id, account: alice)) == nil)
@@ -94,7 +94,7 @@ private struct UntouchedMailServer: MailServer {
 
     @Test func aVaultWithNoKeychainKeepsNoSignIns() async throws {
         let vault = MailVault(store: MailMemoryStore(), rootKey: try .generate(), account: alice)
-        await #expect(throws: OutsideAccountError.unavailable) { try await vault.save(icloud, appPassword: "hjkl-qwer-tyui-asdf") }
+        await #expect(throws: OutsideAccountError.unavailable) { try await vault.save(icloud, credential: .appPassword("hjkl-qwer-tyui-asdf")) }
     }
 
     @Test("Two-user: on one device, the next account gets none of the last one's outside accounts")
@@ -103,7 +103,7 @@ private struct UntouchedMailServer: MailServer {
         let keys = MailMemoryKeys()
         let key = try ContentRootKey.generate()
         let mine = MailVault(store: blobs, rootKey: key, account: alice, secrets: keys)
-        try await mine.save(icloud, appPassword: "hjkl-qwer-tyui-asdf", at: added)
+        try await mine.save(icloud, credential: .appPassword("hjkl-qwer-tyui-asdf"), at: added)
         let theirs = MailVault(store: blobs, rootKey: key, account: bruno, secrets: keys)
         #expect(try await theirs.outsideAccounts().isEmpty)
         #expect(try await theirs.signIn(for: icloud.id) == nil)
@@ -118,7 +118,7 @@ private struct UntouchedMailServer: MailServer {
     @Test("Two-user: the sync server holds only ciphertext it can't open")
     func syncRowsShowNothing() async throws {
         let vault = MailVault(store: MailMemoryStore(), rootKey: try .generate(), account: alice, secrets: MailMemoryKeys())
-        try await vault.save(icloud, appPassword: "hjkl-qwer-tyui-asdf", at: added)
+        try await vault.save(icloud, credential: .appPassword("hjkl-qwer-tyui-asdf"), at: added)
         let remote = MailMemoryRemote()
         _ = try await SyncEngine(areas: [vault], remote: remote, state: MailMemorySyncState()).sync()
         let rows = await remote.all()
@@ -140,11 +140,11 @@ private struct UntouchedMailServer: MailServer {
         let remote = MailMemoryRemote()
         let phoneSync = SyncEngine(areas: [phone], remote: remote, state: MailMemorySyncState())
         let macSync = SyncEngine(areas: [mac], remote: remote, state: MailMemorySyncState())
-        try await phone.save(icloud, appPassword: "hjkl-qwer-tyui-asdf", at: added)
+        try await phone.save(icloud, credential: .appPassword("hjkl-qwer-tyui-asdf"), at: added)
         _ = try await phoneSync.sync()
         _ = try await macSync.sync()
         #expect(try await mac.outsideAccounts() == [icloud])
-        #expect(try macKeys.load(MailVault.secretName(icloud.id, account: alice)) == Data("hjkl-qwer-tyui-asdf".utf8))
+        #expect(try macKeys.load(MailVault.secretName(icloud.id, account: alice)).map { try OutsideCredential(keychainData: $0) } == .appPassword("hjkl-qwer-tyui-asdf"))
 
         // Turning sending on reaches the phone too.
         var sending = icloud
@@ -166,7 +166,7 @@ private struct UntouchedMailServer: MailServer {
     @Test func aLostKeychainCopyComesBackFromTheSealedRecord() async throws {
         let keys = MailMemoryKeys()
         let vault = MailVault(store: MailMemoryStore(), rootKey: try .generate(), account: alice, secrets: keys)
-        try await vault.save(icloud, appPassword: "hjkl-qwer-tyui-asdf", at: added)
+        try await vault.save(icloud, credential: .appPassword("hjkl-qwer-tyui-asdf"), at: added)
         try keys.delete(MailVault.secretName(icloud.id, account: alice))
         #expect(try await vault.signIn(for: icloud.id)?.appPassword == "hjkl-qwer-tyui-asdf")
         #expect(try keys.load(MailVault.secretName(icloud.id, account: alice)) != nil)
@@ -178,8 +178,8 @@ private struct UntouchedMailServer: MailServer {
         let mac = MailVault(store: MailMemoryStore(), rootKey: key, account: alice, secrets: MailMemoryKeys())
         var on = icloud
         on.canSend = true
-        try await phone.save(icloud, appPassword: "hjkl-qwer-tyui-asdf", at: added)
-        try await mac.save(on, appPassword: "hjkl-qwer-tyui-asdf", at: added.addingTimeInterval(5))
+        try await phone.save(icloud, credential: .appPassword("hjkl-qwer-tyui-asdf"), at: added)
+        try await mac.save(on, credential: .appPassword("hjkl-qwer-tyui-asdf"), at: added.addingTimeInterval(5))
         let id = MailVault.outsideID(icloud.id, account: alice)
         let older = try #require(try await phone.sealedObject(id))
         let newer = try #require(try await mac.sealedObject(id))
@@ -201,23 +201,23 @@ private struct UntouchedMailServer: MailServer {
         return (store, vault)
     }
 
-    private func gmail(_ address: String = "mckay.clemens@gmail.com") -> OutsideSignIn {
-        OutsideSignIn(provider: .gmail, address: address, appPassword: "wxyz abcd efgh ijkl")!
+    private func icloud(_ address: String = "mckay.clemens@icloud.com") -> OutsideSignIn {
+        OutsideSignIn(provider: .icloud, address: address, appPassword: "wxyz abcd efgh ijkl")!
     }
 
     @Test func addingChecksWithTheProviderFirstAndStartsWithSendingOff() async throws {
         let maker = ProviderMaker()
         let (store, _) = try store(maker)
-        let added = try await store.addOutside(gmail())
-        #expect(added.provider == .gmail && !added.canSend)
-        #expect(maker.connections == [OutsideProvider.gmail.reading])
+        let added = try await store.addOutside(icloud())
+        #expect(added.provider == .icloud && !added.canSend)
+        #expect(maker.connections == [OutsideProvider.icloud.reading])
         #expect(try await store.outsideAccounts() == [added])
     }
 
     @Test func aRefusedSignInKeepsNothing() async throws {
         let keys = MailMemoryKeys()
         let (store, vault) = try store(ProviderMaker(acceptsReading: false), keys: keys)
-        await #expect(throws: OutsideAccountError.problem(.wrongPassword)) { try await store.addOutside(gmail()) }
+        await #expect(throws: OutsideAccountError.problem(.wrongPassword)) { try await store.addOutside(icloud()) }
         #expect(try await vault.outsideAccounts().isEmpty)
         #expect(try await vault.sealedObjectIDs().isEmpty)
     }
@@ -225,24 +225,24 @@ private struct UntouchedMailServer: MailServer {
     @Test func theSameMailboxTwiceIsRefusedWithoutConnecting() async throws {
         let maker = ProviderMaker()
         let (store, _) = try store(maker)
-        _ = try await store.addOutside(gmail())
-        await #expect(throws: OutsideAccountError.alreadyAdded) { try await store.addOutside(gmail("McKay.Clemens@Gmail.com")) }
+        _ = try await store.addOutside(icloud())
+        await #expect(throws: OutsideAccountError.alreadyAdded) { try await store.addOutside(icloud("McKay.Clemens@iCloud.com")) }
         #expect(maker.connections.count == 1)
     }
 
     @Test func threeIsTheMost() async throws {
         let (store, _) = try store(ProviderMaker())
-        for name in ["mckay.clemens", "clemens.family", "mckay.receipts"] { _ = try await store.addOutside(gmail("\(name)@gmail.com")) }
-        await #expect(throws: OutsideAccountError.tooMany) { try await store.addOutside(gmail("one.more@gmail.com")) }
+        for name in ["mckay.clemens", "clemens.family", "mckay.receipts"] { _ = try await store.addOutside(icloud("\(name)@icloud.com")) }
+        await #expect(throws: OutsideAccountError.tooMany) { try await store.addOutside(icloud("one.more@icloud.com")) }
     }
 
     @Test func turningSendingOnChecksSendingFirst() async throws {
         let maker = ProviderMaker()
         let (store, _) = try store(maker)
-        let added = try await store.addOutside(gmail())
+        let added = try await store.addOutside(icloud())
         try await store.setOutsideSending(added.id, on: true)
         #expect(try await store.outsideAccounts().first?.canSend == true)
-        #expect(maker.connections.last == OutsideProvider.gmail.sending)
+        #expect(maker.connections.last == OutsideProvider.icloud.sending)
         // Turning it off needs no check.
         try await store.setOutsideSending(added.id, on: false)
         #expect(try await store.outsideAccounts().first?.canSend == false)
@@ -251,7 +251,7 @@ private struct UntouchedMailServer: MailServer {
 
     @Test func sendingThatFailsItsCheckStaysOff() async throws {
         let (store, _) = try store(ProviderMaker(acceptsSending: false))
-        let added = try await store.addOutside(gmail())
+        let added = try await store.addOutside(icloud())
         await #expect(throws: OutsideAccountError.problem(.wrongPassword)) { try await store.setOutsideSending(added.id, on: true) }
         #expect(try await store.outsideAccounts().first?.canSend == false)
     }
@@ -259,12 +259,19 @@ private struct UntouchedMailServer: MailServer {
     @Test func removingLeavesNoSignIn() async throws {
         let keys = MailMemoryKeys()
         let (store, vault) = try store(ProviderMaker(), keys: keys)
-        let added = try await store.addOutside(gmail())
+        let added = try await store.addOutside(icloud())
         try await store.removeOutside(added.id)
         #expect(try await store.outsideAccounts().isEmpty)
         #expect(try await vault.signIn(for: added.id) == nil)
         #expect(try keys.load(MailVault.secretName(added.id, account: alice)) == nil)
     }
+}
+
+/// A sign-in page that should never open.
+@MainActor
+let neverOpened: OutsideWebSignIn = { _, _ in
+    Issue.record("opened a sign-in page")
+    throw CancellationError()
 }
 
 @MainActor
@@ -292,26 +299,35 @@ private struct UntouchedMailServer: MailServer {
 
     @Test func aWrongPasswordSaysWhatToDo() async throws {
         let model = try model(ProviderMaker(acceptsReading: false))
-        let said = await model.add(.gmail, address: "mckay.clemens@gmail.com", appPassword: "wxyz abcd efgh ijkl")
-        #expect(said == "Gmail didn't accept that address and app password. Check both, or make a new app password.")
+        let said = await model.add(.icloud, address: "mckay.clemens@icloud.com", appPassword: "wxyz abcd efgh ijkl")
+        #expect(said == "iCloud didn't accept that address and app password. Check both, or make a new app password.")
         #expect(model.accounts.isEmpty)
     }
 
     @Test func aHalfTypedAccountNeverConnects() async throws {
         let maker = ProviderMaker()
         let model = try model(maker)
-        #expect(await model.add(.gmail, address: "mckay.clemens", appPassword: "wxyz") == "Enter the full address and the app password.")
+        #expect(await model.add(.icloud, address: "mckay.clemens", appPassword: "wxyz") == "Enter the full address and the app password.")
         #expect(maker.connections.isEmpty)
     }
 
     @Test func aFailedSendSwitchSaysWhyAndStaysOff() async throws {
         let model = try model(ProviderMaker(acceptsSending: false))
-        _ = await model.add(.gmail, address: "mckay.clemens@gmail.com", appPassword: "wxyz abcd efgh ijkl")
+        _ = await model.add(.icloud, address: "mckay.clemens@icloud.com", appPassword: "wxyz abcd efgh ijkl")
         let account = try #require(model.accounts.first)
-        await model.setSending(account, on: true)
+        await model.setSending(account, on: true, signingIn: neverOpened)
         #expect(model.accounts.first?.canSend == false)
-        #expect(model.notice?.hasPrefix("Gmail didn't accept") == true)
+        #expect(model.notice?.hasPrefix("iCloud didn't accept") == true)
         #expect(model.busy.isEmpty)
+    }
+
+    @Test func gmailNeedsGoogleSignInAndNeverTakesAPassword() async throws {
+        let maker = ProviderMaker()
+        let model = try model(maker)
+        #expect(await model.add(.gmail, address: "mckay.clemens@gmail.com", appPassword: "wxyz abcd efgh ijkl") == "Enter the full address and the app password.")
+        #expect(maker.connections.isEmpty)
+        // This build has no Google client, so it says so rather than opening a page.
+        #expect(await model.addGoogle(signingIn: neverOpened) == .failed("Google sign-in isn't set up in this version of Totality yet."))
     }
 
     @Test func aSampleStoreOffersNoOutsideAccounts() {
@@ -331,11 +347,11 @@ private struct UntouchedMailServer: MailServer {
     }
 
     @Test func everyProblemSaysSomething() {
-        let problems: [OutsideMailProblem] = [.offline, .unreachable, .insecure, .wrongPassword, .needsAppPassword, .refused(""), .refused("Too many sign-ins"), .unexpected]
+        let problems: [OutsideMailProblem] = [.offline, .unreachable, .insecure, .wrongPassword, .needsAppPassword, .notAllowed, .expired, .refused(""), .refused("Too many sign-ins"), .unexpected]
         for problem in problems {
-            #expect(!OutsideWording.problem(problem, provider: .gmail).isEmpty)
+            for provider in OutsideProvider.allCases { #expect(!OutsideWording.problem(problem, provider: provider).isEmpty) }
         }
-        for error: OutsideAccountError in [.tooMany, .alreadyAdded, .notFound, .unavailable] {
+        for error: OutsideAccountError in [.tooMany, .alreadyAdded, .notFound, .unavailable, .notSetUp, .differentAccount] {
             #expect(!OutsideWording.problem(error, provider: .icloud).isEmpty)
         }
     }
