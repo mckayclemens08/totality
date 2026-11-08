@@ -4,6 +4,7 @@ import TotalityCalendar
 import TotalityCore
 import TotalityMail
 import TotalityMessages
+import TotalityPhotos
 import TotalityReader
 import TotalityUI
 import TotalityWeb
@@ -21,6 +22,11 @@ struct RootView: View {
     // The real mailbox, for whoever owns this device's key. `mailWiring` holds that account's vault.
     @State private var mail: MailAccountModel
     @State private var mailWiring: MailWiring
+    // The photos of whoever owns this device's key, once it has joined the key backup.
+    @State private var photos = PhotosModel(library: nil)
+    @State private var photosWiring = PhotosWiring()
+    /// Counts each change of who Photos is for, so an older one that finishes late is ignored.
+    @State private var photosTurn = 0
     @State private var registry: ModuleRegistry?
     @State private var syncAreas: [any SyncArea] = []
     @State private var contentProblem: ContentProblem?
@@ -57,7 +63,7 @@ struct RootView: View {
             switch open {
             case nil:
                 HomeView(center: recentModule, glances: glances, bigTile: bigTile, lineLink: lineLink, style: homeStyle) { module in
-                    if module == .reader || module == .calendar || module == .web || module == .mail { prepareContent() }
+                    if [.reader, .calendar, .web, .mail, .photos].contains(module) { prepareContent() }
                     bringUp(module)
                 } onSearch: {
                     prepareContent()
@@ -87,6 +93,9 @@ struct RootView: View {
                     .id(ObjectIdentifier(mail.current))
             case .messages:
                 MessagesHomeView(model: messages) { open = nil }
+            case .photos:
+                PhotosHomeView(model: photos) { open = nil }
+                    .id(ObjectIdentifier(photos))
             case .some(let module):
                 ModuleMessage(
                     systemImage: "hammer",
@@ -107,6 +116,9 @@ struct RootView: View {
                 web = nil
                 await mailWiring.disconnect()
                 mail.keyChanged()
+                photosTurn += 1
+                await photosWiring.disconnect()
+                photos = PhotosModel(library: nil)
                 registry = nil
                 syncAreas = []
                 contentProblem = nil
@@ -182,6 +194,7 @@ struct RootView: View {
         glances[.web] = web?.glance
         glances[.mail] = mail.current.glance
         glances[.messages] = messages.glance
+        glances[.photos] = photos.glance
         return glances
     }
 
@@ -277,6 +290,7 @@ struct RootView: View {
             web?.onSentToReader = { Task { await reader?.load() } }
             web?.onOpenInReader = { show($0) }
             mailWiring.connect(content.mail)
+            photosWiring.connect(content.photos)
             mail.receiver = content.registry.receiver(for: .mail)
             mail.onSentToReader = { Task { await reader?.load() } }
             registry = content.registry
@@ -304,9 +318,18 @@ struct RootView: View {
 
     /// Web keeps things only for the key's owner, and Mail shows only the owner's mailbox.
     private func tellWhoIsHere() async {
+        photosTurn += 1
+        let turn = photosTurn
         let owner = await account?.backup?.deviceOwner()
         let newVault = await mailWiring.use(account: owner)
         mail.use(account: owner, restart: newVault)
+        // Photos go to the server as they're added, so only a device that can sync gets a library.
+        let canSync = await account?.backup?.deviceCanSync() ?? false
+        if turn == photosTurn, await photosWiring.use(account: canSync ? owner : nil), turn == photosTurn {
+            let model = PhotosModel(library: photosWiring.library)
+            photos = model
+            await model.load()
+        }
         await web?.use(account: owner)
     }
 
@@ -345,7 +368,10 @@ struct RootView: View {
             // Marks from another device. Mail only fetches while it's showing.
             if open == .mail, mail.current.phase == .ready { await mail.current.load() }
         }
-        backup.onJoined = { await sync.syncNow() }
+        backup.onJoined = {
+            await sync.syncNow()
+            await tellWhoIsHere()
+        }
         backup.onOwnerChanged = { await tellWhoIsHere() }
     }
 

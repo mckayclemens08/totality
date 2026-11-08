@@ -238,6 +238,14 @@ struct MailRow: View {
                             .foregroundStyle(theme.textSecondary.color)
                             .lineLimit(2)
                     }
+                    if let outside = conversation.latest.outsideAccount {
+                        Label(outside.address, systemImage: "tray")
+                            .font(Typeface.micro)
+                            .foregroundStyle(theme.textSecondary.color)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .accessibilityLabel("In \(outside.provider.name), \(outside.address)")
+                    }
                 }
             }
         }
@@ -316,6 +324,25 @@ struct MailMailboxNotes: View {
             Label(offline, systemImage: "wifi.slash")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Space.s4)
+        }
+        if let download = model.outsideDownload {
+            HStack(spacing: Space.s2) {
+                ProgressView().controlSize(.small)
+                Text(download.done == 0 ? "Checking \(download.address)…" : "Downloading \(download.address): \(download.done) so far")
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Space.s4)
+        }
+        ForEach(model.outsideProblems, id: \.self) { problem in
+            Label(problem, systemImage: "exclamationmark.triangle")
+                .font(Typeface.caption)
+                .foregroundStyle(theme.danger.color)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Space.s4)
         }

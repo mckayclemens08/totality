@@ -76,12 +76,15 @@ public enum MailParser {
     }
 
     /// A message exactly as it was written, with no line from the server above it.
-    static func parseMessage(_ message: Data, id: UUID, received: Date, marks: MailMarks) -> ParsedMail {
+    /// `checkedBy` names who added the checks above the message: Cloudflare for mail that came in through
+    /// Totality, or the provider an outside account downloaded it from. A name starting with a dot
+    /// takes any server under that domain.
+    static func parseMessage(_ message: Data, id: UUID, received: Date, marks: MailMarks, checkedBy: [String] = [cloudflare]) -> ParsedMail {
         let raw = withoutCarriageReturns([UInt8](message)[...])
         guard let top = Part(raw[...], requireHeaders: true) else {
             return ParsedMail(message: .unreadable(id: id, date: received, marks: marks), attachments: [:])
         }
-        return read(top, id: id, received: received, marks: marks)
+        return read(top, id: id, received: received, marks: marks, checkedBy: checkedBy)
     }
 
     private struct Facts: Decodable {
@@ -105,7 +108,7 @@ public enum MailParser {
         return formatter.date(from: value)
     }
 
-    private static func read(_ top: Part, id: UUID, received: Date, marks: MailMarks) -> ParsedMail {
+    private static func read(_ top: Part, id: UUID, received: Date, marks: MailMarks, checkedBy: [String] = [cloudflare]) -> ParsedMail {
         let headers = top.headers
         let fromFields = headers.all("from")
         let from = fromFields.flatMap(addresses)
@@ -143,7 +146,7 @@ public enum MailParser {
             // Everything in a sealed file came in from outside through Cloudflare. Mail between accounts
             // will travel another way, and the path it took is what decides this, never an address.
             route: .outside,
-            proof: proof(headers, from: from, fromFields: fromFields.count), marks: marks,
+            proof: proof(headers, from: from, fromFields: fromFields.count, checkedBy: checkedBy), marks: marks,
             bcc: bcc, replyTo: replyTo, messageID: messageID, references: references
         )
         return ParsedMail(message: message, attachments: data, senders: from, fromLines: fromFields.count)
@@ -670,10 +673,11 @@ public enum MailParser {
     /// counts, and only if it names Cloudflare. A sender can write any `Authentication-Results` they like,
     /// Cloudflare's name included, but never above Cloudflare's own. A From with more than one address
     /// or more than one From line is never proved, because the checks only looked at one of them.
-    static func proof(_ headers: Headers, from: [MailAddress], fromFields: Int) -> MailProof {
+    static func proof(_ headers: Headers, from: [MailAddress], fromFields: Int, checkedBy: [String] = [cloudflare]) -> MailProof {
         guard fromFields == 1, from.count == 1, let sender = from.first?.domain, !sender.isEmpty,
               let top = headers.fields.first(where: { $0.name == "authentication-results" || $0.name == "arc-authentication-results" }),
-              let results = results(top.value), results.server == cloudflare
+              let results = results(top.value),
+              checkedBy.contains(where: { $0.hasPrefix(".") ? results.server.hasSuffix($0) : results.server == $0 })
         else { return .unproved }
 
         func aligned(_ domain: String?) -> Bool {

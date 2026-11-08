@@ -12,6 +12,8 @@ enum AccountSetup {
     /// The one-minute Matrix pass for Messages, and the account its stores belong to.
     private(set) static var matrixPass: (@Sendable () async throws -> String)?
     private(set) static var accountID: (@Sendable () async -> String?)?
+    /// Where one account's photos keep their rows, and the sealed store's sign-in for that account.
+    private(set) static var photoRows: ((String) -> SupabasePhotoRows)?
 
     static func makeModel(content: any ContentKeyAccess) -> AccountModel? {
         guard let config = AccountConfig.fromBundle() else { return nil }
@@ -24,6 +26,7 @@ enum AccountSetup {
         username = { await service.currentUsername() }
         matrixPass = { try await service.matrixPass() }
         accountID = { await service.signedInAccountID() }
+        photoRows = { service.photoRows(for: $0) }
         return AccountModel(
             service: service, backup: BackupModel(service: service, content: content),
             sync: SyncModel(), syncRemote: service.syncRemote

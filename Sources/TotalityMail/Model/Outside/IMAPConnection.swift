@@ -1,9 +1,9 @@
 import Foundation
 
-/// The reading side of an outside account: IMAP over TLS. This first part only signs in and out, which
-/// is how an account is checked before it's saved. Fetching comes with reading (issue 43, step 3).
+/// The reading side of an iCloud account: IMAP over TLS. Signing in and out is how an account is checked
+/// before it's saved; `OutsideReading` adds reading the Inbox.
 final class IMAPConnection {
-    private let reader: WireReader
+    let reader: WireReader
     private var nextTag = 1
 
     private init(_ wire: any OutsideWire) { reader = WireReader(wire) }
@@ -77,7 +77,7 @@ final class IMAPConnection {
         }
     }
 
-    private func takeTag() -> String {
+    func takeTag() -> String {
         defer { nextTag += 1 }
         return "t\(nextTag)"
     }

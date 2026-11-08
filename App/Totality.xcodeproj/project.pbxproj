@@ -16,6 +16,7 @@
 		A1B2C3D40000000000000035 /* TotalityMail in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000036 /* TotalityMail */; };
 		A1B2C3D400000000000000A0 /* TotalityMessages in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000A1 /* TotalityMessages */; };
 		A1B2C3D400000000000000A2 /* MatrixRustSDK in Frameworks */ = {isa = PBXBuildFile; platformFilter = ios; productRef = A1B2C3D400000000000000A3 /* MatrixRustSDK */; };
+		A1B2C3D40000000000000037 /* TotalityPhotos in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000038 /* TotalityPhotos */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +43,7 @@
 				A1B2C3D40000000000000035 /* TotalityMail in Frameworks */,
 				A1B2C3D400000000000000A0 /* TotalityMessages in Frameworks */,
 				A1B2C3D400000000000000A2 /* MatrixRustSDK in Frameworks */,
+				A1B2C3D40000000000000037 /* TotalityPhotos in Frameworks */,
 				A1B2C3D4000000000000001A /* TotalityAccount in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -97,6 +99,7 @@
 				A1B2C3D40000000000000036 /* TotalityMail */,
 				A1B2C3D400000000000000A1 /* TotalityMessages */,
 				A1B2C3D400000000000000A3 /* MatrixRustSDK */,
+				A1B2C3D40000000000000038 /* TotalityPhotos */,
 				A1B2C3D40000000000000019 /* TotalityAccount */,
 			);
 			productName = Totality;
@@ -354,6 +357,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A1B2C3D400000000000000A4 /* XCRemoteSwiftPackageReference "matrix-rust-components-swift" */;
 			productName = MatrixRustSDK;
+		};
+		A1B2C3D40000000000000038 /* TotalityPhotos */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TotalityPhotos;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

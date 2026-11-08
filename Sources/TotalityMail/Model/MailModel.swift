@@ -27,6 +27,11 @@ public final class MailModel {
     public private(set) var phase = Phase.loading(nil)
     public private(set) var mailbox = Mailbox()
     public private(set) var isOffline = false
+    /// Which outside account is downloading, and how far it's got. Nil when none is.
+    public private(set) var outsideDownload: OutsideDownload?
+    /// What went wrong with outside accounts on the last download, one line each.
+    public private(set) var outsideProblems: [String] = []
+    @ObservationIgnored private var isDownloadingOutside = false
     public private(set) var undo: MailUndo?
     public var notice: String?
     public var place = MailPlace.inbox {
@@ -132,17 +137,12 @@ public final class MailModel {
             let opening = try await store.open { [weak self] download in
                 Task { @MainActor in self?.showProgress(download) }
             }
-            let here = since[fetch] ?? Since()
-            var fresh = opening.mailbox
-            fresh.apply(waitingMarks.merging(here.marks) { _, new in new })
-            fresh.remove(waitingErase.union(here.erased))
-            if here.settings || settingsWait { fresh.settings = mailbox.settings }
-            if here.drafts { fresh.drafts = mailbox.drafts }
-            mailbox = fresh
+            mailbox = merged(opening.mailbox, here: since[fetch] ?? Since())
             isOffline = opening.isOffline
             phase = .ready
             await emptyTrash()
             if !isOffline { await sendWaiting() }
+            await downloadOutside()
         } catch MailStoreError.noKey {
             phase = .noKey
         } catch MailStoreError.noAccount {
@@ -155,6 +155,40 @@ public final class MailModel {
         } catch {
             phase = .failed
         }
+    }
+
+    /// What the store had, with every change made here since it was asked kept on top.
+    private func merged(_ stored: Mailbox, here: Since) -> Mailbox {
+        var fresh = stored
+        fresh.apply(waitingMarks.merging(here.marks) { _, new in new })
+        fresh.remove(waitingErase.union(here.erased))
+        if here.settings || settingsWait { fresh.settings = mailbox.settings }
+        if here.drafts { fresh.drafts = mailbox.drafts }
+        return fresh
+    }
+
+    /// New mail from outside accounts, straight from each provider. Totality mail is already showing by
+    /// now, so this never holds it up.
+    private func downloadOutside() async {
+        guard !isDownloadingOutside else { return }
+        isDownloadingOutside = true
+        defer {
+            isDownloadingOutside = false
+            outsideDownload = nil
+        }
+        let fetch = UUID()
+        since[fetch] = Since()
+        defer { since[fetch] = nil }
+        guard let result = await store.downloadOutside(progress: { [weak self] download in
+            Task { @MainActor in self?.outsideDownload = download }
+        }) else {
+            outsideProblems = []
+            return
+        }
+        var fresh = merged(result.mailbox, here: since[fetch] ?? Since())
+        fresh.isFull = mailbox.isFull
+        mailbox = fresh
+        outsideProblems = result.problems
     }
 
     /// Starts over from the store, forgetting anything that was waiting.

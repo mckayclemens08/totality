@@ -74,6 +74,11 @@ public actor MailVault {
     /// One outside account, with its app password. It has no trash file: a sign-in is never kept
     /// after it's removed, here or because the server says so.
     private static let outsideSuffix = ".mail.outside"
+    /// Mail downloaded from an outside account. It stays on this device, never synced: each device
+    /// downloads its own copy from the provider.
+    private static let fetchedSuffix = ".mail.fetched"
+    /// Empty, and says a downloaded message was deleted here, so it isn't downloaded again.
+    private static let fetchedGoneSuffix = ".mail.fetched.gone"
 
     /// How each file is sealed, so a key move can reach them without knowing what they are. The IDs are
     /// derived from text only Mail uses, so no other module's blob can share one.
@@ -86,6 +91,7 @@ public actor MailVault {
         draftBodySuffix: .content, draftBodySuffix + ".trash": .content,
         unkeptSuffix: .metadata,
         outsideSuffix: .metadata,
+        fetchedSuffix: .content,
     ]
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
 
@@ -257,6 +263,82 @@ public actor MailVault {
                   record.account == account, Self.messageID(record.message.id, account: account) == id
             else { return nil }
             return record.message
+        }
+    }
+
+    // MARK: Mail downloaded from outside accounts
+
+    struct FetchedRecord: Codable {
+        let account: String
+        let message: OutsideFetchedMessage
+    }
+
+    /// The same message from the same outside account has the same ID on every device, so its marks
+    /// line up wherever it was downloaded.
+    static func fetchedID(_ outside: UUID, providerID: String, account: String) -> UUID {
+        UUID(derivedFrom: "totality.mail.fetched.\(account).\(outside.uuidString.lowercased()).\(providerID)")
+    }
+
+    /// Already here, or deleted here on purpose.
+    public func hasFetched(_ outside: UUID, providerID: String) throws -> Bool {
+        let id = Self.fetchedID(outside, providerID: providerID, account: account)
+        return try store.read(name(id, Self.fetchedSuffix)) != nil || store.read(name(id, Self.fetchedGoneSuffix)) != nil
+    }
+
+    public func keepFetched(_ message: OutsideFetchedMessage) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        // Only for an account that's still here: a download that finishes after Remove keeps nothing.
+        guard try outsideRecord(message.outside) != nil else { throw OutsideAccountError.notFound }
+        let id = Self.fetchedID(message.outside, providerID: message.providerID, account: account)
+        try store.write(try seal(FetchedRecord(account: account, message: message), id: id, purpose: .content), as: name(id, Self.fetchedSuffix))
+    }
+
+    /// This account's downloaded mail, by the ID it shows under. One that won't open, is someone else's,
+    /// or belongs to an outside account that's gone, is left out.
+    public func fetched() throws -> [UUID: OutsideFetchedMessage] {
+        let outside = Set(try outsideRecords().map(\.outside.id))
+        var found: [UUID: OutsideFetchedMessage] = [:]
+        for id in try ids(Self.fetchedSuffix) {
+            guard let sealed = try store.read(name(id, Self.fetchedSuffix)),
+                  let record = try? open(FetchedRecord.self, sealed, id: id, purpose: .content),
+                  record.account == account, outside.contains(record.message.outside),
+                  Self.fetchedID(record.message.outside, providerID: record.message.providerID, account: account) == id
+            else { continue }
+            found[id] = record.message
+        }
+        return found
+    }
+
+    /// One downloaded message by the ID it shows under, if it's still here and still this account's.
+    public func fetchedMessage(_ id: UUID) throws -> OutsideFetchedMessage? {
+        guard let sealed = try store.read(name(id, Self.fetchedSuffix)) else { return nil }
+        let record = try open(FetchedRecord.self, sealed, id: id, purpose: .content)
+        guard record.account == account,
+              Self.fetchedID(record.message.outside, providerID: record.message.providerID, account: account) == id,
+              try outsideRecord(record.message.outside) != nil
+        else { return nil }
+        return record.message
+    }
+
+    /// Deleted on this device, and remembered so the next download doesn't bring them back. Nothing at
+    /// the provider changes.
+    public func eraseFetched(_ messages: Set<UUID>) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        for id in messages where try store.read(name(id, Self.fetchedSuffix)) != nil {
+            try store.write(Data(), as: name(id, Self.fetchedGoneSuffix))
+            try store.delete(name(id, Self.fetchedSuffix))
+        }
+    }
+
+    /// Everything downloaded from one outside account, and what was deleted from it, for when it goes.
+    private func forgetFetched(from outside: UUID) throws {
+        for id in try ids(Self.fetchedSuffix) {
+            guard let sealed = try store.read(name(id, Self.fetchedSuffix)) else { continue }
+            if let record = try? open(FetchedRecord.self, sealed, id: id, purpose: .content), record.account == account,
+               record.message.outside == outside {
+                try store.delete(name(id, Self.fetchedSuffix))
+                try store.delete(name(id, Self.fetchedGoneSuffix))
+            }
         }
     }
 
@@ -448,6 +530,7 @@ public actor MailVault {
         guard !isClosed else { throw MailVaultError.closed }
         let id = Self.outsideID(outside, account: account)
         try secrets?.delete(Self.secretName(outside, account: account))
+        try forgetFetched(from: outside)
         guard try store.read(name(id, Self.outsideSuffix)) != nil else { return }
         try store.write(Data(), as: deletionName(id))
         try store.delete(name(id, Self.outsideSuffix))
@@ -680,6 +763,7 @@ extension MailVault: SyncArea {
         if kind == .mailOutside {
             if let record = try? openedOutside(id: id, sealed: sealed) {
                 try secrets?.delete(Self.secretName(record.outside.id, account: account))
+                try forgetFetched(from: record.outside.id)
             }
             try store.delete(name(id, suffix))
             hashes[id] = nil
