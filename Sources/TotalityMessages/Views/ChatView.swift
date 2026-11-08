@@ -41,6 +41,8 @@ struct ChatView: View {
     @FocusState private var writing: Bool
     @State private var playing: ChatMessage?
     @State private var confirmingBlock = false
+    /// A disappearing setting waiting for the person to confirm it.
+    @State private var pendingSetting: Disappearing?
     @State private var confirmingLeave = false
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var viewing: ChatMessage?
@@ -55,7 +57,7 @@ struct ChatView: View {
                     LazyVStack(spacing: Space.s2) {
                         EncryptionNote()
                         if model.disappearing != .off {
-                            DisappearingNote(setting: model.disappearing)
+                            DisappearingNote(setting: model.disappearing, changedBy: model.disappearingChangedBy)
                         }
                         if model.loaded && model.messages.isEmpty {
                             Text("No messages yet. Say hello.")
@@ -136,6 +138,17 @@ struct ChatView: View {
         }
         .toolbar { chatMenu }
         .confirmationDialog(
+            "Disappearing messages: \(pendingSetting?.label.lowercased() ?? "")?",
+            isPresented: Binding(get: { pendingSetting != nil }, set: { if !$0 { pendingSetting = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingSetting
+        ) { setting in
+            Button("Turn on for everyone here") { Task { await model.setDisappearing(setting) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { setting in
+            Text("\(setting.explanation) Everyone in this chat sees that you turned it on.")
+        }
+        .confirmationDialog(
             "Block \(model.otherPerson.map(MessagesUsername.display) ?? "them")?",
             isPresented: $confirmingBlock, titleVisibility: .visible
         ) {
@@ -191,7 +204,13 @@ struct ChatView: View {
             Menu {
                 Picker("Disappearing messages", selection: Binding(
                     get: { model.disappearing },
-                    set: { setting in Task { await model.setDisappearing(setting) } }
+                    set: { setting in
+                        if setting == .off {
+                            Task { await model.setDisappearing(.off) }
+                        } else {
+                            pendingSetting = setting
+                        }
+                    }
                 )) {
                     ForEach(Disappearing.allCases) { Text($0.label).tag($0) }
                 }
@@ -270,10 +289,12 @@ private struct EncryptionNote: View {
 /// Shown at the top of a chat while disappearing messages are on, with what it can't do.
 private struct DisappearingNote: View {
     let setting: Disappearing
+    let changedBy: String?
 
     var body: some View {
         let theme = Theme.current
-        Label("Disappearing messages: \(setting.label.lowercased()). They can't stop a screenshot or another camera.", systemImage: "timer")
+        let who = changedBy.map { " Turned on by \(MessagesUsername.display($0))." } ?? ""
+        Label("Disappearing messages: \(setting.label.lowercased()).\(who) \(setting.explanation) They can't stop a screenshot or another camera.", systemImage: "timer")
             .font(Typeface.caption)
             .foregroundStyle(theme.textSecondary.color)
             .multilineTextAlignment(.center)

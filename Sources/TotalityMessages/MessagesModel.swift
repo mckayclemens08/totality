@@ -269,10 +269,13 @@ public final class MessagesModel {
 public final class ChatModel {
     /// What the chat shows: everything, minus anything a disappearing setting has expired.
     public var messages: [ChatMessage] {
-        DisappearingRule.visible(all, setting: disappearing, now: now, viewedUpTo: viewedUpTo)
+        DisappearingRule.visible(all, state: disappearingState, now: now, viewedUpTo: viewedUpTo)
     }
     private var all: [ChatMessage] = []
-    public private(set) var disappearing: Disappearing = .off
+    public private(set) var disappearingState = DisappearingState.off
+    public var disappearing: Disappearing { disappearingState.setting }
+    /// Who turned the current setting on, when it wasn't you.
+    public var disappearingChangedBy: String? { disappearingState.changedBy }
     /// Moved on every half minute while the chat is open, so timed messages go on time.
     private var now = Date()
     private var viewedUpTo: Date?
@@ -311,7 +314,7 @@ public final class ChatModel {
         viewedUpTo = defaults.object(forKey: viewedKey) as? Date
         await channel.observeDisappearing { [weak self] setting in
             Task { @MainActor in
-                self?.disappearing = setting
+                self?.disappearingState = setting
                 await self?.removeDue()
             }
         }
@@ -349,7 +352,7 @@ public final class ChatModel {
 
     /// Removes your own messages that a disappearing setting says are due, once each.
     func removeDue() async {
-        for message in DisappearingRule.due(all, setting: disappearing, now: now) where !removing.contains(message.id) {
+        for message in DisappearingRule.due(all, state: disappearingState, now: now) where !removing.contains(message.id) {
             removing.insert(message.id)
             try? await channel.delete(message.id)
         }
@@ -359,7 +362,10 @@ public final class ChatModel {
         do {
             notice = nil
             try await channel.setDisappearing(setting)
-            disappearing = setting
+            // The server's own copy follows through the subscription, with its exact start time.
+            if disappearingState.setting != setting {
+                disappearingState = DisappearingState(setting: setting, since: Date(), changedBy: nil)
+            }
         } catch {
             notice = MessagesModel.describe(error)
         }
@@ -478,7 +484,7 @@ public final class ChatModel {
         clock?.cancel()
         clock = nil
         // After viewing: what you've seen now won't show next time you open the chat.
-        if disappearing == .afterViewing, let newest = all.filter({ !$0.isOwn }).map(\.time).max() {
+        if disappearing == .afterViewing, let newest = all.filter({ !$0.isOwn && disappearingState.covers($0) }).map(\.time).max() {
             defaults.set(newest, forKey: viewedKey)
         }
         photos.removeAll()

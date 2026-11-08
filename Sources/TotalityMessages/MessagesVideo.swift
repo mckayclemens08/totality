@@ -93,7 +93,14 @@ extension PhotoPrep {
 public enum VideoFiles {
     public static var folder: URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("MessagesVideo", isDirectory: true)
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        #if os(iOS)
+        // New files in the folder take its protection, so nothing here can be read while the phone is locked.
+        let attributes: [FileAttributeKey: Any] = [.protectionKey: FileProtectionType.complete]
+        #else
+        let attributes: [FileAttributeKey: Any] = [:]
+        #endif
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: attributes)
+        try? FileManager.default.setAttributes(attributes, ofItemAtPath: url.path)
         return url
     }
 
@@ -106,6 +113,13 @@ public enum VideoFiles {
         try data.write(to: url, options: .atomic)
         #endif
         return url
+    }
+
+    /// A copied or moved file keeps the protection it had before, so it's set again here.
+    static func protect(_ url: URL) {
+        #if os(iOS)
+        try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: url.path)
+        #endif
     }
 
     public static func emptyFolder() {
@@ -123,6 +137,7 @@ struct PickedMovie: Transferable {
         FileRepresentation(importedContentType: .movie) { received in
             let copy = VideoFiles.folder.appendingPathComponent(UUID().uuidString).appendingPathExtension(received.file.pathExtension)
             try FileManager.default.copyItem(at: received.file, to: copy)
+            VideoFiles.protect(copy)
             return PickedMovie(url: copy)
         }
     }

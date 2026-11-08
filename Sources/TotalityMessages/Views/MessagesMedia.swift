@@ -162,6 +162,7 @@ struct VideoViewer: View {
     @State private var file: URL?
     @State private var player: AVPlayer?
     @State private var failed = false
+    @State private var closed = false
 
     var body: some View {
         let theme = Theme.current
@@ -187,12 +188,18 @@ struct VideoViewer: View {
         .tint(theme.accent.color)
         .task {
             guard let url = await model.playableVideo(message) else { failed = true; return }
+            // Closed while it was still opening: remove it straight away.
+            if closed || Task.isCancelled {
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
             file = url
             let player = AVPlayer(url: url)
             self.player = player
             player.play()
         }
         .onDisappear {
+            closed = true
             player?.pause()
             if let file { try? FileManager.default.removeItem(at: file) }
         }
@@ -235,6 +242,7 @@ struct CameraPicker: UIViewControllerRepresentable {
             if let movie = info[.mediaURL] as? URL {
                 let copy = VideoFiles.folder.appendingPathComponent(UUID().uuidString).appendingPathExtension(movie.pathExtension)
                 if (try? FileManager.default.moveItem(at: movie, to: copy)) != nil {
+                    VideoFiles.protect(copy)
                     onDone(.video(copy))
                 } else {
                     onDone(nil)

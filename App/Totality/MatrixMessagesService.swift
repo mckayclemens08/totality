@@ -377,12 +377,22 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
 
     private static let retention = "m.room.retention"
 
-    func observeDisappearing(_ onChange: @escaping @Sendable (Disappearing) -> Void) async {
+    func observeDisappearing(_ onChange: @escaping @Sendable (DisappearingState) -> Void) async {
+        let own = ownUserID
+        // The event's server time is when the setting began. Only messages after it are affected,
+        // and without one, none are.
+        let state: @Sendable (RoomStateEvent) -> DisappearingState = { event in
+            DisappearingState(
+                setting: Disappearing(stateJSON: event.contentJson),
+                since: event.timestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+                changedBy: event.sender == own ? nil : event.sender
+            )
+        }
         if let current = try? await room.stateEvents(eventType: .roomRetention).first(where: { $0.stateKey.isEmpty }) {
-            onChange(Disappearing(stateJSON: current.contentJson))
+            onChange(state(current))
         }
         let handle = room.subscribeToStateEvents(eventType: .roomRetention, listener: StateListener { events in
-            if let event = events.last(where: { $0.stateKey.isEmpty }) { onChange(Disappearing(stateJSON: event.contentJson)) }
+            if let event = events.last(where: { $0.stateKey.isEmpty }) { onChange(state(event)) }
         })
         lock.withLock { handles.append(handle) }
     }

@@ -276,7 +276,7 @@ public protocol ChatChannel: AnyObject, Sendable {
     var otherPerson: String? { get }
     var isGroup: Bool { get }
     /// The chat's disappearing setting, now and whenever someone changes it.
-    func observeDisappearing(_ onChange: @escaping @Sendable (Disappearing) -> Void) async
+    func observeDisappearing(_ onChange: @escaping @Sendable (DisappearingState) -> Void) async
     func setDisappearing(_ setting: Disappearing) async throws
     /// A private receipt when `share` is off, so your own devices still know what you've read.
     func markRead(share: Bool) async
@@ -311,6 +311,18 @@ public enum Disappearing: String, Sendable, Equatable, CaseIterable, Identifiabl
         case .afterViewing: "After viewing"
         case .day: "After 24 hours"
         case .week: "After 7 days"
+        }
+    }
+
+    /// What it really does, said plainly before it's turned on and while it's on.
+    public var explanation: String {
+        switch self {
+        case .off:
+            "Messages stay until someone deletes them."
+        case .afterViewing:
+            "Messages sent from now on go once they've been read. In a group, the first person to read one removes it for everyone. Someone who doesn't share read receipts never marks one read, so it stays until they do. On your phone, messages you've read go when you leave the chat."
+        case .day, .week:
+            "Messages sent from now on are hidden on everyone's phone \(self == .day ? "after 24 hours" : "after 7 days"). Each person's messages leave the server the next time their own app opens this chat. Earlier messages stay."
         }
     }
 
@@ -350,15 +362,39 @@ public enum Disappearing: String, Sendable, Equatable, CaseIterable, Identifiabl
     }
 }
 
+/// A chat's disappearing setting, when it took effect, and who chose it. Only messages sent after
+/// `since` are affected, so turning it on never reaches back into earlier history.
+public struct DisappearingState: Sendable, Equatable {
+    public let setting: Disappearing
+    public let since: Date?
+    /// Someone else who chose it. Nil when it was you.
+    public let changedBy: String?
+
+    public init(setting: Disappearing, since: Date?, changedBy: String? = nil) {
+        self.setting = setting
+        self.since = since
+        self.changedBy = changedBy
+    }
+
+    public static let off = DisappearingState(setting: .off, since: nil)
+
+    /// True when this message was sent while the setting was on. Without a start time, nothing is.
+    func covers(_ message: ChatMessage) -> Bool {
+        guard setting != .off, let since else { return false }
+        return message.time >= since
+    }
+}
+
 /// Which messages a disappearing chat still shows, and which of your own to remove from the server.
 public enum DisappearingRule {
     /// Hides other people's messages once they've expired here, even if their sender hasn't removed
     /// them yet. `viewedUpTo` is the newest message time you'd already seen when you last left the chat.
     public static func visible(
-        _ messages: [ChatMessage], setting: Disappearing, now: Date, viewedUpTo: Date?
+        _ messages: [ChatMessage], state: DisappearingState, now: Date, viewedUpTo: Date?
     ) -> [ChatMessage] {
-        messages.filter { message in
-            guard message.kind != .deleted else { return true }
+        let setting = state.setting
+        return messages.filter { message in
+            guard message.kind != .deleted, state.covers(message) else { return true }
             if let lifetime = setting.lifetime { return message.time.addingTimeInterval(lifetime) > now }
             if setting == .afterViewing, !message.isOwn, let viewedUpTo { return message.time > viewedUpTo }
             return true
@@ -366,9 +402,10 @@ public enum DisappearingRule {
     }
 
     /// Your own messages that are due to go: past their time, or seen by someone when it's after viewing.
-    public static func due(_ messages: [ChatMessage], setting: Disappearing, now: Date) -> [ChatMessage] {
-        messages.filter { message in
-            guard message.isOwn, message.state == .sent, message.kind != .deleted else { return false }
+    public static func due(_ messages: [ChatMessage], state: DisappearingState, now: Date) -> [ChatMessage] {
+        let setting = state.setting
+        return messages.filter { message in
+            guard message.isOwn, message.state == .sent, message.kind != .deleted, state.covers(message) else { return false }
             if let lifetime = setting.lifetime { return message.time.addingTimeInterval(lifetime) <= now }
             return setting == .afterViewing && message.seen
         }

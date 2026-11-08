@@ -111,7 +111,7 @@ private final class FakeChannel: ChatChannel, @unchecked Sendable {
     private(set) var videos: [OutgoingVideo] = []
     private(set) var settings: [Disappearing] = []
     var failSending = false
-    var startingSetting: Disappearing = .off
+    var startingSetting = DisappearingState.off
     var startingMessages: [ChatMessage] = []
     let id = "!chat"
     let otherPerson: String? = "@mckay_test:usetotality.com"
@@ -120,7 +120,7 @@ private final class FakeChannel: ChatChannel, @unchecked Sendable {
     func observe(messages: @escaping @Sendable ([ChatMessage]) -> Void, typing: @escaping @Sendable ([String]) -> Void) async {
         messages(startingMessages)
     }
-    func observeDisappearing(_ onChange: @escaping @Sendable (Disappearing) -> Void) async { onChange(startingSetting) }
+    func observeDisappearing(_ onChange: @escaping @Sendable (DisappearingState) -> Void) async { onChange(startingSetting) }
     func setDisappearing(_ setting: Disappearing) async throws {
         if failSending { throw MessagesError.offline }
         lock.withLock { settings.append(setting) }
@@ -578,6 +578,30 @@ private final class Signed: @unchecked Sendable {
 
 // MARK: Step 4: disappearing messages, groups, blocking
 
+/// A setting that was on from before any message in these tests.
+private func on(_ setting: Disappearing) -> DisappearingState {
+    DisappearingState(setting: setting, since: jan1.addingTimeInterval(-86_400))
+}
+
+@Test func turningItOnNeverReachesBackIntoEarlierMessages() {
+    let messages = [
+        ChatMessage(id: "before", sender: "@me:x", body: "Months-old plans", isOwn: true, time: jan1, seen: true),
+        ChatMessage(id: "theirs", sender: "@ana:x", body: "Old reply", isOwn: false, time: jan1),
+        ChatMessage(id: "after", sender: "@me:x", body: "Sent once it was on", isOwn: true, time: jan1.addingTimeInterval(10 * 86_400)),
+    ]
+    let turnedOn = jan1.addingTimeInterval(9 * 86_400)
+    let later = jan1.addingTimeInterval(30 * 86_400)
+    for setting in [Disappearing.day, .afterViewing] {
+        let state = DisappearingState(setting: setting, since: turnedOn, changedBy: "@ana:x")
+        #expect(!DisappearingRule.due(messages, state: state, now: later).map(\.id).contains("before"))
+        #expect(DisappearingRule.visible(messages, state: state, now: later, viewedUpTo: later).map(\.id).starts(with: ["before", "theirs"]))
+    }
+    // With no start time, nothing is touched at all.
+    let unknown = DisappearingState(setting: .day, since: nil)
+    #expect(DisappearingRule.due(messages, state: unknown, now: later).isEmpty)
+    #expect(DisappearingRule.visible(messages, state: unknown, now: later, viewedUpTo: nil).count == 3)
+}
+
 @Test func disappearingSettingsRoundTripThroughTheRoomState() {
     for setting in Disappearing.allCases {
         #expect(Disappearing(stateJSON: setting.stateJSON) == setting, "\(setting)")
@@ -594,9 +618,9 @@ private final class Signed: @unchecked Sendable {
         ChatMessage(id: "new", sender: "@ana:x", body: "From an hour ago", isOwn: false, time: jan1.addingTimeInterval(47 * 3600)),
     ]
     let now = jan1.addingTimeInterval(48 * 3600)
-    #expect(DisappearingRule.visible(messages, setting: .day, now: now, viewedUpTo: nil).map(\.id) == ["new"])
-    #expect(DisappearingRule.visible(messages, setting: .week, now: now, viewedUpTo: nil).map(\.id) == ["old", "new"])
-    #expect(DisappearingRule.visible(messages, setting: .off, now: now, viewedUpTo: nil).count == 2)
+    #expect(DisappearingRule.visible(messages, state: on(.day), now: now, viewedUpTo: nil).map(\.id) == ["new"])
+    #expect(DisappearingRule.visible(messages, state: on(.week), now: now, viewedUpTo: nil).map(\.id) == ["old", "new"])
+    #expect(DisappearingRule.visible(messages, state: .off, now: now, viewedUpTo: nil).count == 2)
 }
 
 @Test func afterViewingHidesWhatYouveAlreadySeenFromOthers() {
@@ -605,7 +629,7 @@ private final class Signed: @unchecked Sendable {
         ChatMessage(id: "mine", sender: "@me:x", body: "Got it", isOwn: true, time: jan1),
         ChatMessage(id: "fresh", sender: "@ana:x", body: "Parking is round the back", isOwn: false, time: jan1.addingTimeInterval(60)),
     ]
-    let shown = DisappearingRule.visible(messages, setting: .afterViewing, now: jan1.addingTimeInterval(120), viewedUpTo: jan1)
+    let shown = DisappearingRule.visible(messages, state: on(.afterViewing), now: jan1.addingTimeInterval(120), viewedUpTo: jan1)
     #expect(shown.map(\.id) == ["mine", "fresh"])
 }
 
@@ -617,9 +641,9 @@ private final class Signed: @unchecked Sendable {
         ChatMessage(id: "theirs", sender: "@ana:x", body: "Will do", isOwn: false, time: jan1),
         ChatMessage(id: "seen", sender: "@me:x", body: "Door's open", isOwn: true, time: late, seen: true),
     ]
-    #expect(DisappearingRule.due(messages, setting: .day, now: late).map(\.id) == ["mine"])
-    #expect(DisappearingRule.due(messages, setting: .afterViewing, now: late).map(\.id) == ["seen"])
-    #expect(DisappearingRule.due(messages, setting: .off, now: late).isEmpty)
+    #expect(DisappearingRule.due(messages, state: on(.day), now: late).map(\.id) == ["mine"])
+    #expect(DisappearingRule.due(messages, state: on(.afterViewing), now: late).map(\.id) == ["seen"])
+    #expect(DisappearingRule.due(messages, state: .off, now: late).isEmpty)
 }
 
 @Test func groupUsernamesAreCheckedAndTidied() throws {
@@ -636,7 +660,7 @@ private final class Signed: @unchecked Sendable {
 @Test func dueMessagesAreRemovedOnceEach() async throws {
     let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
     let channel = FakeChannel()
-    channel.startingSetting = .day
+    channel.startingSetting = DisappearingState(setting: .day, since: Date().addingTimeInterval(-3 * 86_400))
     channel.startingMessages = [
         ChatMessage(id: "$old", sender: "@me:x", body: "Lunch at noon?", isOwn: true, time: Date().addingTimeInterval(-2 * 86_400)),
         ChatMessage(id: "$new", sender: "@me:x", body: "Running five late", isOwn: true, time: Date()),
@@ -654,7 +678,7 @@ private final class Signed: @unchecked Sendable {
 @Test func leavingAnAfterViewingChatRemembersWhatYouSaw() async throws {
     let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
     let channel = FakeChannel()
-    channel.startingSetting = .afterViewing
+    channel.startingSetting = on(.afterViewing)
     channel.startingMessages = [
         ChatMessage(id: "$a", sender: "@ana:x", body: "The gate code is 4417", isOwn: false, time: jan1),
     ]

@@ -58,7 +58,11 @@ public struct MessagesHomeView: View {
             .ignoresSafeArea()
         }
         #endif
-        .sheet(isPresented: Binding(get: { taken != nil }, set: { if !$0 { taken = nil } })) {
+        .sheet(isPresented: Binding(get: { taken != nil }, set: { shown in
+            // Swiped away: a video from the camera mustn't be left behind.
+            if !shown, case .video(let url)? = taken { try? FileManager.default.removeItem(at: url) }
+            if !shown { taken = nil }
+        })) {
             ChooseChatView(model: model) { chat in
                 let media = taken
                 taken = nil
