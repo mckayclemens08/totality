@@ -14,6 +14,12 @@ public final class PhotosModel {
         case unavailable(title: String, detail: String)
     }
 
+    /// Which photos a grid or the viewer shows.
+    public enum Scope: Hashable, Sendable {
+        case library, favourites, recentlyDeleted
+        case album(UUID)
+    }
+
     public struct Month: Identifiable, Equatable {
         public let id: String
         public let title: String
@@ -21,7 +27,9 @@ public final class PhotosModel {
     }
 
     public private(set) var phase: Phase = .loading
+    /// Every photo, Recently Deleted included. `items(in:)` picks the ones a screen shows.
     public private(set) var items: [PhotoItem] = []
+    public private(set) var albums: [PhotoAlbum] = []
     public private(set) var usage: SealedStoreUsage?
     public private(set) var waitingCount = 0
     public private(set) var isFull = false
@@ -71,9 +79,11 @@ public final class PhotosModel {
             isOffline = !listing.isCurrent
             waitingCount = listing.items.filter(\.isWaiting).count
             phase = .ready
+            albums = try await library.albums().albums
         } catch PhotoError.closed {
             // The account changed under this library, so nothing of it stays on screen.
             items = []
+            albums = []
             thumbnails = [:]
             phase = .unavailable(title: "Photos are closed", detail: "These photos belong to another account. Sign in as that account to see them.")
             return
@@ -146,6 +156,138 @@ public final class PhotosModel {
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
+    // MARK: Changing
+
+    public func toggleFavourite(_ item: PhotoItem) async {
+        let on = !(current(item)?.details.favourite ?? item.details.favourite)
+        await change(item) { $0.isFavourite = on ? true : nil }
+    }
+
+    public func setCaption(_ item: PhotoItem, to text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let caption = trimmed.isEmpty ? nil : String(trimmed.prefix(PhotoDetails.captionLimit))
+        guard caption != current(item)?.details.caption else { return }
+        await change(item) { $0.caption = caption }
+    }
+
+    public func set(_ item: PhotoItem, in album: PhotoAlbum, _ included: Bool) async {
+        await change(item) { details in
+            var ids = details.albumIDs.filter { $0 != album.id }
+            if included { ids.append(album.id) }
+            details.albums = ids.isEmpty ? nil : ids
+        }
+    }
+
+    /// Recently Deleted keeps it for 30 days.
+    public func moveToRecentlyDeleted(_ item: PhotoItem) async {
+        let now = Date()
+        await change(item) { $0.trashed = now }
+    }
+
+    public func restore(_ item: PhotoItem) async {
+        await change(item) { $0.trashed = nil }
+    }
+
+    public func deleteForGood(_ item: PhotoItem) async {
+        guard let library else { return }
+        do {
+            try await library.deleteForGood(item)
+            items.removeAll { $0.id == item.id }
+            thumbnails[item.id] = nil
+            waitingCount = items.filter(\.isWaiting).count
+            usage = try? await library.usage()
+        } catch {
+            notice = Self.problem(error, doing: "delete that photo")
+        }
+    }
+
+    public func emptyRecentlyDeleted() async {
+        for item in items(in: .recentlyDeleted) { await deleteForGood(item) }
+    }
+
+    /// The latest copy of a photo, which may have changed since a screen was given it.
+    public func current(_ item: PhotoItem) -> PhotoItem? {
+        items.first { $0.id == item.id }
+    }
+
+    private func change(_ item: PhotoItem, _ edit: @escaping @Sendable (inout PhotoDetails) -> Void) async {
+        guard let library else { return }
+        do {
+            let changed = try await library.change(current(item) ?? item, edit)
+            if let index = items.firstIndex(where: { $0.id == changed.id }) { items[index] = changed }
+        } catch {
+            notice = Self.problem(error, doing: "save that change")
+        }
+    }
+
+    // MARK: Albums
+
+    public func makeAlbum(named name: String) async -> PhotoAlbum? {
+        guard let library else { return nil }
+        do {
+            let album = try await library.makeAlbum(named: name)
+            albums.append(album)
+            return album
+        } catch {
+            notice = Self.problem(error, doing: "make that album")
+            return nil
+        }
+    }
+
+    public func rename(_ album: PhotoAlbum, to name: String) async {
+        guard let library else { return }
+        do {
+            let renamed = try await library.rename(album, to: name)
+            if let index = albums.firstIndex(where: { $0.id == album.id }) { albums[index] = renamed }
+        } catch {
+            notice = Self.problem(error, doing: "rename that album")
+        }
+    }
+
+    public func deleteAlbum(_ album: PhotoAlbum) async {
+        guard let library else { return }
+        do {
+            try await library.deleteAlbum(album)
+            albums.removeAll { $0.id == album.id }
+        } catch {
+            notice = Self.problem(error, doing: "delete that album")
+        }
+    }
+
+    public func album(_ id: UUID) -> PhotoAlbum? {
+        albums.first { $0.id == id }
+    }
+
+    /// What went wrong, in words for the person.
+    nonisolated static func problem(_ error: Error, doing action: String) -> String {
+        switch error {
+        case SealedStoreError.offline:
+            "Photos couldn't \(action), because the server can't be reached. Try again when you're online."
+        case PhotoError.changedElsewhere:
+            "Photos couldn't \(action), because another device kept changing it. Try again."
+        case PhotoError.emptyName:
+            "An album needs a name."
+        case PhotoError.missing:
+            "That photo isn't there any more. It may have been deleted on another device."
+        default:
+            "Photos couldn't \(action). Try again in a moment."
+        }
+    }
+
+    // MARK: Saving out
+
+    /// The original, for saving to the device's own Photos.
+    public func original(_ item: PhotoItem) async throws -> Data {
+        guard let library else { throw PhotoError.closed }
+        return try await library.original(of: item)
+    }
+
+    /// The camera and place, read from the original on this device.
+    public func info(_ item: PhotoItem) async -> PhotoImport.Info? {
+        guard let data = try? await original(item) else { return nil }
+        return await Task.detached(priority: .userInitiated) { PhotoImport.info(from: data) }.value
+    }
+
     // MARK: Images
 
     public func cachedThumbnail(_ item: PhotoItem) -> CGImage? {
@@ -180,9 +322,40 @@ public final class PhotosModel {
 
     // MARK: Shaping
 
-    /// The library by month, newest first, for the grid's labels.
-    public var months: [Month] {
-        Self.months(of: items, calendar: .current)
+    public func items(in scope: Scope) -> [PhotoItem] {
+        Self.items(items, in: scope, albums: Set(albums.map(\.id)))
+    }
+
+    nonisolated static func items(_ items: [PhotoItem], in scope: Scope, albums: Set<UUID>) -> [PhotoItem] {
+        switch scope {
+        case .library: items.filter { $0.details.trashed == nil }
+        case .favourites: items.filter { $0.details.trashed == nil && $0.details.favourite }
+        case .recentlyDeleted:
+            items.filter { $0.details.trashed != nil }.sorted { ($0.details.trashed ?? .distantPast) > ($1.details.trashed ?? .distantPast) }
+        case .album(let id):
+            albums.contains(id) ? items.filter { $0.details.trashed == nil && $0.details.albumIDs.contains(id) } : []
+        }
+    }
+
+    /// A scope's photos by month, newest first, for the grid's labels.
+    public func months(in scope: Scope) -> [Month] {
+        Self.months(of: items(in: scope), calendar: .current)
+    }
+
+    public func title(of scope: Scope) -> String {
+        switch scope {
+        case .library: "Library"
+        case .favourites: "Favourites"
+        case .recentlyDeleted: "Recently Deleted"
+        case .album(let id): album(id)?.name ?? "Album"
+        }
+    }
+
+    /// How long until a photo in Recently Deleted goes for good.
+    nonisolated static func daysLeft(_ item: PhotoItem, now: Date = Date()) -> Int? {
+        guard let trashed = item.details.trashed else { return nil }
+        let left = trashed.addingTimeInterval(Double(PhotoLibrary.trashDays) * 86_400).timeIntervalSince(now)
+        return max(0, Int((left / 86_400).rounded(.up)))
     }
 
     static func months(of items: [PhotoItem], calendar: Calendar) -> [Month] {
@@ -222,8 +395,9 @@ public final class PhotosModel {
 
     public var glance: ModuleGlance? {
         guard library != nil, phase == .ready else { return nil }
-        guard let newest = items.first else { return ModuleGlance(lines: ["No photos yet"], isQuiet: true) }
-        let count = items.count == 1 ? "1 photo" : "\(items.count) photos"
+        let shown = items(in: .library)
+        guard let newest = shown.first else { return ModuleGlance(lines: ["No photos yet"], isQuiet: true) }
+        let count = shown.count == 1 ? "1 photo" : "\(shown.count) photos"
         return ModuleGlance(lines: [count, "Newest from \(newest.date.formatted(date: .abbreviated, time: .omitted))"])
     }
 

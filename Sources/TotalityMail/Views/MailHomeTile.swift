@@ -70,7 +70,8 @@ public struct MailHomeTile: View {
 
     private func label(for conversation: MailConversation) -> String {
         let who = conversation.heading(me: model.mailbox.address, showingRecipients: false)
-        return conversation.isUnread ? "Unread, \(who): \(conversation.subject)" : "\(who): \(conversation.subject)"
+        let place = conversation.latest.outsideAccount.map { ", in \($0.provider.name)" } ?? ""
+        return (conversation.isUnread ? "Unread, \(who): \(conversation.subject)" : "\(who): \(conversation.subject)") + place
     }
 }
 
@@ -92,12 +93,19 @@ private struct Row: View {
                     .font(conversation.isUnread ? Typeface.headline : Typeface.body)
                     .foregroundStyle(theme.textPrimary.color)
                     .lineLimit(1)
-                Text(conversation.isUnreadable ? "Can't be opened" : conversation.subject)
+                Text(subjectLine)
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
                     .lineLimit(1)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The subject, and which outside account it's in, as the issue's spec asks of a row.
+    private var subjectLine: String {
+        let subject = conversation.isUnreadable ? "Can't be opened" : conversation.subject
+        guard let outside = conversation.latest.outsideAccount else { return subject }
+        return "\(outside.provider.name) · \(subject)"
     }
 }

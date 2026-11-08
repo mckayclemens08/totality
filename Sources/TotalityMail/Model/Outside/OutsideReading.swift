@@ -184,14 +184,21 @@ extension GoogleOAuth {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(body)
         }
+        let data = try await gmailAnswer(request)
+        guard let answer = try? JSONDecoder().decode(Answer.self, from: data) else { throw OutsideMailProblem.unexpected }
+        return answer
+    }
+
+    /// Sends a request to Gmail and returns its answer, waiting out "too fast" and naming every other no.
+    func gmailAnswer(_ request: URLRequest) async throws -> Data {
         var wait = pause
         for attempt in 0... {
             let (data, response) = try await sendRequest(request)
             switch response.statusCode {
-            case 200:
-                guard let answer = try? JSONDecoder().decode(Answer.self, from: data) else { throw OutsideMailProblem.unexpected }
-                return answer
+            case 200: return data
             case 401: throw OutsideMailProblem.expired
+            case 400:
+                throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(GmailRefusal(data).message ?? "Gmail said no (400)."))
             case 403, 429:
                 let refusal = GmailRefusal(data)
                 // Gmail says "too fast" with a 403 as well as a 429. That's waited out, not a missing permission.
@@ -202,7 +209,7 @@ extension GoogleOAuth {
                 guard attempt < 4 else { throw OutsideMailProblem.unreachable }
                 try await Task.sleep(for: wait)
                 wait *= 2
-                case 404: throw GmailMissing.message
+            case 404: throw GmailMissing.message
             default: throw OutsideMailProblem.unreachable
             }
         }
@@ -363,12 +370,56 @@ struct OutsideReader: Sendable {
     let maker: any OutsideWireMaker
     let google: GoogleOAuth?
 
+    /// Opens one iCloud folder read-only and notes what's in it from `since`: flags and Message-IDs only.
+    private func look(in name: String, kind: OutsideFolders.Kind, connection: IMAPConnection, since: Date) async throws -> OutsideIMAPFolder {
+        let validity = kind == .inbox ? try await connection.examineInbox() : try await connection.examine(name)
+        let all = try await connection.uids(since: since)
+        let listed = Array(all.prefix(OutsideReading.mostListed))
+        var entries: [UInt32: OutsideIMAPEntry] = [:]
+        for start in stride(from: 0, to: listed.count, by: 500) {
+            try Task.checkCancellation()
+            entries.merge(try await connection.entries(Array(listed[start..<min(start + 500, listed.count)]))) { first, _ in first }
+        }
+        return OutsideIMAPFolder(name: name, kind: kind, validity: validity, entries: entries, complete: listed.count == all.count)
+    }
+
+    /// Downloads what's in the open folder and not here yet, newest first. A message that's here already
+    /// under another UID, because it moved, isn't downloaded again.
+    private func download(
+        from folder: OutsideIMAPFolder, connection: IMAPConnection, account: OutsideAccount, budget: inout Int,
+        have: @Sendable (String) async throws -> Bool, haveMessage: @Sendable (String) async throws -> Bool,
+        keep: @Sendable (OutsideFetchedMessage) async throws -> Void
+    ) async throws {
+        var missing: [UInt32] = []
+        for (uid, entry) in folder.entries.sorted(by: { $0.key > $1.key }) where missing.count < budget {
+            let location = OutsideIMAPLocation(mailbox: folder.name, validity: folder.validity, uid: uid)
+            guard try await !have(location.providerID) else { continue }
+            if let id = entry.messageID, try await haveMessage(id) { continue }
+            missing.append(uid)
+        }
+        budget -= missing.count
+        // A few at a time, so one huge message doesn't hold up the rest.
+        for start in stride(from: 0, to: missing.count, by: 10) {
+            try Task.checkCancellation()
+            for fetched in try await connection.fetch(Array(missing[start..<min(start + 10, missing.count)])) {
+                let location = OutsideIMAPLocation(mailbox: folder.name, validity: folder.validity, uid: fetched.uid)
+                try await keep(OutsideFetchedMessage(
+                    outside: account.id, providerID: location.providerID, received: fetched.received ?? Date(),
+                    raw: fetched.raw, isUnread: fetched.isUnread, isStarred: fetched.isStarred,
+                    // Where it came from, when that isn't the Inbox, so it starts out archived here.
+                    labels: folder.kind == .inbox ? [] : [folder.name]
+                ))
+            }
+        }
+    }
+
     /// `have` says whether a provider ID is already here, or was deleted here. Each message is handed to
     /// `keep` as it arrives, so what came before a dropped connection isn't lost.
     func download(
         _ account: OutsideAccount, credential: OutsideCredential, since: Date,
         have: @Sendable (String) async throws -> Bool, keep: @Sendable (OutsideFetchedMessage) async throws -> Void,
-        seen: @Sendable (OutsideProviderView) async throws -> Void = { _ in }
+        seen: @Sendable (OutsideProviderView) async throws -> Void = { _ in },
+        haveMessage: @Sendable (String) async throws -> Bool = { _ in false }
     ) async throws {
         switch credential {
         case .google(let grant):
@@ -423,26 +474,33 @@ struct OutsideReader: Sendable {
             }
             let connection = try await IMAPConnection.signIn(signIn, with: maker)
             do {
-                let validity = try await connection.examineInbox()
-                let all = try await connection.uids(since: since)
-                // How each one is marked now, so changes made at iCloud show here too.
-                let listed = Array(all.prefix(OutsideReading.mostListed))
-                let flags = try await connection.flags(listed).mapValues { OutsideIMAPInbox.OutsideFlags(isUnread: $0.isUnread, isStarred: $0.isStarred) }
-                try await seen(.imap(OutsideIMAPInbox(validity: validity, since: since, flags: flags, complete: listed.count == all.count)))
-                var missing: [UInt32] = []
-                for uid in all.prefix(OutsideReading.mostPerOpen) where try await !have("\(validity).\(uid)") {
-                    missing.append(uid)
-                }
-                // A few at a time, so one huge message doesn't hold up the rest.
-                for start in stride(from: 0, to: missing.count, by: 10) {
+                var budget = OutsideReading.mostPerOpen
+                // The Inbox first, then each other folder, so mail moved at iCloud is followed and mail
+                // in the person's own folders shows in the places for them.
+                var folders = [try await look(in: "INBOX", kind: .inbox, connection: connection, since: since)]
+                try await download(
+                    from: folders[0], connection: connection, account: account, budget: &budget, have: have, haveMessage: haveMessage, keep: keep
+                )
+                let listed = (try? await connection.folders()) ?? []
+                for (name, kind) in OutsideFolders.kinds(listed).prefix(GoogleOAuth.mostLabels) {
                     try Task.checkCancellation()
-                    for fetched in try await connection.fetch(Array(missing[start..<min(start + 10, missing.count)])) {
-                        try await keep(OutsideFetchedMessage(
-                            outside: account.id, providerID: "\(validity).\(fetched.uid)", received: fetched.received ?? Date(),
-                            raw: fetched.raw, isUnread: fetched.isUnread, isStarred: fetched.isStarred
-                        ))
+                    let folder: OutsideIMAPFolder
+                    do {
+                        folder = try await look(in: name, kind: kind, connection: connection, since: since)
+                    } catch let problem as OutsideMailProblem where problem != .offline && problem != .unreachable {
+                        // One folder that won't open doesn't stop the rest. What's in it just isn't known.
+                        continue
+                    }
+                    folders.append(folder)
+                    // Mail is downloaded from the Inbox and the person's own folders, never only for being
+                    // archived, in Junk or in Trash, as with Gmail.
+                    if kind == .own {
+                        try await download(
+                            from: folder, connection: connection, account: account, budget: &budget, have: have, haveMessage: haveMessage, keep: keep
+                        )
                     }
                 }
+                try await seen(.imap(OutsideIMAPInbox(since: since, folders: folders)))
                 await connection.signOut()
             } catch {
                 await connection.signOut()

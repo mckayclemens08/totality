@@ -81,9 +81,18 @@ public final class MailComposer: Identifiable {
         MailComposer(draft: signed(MailDraft(), with: model.mailbox.settings.signature), model: model)
     }
 
+    /// Mail that came to an outside account is answered from it when it can send, so the reply comes
+    /// from the address it was sent to. Otherwise from the Totality address.
     public static func reply(to message: MailMessage, all: Bool, in model: MailModel) -> MailComposer {
-        let me = model.mailbox.address
-        let draft = all ? MailDraft.replyAll(to: message, me: me) : MailDraft.reply(to: message, me: me)
+        let me = message.outsideAccount?.address ?? model.mailbox.address
+        var draft = all ? MailDraft.replyAll(to: message, me: me) : MailDraft.reply(to: message, me: me)
+        if let outside = message.outsideAccount {
+            // Neither address of the person's own is someone to reply to.
+            let totality = model.mailbox.address
+            draft.to.removeAll { MailDraft.isMe($0, totality) }
+            draft.cc.removeAll { MailDraft.isMe($0, totality) }
+            draft.from = model.mailbox.senders.first { $0.id == outside.id }?.id
+        }
         return MailComposer(draft: signed(draft, with: model.mailbox.settings.signature), model: model)
     }
 
@@ -224,9 +233,28 @@ public final class MailComposer: Identifiable {
     public var routeNote: (text: String, isSealed: Bool)? {
         let people = draft.recipients
         guard !people.isEmpty else { return nil }
+        if let sender { return (OutsideWording.sendingThrough(sender.provider), false) }
         if people.allSatisfy({ $0.totalityName != nil }) { return (MailWording.betweenAccounts, true) }
         if people.allSatisfy({ $0.totalityName == nil }) { return (MailWording.outsideSending, false) }
         return (MailWording.mixedSending, false)
+    }
+
+    // MARK: From
+
+    /// The addresses it can go from: the Totality address first, then each outside account that sends.
+    public var senders: [OutsideAccountLabel] { model.mailbox.senders }
+
+    /// The outside account it's from, or nil for the Totality address.
+    public var sender: OutsideAccountLabel? {
+        draft.from.flatMap { id in senders.first { $0.id == id } }
+    }
+
+    /// The address on the From line.
+    public var fromAddress: String { sender?.address ?? model.mailbox.address }
+
+    public func send(from account: OutsideAccountLabel?) {
+        guard phase == .writing else { return }
+        draft.from = account?.id
     }
 
     public var canSend: Bool {

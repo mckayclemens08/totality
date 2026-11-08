@@ -32,6 +32,8 @@ public final class MailModel {
     /// What went wrong with outside accounts on the last download, one line each.
     public private(set) var outsideProblems: [String] = []
     @ObservationIgnored private var isDownloadingOutside = false
+    /// Searching outside accounts for older mail: nil until asked, then how it went for `query`.
+    public private(set) var outsideSearch: OutsideSearchState?
     public private(set) var undo: MailUndo?
     public var notice: String?
     public var place = MailPlace.inbox {
@@ -189,6 +191,27 @@ public final class MailModel {
         fresh.isFull = mailbox.isFull
         mailbox = fresh
         outsideProblems = result.problems
+    }
+
+    /// Asks each outside account for older mail matching the search, from the person's press. What's
+    /// found is downloaded and joins the mailbox; the search itself still runs on the device.
+    public func searchOutside() async {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, outsideSearch?.isSearching != true else { return }
+        let before = Set(mailbox.messages.map(\.id))
+        outsideSearch = OutsideSearchState(query: query, isSearching: true)
+        let fetch = UUID()
+        since[fetch] = Since()
+        defer { since[fetch] = nil }
+        guard let result = await store.searchOutside(query) else {
+            outsideSearch = OutsideSearchState(query: query, isSearching: false)
+            return
+        }
+        var fresh = merged(result.mailbox, here: since[fetch] ?? Since())
+        fresh.isFull = mailbox.isFull
+        mailbox = fresh
+        let found = mailbox.messages.filter { !before.contains($0.id) }.count
+        outsideSearch = OutsideSearchState(query: query, isSearching: false, found: found, problems: result.problems)
     }
 
     /// Starts over from the store, forgetting anything that was waiting.

@@ -128,6 +128,13 @@ private func sealedBytes(_ count: Int) -> Data {
     Data((0..<count).map { _ in UInt8.random(in: 0...255) })
 }
 
+@Suite struct ServerTimeTests {
+    @Test func readsTheServersDateHeader() {
+        #expect(SealedStoreClient.httpDate("Sun, 08 Nov 2026 06:12:00 GMT") == ISO8601DateFormatter().date(from: "2026-11-08T06:12:00Z"))
+        #expect(SealedStoreClient.httpDate("yesterday") == nil)
+    }
+}
+
 @Suite struct SealedStoreTargetTests {
     @Test func theTargetIsConfigurationAndOnlyHTTPS() {
         #expect(SealedStoreTarget.standard.url.absoluteString == "https://usetotality.com/blobs/")
