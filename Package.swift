@@ -18,8 +18,6 @@ let package = Package(
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.9.1"),
         .package(url: "https://github.com/supabase/supabase-swift.git", exact: "2.49.0"),
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.18.0"),
-        // Element's official Swift build of matrix-rust-sdk. It ships iPhone and simulator slices only.
-        .package(url: "https://github.com/element-hq/matrix-rust-components-swift.git", exact: "26.10.30-2"),
     ],
     targets: [
         .target(name: "TotalityCore", dependencies: [
@@ -37,11 +35,9 @@ let package = Package(
             "TotalityCore", "TotalityUI",
             .product(name: "Supabase", package: "supabase-swift"),
         ]),
-        // The SDK has no Mac slice, so on the Mac this module builds without it and says so.
-        .target(name: "TotalityMessages", dependencies: [
-            "TotalityCore", "TotalityUI",
-            .product(name: "MatrixRustSDK", package: "matrix-rust-components-swift", condition: .when(platforms: [.iOS])),
-        ]),
+        // The Matrix SDK ships for iPhone only, so the app links it and holds the one file that uses it
+        // (App/Totality/MatrixMessagesService.swift). That keeps `swift test` working on the Mac.
+        .target(name: "TotalityMessages", dependencies: ["TotalityCore", "TotalityUI"]),
         .testTarget(name: "TotalityCoreTests", dependencies: ["TotalityCore"]),
         .testTarget(name: "TotalityUITests", dependencies: ["TotalityUI"]),
         .testTarget(name: "TotalityReaderTests", dependencies: ["TotalityReader"]),
@@ -49,5 +45,6 @@ let package = Package(
         .testTarget(name: "TotalityWebTests", dependencies: ["TotalityWeb"]),
         .testTarget(name: "TotalityMailTests", dependencies: ["TotalityMail"]),
         .testTarget(name: "TotalityAccountTests", dependencies: ["TotalityAccount"]),
+        .testTarget(name: "TotalityMessagesTests", dependencies: ["TotalityMessages"]),
     ]
 )

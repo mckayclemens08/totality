@@ -1,5 +1,5 @@
 {
-  "originHash" : "eb9c8f38ce8ade2f04e05efb758d1b0a8594506b0ed3b158a2c57afbd879d477",
+  "originHash" : "f258d2bd4b29b47d4ecd3a0c0f3d49795323c9c72f24e01bd7ca7113503dff33",
   "pins" : [
     {
       "identity" : "fluidaudio",
@@ -8,15 +8,6 @@
       "state" : {
         "revision" : "e15287985625dbf544a343df679436789ffb03fb",
         "version" : "0.18.0"
-      }
-    },
-    {
-      "identity" : "matrix-rust-components-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/element-hq/matrix-rust-components-swift.git",
-      "state" : {
-        "revision" : "f5fa5ad0faed200af6dbcb2ddc61dd115e82ba06",
-        "version" : "26.10.30-2"
       }
     },
     {

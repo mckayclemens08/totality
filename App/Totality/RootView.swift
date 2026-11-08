@@ -17,7 +17,7 @@ struct RootView: View {
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
     @State private var web: WebModel?
-    @State private var messagesTrial: MessagesTrialModel?
+    @State private var messages: MessagesModel
     // The real mailbox, for whoever owns this device's key. `mailWiring` holds that account's vault.
     @State private var mail: MailAccountModel
     @State private var mailWiring: MailWiring
@@ -48,9 +48,7 @@ struct RootView: View {
             return await backup.deviceOwner() == account
         }
         _mailWiring = State(initialValue: wiring)
-        if let pass = AccountSetup.matrixPass, let accountID = AccountSetup.accountID {
-            _messagesTrial = State(initialValue: MessagesTrialModel(account: accountID, pass: pass))
-        }
+        _messages = State(initialValue: AccountSetup.makeMessages())
         _mail = State(initialValue: MailAccountModel { wiring.makeStore(account: $0) })
     }
 
@@ -88,15 +86,7 @@ struct RootView: View {
                 MailHomeView(model: mail.current, onClose: { open = nil }, onOpenLink: openInWeb)
                     .id(ObjectIdentifier(mail.current))
             case .messages:
-                if let messagesTrial {
-                    MessagesTrialView(model: messagesTrial) { open = nil }
-                } else {
-                    ModuleMessage(
-                        systemImage: "person.crop.circle.badge.exclamationmark",
-                        title: "Sign-in isn't set up",
-                        detail: "This build has no backend settings, so Messages can't connect."
-                    ) { open = nil }
-                }
+                MessagesHomeView(model: messages) { open = nil }
             case .some(let module):
                 ModuleMessage(
                     systemImage: "hammer",
@@ -128,6 +118,9 @@ struct RootView: View {
             await account?.sync?.syncNow()
         }
         .onChange(of: defaultHomeStyle) { chosenHomeStyle = nil }
+        .onChange(of: showingAccount) {
+            if !showingAccount { Task { await messages.checkAccount() } }
+        }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { await account?.sync?.syncNow() } }
         }
@@ -188,6 +181,7 @@ struct RootView: View {
         glances[.calendar] = calendar?.glance
         glances[.web] = web?.glance
         glances[.mail] = mail.current.glance
+        glances[.messages] = messages.glance
         return glances
     }
 

@@ -1,5 +1,6 @@
 import TotalityAccount
 import TotalityCore
+import TotalityMessages
 
 /// Connects sign-in to this device's Keychain. Nil when the build has no backend settings.
 @MainActor
@@ -8,7 +9,7 @@ enum AccountSetup {
     private(set) static var searchToken: (@Sendable () async throws -> String)?
     /// The signed-in username, which is also the mail address's first half.
     private(set) static var username: (@Sendable () async -> String?)?
-    /// The Messages trial's one-minute Matrix pass, and the account its stores belong to.
+    /// The one-minute Matrix pass for Messages, and the account its stores belong to.
     private(set) static var matrixPass: (@Sendable () async throws -> String)?
     private(set) static var accountID: (@Sendable () async -> String?)?
 
@@ -27,5 +28,21 @@ enum AccountSetup {
             service: service, backup: BackupModel(service: service, content: content),
             sync: SyncModel(), syncRemote: service.syncRemote
         )
+    }
+
+    /// Messages for whoever is signed in. The Matrix SDK is linked for iPhone only.
+    static func makeMessages() -> MessagesModel {
+        #if canImport(MatrixRustSDK)
+        var connector: MessagesConnector?
+        if let pass = matrixPass {
+            connector = { account in try await MatrixMessagesService.connect(account: account, pass: pass) }
+        }
+        return MessagesModule.makeModel(account: accountID, connector: connector)
+        #else
+        return MessagesModule.makeModel(
+            account: accountID, connector: nil,
+            unavailableReason: "Messages runs in the iPhone app. Open Totality's iPhone version on this Mac to use it."
+        )
+        #endif
     }
 }
