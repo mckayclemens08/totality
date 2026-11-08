@@ -37,6 +37,16 @@ public final class PhotosModel {
     public private(set) var isAdding = false
     public private(set) var unreadable = 0
     public var notice: String?
+    /// What would let Photos open, when it can't. Nil when there's nothing the person can do here.
+    public private(set) var fix: Fix?
+    /// A photo the home tile asked for. Photos opens it in the viewer and clears this.
+    public var requestedItem: UUID?
+
+    public enum Fix: Equatable, Sendable {
+        /// Signing in, or setting up the recovery key, both of which live in the account.
+        case openAccount
+        case tryAgain
+    }
     /// Photos per row in the library. Pinching changes it.
     public var columns = PhotosModel.defaultColumns
 
@@ -57,15 +67,30 @@ public final class PhotosModel {
     private static let thumbnailsKept = 400
 
     /// With no library, Photos explains why, in `unavailable`'s words.
-    public init(library: PhotoLibrary?, unavailable: (title: String, detail: String) = PhotosModel.signedOut) {
+    public init(library: PhotoLibrary?, unavailable: (title: String, detail: String) = PhotosModel.signedOut, fix: Fix? = .openAccount) {
         self.library = library
         self.unavailable = unavailable
-        if library == nil { phase = .unavailable(title: unavailable.title, detail: unavailable.detail) }
+        if library == nil {
+            phase = .unavailable(title: unavailable.title, detail: unavailable.detail)
+            self.fix = fix
+        }
     }
 
     public static let signedOut = (
         title: "Sign in to use Photos",
         detail: "Photos are kept sealed in your account, so Photos needs you signed in on a device that has joined your recovery key."
+    )
+
+    /// Signed in, but this device hasn't joined the recovery key, so nothing sealed here could be got back.
+    public static let needsRecoveryKey = (
+        title: "Set up your recovery key first",
+        detail: "Photos are sealed on this device before they upload, and your recovery key is what gets them back on a new one. Set it up in your account, then come back."
+    )
+
+    /// This device's key belongs to someone else, so their photos stay theirs.
+    public static let otherAccountsKey = (
+        title: "This device is set up for another account",
+        detail: "Photos open only for the account that holds this device's key. Sign in as that account to see its photos."
     )
 
     public var account: String? { library?.account }
@@ -85,6 +110,7 @@ public final class PhotosModel {
             isOffline = !listing.isCurrent
             waitingCount = listing.items.filter(\.isWaiting).count
             phase = .ready
+            fix = nil
             albums = try await library.albums().albums
         } catch PhotoError.closed {
             // The account changed under this library, so nothing of it stays on screen.
@@ -92,15 +118,25 @@ public final class PhotosModel {
             albums = []
             thumbnails = [:]
             phase = .unavailable(title: "Photos are closed", detail: "These photos belong to another account. Sign in as that account to see them.")
+            fix = .openAccount
             return
         } catch {
             if items.isEmpty {
                 phase = .unavailable(title: "Photos couldn't open", detail: "Something went wrong reading this device's copy. Try again in a moment.")
+                fix = .tryAgain
             }
             return
         }
         usage = try? await library.usage()
         await upload()
+    }
+
+    /// After "Photos couldn't open", shows the spinner again and has another go.
+    public func tryAgain() async {
+        guard library != nil, fix == .tryAgain else { return }
+        phase = .loading
+        fix = nil
+        await load()
     }
 
     /// Sends what's waiting, and says what's stopping it.
@@ -478,7 +514,9 @@ public final class PhotosModel {
     public var waitingLine: String? {
         guard waitingCount > 0 else { return nil }
         let count = waitingCount == 1 ? "1 photo" : "\(waitingCount) photos"
-        if isFull { return "\(count) waiting. Your space is full, so nothing more can upload." }
+        if isFull {
+            return "\(count) waiting. Your space is full, so nothing more can upload. Delete photos or videos you don't need and empty Recently Deleted to make room."
+        }
         if isOffline { return "\(count) waiting to upload when you're back online." }
         return "Uploading \(count)…"
     }
@@ -489,6 +527,18 @@ public final class PhotosModel {
         guard let newest = shown.first else { return ModuleGlance(lines: ["No photos yet"], isQuiet: true) }
         let count = shown.count == 1 ? "1 photo" : "\(shown.count) photos"
         return ModuleGlance(lines: [count, "Newest from \(newest.date.formatted(date: .abbreviated, time: .omitted))"])
+    }
+
+    /// The newest photos in the library, for the home tile. Recently Deleted is left out.
+    public func newest(_ count: Int) -> [PhotoItem] {
+        Array(items(in: .library).prefix(max(count, 0)))
+    }
+
+    /// Takes the home tile's request, if the photo is still in the library.
+    public func takeRequest() -> UUID? {
+        guard let id = requestedItem else { return nil }
+        requestedItem = nil
+        return items(in: .library).contains { $0.id == id } ? id : nil
     }
 
     public func change(columnsBy step: Int) {
