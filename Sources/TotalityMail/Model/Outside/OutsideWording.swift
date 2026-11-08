@@ -16,6 +16,11 @@ public enum OutsideWording {
         "This mail is kept by \(provider.keeper), who can read it. Totality doesn't seal it there. Your downloaded copy on this device is sealed."
     }
 
+    /// The line in the composer when it's going from an outside account.
+    public static func sendingThrough(_ provider: OutsideProvider) -> String {
+        "This goes through \(provider.name) as ordinary email. It isn't end-to-end encrypted, even to Totality addresses, and \(provider.keeper) can read it."
+    }
+
     public static func sent(through provider: OutsideProvider) -> String {
         "Sent through \(provider.name). It isn't end-to-end encrypted."
     }

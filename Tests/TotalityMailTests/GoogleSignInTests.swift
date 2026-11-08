@@ -29,6 +29,9 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
     /// Read or unread changed since it arrived.
     var unreadNow: [String: Bool] = [:]
     private var changeLog: [String] = []
+    private var sentLog: [String] = []
+    /// Each message Totality handed Gmail to send, as Gmail got it.
+    var sentMessages: [String] { lock.withLock { sentLog } }
     /// Each change Totality made at Gmail, as `modify <id> +A -B`, `trash <id>` or `untrash <id>`.
     var changes: [String] { lock.withLock { changeLog } }
     /// The labels the person made, by ID and name.
@@ -131,6 +134,13 @@ final class FakeGoogle: OutsideHTTP, @unchecked Sendable {
             let own = lock.withLock { userLabels }
             let system = [["id": "INBOX", "name": "INBOX", "type": "system"], ["id": "CATEGORY_SOCIAL", "name": "CATEGORY_SOCIAL", "type": "system"]]
             return Self.json(200, ["labels": system + own.map { ["id": $0.id, "name": $0.name, "type": "user"] }])
+        case _ where url.host == "gmail.googleapis.com" && url.path == "/upload/gmail/v1/users/me/messages/send":
+            #expect(request.httpMethod == "POST" && request.value(forHTTPHeaderField: "Content-Type") == "message/rfc822")
+            #expect(request.url?.query == "uploadType=media")
+            if refusesMail { return Self.answer(401, [:]) }
+            let raw = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+            let n = lock.withLock { sentLog.append(raw); return sentLog.count }
+            return Self.json(200, ["id": "19a0b1c2d3e4f5a\(n)", "threadId": "19a0b1c2d3e4f5a0", "labelIds": ["SENT"]])
         case _ where url.host == "gmail.googleapis.com" && url.path.hasPrefix("/gmail/v1/users/me/messages"):
             #expect(request.value(forHTTPHeaderField: "Authorization")?.hasPrefix("Bearer ya29.") == true)
             if refusesMail { return Self.answer(401, [:]) }

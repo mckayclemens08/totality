@@ -130,6 +130,7 @@ struct MailComposeView: View {
                     MailStrip(systemImage: "info.circle", text: notice)
                 }
                 VStack(alignment: .leading, spacing: 0) {
+                    if !composer.senders.isEmpty { fromLine }
                     addressLine(.to)
                     if composer.showsCopies {
                         addressLine(.cc)
@@ -177,6 +178,37 @@ struct MailComposeView: View {
     }
 
     // MARK: Addresses
+
+    /// Only shown when there's a choice: the Totality address, and each outside account that sends.
+    private var fromLine: some View {
+        let theme = Theme.current
+        return HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+            Text("From")
+                .font(Typeface.caption)
+                .foregroundStyle(theme.textSecondary.color)
+                .frame(width: Space.s6, alignment: .leading)
+            Menu {
+                Button(composer.model.mailbox.address) { composer.send(from: nil) }
+                ForEach(composer.senders, id: \.self) { account in
+                    Button(account.address) { composer.send(from: account) }
+                }
+            } label: {
+                HStack(spacing: Space.s1) {
+                    Text(composer.fromAddress)
+                        .font(Typeface.body)
+                        .foregroundStyle(theme.textPrimary.color)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
+                }
+            }
+            .accessibilityLabel("From \(composer.fromAddress)")
+            Spacer(minLength: 0)
+        }
+        .padding(Space.s3)
+    }
 
     private func addressLine(_ field: MailField) -> some View {
         let theme = Theme.current

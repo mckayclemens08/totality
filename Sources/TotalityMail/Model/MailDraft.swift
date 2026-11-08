@@ -53,11 +53,14 @@ public struct MailDraft: Identifiable, Hashable, Codable, Sendable {
     public var body: String
     public var attachments: [MailDraftAttachment]
     public var origin: MailDraftOrigin?
+    /// The outside account it goes from, through that provider. Nil is the Totality address.
+    public var from: UUID?
 
     public init(
         id: UUID = UUID(), to: [MailAddress] = [], cc: [MailAddress] = [], bcc: [MailAddress] = [], subject: String = "",
-        body: String = "", attachments: [MailDraftAttachment] = [], origin: MailDraftOrigin? = nil
+        body: String = "", attachments: [MailDraftAttachment] = [], origin: MailDraftOrigin? = nil, from: UUID? = nil
     ) {
+        self.from = from
         self.id = id
         self.to = to
         self.cc = cc
@@ -235,4 +238,6 @@ public enum MailSendError: Error, Equatable {
     case tooBig
     /// The account's username isn't known yet, so there's no From address to send as.
     case noAddress
+    /// The outside account it's from was removed, or its Send switch is off.
+    case cannotSendFrom
 }

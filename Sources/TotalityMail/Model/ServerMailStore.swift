@@ -240,9 +240,14 @@ public actor ServerMailStore: MailStore {
             if account.provider == .gmail {
                 let known = places[account.id]?.labels(of: stored.providerID, received: stored.received)
                 let labels = known ?? Set(stored.labels)
-                message.outsideLabels = labels.subtracting(["INBOX", "UNREAD", "STARRED", "IMPORTANT", "SENT", "DRAFT", "CATEGORY_PERSONAL"])
+                message.outsideLabels = labels.subtracting(["INBOX", "UNREAD", "STARRED", "IMPORTANT", "DRAFT", "CATEGORY_PERSONAL"])
                 // Gmail archives by taking INBOX away, so mail it holds without INBOX is archived here.
                 if known != nil || !stored.labels.isEmpty, !labels.contains("INBOX") { message.marks.folder = .archive }
+            }
+            if stored.labels.contains("SENT") {
+                // Sent from here through the provider: this device's own copy of it.
+                message.outsideLabels.insert("SENT")
+                message.marks.folder = .sent
             }
             if let synced = marks[id] {
                 message.marks = synced
@@ -258,6 +263,8 @@ public actor ServerMailStore: MailStore {
         var mailbox = Mailbox(
             address: me.map(MailDomain.address(for:)) ?? "", messages: messages, settings: settings, drafts: try await vault.drafts()
         )
+        mailbox.senders = outside.values.filter(\.canSend).sorted { $0.address < $1.address }
+            .map { OutsideAccountLabel(id: $0.id, provider: $0.provider, address: $0.address) }
         mailbox.outsidePlaces = outside.values.sorted { $0.address < $1.address }.compactMap { account in
             guard let known = places[account.id] else { return nil }
             let label = OutsideAccountLabel(id: account.id, provider: account.provider, address: account.address)
@@ -322,7 +329,13 @@ public actor ServerMailStore: MailStore {
     /// Downloaded mail is read as the provider gave it. Only the provider's own checks at the top can
     /// prove its sender.
     private func readFetched(_ stored: OutsideFetchedMessage, id: UUID, provider: OutsideProvider) -> ParsedMail {
-        MailParser.parseMessage(
+        if stored.labels.contains("SENT") {
+            // Written and sent on this device, so there's nothing to prove about who sent it.
+            let parsed = MailParser.parseMessage(stored.raw, id: id, received: stored.received, marks: MailMarks(folder: .sent))
+            guard !parsed.message.isUnreadable else { return parsed }
+            return ParsedMail(message: parsed.message.travelled(.outside, proof: .proved), attachments: parsed.attachments)
+        }
+        return MailParser.parseMessage(
             stored.raw, id: id, received: stored.received, marks: MailMarks(isUnread: stored.isUnread, isStarred: stored.isStarred),
             checkedBy: OutsideReading.checkedBy(provider)
         )
@@ -534,6 +547,7 @@ public actor ServerMailStore: MailStore {
     /// only the people who didn't.
     public func send(_ draft: MailDraft) async throws -> MailSendResult {
         try draft.checkRecipients()
+        if let from = draft.from { return try await send(draft, through: from) }
         if hasConflict { throw MailStoreError.keyConflict }
         guard await canPublish() else { throw MailStoreError.waitingForBackup }
         guard let me = await username()?.lowercased() else { throw MailSendError.noAddress }
@@ -598,6 +612,49 @@ public actor ServerMailStore: MailStore {
             remaining = rest
         }
         return MailSendResult(recipients: outcomes, sent: sent, keptCopy: keptCopy, remaining: remaining)
+    }
+
+    /// From an outside account: one ordinary message to everyone, Totality addresses included, through
+    /// that provider. Nothing goes through Totality's server. The Sent copy is the provider's, and this
+    /// device keeps its own sealed copy of it, labelled as sent through the provider.
+    private func send(_ draft: MailDraft, through id: UUID) async throws -> MailSendResult {
+        guard let account = try await vault.outsideAccounts().first(where: { $0.id == id }), account.canSend,
+              let credential = try await vault.credential(for: id) else { throw MailSendError.cannotSendFrom }
+        if case .google(let grant) = credential, !grant.canSend { throw MailSendError.cannotSendFrom }
+        let messageID = UUID(), date = now()
+        let withBcc = MailWriter.write(draft, fromAddress: account.address, message: messageID, date: date, keepingBcc: true)
+        guard withBcc.count <= MailDraft.maxBytes else { throw MailSendError.tooBig }
+        let recipients = draft.recipients.filter(\.isWellFormed)
+        let sender = OutsideSender(maker: outsideCheck.maker, google: google)
+        let result = await sender.send(account, credential: credential, raw: withBcc, sentCopy: withBcc, recipients: recipients.map(\.address))
+        var outcomes: [MailSendResult.Recipient] = []
+        for address in draft.recipients {
+            let outcome = address.isWellFormed ? result.outcomes[address.address.lowercased()] ?? .failed : .notAnAddress
+            outcomes.append(MailSendResult.Recipient(address: address, outcome: outcome))
+        }
+        if outcomes.allSatisfy({ $0.outcome == .offline }) { throw MailStoreError.offline }
+        let delivered = Set(outcomes.filter(\.outcome.left).map(\.address.key))
+        var sent: UUID?
+        if !delivered.isEmpty {
+            let providerID = result.providerID ?? "sent.\(messageID.uuidString.lowercased())"
+            let copy = OutsideFetchedMessage(
+                outside: id, providerID: providerID, received: date, raw: withBcc, isUnread: false, labels: ["SENT"]
+            )
+            try await vault.keepFetched(copy)
+            sent = MailVault.fetchedID(id, providerID: providerID, account: self.account)
+        }
+        var remaining: MailDraft?
+        if delivered.count == outcomes.count {
+            try await vault.deleteDraft(draft.id)
+        } else {
+            var rest = draft
+            rest.to.removeAll { delivered.contains($0.key) }
+            rest.cc.removeAll { delivered.contains($0.key) }
+            rest.bcc.removeAll { delivered.contains($0.key) }
+            try await vault.save(rest, at: now())
+            remaining = rest
+        }
+        return MailSendResult(recipients: outcomes, sent: sent, keptCopy: true, remaining: remaining)
     }
 
     /// Everyone outside Totality gets one ordinary message, in the same To, Cc, and Bcc places as the
