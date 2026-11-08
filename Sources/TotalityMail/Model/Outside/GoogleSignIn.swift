@@ -85,7 +85,7 @@ public struct GoogleOAuth: Sendable {
     }
 
     /// Everything Mail itself might ask Google for, and the scopes Google adds on its own to any token.
-    static let mailScopes: Set<String> = [readScope, changeScope, sendScope].union(GoogleAccounts.identityScopes)
+    static let mailScopes = Set([readScope, changeScope, sendScope]).union(GoogleAccounts.identityScopes)
         .union(["https://www.googleapis.com/auth/userinfo.email"])
 
     /// Keeps a Gmail sign-in as this device's connection to that Google account, for Calendar and Photos
