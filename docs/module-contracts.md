@@ -152,6 +152,17 @@ Spec: issue #14. The magnifying glass on the home page opens one screen that ask
 
 A module offers content through `ContentProvider`, and `ModuleRegistry.providers(for:)` lists what a module can attach, which is everything except its own. Only a `ContentRef` crosses over, so Calendar never imports the Reader. A ref's preview title lives inside the sealed event. `current(_:)` re-reads it, so a renamed item shows its new title and a deleted one says it's gone instead of leaving a dead link. The app opens a ref by handing its ID to the owning module.
 
+## Google sign-in
+
+Spec: issue #76, decision 8 (owner, 2026-11-08: "i shouldn't have to sign in to google more than once"). `GoogleSignIn` in `TotalityCore` is the one Google sign-in, for Mail, Calendar, and Photos, so no module imports another to reach Google.
+
+- It knows no module's scopes. Each module passes only its own. A module turned on later for a Google account that's already connected asks with `include_granted_scopes` and that account as `login_hint`, which is one consent tap, not a second sign-in.
+- It's the installed-app flow (RFC 8252): Google's own page, PKCE with S256, no client secret, and the answer has to come back on the client's own scheme with this request's state. The verifier and state stay in memory and never print, and nor do tokens.
+- `finish` hands back what Google granted, as Google said it. The person can untick any scope, so each module checks for its own. Mail still revokes when an account being added didn't get everything Mail needs.
+- Revoking at Google takes back every scope that Google account gave Totality, so disconnecting one Google account disconnects every module using it, and the screen has to say so first.
+- Errors from the network pass through unchanged, so each module says them its own way. Mail turns them into `OutsideMailProblem`.
+- Step 1b, still to come: one connection per Google account, with one refresh token in the Keychain, shared by every module. Mail's existing Gmail grants move to it without signing in again.
+
 ## Calendar
 
 Spec: issue #12, and issue #23 for the redesign. An event is one sealed blob with its times inside, so storage shows only an ID. Events use their own key purpose, so a Reader blob can't open as an event, and the ID inside must match the one outside.
