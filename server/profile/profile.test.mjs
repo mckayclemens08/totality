@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, test } from 'node:test'
-import { Cards, Profiles, accountFrom, cardFrom, escapeHTML, pageHeaders } from './profile.mjs'
+import { Cards, Profiles, accountFrom, cardFrom, escapeHTML, homePage, pageHeaders, privacyPage } from './profile.mjs'
 
 const MCKAY = { name: 'mckay', id: '11111111-2222-4333-8444-555555555555' }
 const DANA = { name: 'dana_w', id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' }
@@ -159,4 +159,25 @@ test('the account comes from the sign-in email alone', () => {
   assert.deepEqual(accountFrom({ email: 'mckay@totality.invalid', id: MCKAY.id }), MCKAY)
   assert.equal(accountFrom({ email: 'mckay@example.com', id: MCKAY.id }), null)
   assert.equal(accountFrom({ email: 'mckay@totality.invalid', id: 'not-an-id' }), null)
+})
+
+test('the homepage and privacy policy are fixed pages anyone can read', async () => {
+  const { profiles } = await make()
+  for (const path of ['/', '/privacy']) {
+    const reply = await ask(profiles, 'GET', path)
+    assert.equal(reply.status, 200)
+    assert.equal(reply.type, 'text/html; charset=utf-8')
+    // No scripts, no pictures, and nothing loaded from anywhere.
+    assert.match(reply.headers['Content-Security-Policy'], /default-src 'none'; style-src 'sha256-[^']+'; img-src 'none'/)
+    assert.doesNotMatch(text(reply), /<script|<img|noindex/)
+    assert.equal((await ask(profiles, 'POST', path)).status, 405)
+  }
+  assert.match(text(await ask(profiles, 'GET', '/')), /href="\/privacy"/)
+  const policy = privacyPage()
+  // What Google asks a Gmail app to say, and the promises the app's design keeps.
+  assert.match(policy, /Limited Use requirements/)
+  assert.match(policy, /isn't used for ads/)
+  assert.match(policy, /no ads, no analytics, and no tracking/)
+  assert.ok(homePage().includes('Privacy policy'))
+  assert.equal((await ask(profiles, 'GET', '/privacy/')).status, 404)
 })

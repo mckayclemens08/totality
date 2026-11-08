@@ -1,4 +1,5 @@
-// Public profile pages at usetotality.com/@username. A page exists only after its owner pressed Share in
+// Totality's homepage and privacy policy at usetotality.com/ and /privacy, both fixed text. And public
+// profile pages at usetotality.com/@username. A page exists only after its owner pressed Share in
 // the app. The device asks for its page to be published, and this server reads the profile with that
 // device's own sign-in, so it holds nothing it couldn't read anyway and can't be told what to say. The
 // username always comes from the account, never from the request. Only the name, photo, and bio are kept,
@@ -52,7 +53,11 @@ h1{margin:0;font-size:26px;font-weight:700;overflow-wrap:anywhere}
 .bio{margin:20px 0 0;white-space:pre-line;overflow-wrap:anywhere}
 .open{display:inline-block;margin-top:28px;padding:14px 26px;border-radius:999px;color:var(--accent);
 font-weight:600;text-decoration:none;background:var(--surface);box-shadow:-5px -5px 12px var(--light),5px 5px 12px var(--shade)}
-.note{margin:22px 0 0;font-size:14px;color:var(--text2)}`
+.note{margin:22px 0 0;font-size:14px;color:var(--text2)}
+main.doc{max-width:680px;text-align:left;padding:36px 28px}
+.doc h1{font-size:28px}.doc h2{margin:30px 0 8px;font-size:19px}
+.doc p,.doc li{margin:8px 0;color:var(--text)}.doc ul{padding-left:22px;margin:8px 0}
+.doc a{color:var(--accent)}.doc .lead{color:var(--text2);margin-top:10px}`
 
 const styleHash = createHash('sha256').update(STYLE).digest('base64')
 
@@ -67,11 +72,58 @@ export function pageHeaders(photoOrigin) {
   }
 }
 
-function page(title, inner) {
+function page(title, inner, { kind = '', indexed = false } = {}) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
-    `<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">` +
-    `<title>${escapeHTML(title)}</title><style>${STYLE}</style></head><body><main>${inner}</main></body></html>`
+    `<meta name="viewport" content="width=device-width,initial-scale=1">${indexed ? '' : '<meta name="robots" content="noindex">'}` +
+    `<title>${escapeHTML(title)}</title><style>${STYLE}</style></head><body><main${kind ? ` class="${kind}"` : ''}>${inner}</main></body></html>`
 }
+
+/** usetotality.com itself. Fixed text, nothing from a request. */
+export const homePage = () => page('Totality', `<h1>Totality</h1>
+<p class="lead">One app for iPhone and Mac: reading and listening, a calendar, mail, messages, and photos.</p>
+<p>What you keep in Totality is sealed on your own device before it goes anywhere, with a key only your devices hold. Messages are end-to-end encrypted. Every account gets its own address at usetotality.com, and you can add Gmail or iCloud beside it.</p>
+<p>Totality is in early testing and isn't in the App Store yet.</p>
+<p><a href="/privacy">Privacy policy</a></p>`, { kind: 'doc', indexed: true })
+
+/** What Totality keeps and where. Every line has to be literally true of the code. */
+export const privacyPage = () => page('Totality privacy policy', `<h1>Privacy policy</h1>
+<p class="lead">Last updated 8 November 2026. This covers the Totality app and its servers at usetotality.com.</p>
+
+<h2>The short version</h2>
+<ul>
+<li>Your content is encrypted on your device before it's uploaded. Totality's servers hold it sealed and can't read it.</li>
+<li>There are no ads, no analytics, and no tracking, and nothing is sold or shared for marketing.</li>
+<li>Gmail and iCloud accounts you add connect from your device straight to Google or Apple. Totality's servers never see that mail or those sign-ins.</li>
+</ul>
+
+<h2>Your account</h2>
+<p>An account is a username and a password. Totality doesn't ask for an email address or a phone number. Your password goes over HTTPS only to the account server, which keeps a one-way hash of it. The app never stores it, and it's never used to encrypt anything.</p>
+
+<h2>What you keep in Totality</h2>
+<p>Things like Reader documents, calendar events, bookmarks, photos, and mail settings are encrypted on your device before upload. The servers keep the sealed copy and what's needed to sync it: an ID, which kind of thing it is, which account it belongs to, its size, and when it changed. The keys stay on your devices. A backup of them is kept on the server, sealed with a recovery key that only you have.</p>
+
+<h2>Messages</h2>
+<p>Messages, groups, and calls go through Totality's Matrix server and are end-to-end encrypted, so the server can't read them. It does know which accounts are in a conversation and when messages are sent, because it has to deliver them.</p>
+
+<h2>Totality Mail</h2>
+<p>Every account has an address at usetotality.com. Mail between Totality accounts is sealed end to end. Mail from outside Totality arrives readable, as all email does. The mail server checks it for spam and holds it in memory for a moment, then seals it to your key before it's written anywhere. Mail you send to an outside address has to reach the other side readable, so it passes through Cloudflare's email service unsealed. Neither step keeps a log of the mail.</p>
+
+<h2>Gmail and iCloud</h2>
+<p>When you add a Gmail or iCloud account, your device connects to it directly. Gmail uses Google sign-in, and iCloud uses an app-specific password. The sign-in is kept in your device's Keychain. Mail downloaded from these accounts is stored encrypted on that device only, and isn't uploaded to Totality's servers.</p>
+<p>From the device, Totality reads your mail and labels or folders so they show in the app. It also sends back the changes you make in the app: read or unread, starred, archived, spam, and moving to Trash. It never deletes mail for good there. It only sends mail from these accounts after you turn on sending for that account, and then only each message you send. When you remove an account, its mail and sign-in are deleted from your devices, and Totality's access is withdrawn at Google.</p>
+<p>Totality's use and transfer of information received from Google APIs follows the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including its Limited Use requirements. Gmail data is used only to show and manage your mail in the app. It isn't used for ads, it isn't sold or given to anyone, nobody at Totality reads it, and it isn't used to train AI models.</p>
+
+<h2>Public profile</h2>
+<p>Your profile has a public web page at usetotality.com/@username only after you press Share. The page shows only your name, photo, and bio, and you can take it down at any time.</p>
+
+<h2>Web search</h2>
+<p>Searches go through Totality's own search gateway, which passes them to search engines without your account or address attached. Neither the gateway nor the search service logs what you search for.</p>
+
+<h2>Where it's kept</h2>
+<p>Totality's servers run on Supabase (the account and sealed sync data), Oracle Cloud (messages, mail, and sealed files), and Cloudflare (the connection to those servers and email delivery). Each of them holds only what's described above.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes, the date at the top changes with it.</p>`, { kind: 'doc', indexed: true })
 
 /** The page for one card. Every piece of it that a person typed is escaped. */
 export function profilePage(username, card, photoBase) {
@@ -123,6 +175,12 @@ export class Profiles {
   async respond(method, url, authorization) {
     const path = new URL(url ?? '/', 'http://local').pathname
     if (path === '/profile/health') return json(200, { ok: true })
+
+    const fixed = { '/': homePage, '/privacy': privacyPage }[path]
+    if (fixed) {
+      if (method !== 'GET' && method !== 'HEAD') return json(405, { error: 'method' })
+      return { status: 200, body: Buffer.from(fixed()), type: 'text/html; charset=utf-8', headers: pageHeaders("'none'"), cache: 'public, max-age=300' }
+    }
 
     const shown = /^\/@([A-Za-z0-9_]{3,24})$/.exec(path)
     if (shown) {
