@@ -18,7 +18,7 @@ final class IMAPConnection {
 
     /// Opens the provider's IMAP server and signs in. Throws a problem, never the password.
     static func signIn(_ signIn: OutsideSignIn, with maker: any OutsideWireMaker) async throws -> IMAPConnection {
-        let endpoint = signIn.provider.reading
+        guard let endpoint = signIn.provider.reading else { throw OutsideMailProblem.unexpected }
         precondition(endpoint.security == .tls, "IMAP is only ever spoken over TLS from the start")
         let connection = IMAPConnection(maker.open(endpoint))
         do {

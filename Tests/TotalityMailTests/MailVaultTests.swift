@@ -152,10 +152,10 @@ final class MailMemorySyncState: SyncStateStore, @unchecked Sendable {
         await #expect(throws: CryptoError.self) { try await second.store(planted, ifLocalHash: nil) }
     }
 
-    @Test("Sync sees marks, settings, and drafts, never messages")
+    @Test("Sync sees marks, settings, drafts, and outside accounts, never messages")
     func onlyMarksAndSettingsSync() async throws {
         let vault = MailVault(store: MailMemoryStore(), rootKey: try .generate(), account: alice)
-        #expect(vault.kinds == [.mailMarks, .mailSettings, .mailKeys, .mailDraft])
+        #expect(vault.kinds == [.mailMarks, .mailSettings, .mailKeys, .mailDraft, .mailOutside])
         try await vault.keep(invoiceMessage)
         #expect(try await vault.sealedObjectIDs().isEmpty)
         try await vault.save([invoice: MailMarks(isStarred: true)])

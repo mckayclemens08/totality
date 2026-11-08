@@ -263,7 +263,7 @@ import TotalityCore
 @Suite struct SyncRemoteFormatTests {
     @Test("Bookmarks, events, and mail marks sync with no body, and everything else needs one")
     func metaOnlyKinds() {
-        #expect(SupabaseSyncRemote.metaOnly == [.event, .bookmark, .mailMarks, .mailSettings, .mailKeys])
+        #expect(SupabaseSyncRemote.metaOnly == [.event, .bookmark, .mailMarks, .mailSettings, .mailKeys, .mailOutside])
         #expect(!SupabaseSyncRemote.metaOnly.contains(.note))
     }
 

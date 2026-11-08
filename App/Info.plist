@@ -35,6 +35,8 @@
 	<string>$(TOTALITY_BACKEND_KEY)</string>
 	<key>TotalitySealedStoreURL</key>
 	<string>$(TOTALITY_SEALED_STORE_URL)</string>
+	<key>TotalityGoogleClientID</key>
+	<string>$(TOTALITY_GOOGLE_CLIENT_ID)</string>
 	<key>UIUserInterfaceStyle</key>
 	<string>Light</string>
 	<key>UIBackgroundModes</key>

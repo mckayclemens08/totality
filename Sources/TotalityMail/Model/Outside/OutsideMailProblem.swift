@@ -12,6 +12,10 @@ public enum OutsideMailProblem: Error, Equatable, Sendable {
     case wrongPassword
     /// The provider wants an app password, not the account's own password.
     case needsAppPassword
+    /// The person didn't allow everything asked for on Google's page: reading to add, sending to send.
+    case notAllowed
+    /// A Google sign-in that worked before was taken back, or ran out. Signing in again fixes it.
+    case expired
     /// The provider said no for its own reason, in its own words.
     case refused(String)
     /// The server said something that doesn't fit the protocol.

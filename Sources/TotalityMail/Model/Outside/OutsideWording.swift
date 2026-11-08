@@ -1,0 +1,78 @@
+import Foundation
+
+/// What Mail says about outside accounts. The keeper and sending lines are issue 43's own words, agreed
+/// with the owner, and have to stay literally true: nothing here calls an outside account's mail sealed
+/// or end-to-end encrypted at the provider.
+public enum OutsideWording {
+    /// On every outside account, and on its mail once reading lands.
+    public static func kept(by provider: OutsideProvider) -> String {
+        "This mail is kept by \(provider.keeper), who can read it. Totality doesn't seal it there. Your downloaded copy on this device is sealed."
+    }
+
+    public static func sent(through provider: OutsideProvider) -> String {
+        "Sent through \(provider.name). It isn't end-to-end encrypted."
+    }
+
+    public static let sendSwitch = "Send from this account"
+    public static func sendSwitchOff(_ provider: OutsideProvider) -> String {
+        provider.signsInWithGoogle
+            ? "Reading this account never lets Totality send from it. Turning this on asks Google to let Totality send too."
+            : "Reading this account never lets Totality send from it. Turn this on to choose it as From."
+    }
+
+    /// What adding an account involves, before anything is asked for.
+    public static func howToAdd(_ provider: OutsideProvider) -> [String] {
+        switch provider {
+        case .icloud: [
+            "Apple doesn't let other apps sign in to iCloud Mail with your Apple Account, so it takes an app-specific password made for Totality.",
+            "Tap Make an App Password, sign in to Apple, then choose Sign-In and Security, App-Specific Passwords, and name it Totality. Copy it, come back, and paste it here.",
+            "Your iPhone or Mac talks to Apple directly. Totality's server never sees the password or your mail.",
+        ]
+        case .gmail: [
+            "Sign in on Google's own page. Totality never sees your Google password.",
+            "Totality asks only to read your mail. Sending is asked for separately, if you turn it on.",
+            "Your iPhone or Mac talks to Google directly. Totality's server never sees your sign-in or your mail.",
+        ]
+        }
+    }
+
+    /// Google shows this warning until it has reviewed Totality, so it's said first.
+    public static let googleUnverified = "Google may say it hasn't verified Totality yet. That's expected for now: choose Advanced, then Go to Totality."
+
+    public static func removing(_ account: OutsideAccount) -> String {
+        account.provider.signsInWithGoogle
+            ? "Its sign-in and everything downloaded from it leave this device and your others, and Totality's access is taken back at Google. No mail at Google is deleted."
+            : "Its sign-in and everything downloaded from it leave this device and your others. Nothing at \(account.provider.keeper) is deleted."
+    }
+
+    public static let none = "No outside accounts yet. Add iCloud or Gmail to read them here, beside your Totality mail."
+
+    public static func problem(_ error: OutsideAccountError, provider: OutsideProvider) -> String {
+        switch error {
+        case .problem(let problem): self.problem(problem, provider: provider)
+        case .tooMany: "You can add up to \(OutsideAccountLimits.most) outside accounts for now."
+        case .alreadyAdded: "That account is already added."
+        case .notFound: "This account's sign-in isn't on this device. Remove it and add it again."
+        case .unavailable: "This device can't keep sign-ins until Mail has opened with your content key."
+        case .cancelled: ""
+        case .notSetUp: "Google sign-in isn't set up in this version of Totality yet."
+        case .differentAccount: "That was a different Google account. Sign in with the one you're changing."
+        }
+    }
+
+    public static func problem(_ problem: OutsideMailProblem, provider: OutsideProvider) -> String {
+        switch problem {
+        case .offline: "You're offline. Connect, then try again."
+        case .unreachable: "\(provider.name) didn't answer. Try again in a moment."
+        case .insecure: "Totality couldn't make a secure connection to \(provider.name), so it didn't send your sign-in."
+        case .wrongPassword: "\(provider.name) didn't accept that address and app password. Check both, or make a new app password."
+        case .notAllowed: provider.signsInWithGoogle
+            ? "Google wasn't given permission. Try again and leave Totality's box ticked on Google's page."
+            : "\(provider.name) didn't allow it."
+        case .expired: "\(provider.name)'s sign-in no longer works. Remove the account and add it again."
+        case .needsAppPassword: "That looks like your \(provider.keeper) account password. \(provider.name) needs an app password made for Totality."
+        case .refused(let said): said.isEmpty ? "\(provider.name) turned the sign-in down." : "\(provider.name) said: \(said)"
+        case .unexpected: "\(provider.name) answered in a way Totality didn't expect. Try again later."
+        }
+    }
+}

@@ -71,6 +71,9 @@ public actor MailVault {
     /// A Sent copy the server didn't take. The message itself is kept like any other; this only says
     /// it still has to reach the server, so it's never pruned or lost meanwhile. It stays on this device.
     private static let unkeptSuffix = ".mail.unkept"
+    /// One outside account, with its app password. It has no trash file: a sign-in is never kept
+    /// after it's removed, here or because the server says so.
+    private static let outsideSuffix = ".mail.outside"
 
     /// How each file is sealed, so a key move can reach them without knowing what they are. The IDs are
     /// derived from text only Mail uses, so no other module's blob can share one.
@@ -82,6 +85,7 @@ public actor MailVault {
         draftSuffix: .metadata, draftSuffix + ".trash": .metadata,
         draftBodySuffix: .content, draftBodySuffix + ".trash": .content,
         unkeptSuffix: .metadata,
+        outsideSuffix: .metadata,
     ]
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
 
@@ -134,6 +138,15 @@ public actor MailVault {
         let message: UUID
     }
 
+    /// The app password or Google's token travels only inside this seal. On the device it's also in
+    /// the keychain, which is where it's used from.
+    struct OutsideRecord: Codable, Equatable {
+        let account: String
+        let outside: OutsideAccount
+        let credential: OutsideCredential
+        let updatedAt: Date
+    }
+
     struct MessageRecord: Codable {
         let account: String
         let message: MailStoredMessage
@@ -142,13 +155,16 @@ public actor MailVault {
     private let store: any BlobStore
     private let rootKey: ContentRootKey
     public nonisolated let account: String
+    /// Where outside accounts' sign-ins are used from. Nil means this vault keeps none.
+    private let secrets: (any KeyStore)?
     private var isClosed = false
     private var hashes: [UUID: String] = [:]
 
-    public init(store: any BlobStore, rootKey: ContentRootKey, account: String) {
+    public init(store: any BlobStore, rootKey: ContentRootKey, account: String, secrets: (any KeyStore)? = nil) {
         self.store = store
         self.rootKey = rootKey
         self.account = account
+        self.secrets = secrets
     }
 
     public func close() {
@@ -175,6 +191,16 @@ public actor MailVault {
 
     static func keysID(account: String) -> UUID {
         UUID(derivedFrom: "totality.mail.keys.\(account)")
+    }
+
+    static func outsideID(_ outside: UUID, account: String) -> UUID {
+        UUID(derivedFrom: "totality.mail.outside.\(account).\(outside.uuidString.lowercased())")
+    }
+
+    /// The keychain name for one outside account's app password. It names the Totality account, so
+    /// another account on this device can never reach it.
+    static func secretName(_ outside: UUID, account: String) -> String {
+        "mail.outside.\(account.lowercased()).\(outside.uuidString.lowercased())"
     }
 
     static func draftID(_ draft: UUID, account: String) -> UUID {
@@ -370,6 +396,91 @@ public actor MailVault {
         return record
     }
 
+    // MARK: Outside accounts
+
+    /// This account's outside accounts, oldest first. One that won't open, or is someone else's, is
+    /// left out and left alone.
+    public func outsideAccounts() throws -> [OutsideAccount] {
+        try outsideRecords().map(\.outside).sorted { ($0.addedAt, $0.id.uuidString) < ($1.addedAt, $1.id.uuidString) }
+    }
+
+    /// Keeps the account and its sign-in, or replaces them. The keychain is written first, so a saved
+    /// account always has its sign-in here.
+    public func save(_ outside: OutsideAccount, credential: OutsideCredential, at now: Date = Date()) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        guard let secrets else { throw OutsideAccountError.unavailable }
+        let id = Self.outsideID(outside.id, account: account)
+        try secrets.save(try credential.keychainData, as: Self.secretName(outside.id, account: account))
+        let record = OutsideRecord(account: account, outside: outside, credential: credential, updatedAt: now)
+        try store.write(try seal(record, id: id, purpose: .metadata), as: name(id, Self.outsideSuffix))
+        try store.delete(deletionName(id))
+        hashes[id] = nil
+    }
+
+    /// Changes what's kept about the account, with the sign-in it already has.
+    public func update(_ outside: OutsideAccount, at now: Date = Date()) throws {
+        guard let record = try outsideRecord(outside.id) else { throw OutsideAccountError.notFound }
+        try save(outside, credential: record.credential, at: now)
+    }
+
+    /// The account's sign-in, from the keychain. A device that got the account through sync and lost
+    /// the keychain copy gets it back from the sealed record.
+    public func credential(for outside: UUID) throws -> OutsideCredential? {
+        guard let secrets, let record = try outsideRecord(outside) else { return nil }
+        let secret = Self.secretName(outside, account: account)
+        let kept = try secrets.load(secret).flatMap { try? OutsideCredential(keychainData: $0) }
+        if kept != record.credential {
+            try secrets.save(try record.credential.keychainData, as: secret)
+        }
+        return record.credential
+    }
+
+    /// An app-password account's sign-in, ready for IMAP or SMTP.
+    public func signIn(for outside: UUID) throws -> OutsideSignIn? {
+        guard case .appPassword(let password) = try credential(for: outside),
+              let record = try outsideRecord(outside) else { return nil }
+        return OutsideSignIn(provider: record.outside.provider, address: record.outside.address, appPassword: password)
+    }
+
+    /// The sign-in leaves the keychain first, then the record goes, and the removal reaches the other
+    /// devices through sync. Nothing at the provider is touched.
+    public func removeOutside(_ outside: UUID) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        let id = Self.outsideID(outside, account: account)
+        try secrets?.delete(Self.secretName(outside, account: account))
+        guard try store.read(name(id, Self.outsideSuffix)) != nil else { return }
+        try store.write(Data(), as: deletionName(id))
+        try store.delete(name(id, Self.outsideSuffix))
+        hashes[id] = nil
+    }
+
+    private func outsideRecord(_ outside: UUID) throws -> OutsideRecord? {
+        let id = Self.outsideID(outside, account: account)
+        guard let sealed = try store.read(name(id, Self.outsideSuffix)) else { return nil }
+        return try openedOutside(id: id, sealed: sealed)
+    }
+
+    private func outsideRecords() throws -> [OutsideRecord] {
+        try ids(Self.outsideSuffix).compactMap { id in
+            guard let sealed = try store.read(name(id, Self.outsideSuffix)) else { return nil }
+            return try? openedOutside(id: id, sealed: sealed)
+        }
+    }
+
+    private func openedOutside(id: UUID, sealed: Data) throws -> OutsideRecord {
+        let record = try open(OutsideRecord.self, sealed, id: id, purpose: .metadata)
+        guard record.account == account, Self.outsideID(record.outside.id, account: account) == id else {
+            throw CryptoError.authenticationFailed
+        }
+        return record
+    }
+
+    /// Keeps the keychain in step with a record that arrived through sync.
+    private func keepSecret(of object: SealedObject) throws {
+        let record = try openedOutside(id: object.id, sealed: object.meta)
+        try secrets?.save(try record.credential.keychainData, as: Self.secretName(record.outside.id, account: account))
+    }
+
     // MARK: Drafts
 
     /// Every draft that opens, newest first. One that won't is left out and left alone.
@@ -452,6 +563,7 @@ public actor MailVault {
         case .mailDraft:
             guard let body = object.body else { throw CryptoError.malformedCiphertext }
             return try openedDraft(id: object.id, meta: object.meta, body: body).updatedAt
+        case .mailOutside: return try openedOutside(id: object.id, sealed: object.meta).updatedAt
         default: throw CryptoError.authenticationFailed
         }
     }
@@ -462,6 +574,7 @@ public actor MailVault {
         case .mailSettings: Self.settingsSuffix
         case .mailKeys: Self.keysSuffix
         case .mailDraft: Self.draftSuffix
+        case .mailOutside: Self.outsideSuffix
         default: nil
         }
     }
@@ -472,20 +585,22 @@ public actor MailVault {
         if let data = try store.read(name(id, Self.settingsSuffix)) { return (.mailSettings, data) }
         if let data = try store.read(name(id, Self.keysSuffix)) { return (.mailKeys, data) }
         if let data = try store.read(name(id, Self.draftSuffix)) { return (.mailDraft, data) }
+        if let data = try store.read(name(id, Self.outsideSuffix)) { return (.mailOutside, data) }
         return nil
     }
 }
 
 extension MailVault: SyncArea {
-    /// Marks, settings, pinned keys, and drafts. Messages have no kind here, so sync can never see them.
-    public nonisolated var kinds: Set<ContentKind> { [.mailMarks, .mailSettings, .mailKeys, .mailDraft] }
+    /// Marks, settings, pinned keys, drafts, and outside accounts. Messages have no kind here, so sync
+    /// can never see them.
+    public nonisolated var kinds: Set<ContentKind> { [.mailMarks, .mailSettings, .mailKeys, .mailDraft, .mailOutside] }
 
     /// Only this account's. Another account's files on this device stay out of this account's sync.
     public func sealedObjectIDs() throws -> [UUID] {
         // A crash can stop an erase halfway. The record says what was meant, so finish it.
         if !isClosed {
             for id in try deletedObjectIDs() {
-                for suffix in [Self.marksSuffix, Self.draftSuffix, Self.draftBodySuffix] where try store.read(name(id, suffix)) != nil {
+                for suffix in [Self.marksSuffix, Self.draftSuffix, Self.draftBodySuffix, Self.outsideSuffix] where try store.read(name(id, suffix)) != nil {
                     try store.delete(name(id, suffix))
                     hashes[id] = nil
                 }
@@ -506,6 +621,10 @@ extension MailVault: SyncArea {
             guard let meta = try store.read(name(id, Self.draftSuffix)), let body = try store.read(name(id, Self.draftBodySuffix)),
                   (try? openedDraft(id: id, meta: meta, body: body)) != nil
             else { continue }
+            found.append(id)
+        }
+        for id in try ids(Self.outsideSuffix) {
+            guard let sealed = try store.read(name(id, Self.outsideSuffix)), (try? openedOutside(id: id, sealed: sealed)) != nil else { continue }
             found.append(id)
         }
         return found
@@ -540,6 +659,10 @@ extension MailVault: SyncArea {
         if expected == nil, try store.read(deletionName(object.id)) != nil { throw SyncError.changedLocally }
         _ = try updatedAt(object)
         if object.kind == .mailKeys { return try merge(object) }
+        if object.kind == .mailOutside {
+            guard secrets != nil else { throw OutsideAccountError.unavailable }
+            try keepSecret(of: object)
+        }
         if let body = object.body { try store.write(body, as: name(object.id, Self.draftBodySuffix)) }
         try store.write(object.meta, as: name(object.id, suffix))
         hashes[object.id] = nil
@@ -552,6 +675,16 @@ extension MailVault: SyncArea {
         guard !isClosed else { throw MailVaultError.closed }
         guard try sealedHash(of: id) == expected else { throw SyncError.changedLocally }
         guard let (kind, sealed) = try synced(id), let suffix = suffix(for: kind), kind != .mailKeys else { return }
+        // A sign-in is gone for good, never kept in a trash. A stolen session could use this to remove
+        // an account, which only disconnects it until it's added again.
+        if kind == .mailOutside {
+            if let record = try? openedOutside(id: id, sealed: sealed) {
+                try secrets?.delete(Self.secretName(record.outside.id, account: account))
+            }
+            try store.delete(name(id, suffix))
+            hashes[id] = nil
+            return
+        }
         // The stamp goes first, so a crash can't leave trash that's never cleaned up.
         try store.write(Data(ISO8601DateFormatter().string(from: Date()).utf8), as: trashStampName(id))
         try store.write(sealed, as: name(id, suffix) + ".trash")
