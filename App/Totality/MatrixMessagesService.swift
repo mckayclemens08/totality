@@ -133,6 +133,8 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
                 isRequest: true, from: inviter, lastActivity: nil
             )
         case .joined:
+            // Messages only shows end-to-end encrypted chats, so its label stays true.
+            guard await room.isEncrypted() else { return nil }
             let (text, time) = preview(await room.latestEvent())
             let title = info.displayName ?? info.heroes.first.map { MessagesUsername.display($0.userId) } ?? "Chat"
             let unread = Int(info.numUnreadMessages) + (info.isMarkedUnread ? 1 : 0)
@@ -176,7 +178,18 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
     }
 
     func accept(_ chat: String) async throws {
-        do { try await room(chat).join() } catch { throw Self.translate(error) }
+        let room: Room
+        do {
+            room = try self.room(chat)
+            try await room.join()
+        } catch {
+            throw Self.translate(error)
+        }
+        // A chat that isn't end-to-end encrypted is left again rather than shown.
+        guard await room.isEncrypted() else {
+            try? await room.leave()
+            throw MessagesError.failed("That chat isn't end-to-end encrypted, so Messages left it.")
+        }
     }
 
     func decline(_ chat: String) async throws {

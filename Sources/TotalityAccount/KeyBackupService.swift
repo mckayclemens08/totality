@@ -119,7 +119,8 @@ extension SupabaseAccountService: KeyBackupService {
         }
     }
 
-    /// A Matrix session lasts for one job and is then thrown away, so no Matrix token is ever stored.
+    /// A key-backup Matrix session lasts for one job and is then thrown away, so its token is never stored.
+    /// (Messages keeps its own long-lived session, in the Keychain, under App/Totality.)
     private func withMatrix<Result: Sendable>(_ work: @Sendable (MatrixSession) async throws -> Result) async throws -> Result {
         let session = try await MatrixSession.signIn(with: try await matrixPass())
         do {
