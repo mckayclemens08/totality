@@ -16,8 +16,23 @@
 		A1B2C3D40000000000000035 /* TotalityMail in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000036 /* TotalityMail */; };
 		A1B2C3D400000000000000A0 /* TotalityMessages in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000A1 /* TotalityMessages */; };
 		A1B2C3D400000000000000A2 /* MatrixRustSDK in Frameworks */ = {isa = PBXBuildFile; platformFilter = ios; productRef = A1B2C3D400000000000000A3 /* MatrixRustSDK */; };
+		A1B2C3D400000000000000A6 /* MatrixRustSDK in Embed Frameworks */ = {isa = PBXBuildFile; platformFilter = ios; productRef = A1B2C3D400000000000000A3 /* MatrixRustSDK */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		A1B2C3D40000000000000037 /* TotalityPhotos in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000038 /* TotalityPhotos */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A1B2C3D400000000000000A5 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				A1B2C3D400000000000000A6 /* MatrixRustSDK in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A1B2C3D4000000000000001B /* Totality.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Totality.xcconfig; sourceTree = "<group>"; };
@@ -80,6 +95,7 @@
 				A1B2C3D40000000000000004 /* Sources */,
 				A1B2C3D40000000000000005 /* Frameworks */,
 				A1B2C3D40000000000000006 /* Resources */,
+				A1B2C3D400000000000000A5 /* Embed Frameworks */,
 				A1B2C3D40000000000000090 /* Embed Voice Pack */,
 			);
 			buildRules = (
