@@ -577,8 +577,9 @@ final class Clock: @unchecked Sendable {
 
     @Test func saysPlainlyWhatWasntAdded() {
         #expect(PhotosModel.addNotice(skipped: 0, tooBig: 0) == nil)
-        #expect(PhotosModel.addNotice(skipped: 1, tooBig: 0) == "One item couldn't be read as a photo.")
-        #expect(PhotosModel.addNotice(skipped: 0, tooBig: 2) == "2 photos are over 100 MB, so they weren't added.")
+        #expect(PhotosModel.addNotice(skipped: 1, tooBig: 0) == "One item couldn't be read as a photo or video.")
+        #expect(PhotosModel.addNotice(skipped: 0, tooBig: 2) == "2 items are too big to add.")
+        #expect(PhotosModel.addNotice(.init(tooLong: 1)) == "One video is over 10 minutes, so it wasn't added.")
     }
 
     @Test @MainActor func withoutALibraryPhotosSaysWhy() {

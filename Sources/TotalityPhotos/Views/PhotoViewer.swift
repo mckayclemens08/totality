@@ -30,14 +30,14 @@ struct PhotoViewer: View {
             #if os(iOS)
             TabView(selection: $current) {
                 ForEach(items) { item in
-                    ZoomablePhoto(model: model, item: item, onClose: onClose).tag(Optional(item.id))
+                    page(item).tag(Optional(item.id))
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
             #else
             if let item = items.first(where: { $0.id == current }) {
-                ZoomablePhoto(model: model, item: item, onClose: onClose).id(item.id)
+                page(item).id(item.id)
             }
             #endif
         }
@@ -68,6 +68,14 @@ struct PhotoViewer: View {
             Text(scope == .recentlyDeleted
                 ? "It's removed from every device and the server. This can't be undone."
                 : "It goes to Recently Deleted for \(PhotoLibrary.trashDays) days, on every device.")
+        }
+    }
+
+    @ViewBuilder private func page(_ item: PhotoItem) -> some View {
+        if item.details.isVideo {
+            SealedVideoView(model: model, item: item).padding(.vertical, Space.s8)
+        } else {
+            ZoomablePhoto(model: model, item: item, onClose: onClose)
         }
     }
 
@@ -135,7 +143,9 @@ struct PhotoViewer: View {
                                      tint: item.details.favourite ? theme.accent.color : nil) {
                             Task { await model.toggleFavourite(item) }
                         }
-                        actionButton("Info", systemImage: "info.circle") { showingInfo = true }
+                        if !item.details.isVideo {
+                            actionButton("Info", systemImage: "info.circle") { showingInfo = true }
+                        }
                         albumMenu(item)
                         if isSaving {
                             ProgressView().frame(width: Space.s7, height: Space.s7).accessibilityLabel("Saving to Photos")
@@ -223,7 +233,17 @@ struct PhotoViewer: View {
         Task {
             defer { isSaving = false }
             do {
-                try await PhotoSaver.save(try await model.original(item))
+                if item.details.isVideo {
+                    let file = try await model.exportMovie(item)
+                    defer { try? FileManager.default.removeItem(at: file) }
+                    try await PhotoSaver.saveVideo(file)
+                } else if item.details.isLive {
+                    let file = try await model.exportMovie(item)
+                    defer { try? FileManager.default.removeItem(at: file) }
+                    try await PhotoSaver.saveLive(still: try await model.original(item), motion: file)
+                } else {
+                    try await PhotoSaver.save(try await model.original(item))
+                }
                 model.notice = "Saved to your Photos."
             } catch PhotoSaver.Failure.notAllowed {
                 model.notice = "Totality isn't allowed to add to your Photos. You can allow it in Settings, under Privacy, then Photos."
@@ -249,6 +269,7 @@ struct ZoomablePhoto: View {
     @State private var full: CGImage?
     @State private var thumbnail: CGImage?
     @State private var failed = false
+    @State private var playingLive = false
     @State private var scale: CGFloat = 1
     @State private var settledScale: CGFloat = 1
     @State private var offset: CGSize = .zero
@@ -269,6 +290,23 @@ struct ZoomablePhoto: View {
                 } else {
                     ProgressView()
                 }
+                if playingLive {
+                    LiveMotionView(model: model, item: item)
+                        .scaleEffect(scale)
+                        .offset(offset)
+                }
+                if item.details.isLive {
+                    Label("Live", systemImage: "livephoto")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textPrimary.color)
+                        .padding(.horizontal, Space.s2)
+                        .padding(.vertical, Space.s1)
+                        .neumorphic(.subtle, in: Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.top, Space.s8 + Space.s5)
+                        .padding(.leading, Space.s4)
+                        .accessibilityLabel("Live Photo. Touch and hold to play.")
+                }
                 if failed {
                     Text("The full photo couldn't be opened. What you see is its thumbnail.")
                         .font(Typeface.caption)
@@ -283,6 +321,17 @@ struct ZoomablePhoto: View {
             .contentShape(Rectangle())
             .gesture(magnify)
             .simultaneousGesture(drag)
+            .onLongPressGesture(minimumDuration: 0.25, maximumDistance: 12) {} onPressingChanged: { pressing in
+                playingLive = pressing && item.details.isLive
+            }
+            .accessibilityAction(named: "Play Live Photo") {
+                guard item.details.isLive else { return }
+                playingLive = true
+                Task {
+                    try? await Task.sleep(for: .seconds(max(item.details.duration ?? 3, 1)))
+                    playingLive = false
+                }
+            }
             .onTapGesture(count: 2) {
                 withAnimation(Motion.quick) {
                     if scale > 1 { reset() } else { scale = 2.5; settledScale = 2.5 }

@@ -15,6 +15,7 @@ struct AlbumsScreen: View {
         ScrollView {
             LazyVGrid(columns: columns, alignment: .leading, spacing: Space.s5) {
                 AlbumCard(model: model, title: "Favourites", systemImage: "heart", items: model.items(in: .favourites)) { onOpen(.favourites) }
+                AlbumCard(model: model, title: "Videos", systemImage: "video", items: model.items(in: .videos)) { onOpen(.videos) }
                 ForEach(model.albums) { album in
                     AlbumCard(model: model, title: album.name, systemImage: "rectangle.stack", items: model.items(in: .album(album.id))) {
                         onOpen(.album(album.id))
@@ -198,6 +199,7 @@ struct ScopeScreen: View {
     private var emptyImage: String {
         switch scope {
         case .favourites: "heart"
+        case .videos: "video"
         case .recentlyDeleted: "trash"
         default: "rectangle.stack"
         }
@@ -206,6 +208,7 @@ struct ScopeScreen: View {
     private var emptyTitle: String {
         switch scope {
         case .favourites: "No favourites yet"
+        case .videos: "No videos yet"
         case .recentlyDeleted: "Nothing recently deleted"
         case .album(let id): model.album(id) == nil ? "This album is gone" : "This album is empty"
         case .library: "No photos yet"
@@ -215,6 +218,7 @@ struct ScopeScreen: View {
     private var emptyDetail: String {
         switch scope {
         case .favourites: "Tap the heart on a photo to keep it here."
+        case .videos: "Add a video with Add. Videos up to 10 minutes are sealed here before they upload."
         case .recentlyDeleted: "Photos you delete wait here for \(PhotoLibrary.trashDays) days, so you can bring them back."
         case .album(let id): model.album(id) == nil
             ? "It was deleted, maybe on another device. Its photos are still in your library."

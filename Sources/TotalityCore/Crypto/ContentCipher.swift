@@ -29,6 +29,8 @@ public enum KeyPurpose: String, Sendable, Hashable {
     case photoDetails = "photo-details"
     /// A photo album's name.
     case photoAlbum = "photo-album"
+    /// A video, or a Live Photo's moving part, sealed in chunks with `ChunkedCipher`.
+    case photoVideo = "photo-video"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.

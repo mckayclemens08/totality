@@ -224,6 +224,41 @@ struct LockedSecretVectorTests {
         }
     }
 
+    @Test func aMovieSealedInChunksMovesAChunkAtATime() throws {
+        let keys = Keys()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ring-\(UUID().uuidString)")
+        let files = try FileBlobStore(directory: folder)
+        let ring = ContentKeyRing(keys: keys, areas: [
+            SealedArea(files: files, purposes: [".meta": .metadata], chunked: [".waiting-video": .photoVideo]),
+        ])
+        let old = try ring.current()
+        let id = UUID()
+        let movie = Data((0..<(ChunkedCipher.chunkSize * 2 + 500)).map { UInt8(truncatingIfNeeded: $0 &* 7) })
+        let plain = folder.appendingPathComponent("plain-input")
+        try movie.write(to: plain)
+        let name = id.uuidString.lowercased() + ".waiting-video"
+        try ChunkedCipher.seal(file: plain, to: files.location(of: name), key: old.objectKey(for: id, purpose: .photoVideo), objectID: id)
+        try FileManager.default.removeItem(at: plain)
+        try files.write(try ContentCipher.seal(Data("Arches at dusk".utf8), key: old.objectKey(for: id, purpose: .metadata), objectID: id),
+                        as: id.uuidString.lowercased() + ".meta")
+
+        let shared = try ContentRootKey.generate()
+        #expect(try ring.adopt(shared) == KeyMoveReport(moved: 2, unreadable: 0))
+        let reader = try ChunkedCipher.Reader(file: files.location(of: name), key: shared.objectKey(for: id, purpose: .photoVideo), objectID: id)
+        #expect(try reader.read(0..<movie.count) == movie)
+        #expect(try files.names().sorted() == [id.uuidString.lowercased() + ".meta", name].sorted())
+        // Running it again finds it moved already, and a file neither key opens is left as it is.
+        #expect(try ChunkedCipher.reseal(
+            files.location(of: name), through: files.location(of: name + "-moving"),
+            from: old.objectKey(for: id, purpose: .photoVideo), to: shared.objectKey(for: id, purpose: .photoVideo), objectID: id
+        ) == .alreadyMoved)
+        let stranger = try ContentRootKey.generate()
+        #expect(try ChunkedCipher.reseal(
+            files.location(of: name), through: files.location(of: name + "-moving"),
+            from: stranger.objectKey(for: id, purpose: .photoVideo), to: stranger.objectKey(for: UUID(), purpose: .photoVideo), objectID: id
+        ) == .unreadable)
+    }
+
     @Test func movesEveryBlobToTheNewKey() throws {
         let device = try device()
         let shared = try ContentRootKey.generate()
