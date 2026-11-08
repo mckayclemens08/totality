@@ -3,6 +3,7 @@ import TotalityAccount
 import TotalityCalendar
 import TotalityCore
 import TotalityMail
+import TotalityPhotos
 import TotalityReader
 import TotalityWeb
 
@@ -16,13 +17,16 @@ enum ContentSetup {
             .appendingPathComponent("Totality", isDirectory: true)
     }
 
-    private static func stores() throws -> (reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore) {
+    private static func stores() throws -> (
+        reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore
+    ) {
         let base = try base()
         return (
             try FileBlobStore(directory: base.appendingPathComponent("Reader", isDirectory: true)),
             try FileBlobStore(directory: base.appendingPathComponent("Calendar", isDirectory: true)),
             try FileBlobStore(directory: base.appendingPathComponent("Web", isDirectory: true)),
-            try FileBlobStore(directory: base.appendingPathComponent("Mail", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Mail", isDirectory: true)),
+            try FileBlobStore(directory: base.appendingPathComponent("Photos", isDirectory: true))
         )
     }
 
@@ -33,6 +37,7 @@ enum ContentSetup {
             SealedArea(store: stores.calendar, purposes: CalendarVault.sealedPurposes),
             SealedArea(store: stores.web, purposes: WebVault.sealedPurposes),
             SealedArea(store: stores.mail, purposes: MailVault.sealedPurposes),
+            SealedArea(store: stores.photos, purposes: PhotoLibrary.sealedPurposes),
         ])
     }
 
@@ -45,7 +50,7 @@ enum ContentSetup {
     /// The key step finishes any move that was interrupted, so this always opens with the right key.
     static func makeModels() throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, areas: [any SyncArea], registry: ModuleRegistry,
-        mail: MailContent
+        mail: MailContent, photos: PhotosContent
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -59,6 +64,7 @@ enum ContentSetup {
             CalendarModule(vault: calendarVault, devices: devices, hidden: { CalendarModel.hiddenCalendars(in: .standard) }),
             WebModule(),
             MailModule(),
+            PhotosModule(),
         ])
         return (
             ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices())),
@@ -74,8 +80,55 @@ enum ContentSetup {
             ),
             [readerVault, calendarVault, webVault],
             registry,
-            MailContent(rootKey: rootKey, store: stores.mail)
+            MailContent(rootKey: rootKey, store: stores.mail),
+            PhotosContent(rootKey: rootKey, store: stores.photos)
         )
+    }
+}
+
+/// What a Photos library is made from. Like Mail's, a library belongs to one account, so it's made once
+/// the device's owner is known.
+struct PhotosContent {
+    let rootKey: ContentRootKey
+    let store: FileBlobStore
+}
+
+/// Makes the Photos library for whoever owns this device's key. A change of account or key closes the
+/// old one, so nothing of the last person's photos can be read or added through it.
+@MainActor
+final class PhotosWiring {
+    private(set) var library: PhotoLibrary?
+    private var content: PhotosContent?
+
+    func connect(_ content: PhotosContent) {
+        self.content = content
+    }
+
+    /// Forgets the library before waiting for it to close, so nothing can pick it up meanwhile.
+    func disconnect() async {
+        let old = library
+        library = nil
+        content = nil
+        await old?.close()
+    }
+
+    /// Opens the library for this account. True when it's a different library from before.
+    /// The new library is in place before anything waits, so two calls that overlap can't leave a stale one.
+    func use(account: String?) async -> Bool {
+        let old = library
+        if let account, let content, let makeRows = AccountSetup.photoRows {
+            guard old?.account != account else { return false }
+            let rows = makeRows(account)
+            library = PhotoLibrary(
+                account: account, rootKey: content.rootKey, cache: content.store, rows: rows,
+                store: SealedStoreClient(token: { try await rows.accessToken() })
+            )
+        } else {
+            guard old != nil else { return false }
+            library = nil
+        }
+        await old?.close()
+        return true
     }
 }
 

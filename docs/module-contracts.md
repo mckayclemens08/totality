@@ -305,6 +305,31 @@ neither module imports the other. Like mail, the Oracle server has no backup yet
 - **Two-user cases** are in `server/blobs/blobs.test.mjs`, through real HTTP the way anyone with a sign-in
   could ask, and the client's half in `SealedStoreTests`.
 
+## Photos
+
+Spec agreed with the owner on 2026-11-05, in issue 54. Step 2 is adding and viewing. Albums, sharing,
+deleting and video come in later steps.
+
+- **Everything is sealed on the device first** (non-negotiable 2). Each photo has three parts, each sealed
+  with its own key from the content key: the original exactly as added (`.photo`), a 480-pixel thumbnail
+  with no metadata (`.photoThumbnail`), and the details (`.photoDetails`): owner, date taken, size, and type.
+  The original and thumbnail go to the sealed blob store under random IDs. A `content_objects` row of kind
+  `photo` holds the sealed details, the original's key, and the size, and nothing readable. The date and
+  place inside the photo stay inside the sealed original and details.
+- **Adding** seals all three parts into the device's photo store before anything uploads, so a photo
+  added offline, or one whose upload stops, isn't lost. Uploads go original, thumbnail, then row, so the
+  server never names a photo whose files aren't there. Trying again is always safe. A full account stops
+  the upload and says so, and the photo waits on the device.
+- **Viewing.** The library lists the rows, opens each one's details, and shows only photos whose details
+  name this account. Thumbnails and details are kept sealed on the device, so the library opens offline.
+  Originals are fetched only when a photo is opened. Photos don't go through encrypted sync, which would
+  copy every original to every device. A second device sees them once it has joined the key backup.
+- **Who gets a library.** Only the account that owns this device's key, once the device has joined the
+  backup. Anyone else signed in sees the reason, not someone else's photos. Rows refuse to work under any
+  sign-in but the account they were made for.
+- **The UI says** "End-to-end encrypted", which is literally true: the server holds only ciphertext and
+  the key never leaves the owner's devices and recovery key.
+
 ## Mail
 
 Agreed with the owner on 2026-11-02, in issue 37, which holds the full spec. Mail stands apart from Supabase and Matrix: mailboxes and public keys live on the Oracle server, and arrival never calls an outside service, so nobody else learns when someone receives mail.

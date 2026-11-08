@@ -8,6 +8,8 @@ enum AccountSetup {
     private(set) static var searchToken: (@Sendable () async throws -> String)?
     /// The signed-in username, which is also the mail address's first half.
     private(set) static var username: (@Sendable () async -> String?)?
+    /// Where one account's photos keep their rows, and the sealed store's sign-in for that account.
+    private(set) static var photoRows: ((String) -> SupabasePhotoRows)?
 
     static func makeModel(content: any ContentKeyAccess) -> AccountModel? {
         guard let config = AccountConfig.fromBundle() else { return nil }
@@ -18,6 +20,7 @@ enum AccountSetup {
         )
         searchToken = { try await service.accessToken() }
         username = { await service.currentUsername() }
+        photoRows = { service.photoRows(for: $0) }
         return AccountModel(
             service: service, backup: BackupModel(service: service, content: content),
             sync: SyncModel(), syncRemote: service.syncRemote

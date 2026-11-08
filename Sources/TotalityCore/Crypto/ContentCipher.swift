@@ -22,6 +22,11 @@ public enum KeyPurpose: String, Sendable, Hashable {
     case bookmark
     /// Web history, open tabs, and settings, which stay on the device.
     case browsing
+    /// A photo's original file, its thumbnail, and its details (issue 54). Each part has its own key, so
+    /// a server can't pass one off as another.
+    case photo
+    case photoThumbnail = "photo-thumbnail"
+    case photoDetails = "photo-details"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.
