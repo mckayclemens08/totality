@@ -52,6 +52,9 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
     private(set) var smtpTo: [String] = []
     private(set) var smtpMessage: String?
     private var smtpData: [String]?
+    private var searchLiteral: String?
+    /// What was searched for, each time.
+    private(set) var searched: [String] = []
     /// Recipients the sending server turns down.
     var refusesRecipients: Set<String> = []
     private var nextUID: UInt32 = 9000
@@ -143,6 +146,12 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
     }
 
     private func answer(_ line: String, accepts: Bool, selected: Locked<String?>) -> String? {
+        if let tag = searchLiteral {
+            searchLiteral = nil
+            searched.append(line)
+            let found = folders[selected.value ?? "INBOX"]!.messages.filter { $0.raw.contains(line) }.map { String($0.uid) }
+            return "* SEARCH \(found.joined(separator: " "))\r\n\(tag) OK SEARCH completed\r\n"
+        }
         if var literal = appending {
             if literal.left > 0 {
                 literal.left -= line.utf8.count + 2
@@ -175,6 +184,16 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
             guard let name = selected.value, var folder = folders[name] else { return "\(tag) BAD nothing selected\r\n" }
             if rest.hasPrefix("SEARCH SINCE ") {
                 return "* SEARCH \(folder.messages.map { String($0.uid) }.joined(separator: " "))\r\n\(tag) OK SEARCH completed\r\n"
+            }
+            if rest.hasPrefix("SEARCH TEXT \"") {
+                let words = String(rest.dropFirst(13).dropLast())
+                searched.append(words)
+                let found = folder.messages.filter { $0.raw.localizedCaseInsensitiveContains(words) }.map { String($0.uid) }
+                return "* SEARCH \(found.joined(separator: " "))\r\n\(tag) OK SEARCH completed\r\n"
+            }
+            if rest.hasPrefix("SEARCH CHARSET UTF-8 TEXT {") {
+                searchLiteral = tag
+                return "+ go ahead\r\n"
             }
             let words = rest.split(separator: " ", maxSplits: 2)
             guard words.count >= 2 else { return "\(tag) BAD what\r\n" }
@@ -601,6 +620,48 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         #expect(String(decoding: SMTPConnection.dotStuffed(raw.removingBcc), as: UTF8.self).hasSuffix("\r\n..hidden\r\nend\r\n.\r\n"))
         #expect(!SMTPConnection.isPlainAddress("a@b.com>\r\nRCPT TO:<c@d.com"))
         #expect(!SMTPConnection.isPlainAddress("rosa delgado@example.com"))
+    }
+
+    // MARK: Searching for older mail
+
+    @Test func searchingGmailDownloadsOlderMailThatMatches() async throws {
+        let fake = FakeGoogle()
+        let old = today.addingTimeInterval(-200 * 86_400)
+        fake.inbox = [
+            ("18f3a2b4c5d6e7f8", mail("Kitchen drawings"), true, today),
+            ("17e0a1b2c3d4e5f6", mail("Deck permit approved", from: "City of Bend <permits@bendoregon.example>", body: "Permit 2026-0412 for the deck is approved."), false, old),
+            ("17e0a1b2c3d4e5f7", mail("Garden plans", body: "Raised beds along the fence."), false, old),
+        ]
+        fake.archived = ["17e0a1b2c3d4e5f6", "17e0a1b2c3d4e5f7"]
+        let (store, _) = try store(google: fake)
+        _ = try await addGmail(store, fake)
+        _ = await store.downloadOutside { _ in }
+        // Older than 90 days and archived, so nothing listed brought it.
+        #expect(fake.fetched == ["18f3a2b4c5d6e7f8"])
+        let result = try #require(await store.searchOutside("  deck\npermit "))
+        #expect(fake.searches == ["deck permit"])
+        #expect(result.problems.isEmpty)
+        let deck = try message(result.mailbox, "Deck permit approved")
+        #expect(deck.marks.folder == .archive && deck.outsideAccount?.provider == .gmail)
+        #expect(!result.mailbox.messages.contains { $0.subject == "Garden plans" })
+        // Found again, it isn't downloaded twice.
+        _ = await store.searchOutside("deck permit")
+        #expect(fake.fetched == ["18f3a2b4c5d6e7f8", "17e0a1b2c3d4e5f6"])
+    }
+
+    @Test func searchingICloudSendsTheWordsSafely() async throws {
+        let icloud = ICloudInbox()
+        icloud.messages = [(4211, mail("Rent for December"), false), (3002, mail("Café receipt", body: "Crème brûlée, two."), false)]
+        let (store, _) = try store(icloud: icloud)
+        _ = try await addICloud(store)
+        let plain = try #require(await store.searchOutside("say \"rent\""))
+        #expect(plain.problems.isEmpty)
+        #expect(icloud.sent.contains { $0.hasSuffix(#"UID SEARCH TEXT "say \"rent\"""#) })
+        // Anything that isn't plain ASCII goes as a literal, never inside the command.
+        let accented = try #require(await store.searchOutside("brûlée"))
+        #expect(icloud.searched.last == "brûlée")
+        #expect(accented.mailbox.messages.contains { $0.subject == "Café receipt" })
+        #expect(await store.searchOutside("   ") == nil)
     }
 
     @Test func eachFieldGoesOneWay() {
