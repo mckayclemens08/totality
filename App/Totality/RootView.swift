@@ -3,6 +3,7 @@ import TotalityAccount
 import TotalityCalendar
 import TotalityCore
 import TotalityMail
+import TotalityMessages
 import TotalityPhotos
 import TotalityReader
 import TotalityUI
@@ -17,6 +18,7 @@ struct RootView: View {
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
     @State private var web: WebModel?
+    @State private var messages: MessagesModel
     // The real mailbox, for whoever owns this device's key. `mailWiring` holds that account's vault.
     @State private var mail: MailAccountModel
     @State private var mailWiring: MailWiring
@@ -52,6 +54,7 @@ struct RootView: View {
             return await backup.deviceOwner() == account
         }
         _mailWiring = State(initialValue: wiring)
+        _messages = State(initialValue: AccountSetup.makeMessages())
         _mail = State(initialValue: MailAccountModel { wiring.makeStore(account: $0) })
     }
 
@@ -88,6 +91,8 @@ struct RootView: View {
             case .mail:
                 MailHomeView(model: mail.current, onClose: { open = nil }, onOpenLink: openInWeb)
                     .id(ObjectIdentifier(mail.current))
+            case .messages:
+                MessagesHomeView(model: messages) { open = nil }
             case .photos:
                 PhotosHomeView(model: photos) { open = nil }
                     .id(ObjectIdentifier(photos))
@@ -125,6 +130,9 @@ struct RootView: View {
             await account?.sync?.syncNow()
         }
         .onChange(of: defaultHomeStyle) { chosenHomeStyle = nil }
+        .onChange(of: showingAccount) {
+            if !showingAccount { Task { await messages.checkAccount() } }
+        }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { await account?.sync?.syncNow() } }
         }
@@ -185,6 +193,7 @@ struct RootView: View {
         glances[.calendar] = calendar?.glance
         glances[.web] = web?.glance
         glances[.mail] = mail.current.glance
+        glances[.messages] = messages.glance
         glances[.photos] = photos.glance
         return glances
     }

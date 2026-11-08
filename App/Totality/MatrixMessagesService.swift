@@ -1,0 +1,468 @@
+#if canImport(MatrixRustSDK)
+import Foundation
+@preconcurrency import MatrixRustSDK
+import TotalityCore
+import TotalityMessages
+
+/// Messages over Totality's Matrix server, through matrix-rust-sdk. Nothing here logs, and the Matrix
+/// access token only ever sits in the Keychain and inside the SDK. It lives in the app rather than the
+/// TotalityMessages package because the SDK ships for iPhone only, and the package's tests run on the Mac.
+final class MatrixMessagesService: MessagesService, @unchecked Sendable {
+    static let homeserver = "https://matrix.usetotality.com"
+    static let serverName = "usetotality.com"
+
+    let account: String
+    let userID: String
+    private let client: Client
+    private let sync: SyncService
+    private let lock = NSLock()
+    private var handles: [TaskHandle] = []
+    private var roomList: RoomList?
+    private var roomListResult: RoomListEntriesWithDynamicAdaptersResult?
+    private var rooms: [Room] = []
+    private var summaryRound = 0
+
+    private init(account: String, client: Client, sync: SyncService) throws {
+        self.account = account
+        self.client = client
+        self.sync = sync
+        userID = try client.userId()
+    }
+
+    /// Opens this account's stores, signs in with a fresh one-minute pass if there's no saved session,
+    /// and starts syncing.
+    static func connect(
+        account: String,
+        keys: any KeyStore = KeychainKeyStore(service: "app.totality.messages"),
+        pass: @Sendable () async throws -> String
+    ) async throws -> MatrixMessagesService {
+        do {
+            let paths = try MessagesStorePaths(account: account)
+            let secrets = MessagesSecrets(keys: keys, account: account)
+            let storeKey = try secrets.storeKey(for: paths)
+            let client = try await ClientBuilder()
+                .homeserverUrl(url: homeserver)
+                .sqliteStore(config: SqliteStoreBuilder(dataPath: paths.data.path, cachePath: paths.cache.path).key(key: storeKey))
+                .slidingSyncVersionBuilder(versionBuilder: .native)
+                .build()
+            if let saved = try keys.load(secrets.sessionName), let session = try? JSONDecoder().decode(StoredSession.self, from: saved) {
+                try await client.restoreSession(session: session.sdk)
+            } else {
+                try await client.customLoginWithJwt(jwt: try await pass(), initialDeviceName: deviceName, deviceId: nil)
+                try keys.save(try JSONEncoder().encode(StoredSession(try client.session())), as: secrets.sessionName)
+            }
+            let sync = try await client.syncService().withOfflineMode().finish()
+            await sync.start()
+            return try MatrixMessagesService(account: account, client: client, sync: sync)
+        } catch {
+            throw Self.translate(error)
+        }
+    }
+
+    func stop() async {
+        let old = lock.withLock {
+            defer { handles = []; roomListResult = nil; roomList = nil; rooms = [] }
+            return handles
+        }
+        old.forEach { $0.cancel() }
+        await sync.stop()
+    }
+
+    // MARK: Connection
+
+    func observeConnection(_ onChange: @escaping @Sendable (Connection) -> Void) {
+        let client = client
+        let handle = sync.state(listener: SyncStateListener { state in
+            switch state {
+            case .running:
+                onChange(.online)
+                // A queue that hit an error while offline stays paused until it's switched back on.
+                Task { await client.enableAllSendQueues(enable: true) }
+            case .offline, .error: onChange(.offline)
+            case .idle, .terminated: onChange(.connecting)
+            }
+        })
+        lock.withLock { handles.append(handle) }
+    }
+
+    // MARK: Chats and requests
+
+    func observeChats(_ onChange: @escaping @Sendable ([ChatSummary]) -> Void) async throws {
+        do {
+            let list = try await sync.roomListService().allRooms()
+            let result = list.entriesWithDynamicAdapters(pageSize: 500, listener: RoomsListener { [weak self] updates in
+                self?.roomsChanged(updates, onChange: onChange)
+            })
+            _ = result.controller().setFilter(kind: .all(filters: [.nonLeft, .nonSpace]))
+            let stream = result.entriesStream()
+            lock.withLock {
+                roomList = list
+                roomListResult = result
+                handles.append(stream)
+            }
+        } catch {
+            throw Self.translate(error)
+        }
+    }
+
+    private func roomsChanged(_ updates: [RoomListEntriesUpdate], onChange: @escaping @Sendable ([ChatSummary]) -> Void) {
+        let (snapshot, round) = lock.withLock {
+            for update in updates { Self.change(update).apply(to: &rooms) }
+            summaryRound += 1
+            return (rooms, summaryRound)
+        }
+        Task {
+            var summaries: [ChatSummary] = []
+            for room in snapshot {
+                if let summary = await Self.summary(of: room) { summaries.append(summary) }
+            }
+            // Only the newest round is shown, so a slow older one can't put back a stale list.
+            guard lock.withLock({ round == summaryRound }) else { return }
+            onChange(summaries)
+        }
+    }
+
+    private static func summary(of room: Room) async -> ChatSummary? {
+        guard let info = try? await room.roomInfo(), !info.isSpace else { return nil }
+        switch info.membership {
+        case .invited:
+            let inviter = info.inviter?.userId
+            return ChatSummary(
+                id: info.id,
+                title: inviter.map(MessagesUsername.display) ?? info.displayName ?? "Someone",
+                isRequest: true, from: inviter, lastActivity: nil
+            )
+        case .joined:
+            // Messages only shows end-to-end encrypted chats, so its label stays true.
+            guard await room.isEncrypted() else { return nil }
+            let (text, time) = preview(await room.latestEvent())
+            let title = info.displayName ?? info.heroes.first.map { MessagesUsername.display($0.userId) } ?? "Chat"
+            let unread = Int(info.numUnreadMessages) + (info.isMarkedUnread ? 1 : 0)
+            return ChatSummary(id: info.id, title: title, lastMessage: text, lastActivity: time, unread: unread)
+        default:
+            return nil
+        }
+    }
+
+    private static func preview(_ latest: LatestEventValue) -> (String?, Date?) {
+        switch latest {
+        case .none, .remoteInvite: (nil, nil)
+        case .remote(let timestamp, _, let isOwn, _, let content):
+            (preview(content).map { isOwn ? "You: \($0)" : $0 }, date(timestamp))
+        case .local(let timestamp, _, _, let content, _):
+            (preview(content).map { "You: \($0)" }, date(timestamp))
+        }
+    }
+
+    static func preview(_ content: TimelineItemContent) -> String? {
+        guard case .msgLike(let like) = content else { return nil }
+        switch like.kind {
+        case .message(let message):
+            switch message.msgType {
+            case .image: return "Photo"
+            case .video: return "Video"
+            case .audio: return "Audio"
+            case .file: return "File"
+            case .location: return "Location"
+            default: return message.body
+            }
+        case .unableToDecrypt: return "Waiting for this message's key"
+        case .redacted: return "Message deleted"
+        case .sticker: return "Sticker"
+        default: return nil
+        }
+    }
+
+    static func date(_ timestamp: Timestamp) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000)
+    }
+
+    func accept(_ chat: String) async throws {
+        let room: Room
+        do {
+            room = try self.room(chat)
+            try await room.join()
+        } catch {
+            throw Self.translate(error)
+        }
+        // A chat that isn't end-to-end encrypted is left again rather than shown.
+        guard await room.isEncrypted() else {
+            try? await room.leave()
+            throw MessagesError.failed("That chat isn't end-to-end encrypted, so Messages left it.")
+        }
+    }
+
+    func decline(_ chat: String) async throws {
+        do { try await room(chat).leave() } catch { throw Self.translate(error) }
+    }
+
+    func block(_ chat: String) async throws {
+        do {
+            let room = try room(chat)
+            if let inviter = try await room.inviter()?.userId {
+                try await client.ignoreUser(userId: inviter)
+            }
+            try await room.leave()
+        } catch {
+            throw Self.translate(error)
+        }
+    }
+
+    private func room(_ id: String) throws -> Room {
+        guard let room = try client.getRoom(roomId: id) else { throw MessagesError.failed("That chat isn't on this device yet.") }
+        return room
+    }
+
+    // MARK: Starting and opening chats
+
+    func startChat(with username: String) async throws -> String {
+        let other = "@\(username):\(Self.serverName)"
+        guard other != userID else { throw MessagesError.ownUsername }
+        do {
+            if let existing = try client.getDmRoom(userId: other) { return existing.id() }
+            do {
+                _ = try await client.getProfile(userId: other)
+            } catch let error as ClientError {
+                if case .MatrixApi(_, let code, _, _) = error, code == "M_NOT_FOUND" { throw MessagesError.noSuchPerson }
+                throw error
+            }
+            let id = try await client.createRoom(request: CreateRoomParameters(
+                name: nil, isEncrypted: true, isDirect: true, visibility: .private, preset: .trustedPrivateChat, invite: [other]
+            ))
+            for _ in 0..<50 {
+                if try client.getRoom(roomId: id) != nil { return id }
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            throw MessagesError.failed("The new chat didn't arrive from the server. Try again.")
+        } catch {
+            throw Self.translate(error)
+        }
+    }
+
+    func openChat(_ chat: String) async throws -> any ChatChannel {
+        do {
+            let room = try room(chat)
+            guard await room.isEncrypted() else { throw MessagesError.notEncrypted }
+            let title = (try? await room.roomInfo()).flatMap { $0.displayName } ?? room.displayName() ?? "Chat"
+            return MatrixChat(room: room, timeline: try await room.timeline(), title: title, ownUserID: userID)
+        } catch {
+            throw Self.translate(error)
+        }
+    }
+
+    // MARK: Helpers
+
+    static func translate(_ error: any Error) -> any Error {
+        switch error {
+        case let error as MessagesError: return error
+        case let error as ClientError:
+            if case .MatrixApi(_, let code, _, _) = error, code == "M_FORBIDDEN" {
+                return MessagesError.failed("The Matrix server refused that.")
+            }
+            return MessagesError.failed("Messages couldn't reach the server. Check your connection and try again.")
+        case is URLError: return MessagesError.offline
+        default: return MessagesError.failed("Something went wrong. Try again.")
+        }
+    }
+
+    static func change(_ update: RoomListEntriesUpdate) -> ListChange<Room> {
+        switch update {
+        case .append(let values): .append(values)
+        case .clear: .clear
+        case .pushFront(let value): .pushFront(value)
+        case .pushBack(let value): .pushBack(value)
+        case .popFront: .popFront
+        case .popBack: .popBack
+        case .insert(let index, let value): .insert(Int(index), value)
+        case .set(let index, let value): .set(Int(index), value)
+        case .remove(let index): .remove(Int(index))
+        case .truncate(let length): .truncate(Int(length))
+        case .reset(let values): .reset(values)
+        }
+    }
+
+    private static var deviceName: String {
+        #if os(iOS)
+        "Totality on iPhone"
+        #else
+        "Totality"
+        #endif
+    }
+}
+
+/// One open conversation, backed by the SDK's timeline.
+final class MatrixChat: ChatChannel, @unchecked Sendable {
+    let title: String
+    private let room: Room
+    private let timeline: Timeline
+    private let ownUserID: String
+    private let lock = NSLock()
+    private var items: [TimelineItem] = []
+    private var sendIDs: [String: EventOrTransactionId] = [:]
+    private var handles: [TaskHandle] = []
+
+    init(room: Room, timeline: Timeline, title: String, ownUserID: String) {
+        self.room = room
+        self.timeline = timeline
+        self.title = title
+        self.ownUserID = ownUserID
+    }
+
+    func observe(messages: @escaping @Sendable ([ChatMessage]) -> Void, typing: @escaping @Sendable ([String]) -> Void) async {
+        let own = ownUserID
+        let timelineHandle = await timeline.addListener(listener: TimelineDiffListener { [weak self] diffs in
+            guard let self else { return }
+            messages(self.apply(diffs))
+        })
+        let typingHandle = room.subscribeToTypingNotifications(listener: TypingListener { ids in
+            typing(ids.filter { $0 != own })
+        })
+        lock.withLock { handles += [timelineHandle, typingHandle] }
+    }
+
+    private func apply(_ diffs: [TimelineDiff]) -> [ChatMessage] {
+        lock.withLock {
+            for diff in diffs { Self.change(diff).apply(to: &items) }
+            var result: [ChatMessage] = []
+            var readUpTo: Int?
+            for item in items {
+                guard let event = item.asEvent(), let message = message(item, event) else { continue }
+                result.append(message)
+                sendIDs[message.id] = event.eventOrTransactionId
+                if event.readReceipts.keys.contains(where: { $0 != ownUserID }) { readUpTo = result.count - 1 }
+            }
+            return ChatMessage.markingSeen(result, readUpTo: readUpTo)
+        }
+    }
+
+    private func message(_ item: TimelineItem, _ event: EventTimelineItem) -> ChatMessage? {
+        guard case .msgLike(let like) = event.content else { return nil }
+        let decrypted: Bool
+        let body: String
+        switch like.kind {
+        case .unableToDecrypt:
+            decrypted = false
+            body = "Waiting for this message's key"
+        default:
+            guard let text = MatrixMessagesService.preview(event.content) else { return nil }
+            decrypted = true
+            body = text
+        }
+        let state: ChatMessage.State = switch event.localSendState {
+        case nil, .sent: .sent
+        case .notSentYet: .sending
+        case .sendingFailed(_, let recoverable): .failed(canRetry: recoverable)
+        }
+        return ChatMessage(
+            id: item.uniqueId().id, sender: event.sender, body: body, isOwn: event.isOwn,
+            time: MatrixMessagesService.date(event.timestamp), state: state, decrypted: decrypted
+        )
+    }
+
+    func loadEarlier() async {
+        _ = try? await timeline.paginateBackwards(numEvents: 40)
+    }
+
+    func send(_ text: String) async throws {
+        do {
+            if !room.isSendQueueEnabled() { room.enableSendQueue(enable: true) }
+            let content = try messageEventContentNew(msgtype: .text(content: TextMessageContent(body: text, formatted: nil)))
+            _ = try await timeline.send(msg: content)
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func retry(_ message: String) async throws {
+        guard let id = lock.withLock({ sendIDs[message] }) else { return }
+        do {
+            room.enableSendQueue(enable: true)
+            _ = try await timeline.retrySend(itemId: id, target: .event)
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func markRead(share: Bool) async {
+        try? await timeline.markAsRead(receiptType: share ? .read : .readPrivate)
+    }
+
+    func setTyping(_ typing: Bool) async {
+        try? await room.typingNotice(isTyping: typing)
+    }
+
+    func close() {
+        let old = lock.withLock {
+            defer { handles = [] }
+            return handles
+        }
+        old.forEach { $0.cancel() }
+    }
+
+    static func change(_ diff: TimelineDiff) -> ListChange<TimelineItem> {
+        switch diff {
+        case .append(let values): .append(values)
+        case .clear: .clear
+        case .pushFront(let value): .pushFront(value)
+        case .pushBack(let value): .pushBack(value)
+        case .popFront: .popFront
+        case .popBack: .popBack
+        case .insert(let index, let value): .insert(Int(index), value)
+        case .set(let index, let value): .set(Int(index), value)
+        case .remove(let index): .remove(Int(index))
+        case .truncate(let length): .truncate(Int(length))
+        case .reset(let values): .reset(values)
+        }
+    }
+}
+
+/// The SDK's session, in a form the Keychain can hold.
+private struct StoredSession: Codable {
+    let accessToken: String
+    let refreshToken: String?
+    let userId: String
+    let deviceId: String
+    let homeserverUrl: String
+    let nativeSlidingSync: Bool
+
+    init(_ session: Session) {
+        accessToken = session.accessToken
+        refreshToken = session.refreshToken
+        userId = session.userId
+        deviceId = session.deviceId
+        homeserverUrl = session.homeserverUrl
+        nativeSlidingSync = session.slidingSyncVersion == .native
+    }
+
+    var sdk: Session {
+        Session(
+            accessToken: accessToken, refreshToken: refreshToken, userId: userId, deviceId: deviceId,
+            homeserverUrl: homeserverUrl, oauthData: nil, slidingSyncVersion: nativeSlidingSync ? .native : .none
+        )
+    }
+}
+
+private final class RoomsListener: RoomListEntriesListener {
+    let handle: @Sendable ([RoomListEntriesUpdate]) -> Void
+    init(_ handle: @escaping @Sendable ([RoomListEntriesUpdate]) -> Void) { self.handle = handle }
+    func onUpdate(roomEntriesUpdate: [RoomListEntriesUpdate]) { handle(roomEntriesUpdate) }
+}
+
+private final class TimelineDiffListener: TimelineListener {
+    let handle: @Sendable ([TimelineDiff]) -> Void
+    init(_ handle: @escaping @Sendable ([TimelineDiff]) -> Void) { self.handle = handle }
+    func onUpdate(diff: [TimelineDiff]) { handle(diff) }
+}
+
+private final class TypingListener: TypingNotificationsListener {
+    let handle: @Sendable ([String]) -> Void
+    init(_ handle: @escaping @Sendable ([String]) -> Void) { self.handle = handle }
+    func call(typingUserIds: [String]) { handle(typingUserIds) }
+}
+
+private final class SyncStateListener: SyncServiceStateObserver {
+    let handle: @Sendable (SyncServiceState) -> Void
+    init(_ handle: @escaping @Sendable (SyncServiceState) -> Void) { self.handle = handle }
+    func onUpdate(state: SyncServiceState) { handle(state) }
+}
+#endif

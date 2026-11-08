@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "TotalityMail", targets: ["TotalityMail"]),
         .library(name: "TotalityPhotos", targets: ["TotalityPhotos"]),
         .library(name: "TotalityAccount", targets: ["TotalityAccount"]),
+        .library(name: "TotalityMessages", targets: ["TotalityMessages"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.9.1"),
@@ -36,6 +37,9 @@ let package = Package(
             "TotalityCore", "TotalityUI",
             .product(name: "Supabase", package: "supabase-swift"),
         ]),
+        // The Matrix SDK ships for iPhone only, so the app links it and holds the one file that uses it
+        // (App/Totality/MatrixMessagesService.swift). That keeps `swift test` working on the Mac.
+        .target(name: "TotalityMessages", dependencies: ["TotalityCore", "TotalityUI"]),
         .testTarget(name: "TotalityCoreTests", dependencies: ["TotalityCore"]),
         .testTarget(name: "TotalityUITests", dependencies: ["TotalityUI"]),
         .testTarget(name: "TotalityReaderTests", dependencies: ["TotalityReader"]),
@@ -44,5 +48,6 @@ let package = Package(
         .testTarget(name: "TotalityMailTests", dependencies: ["TotalityMail"]),
         .testTarget(name: "TotalityPhotosTests", dependencies: ["TotalityPhotos"]),
         .testTarget(name: "TotalityAccountTests", dependencies: ["TotalityAccount"]),
+        .testTarget(name: "TotalityMessagesTests", dependencies: ["TotalityMessages"]),
     ]
 )

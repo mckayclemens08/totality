@@ -14,6 +14,8 @@
 		A1B2C3D40000000000000031 /* TotalityCalendar in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000032 /* TotalityCalendar */; };
 		A1B2C3D40000000000000033 /* TotalityWeb in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000034 /* TotalityWeb */; };
 		A1B2C3D40000000000000035 /* TotalityMail in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000036 /* TotalityMail */; };
+		A1B2C3D400000000000000A0 /* TotalityMessages in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000A1 /* TotalityMessages */; };
+		A1B2C3D400000000000000A2 /* MatrixRustSDK in Frameworks */ = {isa = PBXBuildFile; platformFilter = ios; productRef = A1B2C3D400000000000000A3 /* MatrixRustSDK */; };
 		A1B2C3D40000000000000037 /* TotalityPhotos in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D40000000000000038 /* TotalityPhotos */; };
 /* End PBXBuildFile section */
 
@@ -39,6 +41,8 @@
 				A1B2C3D40000000000000031 /* TotalityCalendar in Frameworks */,
 				A1B2C3D40000000000000033 /* TotalityWeb in Frameworks */,
 				A1B2C3D40000000000000035 /* TotalityMail in Frameworks */,
+				A1B2C3D400000000000000A0 /* TotalityMessages in Frameworks */,
+				A1B2C3D400000000000000A2 /* MatrixRustSDK in Frameworks */,
 				A1B2C3D40000000000000037 /* TotalityPhotos in Frameworks */,
 				A1B2C3D4000000000000001A /* TotalityAccount in Frameworks */,
 			);
@@ -93,6 +97,8 @@
 				A1B2C3D40000000000000032 /* TotalityCalendar */,
 				A1B2C3D40000000000000034 /* TotalityWeb */,
 				A1B2C3D40000000000000036 /* TotalityMail */,
+				A1B2C3D400000000000000A1 /* TotalityMessages */,
+				A1B2C3D400000000000000A3 /* MatrixRustSDK */,
 				A1B2C3D40000000000000038 /* TotalityPhotos */,
 				A1B2C3D40000000000000019 /* TotalityAccount */,
 			);
@@ -121,6 +127,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A1B2C3D40000000000000012 /* XCLocalSwiftPackageReference ".." */,
+				A1B2C3D400000000000000A4 /* XCRemoteSwiftPackageReference "matrix-rust-components-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A1B2C3D40000000000000008 /* Products */;
@@ -302,6 +309,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		A1B2C3D400000000000000A4 /* XCRemoteSwiftPackageReference "matrix-rust-components-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/element-hq/matrix-rust-components-swift.git";
+			requirement = {
+				kind = exactVersion;
+				version = "26.10.30-2";
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		A1B2C3D40000000000000019 /* TotalityAccount */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -330,6 +348,15 @@
 		A1B2C3D40000000000000036 /* TotalityMail */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TotalityMail;
+		};
+		A1B2C3D400000000000000A1 /* TotalityMessages */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TotalityMessages;
+		};
+		A1B2C3D400000000000000A3 /* MatrixRustSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D400000000000000A4 /* XCRemoteSwiftPackageReference "matrix-rust-components-swift" */;
+			productName = MatrixRustSDK;
 		};
 		A1B2C3D40000000000000038 /* TotalityPhotos */ = {
 			isa = XCSwiftPackageProductDependency;
