@@ -134,6 +134,22 @@ public final class MessagesModel {
         return ChatModel(channel: try await service.openChat(chat))
     }
 
+    /// Sends a photo from the camera straight into a chat, without opening it. True once it's queued.
+    public func sendPhoto(_ original: Data, to chat: String) async -> Bool {
+        guard let service else { return false }
+        do {
+            notice = nil
+            let photo = try await Task.detached(priority: .userInitiated) { try PhotoPrep.prepare(original) }.value
+            let channel = try await service.openChat(chat)
+            defer { channel.close() }
+            try await channel.sendPhoto(photo, replyingTo: nil)
+            return true
+        } catch {
+            notice = Self.describe(error)
+            return false
+        }
+    }
+
     /// The home tile: requests and unread chats first, then who they're from. Never message text,
     /// so nothing private shows on the home screen.
     public var glance: ModuleGlance {
@@ -186,6 +202,11 @@ public final class ChatModel {
     public private(set) var loaded = false
     public var draft = ""
     public var notice: String?
+    /// The message the next one answers, shown above the box until it's sent or cancelled.
+    public var replyingTo: ChatMessage?
+    /// A photo is being prepared and queued.
+    public private(set) var sendingPhoto = false
+    private let photos = PhotoMemory()
 
     public let title: String
     private let channel: any ChatChannel
@@ -225,15 +246,65 @@ public final class ChatModel {
     public func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        let reply = replyingTo
         draft = ""
+        replyingTo = nil
         await draftChanged()
         do {
             notice = nil
-            try await channel.send(text)
+            try await channel.send(text, replyingTo: reply?.id)
         } catch {
             draft = text
+            replyingTo = reply
             notice = MessagesModel.describe(error)
         }
+    }
+
+    /// Prepares a photo off the main thread, then queues it. It's sealed by the SDK before upload.
+    public func sendPhoto(_ original: Data) async {
+        guard !sendingPhoto else { return }
+        sendingPhoto = true
+        defer { sendingPhoto = false }
+        let reply = replyingTo
+        replyingTo = nil
+        do {
+            notice = nil
+            let photo = try await Task.detached(priority: .userInitiated) { try PhotoPrep.prepare(original) }.value
+            try await channel.sendPhoto(photo, replyingTo: reply?.id)
+        } catch {
+            replyingTo = reply
+            notice = MessagesModel.describe(error)
+        }
+    }
+
+    public func toggleReaction(_ key: String, on message: ChatMessage) async {
+        do {
+            notice = nil
+            try await channel.toggleReaction(key, on: message.id)
+        } catch {
+            notice = MessagesModel.describe(error)
+        }
+    }
+
+    /// Only ever called after the person confirmed it.
+    public func delete(_ message: ChatMessage) async {
+        guard message.canDelete else { return }
+        do {
+            notice = nil
+            if replyingTo?.id == message.id { replyingTo = nil }
+            try await channel.delete(message.id)
+        } catch {
+            notice = MessagesModel.describe(error)
+        }
+    }
+
+    /// A photo opened on this device, kept in memory while the chat is open.
+    public func photo(_ message: ChatMessage, thumbnail: Bool) async -> Data? {
+        let key = "\(message.id)|\(thumbnail)"
+        if let cached = photos[key] { return cached }
+        guard let data = try? await channel.photo(message.id, thumbnail: thumbnail) else { return nil }
+        photos[key] = data
+        return data
     }
 
     public func retry(_ message: ChatMessage) async {
@@ -254,6 +325,7 @@ public final class ChatModel {
     }
 
     public func close() {
+        photos.removeAll()
         let wasTyping = typingSent
         typingSent = false
         Task { [channel] in

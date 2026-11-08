@@ -10,6 +10,9 @@ public struct MessagesHomeView: View {
     @State private var opened: String?
     @State private var composing = false
     @State private var query = ""
+    @State private var showingCamera = false
+    /// A camera photo waiting for its chat to be chosen. Held in memory only.
+    @State private var takenPhoto: Data?
     @AppStorage(MessagesPreferences.shareReadAndTypingKey) private var shareReadAndTyping = true
 
     public init(model: MessagesModel, onClose: (() -> Void)? = nil) {
@@ -38,6 +41,23 @@ public struct MessagesHomeView: View {
             NewMessageView(model: model) { chat in
                 composing = false
                 if let chat { opened = chat }
+            }
+        }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showingCamera) {
+            CameraPicker { data in
+                showingCamera = false
+                takenPhoto = data
+            }
+            .ignoresSafeArea()
+        }
+        #endif
+        .sheet(isPresented: Binding(get: { takenPhoto != nil }, set: { if !$0 { takenPhoto = nil } })) {
+            ChooseChatView(model: model) { chat in
+                let photo = takenPhoto
+                takenPhoto = nil
+                guard let chat, let photo else { return }
+                Task { if await model.sendPhoto(photo, to: chat) { opened = chat } }
             }
         }
         .task { await model.connect() }
@@ -127,6 +147,11 @@ public struct MessagesHomeView: View {
                             .frame(minWidth: Space.s6, minHeight: Space.s6)
                     }
                     .accessibilityLabel("Messages settings")
+                    #if os(iOS)
+                    if CameraPicker.isAvailable && !model.chats.isEmpty {
+                        MessagesBarIcon("Camera", systemImage: "camera") { showingCamera = true }
+                    }
+                    #endif
                     MessagesBarIcon("New message", systemImage: "square.and.pencil") { composing = true }
                 }
             }
@@ -251,5 +276,35 @@ private struct SectionTitle: View {
             .font(Typeface.headline)
             .foregroundStyle(Theme.current.textSecondary.color)
             .padding(.top, Space.s2)
+    }
+}
+
+/// Where a photo from the camera goes: one of your chats.
+struct ChooseChatView: View {
+    let model: MessagesModel
+    let onDone: (String?) -> Void
+
+    var body: some View {
+        let theme = Theme.current
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: Space.s3) {
+                    ForEach(model.chats) { chat in
+                        Button { onDone(chat.id) } label: { ChatRow(chat: chat) }
+                            .buttonStyle(.plain)
+                    }
+                }
+                .padding(Space.s4)
+            }
+            .background(theme.bg.color)
+            .navigationTitle("Send photo to")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onDone(nil) } }
+            }
+        }
+        .tint(theme.accent.color)
     }
 }

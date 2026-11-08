@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import Testing
 import TotalityCore
 @testable import TotalityMessages
@@ -76,15 +78,32 @@ private final class FakeChannel: ChatChannel, @unchecked Sendable {
     private(set) var sent: [String] = []
     private(set) var typing: [Bool] = []
     private(set) var receipts: [Bool] = []
+    private(set) var replies: [String?] = []
+    private(set) var photos: [OutgoingPhoto] = []
+    private(set) var reactions: [String] = []
+    private(set) var deleted: [String] = []
     var failSending = false
 
     func observe(messages: @escaping @Sendable ([ChatMessage]) -> Void, typing: @escaping @Sendable ([String]) -> Void) async {}
     func loadEarlier() async {}
-    func send(_ text: String) async throws {
+    func send(_ text: String, replyingTo: String?) async throws {
         if failSending { throw MessagesError.offline }
-        lock.withLock { sent.append(text) }
+        lock.withLock {
+            sent.append(text)
+            replies.append(replyingTo)
+        }
+    }
+    func sendPhoto(_ photo: OutgoingPhoto, replyingTo: String?) async throws {
+        if failSending { throw MessagesError.offline }
+        lock.withLock {
+            photos.append(photo)
+            replies.append(replyingTo)
+        }
     }
     func retry(_ message: String) async throws {}
+    func toggleReaction(_ key: String, on message: String) async throws { lock.withLock { reactions.append("\(key)@\(message)") } }
+    func delete(_ message: String) async throws { lock.withLock { deleted.append(message) } }
+    func photo(_ message: String, thumbnail: Bool) async throws -> Data { Data("\(message)|\(thumbnail)".utf8) }
     func markRead(share: Bool) async { lock.withLock { receipts.append(share) } }
     func setTyping(_ typing: Bool) async { lock.withLock { self.typing.append(typing) } }
     func close() {}
@@ -372,6 +391,140 @@ private func settle() async {
     let now = jan1.addingTimeInterval(3 * 86_400)
     #expect(MessagesTime.short(now.addingTimeInterval(-86_400), now: now, calendar: calendar) == "Yesterday")
     #expect(MessagesTime.short(now.addingTimeInterval(-30 * 86_400), now: now, calendar: calendar).contains("/"))
+}
+
+// MARK: Step 3: photos, replies, reactions, deleting
+
+/// A wide JPEG carrying a GPS position and a camera make, like one straight off a phone.
+private func phonePhoto(width: Int = 3000, height: Int = 1500) throws -> Data {
+    let context = try #require(CGContext(
+        data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+    ))
+    context.setFillColor(CGColor(red: 0.2, green: 0.5, blue: 0.7, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    let image = try #require(context.makeImage())
+    let out = NSMutableData()
+    let destination = try #require(CGImageDestinationCreateWithData(out, UTType.jpeg.identifier as CFString, 1, nil))
+    let metadata: [CFString: Any] = [
+        kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 40.2338, kCGImagePropertyGPSLongitude: 111.6585],
+        kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFMake: "Apple", kCGImagePropertyTIFFModel: "iPhone 14"],
+    ]
+    CGImageDestinationAddImage(destination, image, metadata as CFDictionary)
+    #expect(CGImageDestinationFinalize(destination))
+    return out as Data
+}
+
+private func properties(_ data: Data) throws -> [CFString: Any] {
+    let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+    return try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+}
+
+@Test func photosLoseWhereTheyWereTakenAndShrink() throws {
+    let original = try phonePhoto()
+    #expect(try properties(original)[kCGImagePropertyGPSDictionary] != nil)
+    let photo = try PhotoPrep.prepare(original)
+    let sent = try properties(photo.data)
+    #expect(sent[kCGImagePropertyGPSDictionary] == nil)
+    #expect((sent[kCGImagePropertyTIFFDictionary] as? [CFString: Any])?[kCGImagePropertyTIFFModel] == nil)
+    #expect(max(photo.width, photo.height) == PhotoPrep.longestSide)
+    #expect(photo.width == 2 * photo.height)
+    #expect(max(photo.thumbnailWidth, photo.thumbnailHeight) == PhotoPrep.thumbnailSide)
+    #expect(try properties(photo.thumbnail)[kCGImagePropertyGPSDictionary] == nil)
+}
+
+@Test func somethingThatIsntAPhotoIsRefused() {
+    #expect(throws: MessagesError.self) { try PhotoPrep.prepare(Data("Dinner at 7".utf8)) }
+}
+
+@MainActor
+@Test func aReplyGoesWithTheMessageItAnswers() async {
+    let channel = FakeChannel()
+    let chat = ChatModel(channel: channel)
+    let question = ChatMessage(id: "m1", sender: "@mckay_test:usetotality.com", body: "Lunch tomorrow?", isOwn: false, time: jan1)
+    chat.replyingTo = question
+    chat.draft = "Yes, noon works"
+    await chat.send()
+    #expect(channel.sent == ["Yes, noon works"])
+    #expect(channel.replies == ["m1"])
+    #expect(chat.replyingTo == nil)
+}
+
+@MainActor
+@Test func aFailedReplyKeepsWhatItAnswered() async {
+    let channel = FakeChannel()
+    channel.failSending = true
+    let chat = ChatModel(channel: channel)
+    let question = ChatMessage(id: "m1", sender: "@mckay_test:usetotality.com", body: "Lunch tomorrow?", isOwn: false, time: jan1)
+    chat.replyingTo = question
+    chat.draft = "Yes, noon works"
+    await chat.send()
+    #expect(chat.replyingTo == question)
+    #expect(chat.draft == "Yes, noon works")
+}
+
+@MainActor
+@Test func aPhotoIsPreparedBeforeItsSent() async throws {
+    let channel = FakeChannel()
+    let chat = ChatModel(channel: channel)
+    await chat.sendPhoto(try phonePhoto(width: 800, height: 600))
+    #expect(channel.photos.count == 1)
+    #expect(try properties(channel.photos[0].data)[kCGImagePropertyGPSDictionary] == nil)
+    #expect(chat.sendingPhoto == false)
+}
+
+@MainActor
+@Test func onlyYourOwnMessagesCanBeDeleted() async {
+    let channel = FakeChannel()
+    let chat = ChatModel(channel: channel)
+    let theirs = ChatMessage(id: "m1", sender: "@mckay_test:usetotality.com", body: "See you there", isOwn: false, time: jan1)
+    let mine = ChatMessage(id: "m2", sender: "@mckay_clemens:usetotality.com", body: "Running late", isOwn: true, time: jan1)
+    #expect(!theirs.canDelete)
+    #expect(mine.canDelete)
+    await chat.delete(theirs)
+    await chat.delete(mine)
+    #expect(channel.deleted == ["m2"])
+}
+
+@MainActor
+@Test func reactionsReachTheRightMessage() async {
+    let channel = FakeChannel()
+    let chat = ChatModel(channel: channel)
+    let message = ChatMessage(id: "m7", sender: "@mckay_test:usetotality.com", body: "We won", isOwn: false, time: jan1)
+    await chat.toggleReaction("❤️", on: message)
+    #expect(channel.reactions == ["❤️@m7"])
+}
+
+@Test func photosAndDeletedMessagesHaveNothingToCopy() {
+    let photo = ChatMessage(id: "p", sender: "a", body: "Photo", isOwn: true, time: jan1, kind: .photo(width: 4, height: 3))
+    let gone = ChatMessage(id: "d", sender: "a", body: "Message deleted", isOwn: true, time: jan1, kind: .deleted)
+    let locked = ChatMessage(id: "l", sender: "a", body: "Waiting for this message's key", isOwn: false, time: jan1, decrypted: false)
+    let text = ChatMessage(id: "t", sender: "a", body: "Gate code 4412", isOwn: false, time: jan1)
+    #expect(photo.copyableText == nil)
+    #expect(gone.copyableText == nil)
+    #expect(locked.copyableText == nil)
+    #expect(text.copyableText == "Gate code 4412")
+    #expect(!gone.canDelete)
+}
+
+@MainActor
+@Test func openedPhotosStayInMemoryAndAreForgottenOnClose() async {
+    let chat = ChatModel(channel: FakeChannel())
+    let photo = ChatMessage(id: "p1", sender: "a", body: "Photo", isOwn: false, time: jan1, kind: .photo(width: nil, height: nil))
+    #expect(await chat.photo(photo, thumbnail: true) == Data("p1|true".utf8))
+    #expect(await chat.photo(photo, thumbnail: false) == Data("p1|false".utf8))
+}
+
+@MainActor
+@Test func photoMemoryKeepsOnlyTheNewest() {
+    let memory = PhotoMemory(limit: 2)
+    memory["a"] = Data([1])
+    memory["b"] = Data([2])
+    memory["c"] = Data([3])
+    #expect(memory["a"] == nil)
+    #expect(memory["c"] == Data([3]))
+    memory.removeAll()
+    #expect(memory["c"] == nil)
 }
 
 private final class Signed: @unchecked Sendable {

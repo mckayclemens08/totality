@@ -244,7 +244,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             let room = try room(chat)
             guard await room.isEncrypted() else { throw MessagesError.notEncrypted }
             let title = (try? await room.roomInfo()).flatMap { $0.displayName } ?? room.displayName() ?? "Chat"
-            return MatrixChat(room: room, timeline: try await room.timeline(), title: title, ownUserID: userID)
+            return MatrixChat(client: client, room: room, timeline: try await room.timeline(), title: title, ownUserID: userID)
         } catch {
             throw Self.translate(error)
         }
@@ -293,15 +293,19 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
 /// One open conversation, backed by the SDK's timeline.
 final class MatrixChat: ChatChannel, @unchecked Sendable {
     let title: String
+    private let client: Client
     private let room: Room
     private let timeline: Timeline
     private let ownUserID: String
     private let lock = NSLock()
     private var items: [TimelineItem] = []
+    /// What each shown message is to the SDK, so actions on it reach the right event.
     private var sendIDs: [String: EventOrTransactionId] = [:]
+    private var photoSources: [String: (full: MediaSource, thumbnail: MediaSource?)] = [:]
     private var handles: [TaskHandle] = []
 
-    init(room: Room, timeline: Timeline, title: String, ownUserID: String) {
+    init(client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String) {
+        self.client = client
         self.room = room
         self.timeline = timeline
         self.title = title
@@ -337,15 +341,28 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
 
     private func message(_ item: TimelineItem, _ event: EventTimelineItem) -> ChatMessage? {
         guard case .msgLike(let like) = event.content else { return nil }
-        let decrypted: Bool
+        let id = item.uniqueId().id
+        var decrypted = true
+        var kind = ChatMessage.Kind.text
         let body: String
         switch like.kind {
         case .unableToDecrypt:
             decrypted = false
             body = "Waiting for this message's key"
+        case .redacted:
+            kind = .deleted
+            body = "Message deleted"
+        case .message(let content):
+            if case .image(let image) = content.msgType {
+                kind = .photo(width: image.info?.width.map(Int.init), height: image.info?.height.map(Int.init))
+                body = "Photo"
+                photoSources[id] = (image.source, image.info?.thumbnailSource)
+            } else {
+                guard let text = MatrixMessagesService.preview(event.content) else { return nil }
+                body = text
+            }
         default:
             guard let text = MatrixMessagesService.preview(event.content) else { return nil }
-            decrypted = true
             body = text
         }
         let state: ChatMessage.State = switch event.localSendState {
@@ -353,21 +370,106 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
         case .notSentYet: .sending
         case .sendingFailed(_, let recoverable): .failed(canRetry: recoverable)
         }
+        let reactions = kind == .deleted ? [] : event.reactions.map {
+            ChatReaction(key: $0.key, count: $0.senders.count, mine: $0.senders.contains { $0.senderId == ownUserID })
+        }
         return ChatMessage(
-            id: item.uniqueId().id, sender: event.sender, body: body, isOwn: event.isOwn,
-            time: MatrixMessagesService.date(event.timestamp), state: state, decrypted: decrypted
+            id: id, sender: event.sender, body: body, isOwn: event.isOwn,
+            time: MatrixMessagesService.date(event.timestamp), state: state, decrypted: decrypted,
+            kind: kind, reactions: reactions, replyTo: like.inReplyTo.flatMap(Self.reply), canReply: event.canBeRepliedTo
         )
+    }
+
+    private static func reply(_ details: InReplyToDetails) -> ReplyPreview? {
+        switch details.event() {
+        case .ready(let content, let sender, _, _, _):
+            ReplyPreview(sender: sender, text: MatrixMessagesService.preview(content) ?? "Message")
+        case .pending, .unavailable:
+            ReplyPreview(sender: "", text: "Loading the message this replies to")
+        case .error:
+            ReplyPreview(sender: "", text: "The message this replies to isn't available")
+        }
+    }
+
+    /// The server's event ID for a shown message, needed to reply to it.
+    private func eventID(_ message: String) -> String? {
+        guard case .eventId(let id)? = lock.withLock({ sendIDs[message] }) else { return nil }
+        return id
+    }
+
+    private func itemID(_ message: String) throws -> EventOrTransactionId {
+        guard let id = lock.withLock({ sendIDs[message] }) else { throw MessagesError.failed("That message isn't here any more.") }
+        return id
     }
 
     func loadEarlier() async {
         _ = try? await timeline.paginateBackwards(numEvents: 40)
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, replyingTo: String?) async throws {
         do {
             if !room.isSendQueueEnabled() { room.enableSendQueue(enable: true) }
             let content = try messageEventContentNew(msgtype: .text(content: TextMessageContent(body: text, formatted: nil)))
-            _ = try await timeline.send(msg: content)
+            if let replyingTo, let event = eventID(replyingTo) {
+                _ = try await timeline.sendReply(msg: content, eventId: event)
+            } else {
+                _ = try await timeline.send(msg: content)
+            }
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func sendPhoto(_ photo: OutgoingPhoto, replyingTo: String?) async throws {
+        // The room is end-to-end encrypted (openChat checks), so the SDK encrypts the file and its
+        // thumbnail on this device and uploads only ciphertext. The keys go inside the encrypted event.
+        guard await room.isEncrypted() else { throw MessagesError.notEncrypted }
+        do {
+            if !room.isSendQueueEnabled() { room.enableSendQueue(enable: true) }
+            let info = ImageInfo(
+                height: UInt64(photo.height), width: UInt64(photo.width), mimetype: "image/jpeg",
+                size: UInt64(photo.data.count),
+                thumbnailInfo: ThumbnailInfo(
+                    height: UInt64(photo.thumbnailHeight), width: UInt64(photo.thumbnailWidth),
+                    mimetype: "image/jpeg", size: UInt64(photo.thumbnail.count)
+                ),
+                thumbnailSource: nil, blurhash: nil, isAnimated: false
+            )
+            let params = UploadParameters(
+                source: .data(bytes: photo.data, filename: "photo.jpg"), caption: nil, formattedCaption: nil,
+                mentions: nil, inReplyTo: replyingTo.flatMap(eventID)
+            )
+            let handle = try timeline.sendImage(
+                params: params, thumbnailSource: .data(bytes: photo.thumbnail, filename: "thumbnail.jpg"), imageInfo: info
+            )
+            try await handle.join()
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func toggleReaction(_ key: String, on message: String) async throws {
+        do {
+            _ = try await timeline.toggleReaction(itemId: try itemID(message), key: key)
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func delete(_ message: String) async throws {
+        do {
+            try await timeline.redactEvent(eventOrTransactionId: try itemID(message), reason: nil)
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func photo(_ message: String, thumbnail: Bool) async throws -> Data {
+        guard let sources = lock.withLock({ photoSources[message] }) else { throw MessagesError.failed("That photo isn't here any more.") }
+        do {
+            // The SDK downloads the ciphertext and opens it with the key from the message.
+            if thumbnail, let small = sources.thumbnail { return try await client.getMediaContent(mediaSource: small) }
+            return try await client.getMediaContent(mediaSource: sources.full)
         } catch {
             throw MatrixMessagesService.translate(error)
         }
