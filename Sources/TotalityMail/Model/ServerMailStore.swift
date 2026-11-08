@@ -243,6 +243,13 @@ public actor ServerMailStore: MailStore {
                 message.outsideLabels = labels.subtracting(["INBOX", "UNREAD", "STARRED", "IMPORTANT", "DRAFT", "CATEGORY_PERSONAL"])
                 // Gmail archives by taking INBOX away, so mail it holds without INBOX is archived here.
                 if known != nil || !stored.labels.isEmpty, !labels.contains("INBOX") { message.marks.folder = .archive }
+            } else {
+                // iCloud: the person's own folders it's in, by its Message-ID.
+                if let known = places[account.id], let messageID = message.messageID {
+                    message.outsideLabels = Set(known.membership[messageID] ?? [])
+                }
+                // Downloaded from a folder other than the Inbox, so it starts out archived.
+                if !stored.labels.isEmpty, !stored.labels.contains("SENT") { message.marks.folder = .archive }
             }
             if stored.labels.contains("SENT") {
                 // Sent from here through the provider: this device's own copy of it.
@@ -362,6 +369,10 @@ public actor ServerMailStore: MailStore {
                 continue
             }
             let vault = vault, counter = OutsideCounter(), view = OutsideViewBox()
+            // Each Message-ID already here from this account, so mail moved between iCloud's folders isn't kept twice.
+            let known: Set<String> = account.provider == .gmail ? [] : Set(
+                ((try? await vault.fetched()) ?? [:]).values.filter { $0.outside == account.id }.compactMap { OutsideFolders.messageID($0.raw) }
+            )
             defer { if let seen = view.value { views[account.id] = seen } }
             do {
                 try await reader.download(
@@ -373,8 +384,12 @@ public actor ServerMailStore: MailStore {
                     },
                     seen: { seen in
                         view.value = seen
-                        if case .gmail(let places) = seen { try await vault.keepPlaces(places) }
-                    }
+                        switch seen {
+                        case .gmail(let places): try await vault.keepPlaces(places)
+                        case .imap(let folders): try await vault.keepPlaces(folders.places(of: account.id))
+                        }
+                    },
+                    haveMessage: { known.contains($0) }
                 )
             } catch is CancellationError {
                 break
@@ -453,14 +468,19 @@ public actor ServerMailStore: MailStore {
                 let mine = marks[id].map { OutsideRemoteState($0, location: base.location) }
                 let seen: OutsideSeen = switch view {
                 case .gmail(let places): places.seen(stored.providerID, received: stored.received)
-                case .imap(let inbox): inbox.seen(providerID: stored.providerID, location: base.location, received: stored.received)
+                case .imap(let inbox):
+                    inbox.seen(
+                        providerID: stored.providerID, location: base.location, received: stored.received,
+                        messageID: OutsideFolders.messageID(stored.raw)
+                    )
                 case nil: .unknown
                 }
                 var outcome = OutsideReconcile.outcome(base: base, mine: mine, seen: seen)
-                if case .imap = view, let pulled = outcome.pull, pulled.place != base.place, pulled.place != .inbox {
-                    // It left the Inbox at iCloud for a folder that isn't known, so it can't be followed there.
-                    outcome.agreed.location = .lost
-                    outcome.agreedIfPushFails.location = .lost
+                if let moved = seen.location {
+                    // Moved at iCloud: followed to its new folder, or lost when it went somewhere not looked in.
+                    outcome.agreed.location = moved
+                    outcome.agreedIfPushFails.location = moved
+                    if moved.mailbox == "INBOX" { try? await vault.noteFetchedAlias(account.id, providerID: moved.providerID) }
                 }
                 if let pull = outcome.pull {
                     let shown = marks[id] ?? MailMarks(folder: Self.folder(base.place), isUnread: base.isUnread, isStarred: base.isStarred)
@@ -479,17 +499,18 @@ public actor ServerMailStore: MailStore {
             }
             if !changes.isEmpty, let credential = try? await vault.credential(for: account.id) {
                 for (providerID, outcome) in await writer.push(account, credential: credential, changes: changes) {
-                    let wanted = changes.first { $0.providerID == providerID }?.to
                     switch outcome {
                     case .done(let after):
                         if record.erased[providerID] != nil { record.erased[providerID] = nil; continue }
                         states[providerID] = after
-                        if let moved = after.location, moved.mailbox == "INBOX" {
-                            try? await vault.noteFetchedAlias(account.id, providerID: "\(moved.validity).\(moved.uid)")
+                        if let moved = after.location, moved != .lost {
+                            try? await vault.noteFetchedAlias(account.id, providerID: moved.providerID)
                         }
                     case .lost:
                         if record.erased[providerID] != nil { record.erased[providerID] = nil; continue }
-                        if var wanted { wanted.location = .lost; states[providerID] = wanted }
+                        // Nothing changed at iCloud, so the agreement stays as it was. Once it's found again by
+                        // its Message-ID, Totality's change goes through.
+                        if var kept = changes.first(where: { $0.providerID == providerID })?.from { kept.location = .lost; states[providerID] = kept }
                     }
                 }
             }
