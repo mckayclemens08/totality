@@ -46,6 +46,10 @@ public struct PhotoListing: Sendable, Equatable {
 /// One library per account. Only photos whose sealed details name this account are ever shown.
 public actor PhotoLibrary {
     /// How each kind of file here is sealed, so a key change can reach them without knowing what they are.
+    /// Movies are in `chunkedPurposes` instead, because they're re-sealed a chunk at a time.
+    /// Files sealed in chunks, which a key move re-seals a chunk at a time.
+    public static let chunkedPurposes: [String: KeyPurpose] = [".waiting-video": .photoVideo, ".video": .photoVideo]
+
     public static let sealedPurposes: [String: KeyPurpose] = [
         ".thumb": .photoThumbnail, ".details": .photoDetails,
         ".waiting-original": .photo, ".waiting-thumb": .photoThumbnail, ".waiting-details": .photoDetails,
@@ -58,7 +62,7 @@ public actor PhotoLibrary {
 
     public nonisolated let account: String
     private let sealer: PhotoSealer
-    private let cache: any BlobStore
+    private let cache: FileBlobStore
     private let rows: any PhotoRows
     private let store: any SealedStore
     private let clock: @Sendable () -> Date
@@ -73,7 +77,7 @@ public actor PhotoLibrary {
     private var sending: Set<UUID> = []
 
     public init(
-        account: String, rootKey: ContentRootKey, cache: any BlobStore, rows: any PhotoRows, store: any SealedStore,
+        account: String, rootKey: ContentRootKey, cache: FileBlobStore, rows: any PhotoRows, store: any SealedStore,
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.account = account
@@ -100,8 +104,7 @@ public actor PhotoLibrary {
         try checkOpen()
         let prepared = try PhotoImport.prepare(data)
         let id = UUID()
-        // Whole seconds, which is what the sealed details keep, so the photo shows the same before and after.
-        let added = Date(timeIntervalSince1970: clock().timeIntervalSince1970.rounded(.down))
+        let added = wholeSeconds(clock())
         let details = PhotoDetails(
             id: id, owner: account, original: UUID(), thumbnail: UUID(), added: added, taken: prepared.taken,
             width: prepared.width, height: prepared.height, type: prepared.type, byteCount: data.count
@@ -112,6 +115,74 @@ public actor PhotoLibrary {
         // The details go last, because they're what makes a waiting photo count.
         try cache.write(try sealer.sealDetails(details), as: "\(name).waiting-details")
         return PhotoItem(details: details, isWaiting: true)
+    }
+
+    /// Seals a video from its file and keeps it on the device, ready to upload. The file isn't changed or
+    /// removed: whoever made it removes it.
+    public func addVideo(_ file: URL) async throws -> PhotoItem {
+        try checkOpen()
+        let prepared = try await VideoImport.prepare(file)
+        try checkOpen()
+        let id = UUID()
+        var details = PhotoDetails(
+            id: id, owner: account, original: UUID(), thumbnail: UUID(), added: wholeSeconds(clock()), taken: prepared.taken,
+            width: prepared.width, height: prepared.height, type: prepared.type, byteCount: prepared.byteCount
+        )
+        details.media = .video
+        details.duration = prepared.duration
+        let name = id.uuidString.lowercased()
+        do {
+            try sealer.sealMovie(file, to: cache.location(of: "\(name).waiting-video"), of: id)
+            // Sealing a long video takes a while. A library closed meanwhile keeps nothing of it.
+            try checkOpen()
+            try cache.write(try sealer.seal(prepared.thumbnail, .thumbnail, of: id), as: "\(name).waiting-thumb")
+            try cache.write(try sealer.sealDetails(details), as: "\(name).waiting-details")
+        } catch {
+            discardWaiting(name)
+            throw error
+        }
+        return PhotoItem(details: details, isWaiting: true)
+    }
+
+    /// What a failed add left behind, which has no details to make it count.
+    private func discardWaiting(_ name: String) {
+        for suffix in [".waiting-details", ".waiting-original", ".waiting-video", ".waiting-thumb"] { try? cache.delete(name + suffix) }
+    }
+
+    /// A Live Photo: its still, as any photo, and its few seconds of movement, sealed in chunks.
+    public func addLive(still: Data, motion: URL) async throws -> PhotoItem {
+        try checkOpen()
+        let prepared = try PhotoImport.prepare(still)
+        let motionBytes = (try? motion.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard motionBytes > 0, motionBytes <= VideoImport.maxBytes else { throw PhotoError.notAPhoto }
+        let duration = await VideoImport.duration(of: motion)
+        try checkOpen()
+        let id = UUID()
+        var details = PhotoDetails(
+            id: id, owner: account, original: UUID(), thumbnail: UUID(), added: wholeSeconds(clock()), taken: prepared.taken,
+            width: prepared.width, height: prepared.height, type: prepared.type, byteCount: still.count
+        )
+        details.media = .live
+        details.motion = UUID()
+        details.motionByteCount = motionBytes
+        details.duration = duration
+        let name = id.uuidString.lowercased()
+        do {
+            try cache.write(try sealer.seal(still, .original, of: id), as: "\(name).waiting-original")
+            try sealer.sealMovie(motion, to: cache.location(of: "\(name).waiting-video"), of: id)
+            try checkOpen()
+            try cache.write(try sealer.seal(prepared.thumbnail, .thumbnail, of: id), as: "\(name).waiting-thumb")
+            try cache.write(try sealer.sealDetails(details), as: "\(name).waiting-details")
+        } catch {
+            discardWaiting(name)
+            throw error
+        }
+        return PhotoItem(details: details, isWaiting: true)
+    }
+
+    /// Whole seconds, which is what the sealed details keep, so a photo shows the same before and after.
+    private func wholeSeconds(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down))
     }
 
     /// Photos added here and not uploaded yet, oldest first.
@@ -163,14 +234,26 @@ public actor PhotoLibrary {
         sending.insert(details.id)
         defer { sending.remove(details.id) }
         let name = details.id.uuidString.lowercased()
-        guard let original = try cache.read("\(name).waiting-original"), let thumbnail = try cache.read("\(name).waiting-thumb"),
-              let sealedDetails = try cache.read("\(name).waiting-details")
+        guard let thumbnail = try cache.read("\(name).waiting-thumb"), let sealedDetails = try cache.read("\(name).waiting-details")
         else { throw PhotoError.missing }
-        try await store.put(original, as: details.original)
-        try checkOpen()
+        var size = thumbnail.count + sealedDetails.count
+        if let movie = details.movie {
+            // Checked before it goes, so a movie a key change left behind is never uploaded unopenable.
+            let file = try cache.location(of: "\(name).waiting-video")
+            _ = try sealer.openMovie(file, of: details.id)
+            try await store.putFile(file, as: movie.blob)
+            try checkOpen()
+            size += (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        }
+        if !details.isVideo {
+            guard let original = try cache.read("\(name).waiting-original") else { throw PhotoError.missing }
+            try await store.put(original, as: details.original)
+            try checkOpen()
+            size += original.count
+        }
         try await store.put(thumbnail, as: details.thumbnail)
         try checkOpen()
-        let row = PhotoRow(id: details.id, details: sealedDetails, byteCount: original.count + thumbnail.count + sealedDetails.count)
+        let row = PhotoRow(id: details.id, details: sealedDetails, byteCount: size)
         try await rows.insert(row, kind: .photo, original: details.original)
         // A library closed meanwhile writes nothing more: its key may already have moved on.
         try checkOpen()
@@ -178,6 +261,7 @@ public actor PhotoLibrary {
         try cache.write(thumbnail, as: "\(name).thumb")
         try cache.write(sealedDetails, as: "\(name).details")
         try cache.delete("\(name).waiting-original")
+        try cache.delete("\(name).waiting-video")
         try cache.delete("\(name).waiting-thumb")
         try cache.delete("\(name).waiting-details")
     }
@@ -301,6 +385,7 @@ public actor PhotoLibrary {
                   let sealed = try? cache.read(name), (try? sealer.openDetails(sealed, of: id, account: account)) != nil
             else { continue }
             try? cache.delete("\(id.uuidString.lowercased()).thumb")
+            try? cache.delete("\(id.uuidString.lowercased()).video")
             try? cache.delete(name)
         }
     }
@@ -322,6 +407,8 @@ public actor PhotoLibrary {
     /// The original file exactly as it was added.
     public func original(of item: PhotoItem) async throws -> Data {
         try checkOpen()
+        // A video is read in pieces, through `movie(of:)`, never whole.
+        guard !item.details.isVideo else { throw PhotoError.notAPhoto }
         if let sealed = try cache.read("\(item.id.uuidString.lowercased()).waiting-original") {
             return try sealer.open(sealed, .original, of: item.id)
         }
@@ -329,6 +416,76 @@ public actor PhotoLibrary {
         guard let sealed = try await fetch(item.details.original, atMost: limit) else { throw PhotoError.missing }
         try checkOpen()
         return try sealer.open(sealed, .original, of: item.id)
+    }
+
+    /// A video, or a Live Photo's movement, ready to read in pieces. A waiting one is read from the
+    /// device. Otherwise the sealed file is downloaded once and kept, and only the newest few are kept.
+    public func movie(of item: PhotoItem) async throws -> ChunkedCipher.Reader {
+        try checkOpen()
+        guard let movie = item.details.movie else { throw PhotoError.notAPhoto }
+        let name = item.id.uuidString.lowercased()
+        let waiting = try cache.location(of: "\(name).waiting-video")
+        if FileManager.default.fileExists(atPath: waiting.path) { return try sealer.openMovie(waiting, of: item.id) }
+        let kept = try cache.location(of: "\(name).video")
+        if FileManager.default.fileExists(atPath: kept.path) {
+            if let reader = try? sealer.openMovie(kept, of: item.id) {
+                try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: kept.path)
+                return reader
+            }
+            try? cache.delete("\(name).video")
+        }
+        // One download of a movie at a time. Anyone else asking for it waits for that one.
+        if let running = downloads[item.id] {
+            try await running.value
+        } else {
+            let task = Task { try await self.fetchMovie(item, blob: movie.blob, byteCount: movie.byteCount) }
+            downloads[item.id] = task
+            defer { downloads[item.id] = nil }
+            try await task.value
+        }
+        try checkOpen()
+        return try sealer.openMovie(kept, of: item.id)
+    }
+
+    /// Movies being downloaded now, one task each.
+    private var downloads: [UUID: Task<Void, Error>] = [:]
+
+    private func fetchMovie(_ item: PhotoItem, blob: UUID, byteCount: Int) async throws {
+        let name = item.id.uuidString.lowercased()
+        let part = try cache.location(of: "\(name).video-part")
+        let limit = ChunkedCipher.sealedLength(plain: min(max(byteCount, 0), VideoImport.maxBytes))
+        guard try await store.download(blob, to: part, limit: limit) else { throw PhotoError.missing }
+        try checkOpen()
+        do {
+            // Every chunk is checked once, so nothing damaged anywhere is kept to fail partway through playing.
+            try sealer.openMovie(part, of: item.id).verifyAll()
+        } catch {
+            // Damaged or not this photo's: thrown away, so the next try starts clean.
+            try? cache.delete("\(name).video-part")
+            throw PhotoError.cantOpen
+        }
+        try? cache.delete("\(name).video")
+        try FileManager.default.moveItem(at: part, to: try cache.location(of: "\(name).video"))
+        trimMovies(keeping: name)
+    }
+
+    /// How many downloaded movies stay on the device. They're sealed, but big.
+    static let moviesKept = 3
+
+    private func trimMovies(keeping current: String) {
+        // Partial downloads nobody is finishing, and leftovers from a key move cut off partway.
+        let busy = Set(downloads.keys.map { "\($0.uuidString.lowercased()).video-part" })
+        for name in (try? cache.names()) ?? [] where (name.hasSuffix(".video-part") && !busy.contains(name)) || name.hasSuffix("-moving") {
+            try? cache.delete(name)
+        }
+        let movies = ((try? cache.names()) ?? []).filter { $0.hasSuffix(".video") && $0 != "\(current).video" }
+        let dated = movies.compactMap { name -> (String, Date)? in
+            guard let url = try? cache.location(of: name),
+                  let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            else { return nil }
+            return (name, date)
+        }
+        for (name, _) in dated.sorted(by: { $0.1 > $1.1 }).dropFirst(Self.moviesKept - 1) { try? cache.delete(name) }
     }
 
     /// Room for what sealing adds to a file, which is far less than this.
@@ -409,6 +566,7 @@ public actor PhotoLibrary {
             // It never reached the server, so the device's copy is all there is.
             try cache.delete("\(name).waiting-details")
             try cache.delete("\(name).waiting-original")
+            try cache.delete("\(name).waiting-video")
             try cache.delete("\(name).waiting-thumb")
             return
         }
@@ -423,10 +581,12 @@ public actor PhotoLibrary {
         try await rows.delete(details.id, kind: .photo)
         try await store.delete(details.original)
         try await store.delete(details.thumbnail)
+        if let motion = details.motion { try await store.delete(motion) }
         try checkOpen()
         rowSizes[details.id] = nil
         try? cache.delete("\(name).details")
         try? cache.delete("\(name).thumb")
+        try? cache.delete("\(name).video")
         try cache.delete("\(name).deleting")
     }
 

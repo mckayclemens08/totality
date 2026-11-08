@@ -17,10 +17,23 @@ public struct SealedArea: Sendable {
     public let store: any BlobStore
     /// File suffix to purpose, like ".event" to `.event`.
     public let purposes: [String: KeyPurpose]
+    /// Files sealed in chunks with `ChunkedCipher`, too big to re-seal whole, by suffix. They need a
+    /// store with real files, and are moved a chunk at a time.
+    public let chunked: [String: KeyPurpose]
+    let files: FileBlobStore?
 
     public init(store: any BlobStore, purposes: [String: KeyPurpose]) {
         self.store = store
         self.purposes = purposes
+        chunked = [:]
+        files = nil
+    }
+
+    public init(files: FileBlobStore, purposes: [String: KeyPurpose], chunked: [String: KeyPurpose]) {
+        store = files
+        self.purposes = purposes
+        self.chunked = chunked
+        self.files = files
     }
 }
 
@@ -129,6 +142,17 @@ public struct ContentKeyRing: Sendable {
                 else { throw CryptoError.authenticationFailed }
                 report.moved += 1
             }
+            for name in try area.store.names() {
+                guard let files = area.files, let (id, purpose) = area.identifyChunked(name) else { continue }
+                switch try ChunkedCipher.reseal(
+                    try files.location(of: name), through: try files.location(of: name + "-moving"),
+                    from: old.objectKey(for: id, purpose: purpose), to: new.objectKey(for: id, purpose: purpose), objectID: id
+                ) {
+                case .moved: report.moved += 1
+                case .alreadyMoved: break
+                case .unreadable: report.unreadable += 1
+                }
+            }
         }
         try keys.save(new.bytes, as: Slot.current)
         try keys.delete(Slot.incoming)
@@ -211,6 +235,13 @@ public struct ContentKeyRing: Sendable {
 }
 
 extension SealedArea {
+    fileprivate func identifyChunked(_ name: String) -> (id: UUID, purpose: KeyPurpose)? {
+        for (suffix, purpose) in chunked where name.hasSuffix(suffix) {
+            if let id = UUID(uuidString: String(name.dropLast(suffix.count))) { return (id, purpose) }
+        }
+        return nil
+    }
+
     fileprivate func identify(_ name: String) -> (id: UUID, purpose: KeyPurpose)? {
         for (suffix, purpose) in purposes where name.hasSuffix(suffix) {
             if let id = UUID(uuidString: String(name.dropLast(suffix.count))) { return (id, purpose) }

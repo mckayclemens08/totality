@@ -16,7 +16,7 @@ public final class PhotosModel {
 
     /// Which photos a grid or the viewer shows.
     public enum Scope: Hashable, Sendable {
-        case library, favourites, recentlyDeleted
+        case library, favourites, videos, recentlyDeleted
         case album(UUID)
     }
 
@@ -49,6 +49,8 @@ public final class PhotosModel {
     #endif
 
     private let library: PhotoLibrary?
+    /// Leftover plain files are cleared once each launch, before anything new is picked.
+    private static var sweptThisLaunch = false
     private let unavailable: (title: String, detail: String)
     private var thumbnails: [UUID: CGImage] = [:]
     private var thumbnailOrder: [UUID] = []
@@ -72,6 +74,10 @@ public final class PhotosModel {
 
     public func load() async {
         guard let library else { return }
+        if !Self.sweptThisLaunch, !isAdding {
+            Self.sweptThisLaunch = true
+            Self.removeLeftoverPlainFiles()
+        }
         do {
             let listing = try await library.list()
             items = listing.items
@@ -100,7 +106,10 @@ public final class PhotosModel {
     /// Sends what's waiting, and says what's stopping it.
     public func upload() async {
         guard let library else { return }
+        // Asks iOS for time to finish if Totality goes into the background. It's up to iOS how long.
+        let background = BackgroundTime.begin()
         let report = await library.upload()
+        background.end()
         isFull = report.full
         if report.offline { isOffline = true }
         if report.sent > 0 {
@@ -116,42 +125,86 @@ public final class PhotosModel {
     // MARK: Adding
 
     /// Adds the photos the person picked. `files` loads each one, so the picker's items never reach here.
+    /// One thing the person picked, and how to load it. Files a loader makes are its own copies, and are
+    /// removed here once they're sealed.
+    public enum Pick: Sendable {
+        case photo(@Sendable () async throws -> Data?)
+        case video(@Sendable () async throws -> URL?)
+        /// A Live Photo, and its still alone in case the movement can't be had.
+        case live(@Sendable () async throws -> (still: Data, motion: URL)?, still: @Sendable () async throws -> Data?)
+    }
+
+    /// Adds the photos the person picked, compatible with step 2's callers.
     public func add(_ files: [@Sendable () async throws -> Data?]) async {
-        guard let library, !files.isEmpty else { return }
+        await add(picks: files.map { .photo($0) })
+    }
+
+    /// Adds what the person picked. The picker's items never reach here, only their loaders.
+    public func add(picks: [Pick]) async {
+        guard let library, !picks.isEmpty else { return }
         isAdding = true
         defer { isAdding = false }
         var added: [PhotoItem] = []
-        var skipped = 0
-        var tooBig = 0
-        for file in files {
+        var problems = AddProblems()
+        for pick in picks {
+            var made: [URL] = []
             do {
-                guard let data = try await file() else {
-                    skipped += 1
-                    continue
+                switch pick {
+                case .photo(let load):
+                    guard let data = try await load() else { throw PhotoError.notAPhoto }
+                    added.append(try await library.add(data))
+                case .video(let load):
+                    guard let file = try await load() else { throw PhotoError.notAPhoto }
+                    made.append(file)
+                    added.append(try await library.addVideo(file))
+                case .live(let load, let still):
+                    if let live = try? await load() {
+                        made.append(live.motion)
+                        added.append(try await library.addLive(still: live.still, motion: live.motion))
+                    } else {
+                        guard let data = try await still() else { throw PhotoError.notAPhoto }
+                        added.append(try await library.add(data))
+                    }
                 }
-                added.append(try await library.add(data))
             } catch PhotoError.tooBig {
-                tooBig += 1
+                problems.tooBig += 1
+            } catch PhotoError.tooLong {
+                problems.tooLong += 1
             } catch {
-                skipped += 1
+                problems.skipped += 1
             }
+            for file in made { try? FileManager.default.removeItem(at: file) }
         }
         if !added.isEmpty {
             items = (added + items).sorted { $0.date != $1.date ? $0.date > $1.date : $0.id.uuidString < $1.id.uuidString }
             waitingCount = items.filter(\.isWaiting).count
             if phase != .ready { phase = .ready }
         }
-        notice = Self.addNotice(skipped: skipped, tooBig: tooBig)
+        notice = Self.addNotice(problems)
         await upload()
     }
 
+    struct AddProblems: Equatable {
+        var skipped = 0
+        var tooBig = 0
+        var tooLong = 0
+    }
+
     nonisolated static func addNotice(skipped: Int, tooBig: Int) -> String? {
+        addNotice(AddProblems(skipped: skipped, tooBig: tooBig))
+    }
+
+    nonisolated static func addNotice(_ problems: AddProblems) -> String? {
         var parts: [String] = []
-        if tooBig > 0 {
-            parts.append(tooBig == 1 ? "One photo is over 100 MB, so it wasn't added." : "\(tooBig) photos are over 100 MB, so they weren't added.")
+        if problems.tooBig > 0 {
+            parts.append(problems.tooBig == 1 ? "One item is too big to add." : "\(problems.tooBig) items are too big to add.")
         }
-        if skipped > 0 {
-            parts.append(skipped == 1 ? "One item couldn't be read as a photo." : "\(skipped) items couldn't be read as photos.")
+        if problems.tooLong > 0 {
+            parts.append(problems.tooLong == 1 ? "One video is over 10 minutes, so it wasn't added."
+                : "\(problems.tooLong) videos are over 10 minutes, so they weren't added.")
+        }
+        if problems.skipped > 0 {
+            parts.append(problems.skipped == 1 ? "One item couldn't be read as a photo or video." : "\(problems.skipped) items couldn't be read as photos or videos.")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
@@ -282,8 +335,37 @@ public final class PhotosModel {
         return try await library.original(of: item)
     }
 
+    /// A video or a Live Photo's movement, to play a piece at a time.
+    public func movie(_ item: PhotoItem) async throws -> ChunkedCipher.Reader {
+        guard let library else { throw PhotoError.closed }
+        return try await library.movie(of: item)
+    }
+
+    /// The movie as a plain file, for saving to the device's Photos. The caller removes it.
+    public func exportMovie(_ item: PhotoItem) async throws -> URL {
+        let reader = try await movie(item)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("totality-\(UUID().uuidString).mov")
+        do {
+            try await Task.detached(priority: .userInitiated) { try reader.copyPlain(to: file) }.value
+        } catch {
+            try? FileManager.default.removeItem(at: file)
+            throw error
+        }
+        return file
+    }
+
+    /// Plain copies Totality made for a moment, of a picked video or one being saved to Photos. Each is
+    /// removed when it's done with, so any still here are from a time Totality was stopped partway.
+    nonisolated static func removeLeftoverPlainFiles(in folder: URL = FileManager.default.temporaryDirectory) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        for name in names where name.hasPrefix("totality-") {
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+        }
+    }
+
     /// The camera and place, read from the original on this device.
     public func info(_ item: PhotoItem) async -> PhotoImport.Info? {
+        guard !item.details.isVideo else { return nil }
         guard let data = try? await original(item) else { return nil }
         return await Task.detached(priority: .userInitiated) { PhotoImport.info(from: data) }.value
     }
@@ -330,6 +412,7 @@ public final class PhotosModel {
         switch scope {
         case .library: items.filter { $0.details.trashed == nil }
         case .favourites: items.filter { $0.details.trashed == nil && $0.details.favourite }
+        case .videos: items.filter { $0.details.trashed == nil && $0.details.isVideo }
         case .recentlyDeleted:
             items.filter { $0.details.trashed != nil }.sorted { ($0.details.trashed ?? .distantPast) > ($1.details.trashed ?? .distantPast) }
         case .album(let id):
@@ -346,9 +429,16 @@ public final class PhotosModel {
         switch scope {
         case .library: "Library"
         case .favourites: "Favourites"
+        case .videos: "Videos"
         case .recentlyDeleted: "Recently Deleted"
         case .album(let id): album(id)?.name ?? "Album"
         }
+    }
+
+    /// A video's length, like 1:05 or 10:00.
+    nonisolated static func durationText(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     /// How long until a photo in Recently Deleted goes for good.

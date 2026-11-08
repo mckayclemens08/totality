@@ -30,6 +30,11 @@ public struct FileBlobStore: BlobStore {
         return directory.appendingPathComponent(name, isDirectory: false)
     }
 
+    /// Where a file lives, for one too big to read whole. The name is checked like any other.
+    public func location(of name: String) throws -> URL {
+        try url(name)
+    }
+
     public func read(_ name: String) throws -> Data? {
         let file = try url(name)
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }

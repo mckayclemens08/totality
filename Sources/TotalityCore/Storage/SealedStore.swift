@@ -109,6 +109,26 @@ public protocol SealedStore: Sendable {
     func delete(_ id: UUID) async throws
     func usage() async throws -> SealedStoreUsage
     func list() async throws -> [SealedStoreEntry]
+    /// Stores a sealed file without reading it all into memory, for blobs like videos.
+    func putFile(_ file: URL, as id: UUID) async throws
+    /// Downloads a blob into `file` a piece at a time, carrying on from what's already there. False when
+    /// this account has nothing under that ID. Refuses anything bigger than `limit`.
+    func download(_ id: UUID, to file: URL, limit: Int) async throws -> Bool
+}
+
+extension SealedStore {
+    public func putFile(_ file: URL, as id: UUID) async throws {
+        try await put(Data(contentsOf: file), as: id)
+    }
+
+    public func download(_ id: UUID, to file: URL, limit: Int) async throws -> Bool {
+        guard let size = try await size(of: id) else { return false }
+        guard size <= limit else { throw SealedStoreError.tooBig }
+        guard let data = try await get(id) else { return false }
+        guard data.count <= limit else { throw SealedStoreError.tooBig }
+        try data.write(to: file, options: .atomic)
+        return true
+    }
 }
 
 /// Talks to the sealed store over HTTPS. A blob goes up in pieces small enough for Cloudflare, each at
@@ -146,17 +166,68 @@ public struct SealedStoreClient: SealedStore {
     }
 
     public func put(_ sealed: Data, as id: UUID) async throws {
-        guard !sealed.isEmpty else { throw SealedStoreError.mismatch }
-        guard sealed.count <= Self.maxBlob else { throw SealedStoreError.tooBig }
+        let hash = SHA256.hash(data: sealed).map { String(format: "%02x", $0) }.joined()
+        try await upload(count: sealed.count, hash: hash, as: id) { sealed.subdata(in: $0) }
+    }
+
+    public func putFile(_ file: URL, as id: UUID) async throws {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        let count = Int(try handle.seekToEnd())
+        try handle.seek(toOffset: 0)
+        var hasher = SHA256()
+        while let piece = try handle.read(upToCount: pieceSize), !piece.isEmpty { hasher.update(data: piece) }
+        let hash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        try await upload(count: count, hash: hash, as: id) { range in
+            try handle.seek(toOffset: UInt64(range.lowerBound))
+            guard let piece = try handle.read(upToCount: range.count), piece.count == range.count else { throw SealedStoreError.mismatch }
+            return piece
+        }
+    }
+
+    public func download(_ id: UUID, to file: URL, limit: Int) async throws -> Bool {
+        guard case .done(let size) = try await state(of: id) else { return false }
+        guard size <= limit, size > 0 else { throw SealedStoreError.tooBig }
+        if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil) }
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        var have = Int(try handle.seekToEnd())
+        if have > size {
+            try handle.truncate(atOffset: 0)
+            have = 0
+        }
+        while have < size {
+            let end = min(have + pieceSize, size) - 1
+            let (status, headers, data) = try await send(
+                id.uuidString.lowercased(), method: "GET", headers: ["Range": "bytes=\(have)-\(end)"], atMost: end - have + 1
+            )
+            switch status {
+            case 206:
+                guard headers["content-range"] == "bytes \(have)-\(end)/\(size)", data.count == end - have + 1 else {
+                    throw SealedStoreError.unavailable
+                }
+            case 404: return false
+            default: throw Self.error(for: status)
+            }
+            try handle.write(contentsOf: data)
+            have += data.count
+        }
+        return true
+    }
+
+    /// Sends `count` bytes in pieces, from wherever the server says this upload got to.
+    private func upload(count: Int, hash: String, as id: UUID, piece: (Range<Int>) throws -> Data) async throws {
+        guard count > 0 else { throw SealedStoreError.mismatch }
+        guard count <= Self.maxBlob else { throw SealedStoreError.tooBig }
         var offset: Int
         switch try await state(of: id) {
         case .done(let size):
             // IDs are random and made for one blob, so a finished one is an earlier try that landed.
-            guard size == sealed.count else { throw SealedStoreError.mismatch }
+            guard size == count else { throw SealedStoreError.mismatch }
             return
         case .uploading(let at):
-            offset = at <= sealed.count ? at : 0
-            if at > sealed.count {
+            offset = at <= count ? at : 0
+            if at > count {
                 try await delete(id)
             }
         case .missing:
@@ -164,10 +235,10 @@ public struct SealedStoreClient: SealedStore {
         }
         // A wrong offset is answered with the right one, so a few tries always settle it.
         var corrections = 0
-        while offset < sealed.count {
-            let end = min(offset + pieceSize, sealed.count)
+        while offset < count {
+            let end = min(offset + pieceSize, count)
             let (status, headers, _) = try await send(
-                id.uuidString.lowercased(), method: "PATCH", body: sealed.subdata(in: offset..<end),
+                id.uuidString.lowercased(), method: "PATCH", body: try piece(offset..<end),
                 headers: ["Upload-Offset": String(offset), "Content-Type": "application/octet-stream"]
             )
             switch status {
@@ -177,8 +248,11 @@ public struct SealedStoreClient: SealedStore {
             case 409:
                 corrections += 1
                 guard corrections <= 3 else { throw SealedStoreError.unavailable }
-                if headers["blob-state"] == "done" { return try await put(sealed, as: id) }
-                guard let actual = headers["upload-offset"].flatMap(Int.init), actual >= 0, actual <= sealed.count else {
+                if headers["blob-state"] == "done" {
+                    guard case .done(let size) = try await state(of: id), size == count else { throw SealedStoreError.mismatch }
+                    return
+                }
+                guard let actual = headers["upload-offset"].flatMap(Int.init), actual >= 0, actual <= count else {
                     throw SealedStoreError.unavailable
                 }
                 offset = actual
@@ -187,13 +261,12 @@ public struct SealedStoreClient: SealedStore {
             default: throw Self.error(for: status)
             }
         }
-        let hash = SHA256.hash(data: sealed).map { String(format: "%02x", $0) }.joined()
-        let finish = try JSONSerialization.data(withJSONObject: ["size": sealed.count, "sha256": hash])
+        let finish = try JSONSerialization.data(withJSONObject: ["size": count, "sha256": hash])
         let (status, _, _) = try await send(id.uuidString.lowercased(), method: "POST", body: finish, headers: ["Content-Type": "application/json"])
         switch status {
         case 201: return
         case 409:
-            guard case .done(let size) = try await state(of: id), size == sealed.count else { throw SealedStoreError.mismatch }
+            guard case .done(let size) = try await state(of: id), size == count else { throw SealedStoreError.mismatch }
         case 400:
             // The bytes that arrived aren't these, so they're thrown away and the next try starts clean.
             try? await delete(id)
@@ -276,8 +349,10 @@ public struct SealedStoreClient: SealedStore {
     }
 
     /// Header names come back lowercased.
+    /// One request. With `atMost`, the answer is read as it arrives and refused once it's longer than
+    /// that, so a misbehaving server can't fill the device's memory with it.
     private func send(
-        _ path: String, method: String, body: Data? = nil, headers: [String: String] = [:]
+        _ path: String, method: String, body: Data? = nil, headers: [String: String] = [:], atMost: Int? = nil
     ) async throws -> (Int, [String: String], Data) {
         let bearer: String
         do {
@@ -291,10 +366,23 @@ public struct SealedStoreClient: SealedStore {
         request.httpBody = body
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        let data: Data
+        var data = Data()
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            if let atMost {
+                let (bytes, answer) = try await session.bytes(for: request)
+                response = answer
+                if answer.expectedContentLength > Int64(atMost) { throw SealedStoreError.unavailable }
+                data.reserveCapacity(atMost)
+                for try await byte in bytes {
+                    data.append(byte)
+                    if data.count > atMost { throw SealedStoreError.unavailable }
+                }
+            } else {
+                (data, response) = try await session.data(for: request)
+            }
+        } catch let error as SealedStoreError {
+            throw error
         } catch let error as URLError where Self.offline.contains(error.code) {
             throw SealedStoreError.offline
         } catch is CancellationError {

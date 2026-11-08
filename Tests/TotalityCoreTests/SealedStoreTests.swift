@@ -85,6 +85,14 @@ final class FakeSealedStore: URLProtocol, @unchecked Sendable {
                     : (200, ["Blob-State": "uploading", "Upload-Offset": String(held.data.count)], Data(), false)
             case "GET":
                 guard let held, held.done else { return (404, [:], Data(), false) }
+                if let range = request.value(forHTTPHeaderField: "Range"), range.hasPrefix("bytes=") {
+                    let parts = range.dropFirst(6).split(separator: "-").compactMap { Int($0) }
+                    guard parts.count == 2, parts[0] <= parts[1], parts[0] < held.data.count else { return (416, [:], Data(), false) }
+                    let end = min(parts[1], held.data.count - 1)
+                    if let breakAfter = state.breakAfter, state.pieces >= breakAfter { return (0, [:], Data(), true) }
+                    state.pieces += 1
+                    return (206, ["Content-Range": "bytes \(parts[0])-\(end)/\(held.data.count)"], held.data.subdata(in: parts[0]..<end + 1), false)
+                }
                 return (200, [:], held.data, false)
             case "DELETE":
                 blobs[id] = nil
@@ -173,6 +181,29 @@ private func sealedBytes(_ count: Int) -> Data {
 }
 
 @Suite struct SealedStoreClientTests {
+    @Test func aFileGoesUpAndComesDownInPiecesAndADownloadCarriesOn() async throws {
+        let (store, host) = FakeSealedStore.client(pieceSize: 1_000)
+        let blob = sealedBytes(4_500)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("sealed-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let source = folder.appendingPathComponent("up")
+        try blob.write(to: source)
+        let id = UUID()
+        try await store.putFile(source, as: id)
+        #expect(try await store.get(id) == blob)
+
+        let target = folder.appendingPathComponent("down")
+        FakeSealedStore.change(host) { $0.breakAfter = $0.pieces + 2 }
+        await #expect(throws: SealedStoreError.offline) { _ = try await store.download(id, to: target, limit: 10_000) }
+        FakeSealedStore.change(host) { $0.breakAfter = nil; $0.methods = [] }
+        #expect(try await store.download(id, to: target, limit: 10_000))
+        #expect(try Data(contentsOf: target) == blob)
+        // Only the three pieces it didn't have came again.
+        #expect(FakeSealedStore.state(host).methods.filter { $0 == "GET" }.count == 3)
+        await #expect(throws: SealedStoreError.tooBig) { _ = try await store.download(id, to: folder.appendingPathComponent("x"), limit: 100) }
+        #expect(try await store.download(UUID(), to: folder.appendingPathComponent("y"), limit: 10_000) == false)
+    }
+
     @Test func storesInPiecesAndReadsBack() async throws {
         let (store, host) = FakeSealedStore.client(pieceSize: 1_000)
         let blob = sealedBytes(3_500)

@@ -37,7 +37,7 @@ enum ContentSetup {
             SealedArea(store: stores.calendar, purposes: CalendarVault.sealedPurposes),
             SealedArea(store: stores.web, purposes: WebVault.sealedPurposes),
             SealedArea(store: stores.mail, purposes: MailVault.sealedPurposes),
-            SealedArea(store: stores.photos, purposes: PhotoLibrary.sealedPurposes),
+            SealedArea(files: stores.photos, purposes: PhotoLibrary.sealedPurposes, chunked: PhotoLibrary.chunkedPurposes),
         ])
     }
 

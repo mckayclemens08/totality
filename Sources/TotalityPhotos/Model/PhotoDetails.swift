@@ -23,6 +23,19 @@ public struct PhotoDetails: Codable, Sendable, Equatable {
     /// The original's size before sealing.
     public let byteCount: Int
 
+    /// What kind of item it is. Nil for a still photo, which is all step 2 made.
+    public var media: Media?
+    /// How long a video or a Live Photo's movement plays, in seconds.
+    public var duration: Double?
+    /// The blob holding a Live Photo's movement, sealed in chunks. For a video, `original` is the video.
+    public var motion: UUID?
+    /// The movement's size before sealing.
+    public var motionByteCount: Int?
+
+    public enum Media: String, Codable, Sendable {
+        case video, live
+    }
+
     // What the person changes. Each is content, so it's sealed with the rest (non-negotiable 2).
     public var isFavourite: Bool?
     public var caption: String?
@@ -57,6 +70,16 @@ public struct PhotoDetails: Codable, Sendable, Equatable {
     public static let captionLimit = 2_000
 
     public var favourite: Bool { isFavourite ?? false }
+    public var isVideo: Bool { media == .video }
+    public var isLive: Bool { media == .live && motion != nil }
+    /// The sealed movie, if there is one: the video itself, or a Live Photo's movement.
+    public var movie: (blob: UUID, byteCount: Int)? {
+        switch media {
+        case .video: (original, byteCount)
+        case .live: motion.map { ($0, motionByteCount ?? 0) }
+        case nil: nil
+        }
+    }
     public var changeCount: Int { revision ?? 0 }
     public var albumIDs: [UUID] { albums ?? [] }
 }
@@ -118,6 +141,8 @@ public enum PhotoError: Error, Equatable, Sendable {
     case missing
     /// The library closed, because the account or the key changed.
     case closed
+    /// A video longer than this version takes.
+    case tooLong
     /// Another device kept changing it, so this change didn't land. Trying again usually works.
     case changedElsewhere
     /// An album name with nothing in it.
@@ -165,6 +190,23 @@ struct PhotoSealer: Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
+    }
+
+    /// Seals a movie file into `output` a chunk at a time, so it's never held in memory whole.
+    func sealMovie(_ input: URL, to output: URL, of photo: UUID) throws {
+        try ChunkedCipher.seal(file: input, to: output, key: rootKey.objectKey(for: photo, purpose: .photoVideo), objectID: photo)
+    }
+
+    /// Opens a sealed movie for reading in pieces. It checks the length and the first piece, so a file
+    /// that's damaged, cut short, or sealed with another key is refused here, not partway through playing.
+    func openMovie(_ file: URL, of photo: UUID) throws -> ChunkedCipher.Reader {
+        do {
+            let reader = try ChunkedCipher.Reader(file: file, key: rootKey.objectKey(for: photo, purpose: .photoVideo), objectID: photo)
+            _ = try reader.read(0..<1)
+            return reader
+        } catch {
+            throw PhotoError.cantOpen
+        }
     }
 
     func sealDetails(_ details: PhotoDetails) throws -> Data {

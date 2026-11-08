@@ -56,7 +56,7 @@ public struct PhotosHomeView: View {
             let chosen = picked
             picked = []
             guard !chosen.isEmpty else { return }
-            Task { await model.add(chosen.map { item in { try await item.loadTransferable(type: Data.self) } }) }
+            Task { await model.add(picks: chosen.map(PickedMedia.pick)) }
         }
         .alert("Photos", isPresented: noticeShown) {
             Button("OK", role: .cancel) { model.notice = nil }
@@ -102,7 +102,7 @@ public struct PhotosHomeView: View {
 
     private func addButton(label: String) -> some View {
         let isAdding = model.isAdding
-        return PhotosPicker(selection: $picked, matching: .images, preferredItemEncoding: .current, photoLibrary: .shared()) {
+        return PhotosPicker(selection: $picked, matching: .any(of: [.images, .videos, .livePhotos]), preferredItemEncoding: .current, photoLibrary: .shared()) {
             if isAdding {
                 ProgressView().accessibilityLabel("Adding photos")
             } else {
@@ -125,7 +125,7 @@ public struct PhotosHomeView: View {
                 PhotosMessage(
                     systemImage: "photo.on.rectangle",
                     title: "No photos yet",
-                    detail: "Add photos from this device. They're sealed here before they upload, so only your devices can see them."
+                    detail: "Add photos and videos from this device. They're sealed here before they upload, so only your devices can see them."
                 )
                 .frame(maxHeight: nil)
                 addButton(label: "Add photos")
@@ -271,6 +271,29 @@ struct PhotoCell: View {
                         .accessibilityHidden(true)
                 }
             }
+            .overlay(alignment: .topLeading) {
+                if item.details.isLive {
+                    Image(systemName: "livephoto")
+                        .font(Typeface.micro)
+                        .foregroundStyle(theme.textPrimary.color)
+                        .padding(Space.s1)
+                        .background(theme.surface.color.opacity(0.85), in: Circle())
+                        .padding(Space.s1)
+                        .accessibilityHidden(true)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if item.details.isVideo, let duration = item.details.duration {
+                    Text(PhotosModel.durationText(duration))
+                        .font(Typeface.micro)
+                        .monospacedDigit()
+                        .foregroundStyle(theme.textPrimary.color)
+                        .padding(.horizontal, Space.s2)
+                        .background(theme.surface.color.opacity(0.85), in: Capsule())
+                        .padding(Space.s1)
+                        .accessibilityHidden(true)
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if item.isWaiting {
                     Image(systemName: "arrow.up.circle.fill")
@@ -289,7 +312,9 @@ struct PhotoCell: View {
     }
 
     private var label: String {
-        var parts = ["Photo from \(item.date.formatted(date: .long, time: .shortened))"]
+        let kind = item.details.isVideo ? "Video" : item.details.isLive ? "Live Photo" : "Photo"
+        var parts = ["\(kind) from \(item.date.formatted(date: .long, time: .shortened))"]
+        if item.details.isVideo, let duration = item.details.duration { parts.append(PhotosModel.durationText(duration)) }
         if item.details.favourite { parts.append("favourite") }
         if let caption = item.details.caption { parts.append(caption) }
         if item.isWaiting { parts.append("waiting to upload") }

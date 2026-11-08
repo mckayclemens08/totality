@@ -308,7 +308,8 @@ neither module imports the other. Like mail, the Oracle server has no backup yet
 ## Photos
 
 Spec agreed with the owner on 2026-11-05, in issue 54. Step 2 is adding and viewing, and step 3 is
-albums, favourites, captions, Recently Deleted, and saving back to Photos. Video and sharing come later.
+albums, favourites, captions, Recently Deleted, and saving back to Photos. Step 4 is video, Live Photos,
+and uploads that carry on. Sharing comes in step 5.
 
 - **Everything is sealed on the device first** (non-negotiable 2). Each photo has three parts, each sealed
   with its own key from the content key: the original exactly as added (`.photo`), a 480-pixel thumbnail
@@ -344,6 +345,21 @@ albums, favourites, captions, Recently Deleted, and saving back to Photos. Video
   ahead of the device, the server's own time of that change (`updated_at`) must agree with it to a day,
   and the server's clock now, from the sealed store's `Date` header, must say 30 days have passed. Deleting for good writes a sealed note on the device first, then removes the row, then both
   files, so a delete that stops partway is finished on the next upload and the photo never shows again.
+- **Videos and Live Photos** (step 4). A video up to 10 minutes and 4 GB, or a Live Photo's movement, is
+  sealed from its file in 1 MiB chunks (`ChunkedCipher`, purpose `.photoVideo`), so it's never held in
+  memory whole. Each chunk's associated data names the photo, its place, the chunk size and the whole
+  length, and a file is refused at once if its length doesn't match its header, so a server can't swap,
+  cut, or extend chunks. A video's `original` is the sealed movie. A Live Photo keeps its still as
+  `original` and its movement as `motion`. Both upload and download in 8 MiB pieces, and carry on from
+  where they stopped (`putFile`, `download`). Playback reads the sealed file a piece at a time through an
+  `AVAssetResourceLoader`, so nothing is written out in plain form. The newest 3 downloaded movies stay
+  on the device, still sealed, and every chunk of a download is checked once before it's kept. A key
+  move re-seals movies a chunk at a time into a side file, reads the new copy back in full, and only
+  then replaces the old one (`ChunkedCipher.reseal`). Plain copies made for a moment (a picked video, a
+  Live Photo's parts, a video being saved to Photos) are removed when done, and any left by a launch
+  that was stopped are removed the next time Photos opens.
+- **Uploads in the background** ask iOS for time to finish when Totality leaves the screen. iOS decides
+  how long, and an upload it stops carries on from the same piece next time.
 - **Save to Photos** asks iOS for add-only access, so Totality can't read the device's library, and says
   first that the copy there isn't sealed. **Info** reads the camera and place from the original on the
   device, and shows the place as coordinates, never looked up by name.
