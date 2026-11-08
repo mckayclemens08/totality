@@ -36,6 +36,8 @@ public enum GoogleSignInError: Error, Equatable, Sendable {
     case cancelled
     /// Google refused, in its own words. Not yet made safe to show.
     case refused(String)
+    /// The account is connected, but not for what's being asked. One consent tap adds it.
+    case notAllowed
     /// The grant was taken back at Google, or ran out. Signing in again fixes it.
     case expired
     /// Google couldn't be reached properly.
@@ -71,11 +73,14 @@ public struct GoogleSignInTokens: Sendable, CustomStringConvertible, CustomDebug
     /// Every scope Google says this token carries. The person can untick any of them on Google's page,
     /// so a module checks for its own before relying on it.
     public let granted: Set<String>
+    /// The Google account's address, when `openid email` was granted and Google vouched for it.
+    public let email: String?
 
-    public init(refreshToken: String, accessToken: String, granted: Set<String>) {
+    public init(refreshToken: String, accessToken: String, granted: Set<String>, email: String? = nil) {
         self.refreshToken = refreshToken
         self.accessToken = accessToken
         self.granted = granted
+        self.email = email
     }
 
     public var description: String { "Google tokens" }
@@ -164,7 +169,8 @@ public struct GoogleSignIn: Sendable {
         guard let refresh = answer.refresh_token, !refresh.isEmpty else { throw GoogleSignInError.unexpected }
         return GoogleSignInTokens(
             refreshToken: refresh, accessToken: answer.access_token,
-            granted: Set((answer.scope ?? "").split(separator: " ").map(String.init))
+            granted: Set((answer.scope ?? "").split(separator: " ").map(String.init)),
+            email: answer.id_token.flatMap(verifiedEmail)
         )
     }
 
@@ -196,6 +202,27 @@ public struct GoogleSignIn: Sendable {
         let access_token: String
         let refresh_token: String?
         let scope: String?
+        let id_token: String?
+    }
+
+    /// The address in an ID token straight from Google's token endpoint. It came over TLS from Google
+    /// in answer to this app's own code, which OpenID Connect (Core 3.1.3.7) accepts in place of checking
+    /// the signature. It still has to be from Google, for this client, and an address Google has verified.
+    func verifiedEmail(_ idToken: String) -> String? {
+        let parts = idToken.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 3 else { return nil }
+        var payload = parts[1].replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while payload.count % 4 != 0 { payload += "=" }
+        struct Claims: Decodable {
+            let iss: String
+            let aud: String
+            let email: String?
+            let email_verified: Bool?
+        }
+        guard let data = Data(base64Encoded: payload), let claims = try? JSONDecoder().decode(Claims.self, from: data),
+              ["https://accounts.google.com", "accounts.google.com"].contains(claims.iss), claims.aud == clientID,
+              claims.email_verified == true, let email = claims.email, GoogleAccounts.isAddress(email) else { return nil }
+        return email.lowercased()
     }
 
     private func token(_ fields: [String: String]) async throws -> TokenAnswer {

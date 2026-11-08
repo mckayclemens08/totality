@@ -40,15 +40,20 @@ public struct GoogleOAuth: Sendable {
     static let profileURL = URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/profile")!
 
     let signIn: GoogleSignIn
+    /// The Google accounts this device has connected, shared with Calendar and Photos, so the person
+    /// signs in to Google once. Nil in tests that don't look at it.
+    let accounts: GoogleAccounts?
     /// How long to wait the first time Gmail says it's being asked too fast. Doubles each time after.
     let pause: Duration
 
     public var clientID: String { signIn.clientID }
 
     /// Nil when this build has no Google client, or it isn't the shape Google gives an iOS app.
-    public init?(clientID: String?, http: any OutsideHTTP = EphemeralHTTP(), pause: Duration = .seconds(1)) {
+    /// `connections` is where the shared Google connections are kept, which in the app is the Keychain.
+    public init?(clientID: String?, http: any OutsideHTTP = EphemeralHTTP(), pause: Duration = .seconds(1), connections: (any KeyStore)? = nil) {
         guard let signIn = GoogleSignIn(clientID: clientID, http: http) else { return nil }
         self.signIn = signIn
+        accounts = connections.map { GoogleAccounts(signIn: signIn, keychain: $0) }
         self.pause = pause
     }
 
@@ -58,7 +63,11 @@ public struct GoogleOAuth: Sendable {
     /// account already added.
     func request(_ purpose: GoogleSignInPurpose = .add) -> GoogleSignInRequest {
         let scopes = purpose.sends ? [Self.changeScope, Self.sendScope] : [Self.changeScope]
-        return GoogleSignInRequest(authorization: signIn.authorization(scopes: scopes, account: purpose.address), purpose: purpose)
+        // What the account already gave Calendar or Photos stays in the new token, so there's still one
+        // token per Google account.
+        return GoogleSignInRequest(
+            authorization: signIn.authorization(scopes: scopes, account: purpose.address, includeGranted: true), purpose: purpose
+        )
     }
 
     /// Checks what Google sent back and swaps it for tokens. It has to be the answer to this request,
@@ -67,11 +76,37 @@ public struct GoogleOAuth: Sendable {
         let tokens = try await Self.mapped { try await signIn.finish(request.authorization, callback: callback) }
         guard request.scopes.allSatisfy(tokens.granted.contains) else {
             // Taking a token back at Google takes back everything this app was given, so it's only done
-            // when nothing was added yet. Turning sending on for an account that reads keeps its reading.
-            if request.purpose == .add { await revoke(tokens.refreshToken) }
+            // when nothing was added yet: not for an account that reads and is turning sending on, and not
+            // for one Calendar or Photos already uses.
+            if request.purpose == .add, tokens.granted.isSubset(of: Self.mailScopes) { await revoke(tokens.refreshToken) }
             throw OutsideMailProblem.notAllowed
         }
-        return GoogleTokens(refreshToken: tokens.refreshToken, accessToken: tokens.accessToken)
+        return GoogleTokens(refreshToken: tokens.refreshToken, accessToken: tokens.accessToken, granted: tokens.granted)
+    }
+
+    /// Everything Mail itself might ask Google for, and the scopes Google adds on its own to any token.
+    static let mailScopes: Set<String> = [readScope, changeScope, sendScope].union(GoogleAccounts.identityScopes)
+        .union(["https://www.googleapis.com/auth/userinfo.email"])
+
+    /// Keeps a Gmail sign-in as this device's connection to that Google account, for Calendar and Photos
+    /// to use without signing in again. Best effort: Mail works the same if it can't be kept.
+    func share(_ address: String, _ tokens: GoogleTokens) {
+        _ = try? accounts?.keep(address: address, refreshToken: tokens.refreshToken, granted: tokens.granted)
+    }
+
+    /// The same, for a Gmail account added before sign-in was shared. Google didn't say then what the
+    /// token carries, so it's what Mail asked for. A newer connection already here is left alone.
+    func share(_ address: String, _ grant: GoogleGrant) {
+        guard let accounts, (try? accounts.connection(address)) == nil else { return }
+        var granted: Set<String> = [grant.canChange ? Self.changeScope : Self.readScope]
+        if grant.canSend { granted.insert(Self.sendScope) }
+        _ = try? accounts.keep(address: address, refreshToken: grant.refreshToken, granted: granted)
+    }
+
+    /// For a Gmail account being removed. Its token was taken back at Google, which ends the
+    /// connection for Calendar and Photos too, so it's forgotten here.
+    func unshare(_ address: String) {
+        try? accounts?.forget(address)
     }
 
     /// A fresh access token, which lasts about an hour and is never kept.
@@ -122,6 +157,7 @@ public struct GoogleOAuth: Sendable {
             case .cancelled: throw OutsideAccountError.cancelled
             case .refused(let said): throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(said))
             case .expired: throw OutsideMailProblem.expired
+            case .notAllowed: throw OutsideMailProblem.notAllowed
             case .unreachable: throw OutsideMailProblem.unreachable
             case .unexpected: throw OutsideMailProblem.unexpected
             }
@@ -153,6 +189,7 @@ enum GoogleSignInPurpose: Equatable, Sendable {
 struct GoogleTokens: Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     let refreshToken: String
     let accessToken: String
+    var granted: Set<String> = []
 
     var description: String { "Google tokens" }
     var debugDescription: String { description }

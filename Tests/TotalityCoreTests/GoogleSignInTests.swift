@@ -14,6 +14,9 @@ private final class FakeTokens: GoogleHTTP, @unchecked Sendable {
     var granted = "\(calendarScope) \(photosScope)"
     var refusal: (Int, String)?
     var giveRefresh = true
+    /// The ID token's claims, or nil for none.
+    var claims: [String: Any]? = ["iss": "https://accounts.google.com", "aud": clientID, "email": "McKay.Clemens@gmail.com", "email_verified": true]
+    private(set) var issued = 0
     private(set) var sent: [URLRequest] = []
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -29,8 +32,13 @@ private final class FakeTokens: GoogleHTTP, @unchecked Sendable {
               code == GoogleSignIn.base64URL(Data(SHA256.hash(data: Data(verifier.utf8)))) else {
             return Self.answer(400, ["error": "invalid_grant"])
         }
-        var answer = ["access_token": "ya29.1", "scope": granted]
-        if giveRefresh { answer["refresh_token"] = "1//refresh-1" }
+        let n = lock.withLock { issued += 1; return issued }
+        var answer = ["access_token": "ya29.\(n)", "scope": granted]
+        if giveRefresh { answer["refresh_token"] = "1//refresh-\(n)" }
+        if let claims {
+            let payload = GoogleSignIn.base64URL(try! JSONSerialization.data(withJSONObject: claims))
+            answer["id_token"] = "eyJhbGciOiJSUzI1NiJ9.\(payload).c2lnbmF0dXJl"
+        }
         return Self.answer(200, answer)
     }
 
@@ -152,5 +160,112 @@ private func query(_ authorization: GoogleAuthorization) -> [String: String] {
         ] {
             #expect(!text.contains("secret") && !text.contains(authorization.verifier) && !text.contains(authorization.state))
         }
+    }
+}
+
+/// Keeps keychain items in memory.
+private final class MemoryKeychain: KeyStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [String: Data] = [:]
+    var names: [String] { lock.withLock { items.keys.sorted() } }
+    func load(_ name: String) throws -> Data? { lock.withLock { items[name] } }
+    func save(_ data: Data, as name: String) throws { lock.withLock { items[name] = data } }
+    func delete(_ name: String) throws { lock.withLock { items[name] = nil } }
+}
+
+@Suite struct GoogleAccountsTests {
+    private func accounts(_ fake: FakeTokens = FakeTokens(), _ keychain: MemoryKeychain = MemoryKeychain()) throws -> GoogleAccounts {
+        GoogleAccounts(signIn: try #require(GoogleSignIn(clientID: clientID, http: fake)), keychain: keychain)
+    }
+
+    @Test func connectsOnceAndKnowsTheAccount() async throws {
+        let fake = FakeTokens()
+        fake.granted = "openid https://www.googleapis.com/auth/userinfo.email \(calendarScope)"
+        let accounts = try accounts(fake)
+        let authorization = accounts.authorization(for: [calendarScope])
+        #expect(authorization.scopes == [calendarScope, "openid", "email"])
+        #expect(query(authorization)["include_granted_scopes"] == "true")
+        let connection = try await accounts.finish(authorization, callback: callback(for: authorization))
+        #expect(connection.address == "mckay.clemens@gmail.com")
+        #expect(connection.allows([calendarScope]) && !connection.allows([photosScope]))
+        #expect(try accounts.connections() == [connection])
+        #expect(try await accounts.accessToken("MCKAY.clemens@gmail.com", for: [calendarScope]) == "ya29.refreshed")
+        await #expect(throws: GoogleSignInError.notAllowed) { try await accounts.accessToken("mckay.clemens@gmail.com", for: [photosScope]) }
+        await #expect(throws: GoogleSignInError.expired) { try await accounts.accessToken("someone.else@gmail.com", for: [calendarScope]) }
+    }
+
+    /// Photos turned on later: one tap on the same account, and the one token now carries both.
+    @Test func addsAModuleToTheSameToken() async throws {
+        let fake = FakeTokens()
+        fake.granted = "openid email \(calendarScope)"
+        let accounts = try accounts(fake)
+        let first = accounts.authorization(for: [calendarScope])
+        try await accounts.finish(first, callback: callback(for: first))
+        fake.granted = "openid email \(calendarScope) \(photosScope)"
+        let more = accounts.authorization(for: [photosScope], account: "mckay.clemens@gmail.com")
+        #expect(query(more)["login_hint"] == "mckay.clemens@gmail.com")
+        let connection = try await accounts.finish(more, callback: callback(for: more))
+        #expect(connection.allows([calendarScope, photosScope]))
+        #expect(connection.refreshToken == "1//refresh-2")
+        #expect(try accounts.connections().count == 1)
+        #expect(GoogleUse.uses(of: connection.granted) == [.calendar, .photos])
+    }
+
+    @Test func refusesAnIDTokenItCantTrust() async throws {
+        for claims: [String: Any]? in [
+            nil,
+            ["iss": "https://evil.example", "aud": clientID, "email": "a@b.co", "email_verified": true],
+            ["iss": "https://accounts.google.com", "aud": "someone-else.apps.googleusercontent.com", "email": "a@b.co", "email_verified": true],
+            ["iss": "https://accounts.google.com", "aud": clientID, "email": "a@b.co", "email_verified": false],
+            ["iss": "https://accounts.google.com", "aud": clientID, "email": "not an address", "email_verified": true],
+        ] {
+            let fake = FakeTokens()
+            fake.claims = claims
+            let keychain = MemoryKeychain()
+            let accounts = try accounts(fake, keychain)
+            let authorization = accounts.authorization(for: [calendarScope])
+            await #expect(throws: GoogleSignInError.unexpected) { try await accounts.finish(authorization, callback: callback(for: authorization)) }
+            // Nothing kept, and what Google gave was handed back.
+            #expect(keychain.names.isEmpty)
+            #expect(fake.revoked.count == 1)
+        }
+    }
+
+    /// Mail's Gmail sign-ins from before sharing: an older token that carries less never replaces a newer one.
+    @Test func keepsTheNewerToken() throws {
+        let accounts = try accounts()
+        let gmail = "https://www.googleapis.com/auth/gmail.modify"
+        try accounts.keep(address: "mckay.clemens@gmail.com", refreshToken: "1//both", granted: [gmail, calendarScope])
+        let kept = try accounts.keep(address: "mckay.clemens@gmail.com", refreshToken: "1//old", granted: [gmail])
+        #expect(kept.refreshToken == "1//both")
+        let newer = try accounts.keep(address: "mckay.clemens@gmail.com", refreshToken: "1//newer", granted: [gmail, calendarScope, photosScope])
+        #expect(newer.refreshToken == "1//newer")
+        #expect(throws: GoogleSignInError.unexpected) { try accounts.keep(address: "nobody", refreshToken: "1//x", granted: []) }
+    }
+
+    @Test func disconnectingEndsItForEveryModule() async throws {
+        let fake = FakeTokens()
+        let keychain = MemoryKeychain()
+        let accounts = try accounts(fake, keychain)
+        try accounts.keep(address: "mckay.clemens@gmail.com", refreshToken: "1//shared", granted: [calendarScope, photosScope])
+        try accounts.keep(address: "family.clemens@gmail.com", refreshToken: "1//family", granted: [calendarScope])
+        try await accounts.disconnect("McKay.Clemens@gmail.com")
+        #expect(fake.revoked == ["token=1%2F%2Fshared"])
+        #expect(try accounts.connections().map(\.address) == ["family.clemens@gmail.com"])
+        try accounts.forget("family.clemens@gmail.com")
+        #expect(try accounts.connections().isEmpty)
+    }
+
+    @Test func neverPrintsTheToken() throws {
+        let connection = GoogleConnection(address: "mckay.clemens@gmail.com", refreshToken: "1//refresh-secret", granted: [calendarScope])
+        for text in [String(describing: connection), String(reflecting: connection), String(describing: Mirror(reflecting: connection).children.map(\.value))] {
+            #expect(!text.contains("secret"))
+        }
+    }
+
+    @Test func tellsModulesApartByGooglesScopeNames() {
+        #expect(GoogleUse.uses(of: ["https://www.googleapis.com/auth/gmail.modify", "openid", "email"]) == [.mail])
+        #expect(GoogleUse.uses(of: [calendarScope, photosScope]) == [.calendar, .photos])
+        #expect(GoogleUse.uses(of: ["https://www.googleapis.com/auth/userinfo.email"]).isEmpty)
     }
 }

@@ -1,5 +1,6 @@
 import AuthenticationServices
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// Google's own sign-in page, in the system's sign-in sheet. It shares Safari's sign-ins, so someone
@@ -19,6 +20,8 @@ struct OutsideAccountsView: View {
 
     @State private var adding = false
     @State private var removing: OutsideAccount?
+    /// What else removing `removing` ends, found before the question is asked.
+    @State private var removingAlsoEnds: Set<GoogleUse> = []
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
@@ -76,7 +79,7 @@ struct OutsideAccountsView: View {
                 Task { await model.remove(account) }
             }
         } message: { account in
-            Text(OutsideWording.removing(account))
+            Text(OutsideWording.removing(account, alsoEnds: removingAlsoEnds))
         }
     }
 
@@ -161,7 +164,12 @@ struct OutsideAccountsView: View {
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Remove Account", role: .destructive) { removing = account }
+            Button("Remove Account", role: .destructive) {
+                Task {
+                    removingAlsoEnds = await model.alsoEnds(account)
+                    removing = account
+                }
+            }
                 .font(Typeface.callout)
                 .foregroundStyle(theme.danger.color)
                 .buttonStyle(.plain)

@@ -186,7 +186,10 @@ final class MailWiring {
             return try ServerMailStore(
                 account: account, rootKey: content.rootKey, vault: vault, server: MailServerClient(token: token),
                 canPublish: { [canPublish] in await canPublish(account) }, username: username,
-                google: GoogleOAuth(clientID: Bundle.main.object(forInfoDictionaryKey: "TotalityGoogleClientID") as? String)
+                google: GoogleOAuth(
+                    clientID: Bundle.main.object(forInfoDictionaryKey: "TotalityGoogleClientID") as? String,
+                    connections: KeychainKeyStore(service: GoogleAccounts.service)
+                )
             )
         } catch {
             return UnavailableMailStore(.noKey)
@@ -242,6 +245,7 @@ final class DeviceContentKeys: ContentKeyAccess {
     func release(by account: String) async throws {
         try ContentSetup.keyRing().release(by: account)
         OutsideSecrets.forgetAll()
+        GoogleAccounts.forgetAll()
     }
 
     /// The old key goes, so any open module has to go with it.
@@ -250,6 +254,7 @@ final class DeviceContentKeys: ContentKeyAccess {
         defer { didMove() }
         try ContentSetup.keyRing().resetEmptyDevice()
         OutsideSecrets.forgetAll()
+        GoogleAccounts.forgetAll()
         // What the last account agreed with its server means nothing to the next one.
         try? FileManager.default.removeItem(at: ContentSetup.syncStateFile())
     }

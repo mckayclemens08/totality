@@ -1,4 +1,5 @@
 import Foundation
+import TotalityCore
 
 /// What Mail says about outside accounts. The keeper and sending lines are issue 43's own words, agreed
 /// with the owner, and have to stay literally true: nothing here calls an outside account's mail sealed
@@ -72,10 +73,14 @@ public enum OutsideWording {
     /// For a Gmail account added when Totality could only read it.
     public static let readOnly = "Changes you make in Totality stay here. Allow changes to keep the Gmail app in step: Google will ask once more."
 
-    public static func removing(_ account: OutsideAccount) -> String {
-        account.provider.signsInWithGoogle
-            ? "Its sign-in and everything downloaded from it leave this device and your others, and Totality's access is taken back at Google. No mail at Google is deleted."
-            : "Its sign-in and everything downloaded from it leave this device and your others. Nothing at \(account.provider.keeper) is deleted."
+    public static func removing(_ account: OutsideAccount, alsoEnds: Set<GoogleUse> = []) -> String {
+        guard account.provider.signsInWithGoogle else {
+            return "Its sign-in and everything downloaded from it leave this device and your others. Nothing at \(account.provider.keeper) is deleted."
+        }
+        let base = "Its sign-in and everything downloaded from it leave this device and your others, and Totality's access is taken back at Google. No mail at Google is deleted."
+        let others = GoogleUse.allCases.filter(alsoEnds.contains).map(\.name)
+        guard !others.isEmpty else { return base }
+        return base + " Google takes back all of Totality's access at once, so \(ListFormatter.localizedString(byJoining: others)) for this Google account stop too, until you connect it again."
     }
 
     public static let none = "No outside accounts yet. Add iCloud or Gmail to read them here, beside your Totality mail."
