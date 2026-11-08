@@ -127,10 +127,11 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         switch info.membership {
         case .invited:
             let inviter = info.inviter?.userId
+            let name = inviter.map(MessagesUsername.display) ?? info.displayName ?? "Someone"
             return ChatSummary(
                 id: info.id,
-                title: inviter.map(MessagesUsername.display) ?? info.displayName ?? "Someone",
-                isRequest: true, from: inviter, lastActivity: nil
+                title: info.isDirect ? name : "Group from \(name)",
+                isRequest: true, from: inviter, lastActivity: nil, isGroup: !info.isDirect
             )
         case .joined:
             // Messages only shows end-to-end encrypted chats, so its label stays true.
@@ -138,7 +139,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             let (text, time) = preview(await room.latestEvent())
             let title = info.displayName ?? info.heroes.first.map { MessagesUsername.display($0.userId) } ?? "Chat"
             let unread = Int(info.numUnreadMessages) + (info.isMarkedUnread ? 1 : 0)
-            return ChatSummary(id: info.id, title: title, lastMessage: text, lastActivity: time, unread: unread)
+            return ChatSummary(id: info.id, title: title, lastMessage: text, lastActivity: time, unread: unread, isGroup: !info.isDirect)
         default:
             return nil
         }
@@ -208,6 +209,27 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         }
     }
 
+    func block(person: String, leaving chat: String?) async throws {
+        do {
+            try await client.ignoreUser(userId: person)
+            if let chat { try await room(chat).leave() }
+        } catch {
+            throw Self.translate(error)
+        }
+    }
+
+    func blocked() async throws -> [String] {
+        do { return try await client.ignoredUsers() } catch { throw Self.translate(error) }
+    }
+
+    func unblock(_ person: String) async throws {
+        do { try await client.unignoreUser(userId: person) } catch { throw Self.translate(error) }
+    }
+
+    func leave(_ chat: String) async throws {
+        do { try await room(chat).leave() } catch { throw Self.translate(error) }
+    }
+
     private func room(_ id: String) throws -> Room {
         guard let room = try client.getRoom(roomId: id) else { throw MessagesError.failed("That chat isn't on this device yet.") }
         return room
@@ -239,12 +261,45 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         }
     }
 
+    func startGroup(with usernames: [String]) async throws -> String {
+        let people = usernames.map { "@\($0):\(Self.serverName)" }.filter { $0 != userID }
+        do {
+            for person in people {
+                do {
+                    _ = try await client.getProfile(userId: person)
+                } catch let error as ClientError {
+                    if case .MatrixApi(_, let code, _, _) = error, code == "M_NOT_FOUND" {
+                        throw MessagesError.failed("There's no one called \(MessagesUsername.display(person)).")
+                    }
+                    throw error
+                }
+            }
+            // No room name: Matrix keeps it outside the encryption, so the group is shown by its members.
+            let id = try await client.createRoom(request: CreateRoomParameters(
+                name: nil, isEncrypted: true, isDirect: false, visibility: .private, preset: .privateChat, invite: people
+            ))
+            for _ in 0..<50 {
+                if try client.getRoom(roomId: id) != nil { return id }
+                try await Task.sleep(for: .milliseconds(200))
+            }
+            throw MessagesError.failed("The new group didn't arrive from the server. Try again.")
+        } catch {
+            throw Self.translate(error)
+        }
+    }
+
     func openChat(_ chat: String) async throws -> any ChatChannel {
         do {
             let room = try room(chat)
             guard await room.isEncrypted() else { throw MessagesError.notEncrypted }
-            let title = (try? await room.roomInfo()).flatMap { $0.displayName } ?? room.displayName() ?? "Chat"
-            return MatrixChat(client: client, room: room, timeline: try await room.timeline(), title: title, ownUserID: userID)
+            let info = try? await room.roomInfo()
+            let title = info?.displayName ?? room.displayName() ?? "Chat"
+            let isGroup = !(info?.isDirect ?? true)
+            let other = isGroup ? nil : info?.heroes.first?.userId
+            return MatrixChat(
+                client: client, room: room, timeline: try await room.timeline(), title: title, ownUserID: userID,
+                isGroup: isGroup, otherPerson: other
+            )
         } catch {
             throw Self.translate(error)
         }
@@ -302,14 +357,52 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
     /// What each shown message is to the SDK, so actions on it reach the right event.
     private var sendIDs: [String: EventOrTransactionId] = [:]
     private var photoSources: [String: (full: MediaSource, thumbnail: MediaSource?)] = [:]
+    private var videoSources: [String: MediaSource] = [:]
     private var handles: [TaskHandle] = []
+    let isGroup: Bool
+    let otherPerson: String?
+    var id: String { room.id() }
 
-    init(client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String) {
+    init(client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String, isGroup: Bool, otherPerson: String?) {
         self.client = client
         self.room = room
         self.timeline = timeline
         self.title = title
         self.ownUserID = ownUserID
+        self.isGroup = isGroup
+        self.otherPerson = otherPerson
+    }
+
+    // MARK: Disappearing messages
+
+    private static let retention = "m.room.retention"
+
+    func observeDisappearing(_ onChange: @escaping @Sendable (DisappearingState) -> Void) async {
+        let own = ownUserID
+        // The event's server time is when the setting began. Only messages after it are affected,
+        // and without one, none are.
+        let state: @Sendable (RoomStateEvent) -> DisappearingState = { event in
+            DisappearingState(
+                setting: Disappearing(stateJSON: event.contentJson),
+                since: event.timestamp.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+                changedBy: event.sender == own ? nil : event.sender
+            )
+        }
+        if let current = try? await room.stateEvents(eventType: .roomRetention).first(where: { $0.stateKey.isEmpty }) {
+            onChange(state(current))
+        }
+        let handle = room.subscribeToStateEvents(eventType: .roomRetention, listener: StateListener { events in
+            if let event = events.last(where: { $0.stateKey.isEmpty }) { onChange(state(event)) }
+        })
+        lock.withLock { handles.append(handle) }
+    }
+
+    func setDisappearing(_ setting: Disappearing) async throws {
+        do {
+            _ = try await room.sendStateEventRaw(eventType: Self.retention, stateKey: "", content: setting.stateJSON)
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
     }
 
     func observe(messages: @escaping @Sendable ([ChatMessage]) -> Void, typing: @escaping @Sendable ([String]) -> Void) async {
@@ -357,6 +450,11 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
                 kind = .photo(width: image.info?.width.map { Int(clamping: $0) }, height: image.info?.height.map { Int(clamping: $0) })
                 body = "Photo"
                 photoSources[id] = (image.source, image.info?.thumbnailSource)
+            } else if case .video(let video) = content.msgType {
+                kind = .video(seconds: video.info?.duration)
+                body = "Video"
+                videoSources[id] = video.source
+                photoSources[id] = video.info?.thumbnailSource.map { ($0, nil) }
             } else {
                 guard let text = MatrixMessagesService.preview(event.content) else { return nil }
                 body = text
@@ -446,6 +544,40 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
         } catch {
             throw MatrixMessagesService.translate(error)
         }
+    }
+
+    func sendVideo(_ video: OutgoingVideo, replyingTo: String?) async throws {
+        guard await room.isEncrypted() else { throw MessagesError.notEncrypted }
+        do {
+            if !room.isSendQueueEnabled() { room.enableSendQueue(enable: true) }
+            let size = (try? FileManager.default.attributesOfItem(atPath: video.file.path)[.size] as? NSNumber)?.uint64Value
+            let info = VideoInfo(
+                duration: video.seconds, height: UInt64(video.height), width: UInt64(video.width), mimetype: "video/mp4",
+                size: size,
+                thumbnailInfo: ThumbnailInfo(
+                    height: UInt64(video.thumbnailHeight), width: UInt64(video.thumbnailWidth),
+                    mimetype: "image/jpeg", size: UInt64(video.thumbnail.count)
+                ),
+                thumbnailSource: nil, blurhash: nil
+            )
+            // Read into memory so the plain file can go as soon as this returns.
+            let data = try Data(contentsOf: video.file)
+            let params = UploadParameters(
+                source: .data(bytes: data, filename: "video.mp4"), caption: nil, formattedCaption: nil,
+                mentions: nil, inReplyTo: replyingTo.flatMap(eventID)
+            )
+            let handle = try timeline.sendVideo(
+                params: params, thumbnailSource: .data(bytes: video.thumbnail, filename: "thumbnail.jpg"), videoInfo: info
+            )
+            try await handle.join()
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func video(_ message: String) async throws -> Data {
+        guard let source = lock.withLock({ videoSources[message] }) else { throw MessagesError.failed("That video isn't here any more.") }
+        do { return try await client.getMediaContent(mediaSource: source) } catch { throw MatrixMessagesService.translate(error) }
     }
 
     func toggleReaction(_ key: String, on message: String) async throws {
@@ -554,6 +686,12 @@ private final class TimelineDiffListener: TimelineListener {
     let handle: @Sendable ([TimelineDiff]) -> Void
     init(_ handle: @escaping @Sendable ([TimelineDiff]) -> Void) { self.handle = handle }
     func onUpdate(diff: [TimelineDiff]) { handle(diff) }
+}
+
+private final class StateListener: RoomStateEventsListener {
+    let handle: @Sendable ([RoomStateEvent]) -> Void
+    init(_ handle: @escaping @Sendable ([RoomStateEvent]) -> Void) { self.handle = handle }
+    func onUpdate(events: [RoomStateEvent]) { handle(events) }
 }
 
 private final class TypingListener: TypingNotificationsListener {

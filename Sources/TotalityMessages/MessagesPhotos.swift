@@ -28,7 +28,7 @@ public enum PhotoPrep {
         return OutgoingPhoto(data: data, thumbnail: thumb, width: width, height: height, thumbnailWidth: tw, thumbnailHeight: th)
     }
 
-    private static func encode(_ source: CGImageSource, side: Int, quality: Double) throws -> (Data, Int, Int) {
+    static func encode(_ source: CGImageSource, side: Int, quality: Double) throws -> (Data, Int, Int) {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,

@@ -11,8 +11,10 @@ public struct MessagesHomeView: View {
     @State private var composing = false
     @State private var query = ""
     @State private var showingCamera = false
-    /// A camera photo waiting for its chat to be chosen. Held in memory only.
-    @State private var takenPhoto: Data?
+    /// What the camera took, waiting for its chat to be chosen.
+    @State private var taken: TakenMedia?
+    @State private var makingGroup = false
+    @State private var showingBlocked = false
     @AppStorage(MessagesPreferences.shareReadAndTypingKey) private var shareReadAndTyping = true
 
     public init(model: MessagesModel, onClose: (() -> Void)? = nil) {
@@ -45,20 +47,45 @@ public struct MessagesHomeView: View {
         }
         #if os(iOS)
         .fullScreenCover(isPresented: $showingCamera) {
-            CameraPicker { data in
+            CameraPicker { result in
                 showingCamera = false
-                takenPhoto = data
+                switch result {
+                case .photo(let data): taken = .photo(data)
+                case .video(let url): taken = .video(url)
+                case nil: break
+                }
             }
             .ignoresSafeArea()
         }
         #endif
-        .sheet(isPresented: Binding(get: { takenPhoto != nil }, set: { if !$0 { takenPhoto = nil } })) {
+        .sheet(isPresented: Binding(get: { taken != nil }, set: { shown in
+            // Swiped away: a video from the camera mustn't be left behind.
+            if !shown, case .video(let url)? = taken { try? FileManager.default.removeItem(at: url) }
+            if !shown { taken = nil }
+        })) {
             ChooseChatView(model: model) { chat in
-                let photo = takenPhoto
-                takenPhoto = nil
-                guard let chat, let photo else { return }
-                Task { if await model.sendPhoto(photo, to: chat) { opened = chat } }
+                let media = taken
+                taken = nil
+                switch (chat, media) {
+                case (let chat?, .photo(let data)?):
+                    Task { if await model.sendPhoto(data, to: chat) { opened = chat } }
+                case (let chat?, .video(let url)?):
+                    Task { if await model.sendVideo(url, to: chat) { opened = chat } }
+                case (nil, .video(let url)?):
+                    try? FileManager.default.removeItem(at: url)
+                default:
+                    break
+                }
             }
+        }
+        .sheet(isPresented: $makingGroup) {
+            NewGroupView(model: model) { chat in
+                makingGroup = false
+                if let chat { opened = chat }
+            }
+        }
+        .sheet(isPresented: $showingBlocked) {
+            BlockedView(model: model) { showingBlocked = false }
         }
         .task { await model.connect() }
         .task(id: model.notice) {
@@ -139,6 +166,8 @@ public struct MessagesHomeView: View {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: Space.s3) {
                     Menu {
+                        Button("New group", systemImage: "person.3") { makingGroup = true }
+                        Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
                         Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -306,5 +335,127 @@ struct ChooseChatView: View {
             }
         }
         .tint(theme.accent.color)
+    }
+}
+
+/// A photo or video from the camera on the chat list.
+private enum TakenMedia {
+    case photo(Data)
+    case video(URL)
+}
+
+/// Starts a small group by usernames.
+struct NewGroupView: View {
+    let model: MessagesModel
+    let onDone: (String?) -> Void
+    @State private var usernames = ""
+    @State private var working = false
+    /// Kept here: the chat list clears its own notices after a moment.
+    @State private var problem: String?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let theme = Theme.current
+        NavigationStack {
+            VStack(alignment: .leading, spacing: Space.s4) {
+                TextField("Usernames, separated by commas", text: $usernames, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .font(Typeface.body)
+                    .lineLimit(1...4)
+                    .focused($focused)
+                    .padding(Space.s3)
+                    .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
+                    .accessibilityLabel("Their usernames")
+                Text("Up to \(GroupMembers.limit) people, you included. Each of them gets a request to accept. The group is shown by who's in it.")
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                if let problem {
+                    Text(problem).font(Typeface.caption).foregroundStyle(theme.danger.color)
+                }
+                Spacer()
+            }
+            .padding(Space.s5)
+            .background(theme.bg.color)
+            .navigationTitle("New group")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onDone(nil) } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if working {
+                        ProgressView()
+                    } else {
+                        Button("Start", action: start)
+                            .disabled(usernames.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+        }
+        .tint(theme.accent.color)
+        .onAppear { focused = true }
+        .onChange(of: usernames) { problem = nil }
+    }
+
+    private func start() {
+        guard !working else { return }
+        working = true
+        Task {
+            let chat = await model.startGroup(with: usernames)
+            working = false
+            if let chat {
+                onDone(chat)
+            } else {
+                problem = model.notice
+                model.notice = nil
+            }
+        }
+    }
+}
+
+/// The people you've blocked, each with Unblock.
+struct BlockedView: View {
+    let model: MessagesModel
+    let onDone: () -> Void
+
+    var body: some View {
+        let theme = Theme.current
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Space.s3) {
+                    if let notice = model.notice {
+                        Text(notice).font(Typeface.caption).foregroundStyle(theme.danger.color)
+                    }
+                    if model.blockedPeople.isEmpty {
+                        MessagesStateView(systemImage: "hand.raised", title: "No one is blocked", detail: "When you block someone, nothing more from them reaches you.")
+                    }
+                    ForEach(model.blockedPeople, id: \.self) { person in
+                        HStack {
+                            Text(MessagesUsername.display(person)).font(Typeface.body)
+                            Spacer()
+                            Button("Unblock") { Task { await model.unblock(person) } }
+                                .font(Typeface.callout)
+                        }
+                        .padding(Space.s3)
+                        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md))
+                    }
+                }
+                .padding(Space.s4)
+            }
+            .background(theme.bg.color)
+            .navigationTitle("Blocked people")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done", action: onDone) }
+            }
+        }
+        .tint(theme.accent.color)
+        .task { await model.loadBlocked() }
     }
 }
