@@ -1,54 +1,30 @@
-import CryptoKit
 import Foundation
-import Security
+import TotalityCore
 
-/// One HTTPS request and its answer, so tests can stand in for Google.
-public protocol OutsideHTTP: Sendable {
-    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
-}
+/// One HTTPS request and its answer, so tests can stand in for Google. The same thing Core's Google
+/// sign-in uses, so Gmail's requests go through the same cookie-free, cache-free connection.
+public typealias OutsideHTTP = GoogleHTTP
 
-/// Talks to Google with nothing remembered between requests: no cookies, no cache, TLS 1.2 or later.
-public struct EphemeralHTTP: OutsideHTTP {
-    private let session: URLSession
-
-    public init() {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil
-        configuration.httpShouldSetCookies = false
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
-        configuration.timeoutIntervalForRequest = 30
-        session = URLSession(configuration: configuration)
-    }
-
-    public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-        return (data, http)
-    }
-}
-
-/// The page Google's sign-in opens on, and what Totality needs to check the answer. The verifier and
-/// state stay on the device, in memory, and never print.
+/// The page Google's sign-in opens on, and why Mail opened it. The verifier and state stay on the
+/// device, in memory, and never print.
 public struct GoogleSignInRequest: Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
-    public let url: URL
-    /// The scheme Google sends the person back on, for the web sign-in sheet to catch.
-    public let callbackScheme: String
-    let state: String
-    let verifier: String
-    let scopes: [String]
+    let authorization: GoogleAuthorization
     let purpose: GoogleSignInPurpose
+
+    public var url: URL { authorization.url }
+    /// The scheme Google sends the person back on, for the web sign-in sheet to catch.
+    public var callbackScheme: String { authorization.callbackScheme }
+    var scopes: [String] { authorization.scopes }
+    var state: String { authorization.state }
+    var verifier: String { authorization.verifier }
 
     public var description: String { "Google sign-in" }
     public var debugDescription: String { description }
     public var customMirror: Mirror { Mirror(self, children: [:]) }
 }
 
-/// Sign in with Google, the way an installed app does it (RFC 8252): the person signs in on Google's
-/// own page, Totality never sees their password, and the answer is bound to this device by PKCE. There's
-/// no client secret, because an app can't keep one. Then Gmail's own API, which is how a Google sign-in
-/// reaches the mail. Every address here is fixed in code.
+/// Gmail through a Google sign-in. Signing in, tokens and taking access back are Core's
+/// `GoogleSignIn`, which every module shares. What's here is Gmail's own: its scopes, and its API.
 public struct GoogleOAuth: Sendable {
     /// Read only. What accounts added before 2026-11-07 were given. They're asked once to allow changes.
     public static let readScope = "https://www.googleapis.com/auth/gmail.readonly"
@@ -59,99 +35,83 @@ public struct GoogleOAuth: Sendable {
     /// Send. Asked for separately, only when the Send switch is turned on.
     public static let sendScope = "https://www.googleapis.com/auth/gmail.send"
 
-    static let authorizeURL = URL(string: "https://accounts.google.com/o/oauth2/v2/auth")!
-    static let tokenURL = URL(string: "https://oauth2.googleapis.com/token")!
-    static let revokeURL = URL(string: "https://oauth2.googleapis.com/revoke")!
+    static let tokenURL = GoogleSignIn.tokenURL
+    static let revokeURL = GoogleSignIn.revokeURL
     static let profileURL = URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/profile")!
 
-    private static let clientSuffix = ".apps.googleusercontent.com"
-
-    public let clientID: String
-    private let http: any OutsideHTTP
+    let signIn: GoogleSignIn
+    /// The Google accounts this device has connected, shared with Calendar and Photos, so the person
+    /// signs in to Google once. Nil in tests that don't look at it.
+    let accounts: GoogleAccounts?
     /// How long to wait the first time Gmail says it's being asked too fast. Doubles each time after.
     let pause: Duration
 
+    public var clientID: String { signIn.clientID }
+
     /// Nil when this build has no Google client, or it isn't the shape Google gives an iOS app.
-    public init?(clientID: String?, http: any OutsideHTTP = EphemeralHTTP(), pause: Duration = .seconds(1)) {
-        guard let clientID = clientID?.trimmingCharacters(in: .whitespaces), clientID.hasSuffix(Self.clientSuffix) else { return nil }
-        let name = clientID.dropLast(Self.clientSuffix.count)
-        guard !name.isEmpty, name.count <= 200, name.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }) else { return nil }
-        self.clientID = clientID
-        self.http = http
+    /// `connections` is where the shared Google connections are kept, which in the app is the Keychain.
+    public init?(clientID: String?, http: any OutsideHTTP = EphemeralHTTP(), pause: Duration = .seconds(1), connections: (any KeyStore)? = nil) {
+        guard let signIn = GoogleSignIn(clientID: clientID, http: http) else { return nil }
+        self.signIn = signIn
+        accounts = connections.map { GoogleAccounts(signIn: signIn, keychain: $0) }
         self.pause = pause
     }
 
-    /// Google's iOS clients come back on their own reversed ID.
-    var callbackScheme: String { "com.googleusercontent.apps." + clientID.dropLast(Self.clientSuffix.count) }
-    var redirectURI: String { callbackScheme + ":/oauth2redirect" }
+    var callbackScheme: String { signIn.callbackScheme }
 
     /// To add an account, choosing which Google account. To allow changes, or sending as well, for an
     /// account already added.
     func request(_ purpose: GoogleSignInPurpose = .add) -> GoogleSignInRequest {
         let scopes = purpose.sends ? [Self.changeScope, Self.sendScope] : [Self.changeScope]
-        let address = purpose.address
-        let state = Self.random(), verifier = Self.random()
-        let challenge = Self.base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
-        var components = URLComponents(url: Self.authorizeURL, resolvingAgainstBaseURL: false)!
-        var items = [
-            URLQueryItem(name: "client_id", value: clientID),
-            URLQueryItem(name: "redirect_uri", value: redirectURI),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "scope", value: scopes.joined(separator: " ")),
-            URLQueryItem(name: "state", value: state),
-            URLQueryItem(name: "code_challenge", value: challenge),
-            URLQueryItem(name: "code_challenge_method", value: "S256"),
-            // Asking each time makes sure Google gives a refresh token, and shows what's being allowed.
-            URLQueryItem(name: "prompt", value: address == nil ? "select_account consent" : "consent"),
-        ]
-        if let address { items.append(URLQueryItem(name: "login_hint", value: address)) }
-        components.queryItems = items
-        // `+` in a query reads as a space to some servers, so it's always escaped.
-        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        // What the account already gave Calendar or Photos stays in the new token, so there's still one
+        // token per Google account.
         return GoogleSignInRequest(
-            url: components.url!, callbackScheme: callbackScheme, state: state, verifier: verifier, scopes: scopes, purpose: purpose
+            authorization: signIn.authorization(scopes: scopes, account: purpose.address, includeGranted: true), purpose: purpose
         )
     }
 
     /// Checks what Google sent back and swaps it for tokens. It has to be the answer to this request,
     /// and every scope asked for has to have been allowed: Google lets the person untick each one.
     func finish(_ request: GoogleSignInRequest, callback: URL) async throws -> GoogleTokens {
-        guard callback.scheme?.lowercased() == callbackScheme.lowercased(),
-              let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems else {
-            throw OutsideMailProblem.unexpected
-        }
-        func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
-        guard value("state") == request.state else { throw OutsideMailProblem.unexpected }
-        if let error = value("error") {
-            if error == "access_denied" { throw OutsideAccountError.cancelled }
-            throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(error))
-        }
-        guard let code = value("code"), !code.isEmpty else { throw OutsideMailProblem.unexpected }
-        let answer = try await token([
-            "grant_type": "authorization_code",
-            "code": code,
-            "client_id": clientID,
-            "redirect_uri": redirectURI,
-            "code_verifier": request.verifier,
-        ])
-        guard let refresh = answer.refresh_token, !refresh.isEmpty else { throw OutsideMailProblem.unexpected }
-        let allowed = Set((answer.scope ?? "").split(separator: " ").map(String.init))
-        guard request.scopes.allSatisfy(allowed.contains) else {
+        let tokens = try await Self.mapped { try await signIn.finish(request.authorization, callback: callback) }
+        guard request.scopes.allSatisfy(tokens.granted.contains) else {
             // Taking a token back at Google takes back everything this app was given, so it's only done
-            // when nothing was added yet. Turning sending on for an account that reads keeps its reading.
-            if request.purpose == .add { await revoke(refresh) }
+            // when nothing was added yet: not for an account that reads and is turning sending on, and not
+            // for one Calendar or Photos already uses.
+            if request.purpose == .add, tokens.granted.isSubset(of: Self.mailScopes) { await revoke(tokens.refreshToken) }
             throw OutsideMailProblem.notAllowed
         }
-        return GoogleTokens(refreshToken: refresh, accessToken: answer.access_token)
+        return GoogleTokens(refreshToken: tokens.refreshToken, accessToken: tokens.accessToken, granted: tokens.granted)
+    }
+
+    /// Everything Mail itself might ask Google for, and the scopes Google adds on its own to any token.
+    static let mailScopes = Set([readScope, changeScope, sendScope]).union(GoogleAccounts.identityScopes)
+        .union(["https://www.googleapis.com/auth/userinfo.email"])
+
+    /// Keeps a Gmail sign-in as this device's connection to that Google account, for Calendar and Photos
+    /// to use without signing in again. Best effort: Mail works the same if it can't be kept.
+    func share(_ address: String, _ tokens: GoogleTokens) {
+        _ = try? accounts?.keep(address: address, refreshToken: tokens.refreshToken, granted: tokens.granted)
+    }
+
+    /// The same, for a Gmail account added before sign-in was shared. Google didn't say then what the
+    /// token carries, so it's what Mail asked for. A newer connection already here is left alone.
+    func share(_ address: String, _ grant: GoogleGrant) {
+        guard let accounts, (try? accounts.connection(address)) == nil else { return }
+        var granted: Set<String> = [grant.canChange ? Self.changeScope : Self.readScope]
+        if grant.canSend { granted.insert(Self.sendScope) }
+        _ = try? accounts.keep(address: address, refreshToken: grant.refreshToken, granted: granted)
+    }
+
+    /// For a Gmail account being removed. Its token was taken back at Google, which ends the
+    /// connection for Calendar and Photos too, so it's forgotten here.
+    func unshare(_ address: String) {
+        try? accounts?.forget(address)
     }
 
     /// A fresh access token, which lasts about an hour and is never kept.
     func accessToken(for grant: GoogleGrant) async throws -> String {
-        try await token([
-            "grant_type": "refresh_token",
-            "refresh_token": grant.refreshToken,
-            "client_id": clientID,
-        ]).access_token
+        try await Self.mapped { try await signIn.accessToken(refreshToken: grant.refreshToken) }
     }
 
     /// The Gmail address the token belongs to, which is also proof it can read.
@@ -174,68 +134,36 @@ public struct GoogleOAuth: Sendable {
     /// Takes Totality's access away at Google, for every scope. Best effort: the account goes from
     /// Totality whether or not Google is reached.
     func revoke(_ refreshToken: String) async {
-        var request = URLRequest(url: Self.revokeURL)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Self.form(["token": refreshToken])
-        _ = try? await sendRequest(request)
-    }
-
-    private struct TokenAnswer: Decodable {
-        let access_token: String
-        let refresh_token: String?
-        let scope: String?
-    }
-
-    private func token(_ fields: [String: String]) async throws -> TokenAnswer {
-        var request = URLRequest(url: Self.tokenURL)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Self.form(fields)
-        let (data, response) = try await sendRequest(request)
-        guard response.statusCode == 200 else {
-            struct Refusal: Decodable { let error: String }
-            let error = try? JSONDecoder().decode(Refusal.self, from: data).error
-            // The grant was taken back at Google, or ran out.
-            if error == "invalid_grant" { throw OutsideMailProblem.expired }
-            throw response.statusCode >= 500 ? OutsideMailProblem.unreachable : OutsideMailProblem.unexpected
-        }
-        guard let answer = try? JSONDecoder().decode(TokenAnswer.self, from: data), !answer.access_token.isEmpty else {
-            throw OutsideMailProblem.unexpected
-        }
-        return answer
+        await signIn.revoke(refreshToken)
     }
 
     func sendRequest(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {
-            return try await http.send(request)
+            return try await signIn.send(request)
         } catch {
             throw OutsideMailProblem.from(error)
         }
     }
 
-    static func form(_ fields: [String: String]) -> Data {
-        var allowed = CharacterSet.alphanumerics.intersection(.init(charactersIn: Unicode.Scalar(0)..<Unicode.Scalar(128)))
-        allowed.insert(charactersIn: "-._~")
-        let body = fields.sorted { $0.key < $1.key }.map { key, value in
-            "\(key.addingPercentEncoding(withAllowedCharacters: allowed)!)=\(value.addingPercentEncoding(withAllowedCharacters: allowed)!)"
-        }.joined(separator: "&")
-        return Data(body.utf8)
-    }
+    static func form(_ fields: [String: String]) -> Data { GoogleSignIn.form(fields) }
+    static func base64URL(_ data: Data) -> String { GoogleSignIn.base64URL(data) }
 
-    /// 32 random bytes, which is what PKCE asks of a verifier.
-    static func random() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        precondition(status == errSecSuccess, "The system's random numbers aren't available")
-        return base64URL(Data(bytes))
-    }
-
-    static func base64URL(_ data: Data) -> String {
-        data.base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
+    /// Core's sign-in errors, said the way Mail says the rest.
+    private static func mapped<T>(_ work: () async throws -> T) async throws -> T {
+        do {
+            return try await work()
+        } catch let error as GoogleSignInError {
+            switch error {
+            case .cancelled: throw OutsideAccountError.cancelled
+            case .refused(let said): throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(said))
+            case .expired: throw OutsideMailProblem.expired
+            case .notAllowed: throw OutsideMailProblem.notAllowed
+            case .unreachable: throw OutsideMailProblem.unreachable
+            case .unexpected: throw OutsideMailProblem.unexpected
+            }
+        } catch {
+            throw OutsideMailProblem.from(error)
+        }
     }
 }
 
@@ -261,6 +189,7 @@ enum GoogleSignInPurpose: Equatable, Sendable {
 struct GoogleTokens: Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     let refreshToken: String
     let accessToken: String
+    var granted: Set<String> = []
 
     var description: String { "Google tokens" }
     var debugDescription: String { description }

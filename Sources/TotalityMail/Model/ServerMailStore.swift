@@ -34,6 +34,8 @@ public actor ServerMailStore: MailStore {
     private var fetchedCache: [UUID: FetchedEntry] = [:]
     /// The last change sync with outside accounts, so the next waits for it instead of interleaving.
     private var outsideSync: Task<Void, Never>?
+    /// Whether this store has offered its Gmail sign-ins to the shared Google connections yet.
+    private var hasSharedGoogle = false
 
     /// `account` is the account's ID, which is also the server's name for its mailbox. It has to be the
     /// vault's account, or nothing would line up.
@@ -835,7 +837,23 @@ public actor ServerMailStore: MailStore {
 
 extension ServerMailStore: OutsideAccountStore {
     public func outsideAccounts() async throws -> [OutsideAccount] {
-        try await vault.outsideAccounts()
+        let accounts = try await vault.outsideAccounts()
+        if !hasSharedGoogle, google != nil {
+            // Gmail accounts from before Google sign-in was shared become this device's connections, so
+            // Calendar and Photos don't ask the person to sign in again. It runs on its own and nothing
+            // waits for it: Mail keeps using its own grant whether or not this lands.
+            hasSharedGoogle = true
+            let gmail = accounts.filter(\.provider.signsInWithGoogle)
+            if !gmail.isEmpty { Task { await self.shareGoogle(gmail) } }
+        }
+        return accounts
+    }
+
+    private func shareGoogle(_ accounts: [OutsideAccount]) async {
+        guard let google else { return }
+        for outside in accounts {
+            if case .google(let grant) = try? await vault.credential(for: outside.id) { google.share(outside.address, grant) }
+        }
     }
 
     public func addOutside(_ signIn: OutsideSignIn) async throws -> OutsideAccount {
@@ -870,6 +888,7 @@ extension ServerMailStore: OutsideAccountStore {
         // the other's too, so it's just dropped.
         try await checkRoom(for: candidate)
         try await vault.save(candidate, credential: .google(GoogleGrant(refreshToken: tokens.refreshToken, canSend: false)), at: now())
+        google.share(address, tokens)
         return candidate
     }
 
@@ -899,14 +918,28 @@ extension ServerMailStore: OutsideAccountStore {
         guard address.lowercased() == outside.address.lowercased() else { throw OutsideAccountError.differentAccount }
         outside.canSend = request.purpose.sends
         try await vault.save(outside, credential: .google(GoogleGrant(refreshToken: tokens.refreshToken, canSend: request.purpose.sends)), at: now())
+        google.share(address, tokens)
     }
 
     /// Takes the sign-in off every device. A Google account's access is taken back at Google too,
-    /// which is the one change at the provider: no mail there is touched.
+    /// which is the one change at the provider: no mail there is touched. That ends the account's
+    /// connection for Calendar and Photos as well, which the screen says before it's done.
     public func removeOutside(_ id: UUID) async throws {
         let credential = try? await vault.credential(for: id)
+        let address = try? await vault.outsideAccounts().first(where: { $0.id == id })?.address
         try await vault.removeOutside(id)
-        if case .google(let grant) = credential, let google { await google.revoke(grant.refreshToken) }
+        if case .google(let grant) = credential, let google {
+            await google.revoke(grant.refreshToken)
+            if let address { google.unshare(address) }
+        }
+    }
+
+    /// What else uses this Gmail account's Google connection on this device, for the screen to say
+    /// before removing it. Empty when nothing else does.
+    public func googleSharing(_ id: UUID) async -> Set<GoogleUse> {
+        guard let google, let address = try? await vault.outsideAccounts().first(where: { $0.id == id })?.address,
+              let connection = try? google.accounts?.connection(address) else { return [] }
+        return GoogleUse.uses(of: connection.granted)
     }
 
     public func setOutsideSending(_ id: UUID, on: Bool) async throws {

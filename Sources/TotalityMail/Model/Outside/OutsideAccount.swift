@@ -1,4 +1,5 @@
 import Foundation
+import TotalityCore
 
 /// An outside mail account added beside the Totality address. It never holds the app password or
 /// Google's token: those stay in the keychain, and in the sealed record that syncs them.
@@ -67,6 +68,12 @@ public protocol OutsideAccountStore: Sendable {
     func removeOutside(_ id: UUID) async throws
     /// Turning sending on checks that it works first. Gmail turns on through `allowGoogleSending`.
     func setOutsideSending(_ id: UUID, on: Bool) async throws
+    /// What else on this device uses a Gmail account's Google connection, which removing it ends too.
+    func googleSharing(_ id: UUID) async -> Set<GoogleUse>
+}
+
+public extension OutsideAccountStore {
+    func googleSharing(_ id: UUID) async -> Set<GoogleUse> { [] }
 }
 
 public enum OutsideAccountLimits {

@@ -1,6 +1,7 @@
 import AuthenticationServices
 import Foundation
 import Observation
+import TotalityCore
 
 /// Opens a provider's own sign-in page and hands back the address it returned to. The screen supplies
 /// this, from SwiftUI's web authentication session.
@@ -80,6 +81,12 @@ public final class OutsideAccountsModel {
             guard let error = Self.accountError(error) else { return .cancelled }
             return .failed(OutsideWording.problem(error, provider: .gmail))
         }
+    }
+
+    /// What else removing this account ends, for the screen to say first.
+    public func alsoEnds(_ account: OutsideAccount) async -> Set<GoogleUse> {
+        guard account.provider.signsInWithGoogle else { return [] }
+        return await store.googleSharing(account.id).subtracting([.mail])
     }
 
     public func remove(_ account: OutsideAccount) async {
