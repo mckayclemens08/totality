@@ -320,7 +320,7 @@ struct RootView: View {
         await calendar?.load()
         await tellWhoIsHere()
         // So the Mail tile has something to show before Mail is opened.
-        if mail.current.phase != .ready { await mail.current.load() }
+        if mail.current.phase != .ready { await mail.current.refresh() }
     }
 
     /// Web keeps things only for the key's owner, and Mail shows only the owner's mailbox.
@@ -386,7 +386,7 @@ struct RootView: View {
             await calendar?.load()
             await web?.load()
             // Marks from another device. Mail only fetches while it's showing.
-            if open == .mail, mail.current.phase == .ready { await mail.current.load() }
+            if open == .mail, mail.current.phase == .ready { await mail.current.refresh() }
         }
         backup.onJoined = {
             await sync.syncNow()

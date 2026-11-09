@@ -29,7 +29,13 @@ struct MailListView: View {
             MailSampleNote(model: model)
             MailMailboxNotes(model: model)
             if conversations.isEmpty, drafts.isEmpty {
-                empty
+                // Still a scroll, so a pull checks for mail here too.
+                GeometryReader { space in
+                    ScrollView {
+                        empty.frame(minHeight: space.size.height)
+                    }
+                    .refreshable { await model.refresh() }
+                }
             } else {
                 List {
                     ForEach(drafts) { draft in
@@ -53,6 +59,8 @@ struct MailListView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                // The spinner stays until every account has been checked.
+                .refreshable { await model.refresh() }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -377,7 +385,7 @@ struct MailMailboxNotes: View {
         if let download = model.outsideDownload {
             HStack(spacing: Space.s2) {
                 ProgressView().controlSize(.small)
-                Text(download.done == 0 ? "Checking \(download.address)…" : "Downloading \(download.address): \(download.done) so far")
+                Text("Bringing in \(download.address) for the first time: \(download.done) so far")
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
                     .lineLimit(1)

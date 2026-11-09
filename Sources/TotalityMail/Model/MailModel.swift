@@ -32,6 +32,8 @@ public final class MailModel {
     /// What went wrong with outside accounts on the last download, one line each.
     public private(set) var outsideProblems: [String] = []
     @ObservationIgnored private var isDownloadingOutside = false
+    /// The sync under way, which anything else asking for one waits on.
+    @ObservationIgnored private var syncing: Task<Void, Never>?
     /// Searching outside accounts for older mail: nil until asked, then how it went for `query`.
     public private(set) var outsideSearch: OutsideSearchState?
     public private(set) var undo: MailUndo?
@@ -129,9 +131,30 @@ public final class MailModel {
         Set(waitingMarks.keys).union(waitingErase).count + (settingsWait ? 1 : 0)
     }
 
-    /// Runs each time Mail appears. Whatever changed here while the fetch was out stays changed.
+    /// Brings Mail up to date: on opening, on coming back to the app, on a timer while it's open, and on
+    /// a pull. One runs at a time, and asking while one is under way waits for it to finish.
+    public func refresh() async {
+        if let syncing {
+            await syncing.value
+            return
+        }
+        let task = Task { await self.load() }
+        syncing = task
+        await task.value
+        syncing = nil
+    }
+
+    /// Whatever changed here while the fetch was out stays changed. What's already on the device shows
+    /// first, so nothing waits on the network.
     public func load() async {
-        if phase != .ready { phase = .loading(nil) }
+        if phase != .ready {
+            if let cached = await store.cached() {
+                mailbox = merged(cached, here: Since())
+                phase = .ready
+            } else {
+                phase = .loading(nil)
+            }
+        }
         let fetch = UUID()
         since[fetch] = Since()
         defer { since[fetch] = nil }

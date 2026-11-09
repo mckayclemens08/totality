@@ -46,13 +46,22 @@ public struct OutsideFetchedMessage: Codable, Equatable, Sendable {
 /// Gmail only: its tabs, and the labels the person made.
 public struct OutsideAccountPlaces: Codable, Equatable, Sendable {
     public let outside: UUID
-    public let labels: [OutsideLabel]
+    public var labels: [OutsideLabel]
     /// Each listed message's labels: INBOX, UNREAD, STARRED, SPAM and TRASH among them, as well as the
     /// tabs and the person's own.
-    public let membership: [String: [String]]
+    public var membership: [String: [String]]
     /// Labels that weren't listed in full, so a message missing from one might still have it.
-    public let truncated: Set<String>
+    public var truncated: Set<String>
     public let since: Date
+    /// Gmail: where its history stood when this was last brought up to date, so the next open asks only
+    /// for what changed since.
+    public var historyID: String?
+    /// Gmail: when every label was last listed in full.
+    public var listedAt: Date?
+    /// Gmail: listed to download, newest first, and not downloaded yet.
+    public var waiting: [String]?
+    /// iCloud: each folder as it was last seen, so the next open fetches only what's new in it.
+    public var folders: [OutsideIMAPFolder]?
 
     /// Gmail's own labels that say where a message is and how it's marked, listed besides the places.
     static let marking = ["INBOX", "UNREAD", "STARRED", "SPAM", "TRASH"]
@@ -370,19 +379,6 @@ struct OutsideReader: Sendable {
     let maker: any OutsideWireMaker
     let google: GoogleOAuth?
 
-    /// Opens one iCloud folder read-only and notes what's in it from `since`: flags and Message-IDs only.
-    private func look(in name: String, kind: OutsideFolders.Kind, connection: IMAPConnection, since: Date) async throws -> OutsideIMAPFolder {
-        let validity = kind == .inbox ? try await connection.examineInbox() : try await connection.examine(name)
-        let all = try await connection.uids(since: since)
-        let listed = Array(all.prefix(OutsideReading.mostListed))
-        var entries: [UInt32: OutsideIMAPEntry] = [:]
-        for start in stride(from: 0, to: listed.count, by: 500) {
-            try Task.checkCancellation()
-            entries.merge(try await connection.entries(Array(listed[start..<min(start + 500, listed.count)]))) { first, _ in first }
-        }
-        return OutsideIMAPFolder(name: name, kind: kind, validity: validity, entries: entries, complete: listed.count == all.count)
-    }
-
     /// Downloads what's in the open folder and not here yet, newest first. A message that's here already
     /// under another UID, because it moved, isn't downloaded again.
     private func download(
@@ -419,41 +415,27 @@ struct OutsideReader: Sendable {
         _ account: OutsideAccount, credential: OutsideCredential, since: Date,
         have: @Sendable (String) async throws -> Bool, keep: @Sendable (OutsideFetchedMessage) async throws -> Void,
         seen: @Sendable (OutsideProviderView) async throws -> Void = { _ in },
-        haveMessage: @Sendable (String) async throws -> Bool = { _ in false }
+        haveMessage: @Sendable (String) async throws -> Bool = { _ in false },
+        previous: OutsideAccountPlaces? = nil, now: Date = Date()
     ) async throws {
         switch credential {
         case .google(let grant):
             guard let google else { throw OutsideAccountError.notSetUp }
             let token = try await google.accessToken(for: grant)
-            // Which messages are in the Inbox, each tab and each label, so they show in the same places here.
             let labels = OutsideLabel.tabs + (try await google.userLabels(accessToken: token))
-            var membership: [String: [String]] = [:]
-            var order: [String] = []
-            var truncated = Set<String>()
-            for label in OutsideAccountPlaces.marking + labels.map(\.id) {
-                try Task.checkCancellation()
-                let listed: (ids: [String], truncated: Bool)
-                do {
-                    listed = try await google.ids(in: label, accessToken: token, since: since, limit: OutsideReading.mostListed)
-                } catch let problem as OutsideMailProblem where label != "INBOX" && problem != .expired && problem != .offline {
-                    // One label that won't list doesn't stop the rest. What's in it is just less certain.
-                    truncated.insert(label)
-                    continue
-                }
-                if listed.truncated { truncated.insert(label) }
-                // Mail is downloaded from the Inbox and the places shown, never only for being unread or in Spam.
-                let downloads = !["UNREAD", "STARRED", "SPAM", "TRASH"].contains(label)
-                for id in listed.ids {
-                    if downloads, !order.contains(id) { order.append(id) }
-                    membership[id, default: []].append(label)
-                }
+            var places: OutsideAccountPlaces
+            var order: [String]
+            if let previous, let quick = try await quickGmail(previous, labels: labels, google: google, token: token, now: now) {
+                (places, order) = quick
+            } else {
+                (places, order) = try await fullGmail(account, labels: labels, google: google, token: token, since: since, now: now)
             }
-            try await seen(.gmail(OutsideAccountPlaces(
-                outside: account.id, labels: labels, membership: membership, truncated: truncated, since: since
-            )))
-            var downloaded = 0
+            places.waiting = order
+            try await seen(.gmail(places))
+            var downloaded = 0, done = Set<String>()
             for id in order where downloaded < OutsideReading.mostPerOpen {
                 try Task.checkCancellation()
+                done.insert(id)
                 guard try await !have(id) else { continue }
                 downloaded += 1
                 let message: (raw: Data, received: Date, isUnread: Bool, isStarred: Bool, labels: [String])
@@ -468,6 +450,9 @@ struct OutsideReader: Sendable {
                     isStarred: message.isStarred, labels: message.labels
                 ))
             }
+            // What's left waits for the next open.
+            places.waiting = order.filter { !done.contains($0) }
+            if places.waiting != order { try await seen(.gmail(places)) }
         case .appPassword(let password):
             guard let signIn = OutsideSignIn(provider: account.provider, address: account.address, appPassword: password) else {
                 throw OutsideAccountError.notFound
@@ -477,7 +462,9 @@ struct OutsideReader: Sendable {
                 var budget = OutsideReading.mostPerOpen
                 // The Inbox first, then each other folder, so mail moved at iCloud is followed and mail
                 // in the person's own folders shows in the places for them.
-                var folders = [try await look(in: "INBOX", kind: .inbox, connection: connection, since: since)]
+                var folders = [try await look(
+                    in: "INBOX", kind: .inbox, connection: connection, since: since, previous: previous?.folders?.first { $0.name == "INBOX" }
+                )]
                 try await download(
                     from: folders[0], connection: connection, account: account, budget: &budget, have: have, haveMessage: haveMessage, keep: keep
                 )
@@ -486,7 +473,9 @@ struct OutsideReader: Sendable {
                     try Task.checkCancellation()
                     let folder: OutsideIMAPFolder
                     do {
-                        folder = try await look(in: name, kind: kind, connection: connection, since: since)
+                        folder = try await look(
+                            in: name, kind: kind, connection: connection, since: since, previous: previous?.folders?.first { $0.name == name }
+                        )
                     } catch let problem as OutsideMailProblem where problem != .offline && problem != .unreachable {
                         // One folder that won't open doesn't stop the rest. What's in it just isn't known.
                         continue

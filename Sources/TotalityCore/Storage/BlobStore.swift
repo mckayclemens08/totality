@@ -11,6 +11,12 @@ public protocol BlobStore: Sendable {
     func write(_ data: Data, as name: String) throws
     func delete(_ name: String) throws
     func names() throws -> [String]
+    /// Whether a blob is there, without reading it.
+    func exists(_ name: String) throws -> Bool
+}
+
+extension BlobStore {
+    public func exists(_ name: String) throws -> Bool { try read(name) != nil }
 }
 
 /// Blobs as files in one directory. Names are checked so none can leave it.
@@ -43,6 +49,10 @@ public struct FileBlobStore: BlobStore {
 
     public func write(_ data: Data, as name: String) throws {
         try data.write(to: url(name), options: .atomic)
+    }
+
+    public func exists(_ name: String) throws -> Bool {
+        FileManager.default.fileExists(atPath: try url(name).path)
     }
 
     public func delete(_ name: String) throws {
