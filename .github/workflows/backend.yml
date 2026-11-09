@@ -62,3 +62,33 @@ jobs:
         with:
           node-version: 24
       - run: node --test blobs.test.mjs
+  matrix-tests:
+    # Messages' two-user test on a throwaway Matrix server with the production config. Its signing
+    # key is made fresh for each run, so no secret is needed.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/matrix-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node setup.mjs /tmp/matrix-test
+      - name: Start the Matrix server
+        # v1.9.4 for amd64, the same release the Oracle server runs, pinned by digest.
+        run: |
+          docker run -d --name tuwunel -p 127.0.0.1:8008:8008 \
+            -e TUWUNEL_CONFIG=/etc/tuwunel.toml \
+            -v /tmp/matrix-test/tuwunel.toml:/etc/tuwunel.toml:ro \
+            -v /tmp/matrix-test/data:/var/lib/tuwunel \
+            ghcr.io/matrix-construct/tuwunel@sha256:c7c2e2c1133eb0806e762f2669eb89c734354704e7f0f50992d91ea921c456cb
+          for i in $(seq 1 60); do
+            curl -fs http://127.0.0.1:8008/_matrix/client/versions >/dev/null && exit 0
+            sleep 1
+          done
+          docker logs tuwunel
+          exit 1
+      - run: node --test two-user.test.mjs
+      - if: failure()
+        run: docker logs tuwunel
