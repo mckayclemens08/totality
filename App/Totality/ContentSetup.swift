@@ -18,7 +18,8 @@ enum ContentSetup {
     }
 
     private static func stores() throws -> (
-        reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore
+        reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
+        googleCalendar: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -26,8 +27,16 @@ enum ContentSetup {
             try FileBlobStore(directory: base.appendingPathComponent("Calendar", isDirectory: true)),
             try FileBlobStore(directory: base.appendingPathComponent("Web", isDirectory: true)),
             try FileBlobStore(directory: base.appendingPathComponent("Mail", isDirectory: true)),
-            try FileBlobStore(directory: base.appendingPathComponent("Photos", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Photos", isDirectory: true)),
+            // Apart from the Calendar's own, because this never syncs.
+            try FileBlobStore(directory: base.appendingPathComponent("GoogleCalendar", isDirectory: true))
         )
+    }
+
+    /// This build's Google sign-in, shared by every module, or nil when it has no Google client.
+    static func googleAccounts() -> GoogleAccounts? {
+        GoogleSignIn(clientID: Bundle.main.object(forInfoDictionaryKey: "TotalityGoogleClientID") as? String)
+            .map { GoogleAccounts(signIn: $0) }
     }
 
     static func keyRing() throws -> ContentKeyRing {
@@ -38,6 +47,7 @@ enum ContentSetup {
             SealedArea(store: stores.web, purposes: WebVault.sealedPurposes),
             SealedArea(store: stores.mail, purposes: MailVault.sealedPurposes),
             SealedArea(files: stores.photos, purposes: PhotoLibrary.sealedPurposes, chunked: PhotoLibrary.chunkedPurposes),
+            SealedArea(store: stores.googleCalendar, purposes: GoogleCalendars.sealedPurposes),
         ])
     }
 
@@ -59,9 +69,10 @@ enum ContentSetup {
         let calendarVault = CalendarVault(store: stores.calendar, rootKey: rootKey)
         let webVault = WebVault(store: stores.web, rootKey: rootKey)
         let devices = SystemCalendarSource()
+        let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault),
-            CalendarModule(vault: calendarVault, devices: devices, hidden: { CalendarModel.hiddenCalendars(in: .standard) }),
+            CalendarModule(vault: calendarVault, devices: devices, google: google, hidden: { CalendarModel.hiddenCalendars(in: .standard) }),
             WebModule(),
             MailModule(),
             PhotosModule(),
@@ -71,7 +82,7 @@ enum ContentSetup {
             CalendarModel(
                 vault: calendarVault,
                 devices: devices, reminders: SystemReminders(),
-                registry: registry
+                registry: registry, google: google
             ),
             WebModel(
                 client: AccountSetup.searchToken.map { WebSearchClient(token: $0) }, vault: webVault, blocker: WebBlocker(),

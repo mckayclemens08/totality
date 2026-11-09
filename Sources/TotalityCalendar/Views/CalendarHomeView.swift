@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 import TotalityCore
 import TotalityUI
@@ -62,6 +63,14 @@ public struct CalendarHomeView: View {
             await model.load()
             model.takeRequestedDay()
             if let entry = model.takeRequestedEntry() { path = [entry] }
+            // Google's changes come in on opening and every few minutes while the Calendar is open.
+            // Pulling down asks straight away.
+            await model.refreshGoogle()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                if Task.isCancelled { break }
+                await model.refreshGoogle()
+            }
         }
     }
 
@@ -113,7 +122,9 @@ public struct CalendarHomeView: View {
             VStack(spacing: Space.s3) {
                 header
                 UnreadableNote(model: model)
+                GoogleSyncNote(model: model)
                 page
+                    .refreshable { await model.refreshGoogle() }
                     .id(model.title)
                     .transition(.push(from: movingForward ? .trailing : .leading))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -253,6 +264,32 @@ struct UnreadableNote: View {
     }
 }
 
+/// Says when Google Calendar is being read, and when it couldn't be.
+struct GoogleSyncNote: View {
+    let model: CalendarModel
+
+    var body: some View {
+        let theme = Theme.current
+        if model.isSyncingGoogle, !model.googleAccounts.isEmpty {
+            HStack(spacing: Space.s2) {
+                ProgressView().controlSize(.small)
+                Text("Updating Google Calendar")
+            }
+            .font(Typeface.caption)
+            .foregroundStyle(theme.textSecondary.color)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Space.s4)
+            .accessibilityElement(children: .combine)
+        } else if let status = model.googleStatus {
+            Label(status, systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                .font(Typeface.caption)
+                .foregroundStyle(theme.danger.color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Space.s4)
+        }
+    }
+}
+
 struct CalendarMessage: View {
     let systemImage: String
     let title: String
@@ -281,10 +318,14 @@ struct CalendarMessage: View {
 struct DeviceCalendarsView: View {
     let model: CalendarModel
     let onDone: () -> Void
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @State private var disconnecting: String?
+    @State private var disconnectingAlsoEnds: Set<GoogleUse> = []
 
     var body: some View {
         let theme = Theme.current
         Form {
+            if model.canUseGoogle { GoogleCalendarsSection(model: model, signingIn: signIn, disconnect: askToDisconnect) }
             Section("Events you add here") {
                 Label(
                     model.isSynced
@@ -342,6 +383,32 @@ struct DeviceCalendarsView: View {
                 Button("Done", action: onDone)
             }
         }
+        .confirmationDialog(
+            "Disconnect \(disconnecting ?? "this Google account")?", isPresented: isDisconnecting, titleVisibility: .visible,
+            presenting: disconnecting
+        ) { account in
+            Button("Disconnect", role: .destructive) { Task { await model.disconnectGoogle(account) } }
+        } message: { _ in
+            Text(GoogleCalendarWording.disconnecting(alsoEnds: disconnectingAlsoEnds))
+        }
+    }
+
+    private var signIn: GoogleWebSignIn {
+        let session = webAuthenticationSession
+        return { page, scheme in
+            try await session.authenticate(using: page, callbackURLScheme: scheme, preferredBrowserSession: .shared)
+        }
+    }
+
+    private func askToDisconnect(_ account: String) {
+        Task {
+            disconnectingAlsoEnds = await model.googleAlsoEnds(account)
+            disconnecting = account
+        }
+    }
+
+    private var isDisconnecting: Binding<Bool> {
+        Binding(get: { disconnecting != nil }, set: { if !$0 { disconnecting = nil } })
     }
 
     private func visible(_ calendar: DeviceCalendar) -> Binding<Bool> {

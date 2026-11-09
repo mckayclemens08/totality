@@ -63,8 +63,20 @@ struct EventDetailView: View {
                         AttachmentRow(ref: ref, model: model, onOpen: onOpen)
                     }
                 } else if case .device(let event) = entry.source {
-                    Label("From your \(event.calendarTitle) calendar. It's read-only here, and Totality doesn't encrypt it.", systemImage: "calendar")
-                        .padding(.top, Space.s2)
+                    switch event.origin {
+                    case .device:
+                        Label("From your \(event.calendarTitle) calendar. It's read-only here, and Totality doesn't encrypt it.", systemImage: "calendar")
+                            .padding(.top, Space.s2)
+                    case .google(_, let link):
+                        Label(GoogleCalendarWording.origin(event.calendarTitle), systemImage: "calendar")
+                            .padding(.top, Space.s2)
+                        if let link {
+                            Link(destination: link) {
+                                Label("Open in Google Calendar", systemImage: "arrow.up.right.square")
+                            }
+                            .foregroundStyle(Theme.current.accent.color)
+                        }
+                    }
                 }
             }
             .font(Typeface.callout)

@@ -7,9 +7,17 @@ public struct DeviceCalendar: Identifiable, Sendable, Hashable {
     public let account: String
 }
 
-/// An event from a calendar on the device, like Apple's or a Google account's. Totality doesn't own
-/// or encrypt these. They're read when needed, and never written to Totality's storage.
+/// An event from somewhere other than Totality, shown read-only: a calendar on the device, like Apple's
+/// or a Google account added to it, or a Google account connected in Totality. Device ones aren't
+/// written to Totality's storage at all. Google ones are kept sealed on this device only.
 public struct DeviceEvent: Identifiable, Sendable, Hashable {
+    public enum Origin: Sendable, Hashable {
+        /// Read through the system's calendars.
+        case device
+        /// Read from Google Calendar by Totality itself, with Google's own page for it.
+        case google(account: String, link: URL?)
+    }
+
     public let id: String
     public let title: String
     public let location: String
@@ -18,6 +26,7 @@ public struct DeviceEvent: Identifiable, Sendable, Hashable {
     public let end: Date
     public let isAllDay: Bool
     public let calendarTitle: String
+    public var origin: Origin = .device
 }
 
 public enum DeviceCalendarAccess: Sendable {

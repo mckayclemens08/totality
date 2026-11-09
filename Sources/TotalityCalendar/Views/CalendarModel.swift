@@ -1,6 +1,10 @@
+import AuthenticationServices
 import Foundation
 import Observation
 import TotalityCore
+
+/// Opens Google's page in the system's web sign-in sheet and hands back where Google sent the person.
+public typealias GoogleWebSignIn = @MainActor (_ page: URL, _ callbackScheme: String) async throws -> URL
 
 /// One row on a calendar: either the person's own event or one read from the device.
 public struct CalendarEntry: Identifiable, Sendable, Hashable {
@@ -172,12 +176,24 @@ public final class CalendarModel {
     private let defaults: UserDefaults
     private let now: @Sendable () -> Date
     private var deviceEvents: [DeviceEvent] = []
+    private let google: GoogleCalendars?
+    /// Connected Google accounts and their calendars, as last kept on this device.
+    public private(set) var googleAccounts: [GoogleCalendarAccount] = []
+    /// Google accounts connected for Mail or Photos that haven't allowed Calendar yet.
+    public private(set) var googleNeedsAllowing: [String] = []
+    /// Accounts the last sync couldn't read. What was kept from before still shows.
+    public private(set) var googleProblems: [String: GoogleCalendarProblem] = [:]
+    /// True while Google Calendar is being read, for the spinner.
+    public private(set) var isSyncingGoogle = false
+    /// True while Google's page is open or its answer is being checked.
+    public private(set) var isConnectingGoogle = false
+    private var googleEvents: [DeviceEvent] = []
     private var entriesByDay: [CalendarDay: [CalendarEntry]] = [:]
     private var built: (first: CalendarDay, last: CalendarDay)?
 
     public init(
         vault: CalendarVault, devices: any DeviceCalendarSource, reminders: any ReminderScheduler,
-        registry: ModuleRegistry? = nil, startingMode: Mode = .month, display: Calendar = CalendarModel.personalCalendar,
+        registry: ModuleRegistry? = nil, google: GoogleCalendars? = nil, startingMode: Mode = .month, display: Calendar = CalendarModel.personalCalendar,
         weekSpan: Int = CalendarModel.platformWeekSpan, defaults: UserDefaults = .standard,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -185,6 +201,7 @@ public final class CalendarModel {
         self.devices = devices
         self.reminders = reminders
         self.registry = registry
+        self.google = google
         self.mode = startingMode
         self.display = display
         self.weekSpan = weekSpan
@@ -363,6 +380,7 @@ public final class CalendarModel {
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
     public func stopForKeyChange() async {
         await vault.close()
+        await google?.close()
     }
 
     public func load() async {
@@ -375,6 +393,7 @@ public final class CalendarModel {
             phase = .failed
             return
         }
+        if let google { googleAccounts = await google.kept() }
         refreshDevice()
         rebuild()
         await syncReminders()
@@ -643,6 +662,91 @@ public final class CalendarModel {
             to: window.last.adding(days: 1, in: display).start(in: display),
             calendarIDs: chosen
         )
+        googleEvents = GoogleCalendars.events(
+            in: googleAccounts, from: window.first.start(in: display), to: window.last.adding(days: 1, in: display).start(in: display)
+        )
+    }
+
+    // MARK: Google Calendar
+
+    /// Whether this build can connect Google Calendar.
+    public var canUseGoogle: Bool { google?.isAvailable == true }
+
+    /// Reads Google Calendar again. Only changes come back after the first time. Runs when the Calendar
+    /// opens, when it's pulled down, and every few minutes while it's open.
+    public func refreshGoogle() async {
+        guard let google, google.isAvailable, !isSyncingGoogle else { return }
+        isSyncingGoogle = true
+        defer { isSyncingGoogle = false }
+        let result = await google.sync()
+        googleAccounts = result.accounts
+        googleNeedsAllowing = result.needsAllowing
+        googleProblems = result.problems
+        refreshDevice()
+        rebuild()
+    }
+
+    /// One line for the Calendar to show about Google, or nil when there's nothing to say.
+    public var googleStatus: String? {
+        if let problem = googleProblems.values.first { return problem.message }
+        return nil
+    }
+
+    /// Connects a Google account for Calendar, or, with an account already connected for Mail or
+    /// Photos, allows Calendar on it with one tap.
+    public func connectGoogle(_ account: String? = nil, signingIn web: GoogleWebSignIn) async {
+        guard let google, let authorization = await google.authorization(for: account), !isConnectingGoogle else { return }
+        isConnectingGoogle = true
+        defer { isConnectingGoogle = false }
+        do {
+            let callback = try await web(authorization.url, authorization.callbackScheme)
+            _ = try await google.finish(authorization, callback: callback)
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            return
+        } catch is CancellationError {
+            return
+        } catch let problem as GoogleCalendarProblem {
+            notice = problem == .notAllowed
+                ? "Google Calendar wasn't allowed on Google's page, so nothing was added. Try again and leave Calendar ticked."
+                : problem.message
+            return
+        } catch {
+            notice = GoogleCalendarProblem.from(error).message
+            return
+        }
+        await refreshGoogle()
+    }
+
+    public func setVisible(_ visible: Bool, googleCalendar: GoogleCalendarState, account: String) async {
+        guard let google else { return }
+        do {
+            try await google.setOn(visible, calendar: googleCalendar.id, account: account)
+        } catch {
+            notice = "That calendar couldn't be changed. Close the Calendar and try again."
+            return
+        }
+        if visible {
+            await refreshGoogle()
+        } else {
+            googleAccounts = await google.kept()
+            refreshDevice()
+            rebuild()
+        }
+    }
+
+    /// What else disconnecting this account ends, for the screen to say first.
+    public func googleAlsoEnds(_ account: String) async -> Set<GoogleUse> {
+        await google?.alsoEnds(account) ?? []
+    }
+
+    public func disconnectGoogle(_ account: String) async {
+        guard let google else { return }
+        await google.disconnect(account)
+        googleAccounts.removeAll { $0.address == account }
+        googleNeedsAllowing.removeAll { $0 == account }
+        googleProblems[account] = nil
+        refreshDevice()
+        rebuild()
     }
 
     // MARK: Attachments
@@ -690,7 +794,7 @@ public final class CalendarModel {
             own += event.occurrences(from: window.first, through: window.last, in: display).map { CalendarEntry(source: .own($0)) }
         }
         var days: [CalendarDay: [CalendarEntry]] = [:]
-        for entry in own + deviceEvents.map({ CalendarEntry(source: .device($0)) }) {
+        for entry in own + (deviceEvents + googleEvents).map({ CalendarEntry(source: .device($0)) }) {
             for day in entry.days(in: display) { days[day, default: []].append(entry) }
         }
         entriesByDay = days.mapValues { entries in
