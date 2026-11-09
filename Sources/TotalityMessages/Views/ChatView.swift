@@ -44,6 +44,7 @@ struct ChatView: View {
     /// A disappearing setting waiting for the person to confirm it.
     @State private var pendingSetting: Disappearing?
     @State private var confirmingLeave = false
+    @State private var editingGroup = false
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var viewing: ChatMessage?
     @State private var deleting: ChatMessage?
@@ -55,7 +56,7 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: Space.s2) {
-                        EncryptionNote()
+                        EncryptionNote(isGroup: model.isGroup)
                         if !model.extraPeople.isEmpty {
                             ExtraPeopleNote(people: model.extraPeople, with: model.otherPerson)
                         }
@@ -140,6 +141,9 @@ struct ChatView: View {
             VideoViewer(message: message, model: model) { playing = nil }
         }
         .toolbar { chatMenu }
+        .sheet(isPresented: $editingGroup) {
+            GroupDetailsView(chat: model, messages: messages) { editingGroup = false }
+        }
         .confirmationDialog(
             "Disappearing messages: \(pendingSetting?.label.lowercased() ?? "")?",
             isPresented: Binding(get: { pendingSetting != nil }, set: { if !$0 { pendingSetting = nil } }),
@@ -223,6 +227,9 @@ struct ChatView: View {
                         confirmingBlock = true
                     }
                 }
+                if model.isGroup {
+                    Button("Name and photo", systemImage: "pencil") { editingGroup = true }
+                }
                 Button(model.isGroup ? "Leave group" : "Leave chat", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                     confirmingLeave = true
                 }
@@ -278,9 +285,12 @@ struct ChatView: View {
 
 /// Said once at the top of every chat, because it's literally true: the server only relays ciphertext.
 private struct EncryptionNote: View {
+    let isGroup: Bool
+
     var body: some View {
         let theme = Theme.current
-        Label("End-to-end encrypted, photos too. The server can see who you talk to and when, but not what you send.", systemImage: "lock")
+        let group = isGroup ? " \(GroupLabels.notEncrypted)" : ""
+        Label("Messages are end-to-end encrypted, photos too. The server can see who you talk to and when, but not what you send.\(group)", systemImage: "lock")
             .font(Typeface.caption)
             .foregroundStyle(theme.textSecondary.color)
             .multilineTextAlignment(.center)

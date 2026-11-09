@@ -139,7 +139,12 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             let (text, time) = preview(await room.latestEvent())
             let title = info.displayName ?? info.heroes.first.map { MessagesUsername.display($0.userId) } ?? "Chat"
             let unread = Int(info.numUnreadMessages) + (info.isMarkedUnread ? 1 : 0)
-            return ChatSummary(id: info.id, title: title, lastMessage: text, lastActivity: time, unread: unread, isGroup: !info.isDirect)
+            // A group's photo is shown once you've joined, never on a request: fetching it would tell
+            // the server, and so whoever invited you, that the request was looked at.
+            return ChatSummary(
+                id: info.id, title: title, lastMessage: text, lastActivity: time, unread: unread,
+                isGroup: !info.isDirect, photo: info.isDirect ? nil : info.avatarUrl
+            )
         default:
             return nil
         }
@@ -267,7 +272,17 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         }
     }
 
-    func startGroup(with usernames: [String]) async throws -> String {
+    func groupPhoto(_ location: String) async throws -> Data {
+        // Only this server's own media: federation is off, and a link elsewhere is never fetched.
+        guard location.hasPrefix("mxc://\(Self.serverName)/") else { throw MessagesError.failed("That group photo isn't on Totality's server.") }
+        do {
+            return try await client.getMediaContent(mediaSource: try MediaSource.fromUrl(url: location))
+        } catch {
+            throw Self.translate(error)
+        }
+    }
+
+    func startGroup(with usernames: [String], name: String?, photo: GroupPhoto?) async throws -> String {
         let people = usernames.map { "@\($0):\(Self.serverName)" }.filter { $0 != userID }
         do {
             for person in people {
@@ -280,12 +295,18 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
                     throw error
                 }
             }
-            // No room name: Matrix keeps it outside the encryption, so the group is shown by its members.
+            // The name and photo are outside Matrix's encryption, which the screen says where they're set.
             let id = try await client.createRoom(request: CreateRoomParameters(
-                name: nil, isEncrypted: true, isDirect: false, visibility: .private, preset: .privateChat, invite: people
+                name: name, isEncrypted: true, isDirect: false, visibility: .private, preset: .privateChat, invite: people
             ))
             for _ in 0..<50 {
-                if try client.getRoom(roomId: id) != nil { return id }
+                if let room = try client.getRoom(roomId: id) {
+                    if let photo {
+                        // The group exists either way. A photo that didn't go up can be added from the chat.
+                        try? await room.uploadAvatar(mimeType: "image/jpeg", data: photo.data, mediaInfo: Self.imageInfo(photo))
+                    }
+                    return id
+                }
                 try await Task.sleep(for: .milliseconds(200))
             }
             throw MessagesError.failed("The new group didn't arrive from the server. Try again.")
@@ -305,7 +326,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             let extra = isGroup ? [] : DirectChatRule.extraPeople(members: await Self.activeMembers(of: room), own: userID, other: other)
             return MatrixChat(
                 client: client, room: room, timeline: try await room.timeline(), title: title, ownUserID: userID,
-                isGroup: isGroup, otherPerson: other, extraPeople: extra
+                isGroup: isGroup, otherPerson: other, extraPeople: extra, photo: isGroup ? info?.avatarUrl : nil
             )
         } catch {
             throw Self.translate(error)
@@ -313,6 +334,13 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
     }
 
     // MARK: Helpers
+
+    static func imageInfo(_ photo: GroupPhoto) -> ImageInfo {
+        ImageInfo(
+            height: UInt64(photo.height), width: UInt64(photo.width), mimetype: "image/jpeg", size: UInt64(photo.data.count),
+            thumbnailInfo: nil, thumbnailSource: nil, blurhash: nil, isAnimated: false
+        )
+    }
 
     /// Everyone joined or invited. On any failure it lists nobody, which never passes as "just the two of you".
     static func activeMembers(of room: Room) async -> [String] {
@@ -380,9 +408,11 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
     let otherPerson: String?
     var id: String { room.id() }
 
+    let photo: String?
     let extraPeople: [String]
 
-    init(client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String, isGroup: Bool, otherPerson: String?, extraPeople: [String]) {
+    init(client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String, isGroup: Bool, otherPerson: String?, extraPeople: [String], photo: String?) {
+        self.photo = photo
         self.extraPeople = extraPeople
         self.client = client
         self.room = room
@@ -415,6 +445,28 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
             if let event = events.last(where: { $0.stateKey.isEmpty }) { onChange(state(event)) }
         })
         lock.withLock { handles.append(handle) }
+    }
+
+    func rename(_ name: String?) async throws {
+        guard isGroup else { return }
+        do {
+            try await room.setName(name: name ?? "")
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func setPhoto(_ photo: GroupPhoto?) async throws {
+        guard isGroup else { return }
+        do {
+            if let photo {
+                try await room.uploadAvatar(mimeType: "image/jpeg", data: photo.data, mediaInfo: MatrixMessagesService.imageInfo(photo))
+            } else {
+                try await room.removeAvatar()
+            }
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
     }
 
     func setDisappearing(_ setting: Disappearing) async throws {

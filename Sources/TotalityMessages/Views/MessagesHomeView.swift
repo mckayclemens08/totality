@@ -98,7 +98,7 @@ public struct MessagesHomeView: View {
     @ViewBuilder private var content: some View {
         switch model.phase {
         case .idle, .loading:
-            MessagesStateView(systemImage: "bubble.left.and.bubble.right", title: "Getting your messages", detail: "Connecting to Totality's Matrix server. Everything here is end-to-end encrypted.", busy: true)
+            MessagesStateView(systemImage: "bubble.left.and.bubble.right", title: "Getting your messages", detail: "Connecting to Totality's Matrix server. Your messages here are end-to-end encrypted.", busy: true)
         case .failed(let reason):
             MessagesStateView(systemImage: "exclamationmark.bubble", title: "Messages couldn't open", detail: reason, action: .init(label: "Try again") {
                 Task { await model.connect() }
@@ -144,7 +144,7 @@ public struct MessagesHomeView: View {
                         .padding(.top, Space.s4)
                 } else {
                     ForEach(chats) { chat in
-                        Button { opened = chat.id } label: { ChatRow(chat: chat) }
+                        Button { opened = chat.id } label: { ChatRow(chat: chat, messages: model) }
                             .buttonStyle(.plain)
                     }
                 }
@@ -190,12 +190,13 @@ public struct MessagesHomeView: View {
 
 private struct ChatRow: View {
     let chat: ChatSummary
+    let messages: MessagesModel
 
     var body: some View {
         let theme = Theme.current
         let unread = chat.unread > 0
         HStack(spacing: Space.s3) {
-            Initial(name: chat.title)
+            GroupAvatar(title: chat.title, location: chat.photo, messages: messages)
             VStack(alignment: .leading, spacing: Space.s1) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(chat.title)
@@ -319,7 +320,7 @@ struct ChooseChatView: View {
             ScrollView {
                 LazyVStack(spacing: Space.s3) {
                     ForEach(model.chats) { chat in
-                        Button { onDone(chat.id) } label: { ChatRow(chat: chat) }
+                        Button { onDone(chat.id) } label: { ChatRow(chat: chat, messages: model) }
                             .buttonStyle(.plain)
                     }
                 }
@@ -349,6 +350,8 @@ struct NewGroupView: View {
     let model: MessagesModel
     let onDone: (String?) -> Void
     @State private var usernames = ""
+    @State private var groupName = ""
+    @State private var photo: Data?
     @State private var working = false
     /// Kept here: the chat list clears its own notices after a moment.
     @State private var problem: String?
@@ -370,9 +373,10 @@ struct NewGroupView: View {
                     .padding(Space.s3)
                     .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
                     .accessibilityLabel("Their usernames")
-                Text("Up to \(GroupMembers.limit) people, you included. Each of them gets a request to accept. The group is shown by who's in it.")
+                Text("Up to \(GroupMembers.limit) people, you included. Each of them gets a request to accept.")
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
+                GroupFields(name: $groupName, photo: $photo)
                 if let problem {
                     Text(problem).font(Typeface.caption).foregroundStyle(theme.danger.color)
                 }
@@ -405,7 +409,7 @@ struct NewGroupView: View {
         guard !working else { return }
         working = true
         Task {
-            let chat = await model.startGroup(with: usernames)
+            let chat = await model.startGroup(with: usernames, name: groupName, photo: photo)
             working = false
             if let chat {
                 onDone(chat)

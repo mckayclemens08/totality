@@ -16,13 +16,17 @@ public struct ChatSummary: Identifiable, Sendable, Equatable {
     public let unread: Int
     /// A small group rather than a chat with one person.
     public let isGroup: Bool
+    /// Where a group's photo is kept on the server. Group photos aren't end-to-end encrypted.
+    public let photo: String?
 
     public init(
         id: String, title: String, isRequest: Bool = false, from: String? = nil,
-        lastMessage: String? = nil, lastActivity: Date? = nil, unread: Int = 0, isGroup: Bool = false
+        lastMessage: String? = nil, lastActivity: Date? = nil, unread: Int = 0, isGroup: Bool = false,
+        photo: String? = nil
     ) {
         self.id = id
         self.isGroup = isGroup
+        self.photo = photo
         self.title = title
         self.isRequest = isRequest
         self.from = from
@@ -237,7 +241,9 @@ public protocol MessagesService: AnyObject, Sendable {
     func openChat(_ chat: String) async throws -> any ChatChannel
     /// Starts an encrypted group with these usernames. It has no name of its own: a Matrix room
     /// name isn't end-to-end encrypted, so the group is shown by who's in it.
-    func startGroup(with usernames: [String]) async throws -> String
+    func startGroup(with usernames: [String], name: String?, photo: GroupPhoto?) async throws -> String
+    /// A group's photo. These are stored on the server without end-to-end encryption.
+    func groupPhoto(_ location: String) async throws -> Data
     /// Ignores this person, so nothing more from them arrives, and leaves your chat with them.
     func block(person: String, leaving chat: String?) async throws
     func blocked() async throws -> [String]
@@ -278,6 +284,11 @@ public protocol ChatChannel: AnyObject, Sendable {
     var extraPeople: [String] { get }
     var isGroup: Bool { get }
     /// The chat's disappearing setting, now and whenever someone changes it.
+    /// A group's name and photo. Matrix keeps both outside the encryption, which the screens say.
+    func rename(_ name: String?) async throws
+    func setPhoto(_ photo: GroupPhoto?) async throws
+    var photo: String? { get }
+
     func observeDisappearing(_ onChange: @escaping @Sendable (DisappearingState) -> Void) async
     func setDisappearing(_ setting: Disappearing) async throws
     /// A private receipt when `share` is off, so your own devices still know what you've read.
@@ -411,6 +422,25 @@ public enum DisappearingRule {
             if let lifetime = setting.lifetime { return message.time.addingTimeInterval(lifetime) <= now }
             return setting == .afterViewing && message.seen
         }
+    }
+}
+
+/// Said wherever a group's name or photo is set or shown, because it's the one part of a group that
+/// isn't end-to-end encrypted (owner, 2026-11-08: "allow group names and photos in messages").
+public enum GroupLabels {
+    public static let notEncrypted = "Group name and photo aren't end-to-end encrypted. Messages are."
+    public static let photoOnServer = "The photo is kept on Totality's server without end-to-end encryption, so the server can see it."
+}
+
+/// A group's name, tidied. Nil when there's nothing left.
+public enum GroupName {
+    public static let longest = 60
+
+    public static func clean(_ typed: String) -> String? {
+        let name = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .newlines).joined(separator: " ")
+        guard !name.isEmpty else { return nil }
+        return String(name.prefix(longest))
     }
 }
 

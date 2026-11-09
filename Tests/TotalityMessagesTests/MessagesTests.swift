@@ -64,8 +64,13 @@ private final class FakeService: MessagesService, @unchecked Sendable {
 
     private(set) var blockedList: [String] = []
 
-    func startGroup(with usernames: [String]) async throws -> String {
-        record("group \(usernames.joined(separator: ","))")
+    private(set) var groupPhotos: [GroupPhoto] = []
+
+    func groupPhoto(_ location: String) async throws -> Data { try phonePhoto(width: 800, height: 800) }
+
+    func startGroup(with usernames: [String], name: String?, photo: GroupPhoto?) async throws -> String {
+        record("group \(usernames.joined(separator: ",")) \(name ?? "-")")
+        if let photo { lock.withLock { groupPhotos.append(photo) } }
         guard usernames.allSatisfy(known.contains) else { throw MessagesError.noSuchPerson }
         return "!group"
     }
@@ -115,7 +120,12 @@ private final class FakeChannel: ChatChannel, @unchecked Sendable {
     var startingMessages: [ChatMessage] = []
     let id = "!chat"
     let otherPerson: String? = "@mckay_test:usetotality.com"
-    let isGroup = false
+    var isGroup = false
+    let photo: String? = nil
+    private(set) var names: [String?] = []
+    private(set) var groupPhotos: [GroupPhoto?] = []
+    func rename(_ name: String?) async throws { lock.withLock { names.append(name) } }
+    func setPhoto(_ photo: GroupPhoto?) async throws { lock.withLock { groupPhotos.append(photo) } }
     var extraPeople: [String] = []
 
     func observe(messages: @escaping @Sendable ([ChatMessage]) -> Void, typing: @escaping @Sendable ([String]) -> Void) async {
@@ -730,7 +740,57 @@ private func on(_ setting: Disappearing) -> DisappearingState {
     #expect(model.blockedPeople == ["@mckay_test:usetotality.com"])
     await model.unblock("@mckay_test:usetotality.com")
     #expect(model.blockedPeople.isEmpty)
-    #expect(service.actions.contains("group ana_ruiz,mckay_test"))
+    #expect(service.actions.contains("group ana_ruiz,mckay_test -"))
+}
+
+// MARK: Group names and photos
+
+@Test func groupNamesAreTidied() {
+    #expect(GroupName.clean("  Saturday climbing  ") == "Saturday climbing")
+    #expect(GroupName.clean("Lake\nTrip") == "Lake Trip")
+    #expect(GroupName.clean("   ") == nil)
+    #expect(GroupName.clean(String(repeating: "a", count: 90))?.count == GroupName.longest)
+}
+
+@Test func groupLabelsSayTheNameAndPhotoArentEncrypted() {
+    #expect(GroupLabels.notEncrypted == "Group name and photo aren't end-to-end encrypted. Messages are.")
+    #expect(GroupLabels.photoOnServer.contains("without end-to-end encryption"))
+}
+
+@Test func aGroupPhotoLosesItsLocationAndIsMadeSmall() throws {
+    let photo = try GroupPhoto.prepare(try phonePhoto())
+    #expect(max(photo.width, photo.height) == GroupPhoto.side)
+    let source = try #require(CGImageSourceCreateWithData(photo.data as CFData, nil))
+    let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
+    #expect(properties[kCGImagePropertyGPSDictionary] == nil)
+    #expect((properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any])?[kCGImagePropertyTIFFMake] == nil)
+}
+
+@MainActor
+@Test func aGroupStartsWithItsNameAndARedrawnPhoto() async throws {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [])
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    await model.connect()
+    await settle()
+    let chat = await model.startGroup(with: "ana_ruiz, mckay_test", name: "  Lake trip ", photo: try phonePhoto())
+    #expect(chat == "!group")
+    #expect(service.actions.contains("group ana_ruiz,mckay_test Lake trip"))
+    #expect(service.groupPhotos.first.map { max($0.width, $0.height) } == GroupPhoto.side)
+    #expect(await model.groupPhoto("mxc://usetotality.com/abc") != nil)
+}
+
+@MainActor
+@Test func renamingAndChangingTheGroupPhotoReachTheChat() async throws {
+    let channel = FakeChannel()
+    channel.isGroup = true
+    let chat = ChatModel(channel: channel)
+    #expect(await chat.rename(" Lake trip "))
+    #expect(chat.title == "Lake trip")
+    #expect(await chat.setGroupPhoto(try phonePhoto()))
+    #expect(await chat.setGroupPhoto(nil))
+    #expect(channel.names == ["Lake trip"])
+    #expect(channel.groupPhotos.count == 2)
+    #expect(channel.groupPhotos.last! == nil)
 }
 
 // MARK: One-to-one chats stay one-to-one
