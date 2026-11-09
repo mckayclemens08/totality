@@ -585,6 +585,60 @@ final class Clock: @unchecked Sendable {
     @Test @MainActor func withoutALibraryPhotosSaysWhy() {
         let model = PhotosModel(library: nil)
         #expect(model.phase == .unavailable(title: PhotosModel.signedOut.title, detail: PhotosModel.signedOut.detail))
+        #expect(model.fix == .openAccount)
         #expect(model.glance == nil)
+        #expect(model.newest(4).isEmpty)
+
+        let noKey = PhotosModel(library: nil, unavailable: PhotosModel.needsRecoveryKey)
+        #expect(noKey.phase == .unavailable(title: PhotosModel.needsRecoveryKey.title, detail: PhotosModel.needsRecoveryKey.detail))
+        #expect(noKey.fix == .openAccount)
+    }
+
+    @Test @MainActor func theHomeTileShowsTheNewestAndOpensOnlyWhatsStillThere() async throws {
+        let key = try ContentRootKey.generate()
+        let mckay = UUID().uuidString.lowercased()
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (library, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let model = PhotosModel(library: library)
+        for side in 0..<5 { _ = try await library.add(samplePhoto(width: 300 + side, height: 200)) }
+        await model.load()
+        #expect(model.phase == .ready)
+        #expect(model.fix == nil)
+        let shown = model.newest(4)
+        #expect(shown.map(\.id) == Array(model.items(in: .library).prefix(4)).map(\.id))
+
+        // A photo moved to Recently Deleted leaves the tile, and a request for it opens nothing.
+        let gone = shown[0]
+        await model.moveToRecentlyDeleted(gone)
+        #expect(!model.newest(4).contains { $0.id == gone.id })
+        model.requestedItem = gone.id
+        #expect(model.takeRequest() == nil)
+        #expect(model.requestedItem == nil)
+
+        model.requestedItem = shown[1].id
+        #expect(model.takeRequest() == shown[1].id)
+        #expect(model.requestedItem == nil)
+    }
+
+    /// Photos' home tile case for the brief §6 two-user test: Dana's tile on the same device never
+    /// shows McKay's photos, and asking it for one of them opens nothing.
+    @Test @MainActor func user2sHomeTileShowsNothingOfUser1s() async throws {
+        let key = try ContentRootKey.generate()
+        let mckay = UUID().uuidString.lowercased()
+        let dana = UUID().uuidString.lowercased()
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (mine, cache) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let photo = try await mine.add(samplePhoto())
+        _ = await mine.upload()
+
+        let (hers, _) = try newLibrary(account: dana, key: key, store: store, rows: rows, cache: cache)
+        let model = PhotosModel(library: hers)
+        await model.load()
+        #expect(model.newest(12).isEmpty)
+        #expect(model.glance?.isQuiet == true)
+        model.requestedItem = photo.id
+        #expect(model.takeRequest() == nil)
     }
 }

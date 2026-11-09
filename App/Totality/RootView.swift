@@ -94,7 +94,7 @@ struct RootView: View {
             case .messages:
                 MessagesHomeView(model: messages) { open = nil }
             case .photos:
-                PhotosHomeView(model: photos) { open = nil }
+                PhotosHomeView(model: photos, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
                     .id(ObjectIdentifier(photos))
             case .some(let module):
                 ModuleMessage(
@@ -107,6 +107,9 @@ struct RootView: View {
         .animation(Motion.standard, value: open)
         .task {
             contentKeys.willMove = {
+                // Photos first, before any wait, so the home tile can't show the old key's photos meanwhile.
+                photosTurn += 1
+                photos = PhotosModel(library: nil)
                 await account?.sync?.pause()
                 await reader?.stopForKeyChange()
                 await calendar?.stopForKeyChange()
@@ -213,6 +216,10 @@ struct RootView: View {
         case .mail:
             guard mail.current.phase == .ready else { return nil }
             return AnyView(MailHomeTile(model: mail.current, size: size) { bringUp(.mail) })
+        case .photos:
+            // Signing out shows nothing at once, before the library is closed.
+            guard photos.phase == .ready, let account, case .signedIn = account.phase else { return nil }
+            return AnyView(PhotosHomeTile(model: photos, size: size) { bringUp(.photos) })
         default:
             return nil
         }
@@ -313,7 +320,7 @@ struct RootView: View {
         await calendar?.load()
         await tellWhoIsHere()
         // So the Mail tile has something to show before Mail is opened.
-        if mail.current.phase != .ready { await mail.current.load() }
+        if mail.current.phase != .ready { await mail.current.refresh() }
     }
 
     /// Web keeps things only for the key's owner, and Mail shows only the owner's mailbox.
@@ -326,11 +333,24 @@ struct RootView: View {
         // Photos go to the server as they're added, so only a device that can sync gets a library.
         let canSync = await account?.backup?.deviceCanSync() ?? false
         if turn == photosTurn, await photosWiring.use(account: canSync ? owner : nil), turn == photosTurn {
-            let model = PhotosModel(library: photosWiring.library)
+            let model = PhotosModel(library: photosWiring.library, unavailable: photosReason())
+            photos = model
+            await model.load()
+        } else if turn == photosTurn, photos.account != photosWiring.library?.account
+                    || (photosWiring.library == nil && photos.phase != .unavailable(title: photosReason().title, detail: photosReason().detail)) {
+            // The model on screen must always be the current library's, or none.
+            let model = PhotosModel(library: photosWiring.library, unavailable: photosReason())
             photos = model
             await model.load()
         }
         await web?.use(account: owner)
+    }
+
+    /// Why Photos can't open on this device, in the words its screen shows.
+    private func photosReason() -> (title: String, detail: String) {
+        guard let account, case .signedIn = account.phase else { return PhotosModel.signedOut }
+        if account.backup?.phase == .otherAccount { return PhotosModel.otherAccountsKey }
+        return PhotosModel.needsRecoveryKey
     }
 
     /// Only a sync that really finished counts, so the screens can't claim safety too early.
@@ -366,7 +386,7 @@ struct RootView: View {
             await calendar?.load()
             await web?.load()
             // Marks from another device. Mail only fetches while it's showing.
-            if open == .mail, mail.current.phase == .ready { await mail.current.load() }
+            if open == .mail, mail.current.phase == .ready { await mail.current.refresh() }
         }
         backup.onJoined = {
             await sync.syncNow()

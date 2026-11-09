@@ -105,16 +105,20 @@ extension OutsideIMAPLocation {
 }
 
 /// One iCloud folder as this open saw it: each message from `since`, by UID.
-public struct OutsideIMAPFolder: Equatable, Sendable {
+public struct OutsideIMAPFolder: Codable, Equatable, Sendable {
     public let name: String
     public let kind: OutsideFolders.Kind
     public let validity: UInt32
     public let entries: [UInt32: OutsideIMAPEntry]
     /// Every message since `since` was looked at.
     public let complete: Bool
+    /// UIDNEXT and, with CONDSTORE, HIGHESTMODSEQ when it was looked at: both unchanged means nothing
+    /// in it has changed.
+    public var uidNext: UInt32?
+    public var modseq: UInt64?
 }
 
-public struct OutsideIMAPEntry: Equatable, Sendable {
+public struct OutsideIMAPEntry: Codable, Equatable, Sendable {
     public let messageID: String?
     public let isUnread: Bool
     public let isStarred: Bool
