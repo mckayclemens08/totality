@@ -167,6 +167,7 @@ Spec: issue #76, decision 8 (owner, 2026-11-08: "i shouldn't have to sign in to 
 
 Spec: issue #12, and issue #23 for the redesign. An event is one sealed blob with its times inside, so storage shows only an ID. Events use their own key purpose, so a Reader blob can't open as an event, and the ID inside must match the one outside.
 
+- Google Calendar (issue 76, step 2) is read-only, on the shared Google sign-in, with the scope `calendar.readonly`. The Google Cloud project behind `TotalityGoogleClientID` must have the **Google Calendar API** enabled. Without it, Google answers 403 `accessNotConfigured` / `SERVICE_DISABLED`, which the Calendar shows as Totality's setup problem, not the person's permission. Events are kept sealed per device under `googleCalendar`, in their own folder, and never sync. Only changes are read after the first time, using Google's sync tokens.
 - All-day events are midnight GMT on their first and last days, so they're plain dates in any zone. Timed events repeat in their own zone, so 3 PM at home stays 3 PM at home while the person travels.
 - Repeats that don't exist, like the 31st of a short month, are skipped rather than moved. Editing one occurrence adds it to `skipped` and makes a standalone event.
 - Device calendars are read through EventKit, held in memory, and never written to Totality's storage. Totality doesn't encrypt them, and the UI says so. Only opaque calendar IDs are kept, in `UserDefaults`, to remember which are hidden.
