@@ -838,15 +838,22 @@ public actor ServerMailStore: MailStore {
 extension ServerMailStore: OutsideAccountStore {
     public func outsideAccounts() async throws -> [OutsideAccount] {
         let accounts = try await vault.outsideAccounts()
-        if !hasSharedGoogle, let google {
+        if !hasSharedGoogle, google != nil {
             // Gmail accounts from before Google sign-in was shared become this device's connections, so
-            // Calendar and Photos don't ask the person to sign in again.
+            // Calendar and Photos don't ask the person to sign in again. It runs on its own and nothing
+            // waits for it: Mail keeps using its own grant whether or not this lands.
             hasSharedGoogle = true
-            for outside in accounts where outside.provider.signsInWithGoogle {
-                if case .google(let grant) = try? await vault.credential(for: outside.id) { google.share(outside.address, grant) }
-            }
+            let gmail = accounts.filter(\.provider.signsInWithGoogle)
+            if !gmail.isEmpty { Task { await self.shareGoogle(gmail) } }
         }
         return accounts
+    }
+
+    private func shareGoogle(_ accounts: [OutsideAccount]) async {
+        guard let google else { return }
+        for outside in accounts {
+            if case .google(let grant) = try? await vault.credential(for: outside.id) { google.share(outside.address, grant) }
+        }
     }
 
     public func addOutside(_ signIn: OutsideSignIn) async throws -> OutsideAccount {
