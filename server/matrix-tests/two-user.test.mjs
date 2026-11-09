@@ -40,6 +40,16 @@ async function signIn(handle) {
 
 const tx = () => randomUUID()
 
+// The server refuses with 403, or 404 so as not to say the chat exists. Either is a no.
+const refused = (status) => status === 403 || status === 404
+
+// No messages reached this person: refused outright, or an answer with no message events in it.
+async function seesNothing(who, room) {
+  const { status, json } = await read(who, room)
+  if (refused(status)) return true
+  return status === 200 && !(json.chunk ?? []).some((e) => e.type === 'm.room.encrypted' || e.type === 'm.room.message')
+}
+
 // Looks like what the app sends: Megolm ciphertext the server can't open.
 const sealed = (n) => ({
   algorithm: 'm.megolm.v1.aes-sha2', sender_key: 'k', session_id: 's', device_id: 'D', ciphertext: `opaque-${n}`,
@@ -86,7 +96,7 @@ describe('Messages two-user test', () => {
   test('user 2 cannot read user 1 chat until they accept, and then can', async () => {
     const room = await newChat(one, [two])
     assert.equal((await send(one, room, 1)).status, 200)
-    assert.equal((await read(two, room)).status, 403)
+    assert.ok(await seesNothing(two, room), 'an invited person read messages before accepting')
     assert.equal((await call(two.token, 'POST', `/rooms/${encodeURIComponent(room)}/join`, {})).status, 200)
     const { status, json } = await read(two, room)
     assert.equal(status, 200)
@@ -101,10 +111,10 @@ describe('Messages two-user test', () => {
     const room = await newChat(one, [two], { name: 'Lake trip' })
     await send(one, room, 3)
     const path = encodeURIComponent(room)
-    assert.equal((await read(three, room)).status, 403)
-    assert.equal((await call(three.token, 'GET', `/rooms/${path}/state`)).status, 403)
-    assert.equal((await call(three.token, 'GET', `/rooms/${path}/state/m.room.name/`)).status, 403)
-    assert.equal((await call(three.token, 'GET', `/rooms/${path}/members`)).status, 403)
+    assert.ok(await seesNothing(three, room))
+    assert.ok(refused((await call(three.token, 'GET', `/rooms/${path}/state`)).status))
+    assert.ok(refused((await call(three.token, 'GET', `/rooms/${path}/state/m.room.name/`)).status))
+    assert.ok(refused((await call(three.token, 'GET', `/rooms/${path}/members`)).status))
     assert.notEqual((await call(three.token, 'POST', `/rooms/${path}/join`, {})).status, 200)
     assert.notEqual((await send(three, room, 4)).status, 200)
   })
