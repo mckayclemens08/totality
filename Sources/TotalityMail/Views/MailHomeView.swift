@@ -107,8 +107,6 @@ public struct MailHomeView: View {
 
     @ViewBuilder private func content(isWide: Bool) -> some View {
         switch model.phase {
-        case .loading(let download):
-            MailDownloadView(download: download)
         case .noKey:
             MailStateView(
                 systemImage: "lock.slash", title: "Your key isn't on this device",
@@ -138,7 +136,8 @@ public struct MailHomeView: View {
                 systemImage: "exclamationmark.lock", title: "There's a problem with your mailbox",
                 detail: "Your address is already held by a different key, so mail sent to it can't open on this device. Trying again won't change that. It has to be put right on Totality's server."
             )
-        case .ready:
+        // While Mail opens, its mailbox shows straight away, with a line saying what's under way.
+        case .ready, .loading:
             if isWide {
                 HStack(spacing: 0) {
                     MailFoldersView(model: model) {}

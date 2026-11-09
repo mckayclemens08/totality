@@ -83,6 +83,9 @@ public actor MailVault {
     private static let placesSuffix = ".mail.places"
     /// What Totality and each outside account last agreed about its downloaded mail. On this device only.
     private static let remoteSuffix = ".mail.remote"
+    /// The mailbox key this device has seen published for the account, so a later open needn't wait on
+    /// the key backup check first. On this device only.
+    private static let publishedSuffix = ".mail.published"
 
     /// How each file is sealed, so a key move can reach them without knowing what they are. The IDs are
     /// derived from text only Mail uses, so no other module's blob can share one.
@@ -98,6 +101,7 @@ public actor MailVault {
         fetchedSuffix: .content,
         placesSuffix: .content,
         remoteSuffix: .content,
+        publishedSuffix: .metadata,
     ]
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
 
@@ -395,6 +399,41 @@ public actor MailVault {
               record.account == account, record.remote.outside == outside
         else { return nil }
         return record.remote
+    }
+
+    // MARK: The published key
+
+    struct PublishedRecord: Codable {
+        let account: String
+        let publicKey: Data
+    }
+
+    static func publishedID(account: String) -> UUID {
+        UUID(derivedFrom: "totality.mail.published.\(account)")
+    }
+
+    /// The server took this public key for the account's mailbox, or already had it.
+    public func notePublished(_ publicKey: Data) throws {
+        guard !isClosed else { throw MailVaultError.closed }
+        let id = Self.publishedID(account: account)
+        try store.write(
+            try seal(PublishedRecord(account: account, publicKey: publicKey), id: id, purpose: .metadata),
+            as: name(id, Self.publishedSuffix)
+        )
+    }
+
+    /// Whether this exact key was seen published for this account. A different key, or a record that
+    /// won't open, means no.
+    public func isPublished(_ publicKey: Data) -> Bool {
+        let id = Self.publishedID(account: account)
+        guard let sealed = try? store.read(name(id, Self.publishedSuffix)),
+              let record = try? open(PublishedRecord.self, sealed, id: id, purpose: .metadata)
+        else { return false }
+        return record.account == account && record.publicKey == publicKey
+    }
+
+    public func forgetPublished() throws {
+        try store.delete(name(Self.publishedID(account: account), Self.publishedSuffix))
     }
 
     /// A message Totality moved back into an iCloud Inbox gets a new UID there. It's the same message,

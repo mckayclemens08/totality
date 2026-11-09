@@ -29,6 +29,12 @@ public final class MailModel {
     public private(set) var isOffline = false
     /// Which outside account is downloading, and how far it's got. Nil when none is.
     public private(set) var outsideDownload: OutsideDownload?
+    /// Totality mail coming down from the server, while it does.
+    public private(set) var download: MailDownload?
+    /// Totality's server is being asked for new mail, behind what's already showing.
+    public private(set) var isChecking = false
+    /// Totality's server couldn't be reached on the last check, while stored mail stayed on screen.
+    public private(set) var checkFailed = false
     /// What went wrong with outside accounts on the last download, one line each.
     public private(set) var outsideProblems: [String] = []
     @ObservationIgnored private var isDownloadingOutside = false
@@ -147,6 +153,12 @@ public final class MailModel {
     /// Whatever changed here while the fetch was out stays changed. What's already on the device shows
     /// first, so nothing waits on the network.
     public func load() async {
+        var clock = MailClock("load")
+        isChecking = true
+        defer {
+            clock.done()
+            isChecking = false
+        }
         if phase != .ready {
             if let cached = await store.cached() {
                 mailbox = merged(cached, here: Since())
@@ -154,10 +166,14 @@ public final class MailModel {
             } else {
                 phase = .loading(nil)
             }
+            clock.mark("stored mail shown")
         }
         let fetch = UUID()
         since[fetch] = Since()
-        defer { since[fetch] = nil }
+        defer {
+            since[fetch] = nil
+            download = nil
+        }
         do {
             let opening = try await store.open { [weak self] download in
                 Task { @MainActor in self?.showProgress(download) }
@@ -165,9 +181,15 @@ public final class MailModel {
             mailbox = merged(opening.mailbox, here: since[fetch] ?? Since())
             isOffline = opening.isOffline
             phase = .ready
+            checkFailed = false
+            download = nil
+            isChecking = false
+            clock.mark("Totality mail")
             await emptyTrash()
             if !isOffline { await sendWaiting() }
+            clock.mark("waiting changes")
             await downloadOutside()
+            clock.mark("outside accounts")
         } catch MailStoreError.noKey {
             phase = .noKey
         } catch MailStoreError.noAccount {
@@ -178,7 +200,12 @@ public final class MailModel {
         } catch MailStoreError.keyConflict {
             phase = .keyConflict
         } catch {
-            phase = .failed
+            // Mail that's already showing stays, with a line saying the check didn't go through.
+            if phase == .ready, !mailbox.messages.isEmpty {
+                checkFailed = true
+            } else {
+                phase = .failed
+            }
         }
     }
 
@@ -249,6 +276,7 @@ public final class MailModel {
     }
 
     private func showProgress(_ download: MailDownload) {
+        self.download = download
         if case .loading = phase { phase = .loading(download) }
     }
 

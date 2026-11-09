@@ -341,6 +341,49 @@ private final class Progress: @unchecked Sendable {
         #expect(opening.mailbox.messages.map(\.id) == [ferry])
     }
 
+    @Test func aKeySeenPublishedOpensWithoutTheBackupCheck() async throws {
+        let (store, service, vault, root, _) = try await setUp()
+        await service.add(ferry, sealed: try sealed(ferryMail, to: root, message: ferry), received: received)
+        _ = try await store.open { _ in }
+        // The next launch: the backup check isn't asked.
+        let gate = Gate(true)
+        let later = try ServerMailStore(
+            account: account, rootKey: root, vault: vault, server: service, canPublish: { gate.check() }, username: { "mckay" }
+        )
+        await service.add(clinic, sealed: try sealed(clinicMail, to: root, message: clinic), received: received)
+        let opening = try await later.open { _ in }
+        #expect(Set(opening.mailbox.messages.map(\.id)) == [ferry, clinic])
+        #expect(gate.asked == 0)
+        // It's still confirmed with the server, after the mail is in, so pruning stays safe.
+        #expect(await service.publishCalls == 2)
+    }
+
+    @Test func aBackupCheckThatHangsStillOpensWhatsHere() async throws {
+        let root = try ContentRootKey.generate()
+        let service = FakeMailService()
+        let vault = MailVault(store: MailMemoryStore(), rootKey: root, account: account)
+        let store = try ServerMailStore(
+            account: account, rootKey: root, vault: vault, server: service,
+            canPublish: { try? await Task.sleep(for: .seconds(60)); return true }, username: { "mckay" },
+            backupCheckLimit: .milliseconds(50)
+        )
+        let opening = try await store.open { _ in }
+        #expect(opening.isOffline)
+        #expect(await service.publishCalls == 0)
+        #expect(await service.fetched.isEmpty)
+    }
+
+    @Test func aDifferentKeyIsntTakenForThePublishedOne() async throws {
+        let vault = MailVault(store: MailMemoryStore(), rootKey: try .generate(), account: account)
+        let key = try MailKey(root: try .generate()).publicKey()
+        #expect(await vault.isPublished(key) == false)
+        try await vault.notePublished(key)
+        #expect(await vault.isPublished(key))
+        #expect(await vault.isPublished(try MailKey(root: try .generate()).publicKey()) == false)
+        try await vault.forgetPublished()
+        #expect(await vault.isPublished(key) == false)
+    }
+
     @Test func anAccountThatIsntTheVaultsIsRefused() async throws {
         let vault = MailVault(store: MailMemoryStore(), rootKey: try .generate(), account: account)
         #expect(throws: MailStoreError.noAccount) {
