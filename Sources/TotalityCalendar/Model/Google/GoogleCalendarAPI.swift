@@ -11,6 +11,9 @@ public enum GoogleCalendarProblem: Error, Equatable, Sendable {
     case expired
     /// The account is connected, but not for Calendar yet. One tap on Google's page allows it.
     case notAllowed
+    /// Totality's own Google project isn't set up for Calendar, like the Calendar API not being turned on.
+    /// Nothing the person can fix, and not their account's doing.
+    case notSetUp
     /// Google said something that doesn't fit.
     case unexpected
 
@@ -37,6 +40,7 @@ public enum GoogleCalendarProblem: Error, Equatable, Sendable {
         case .unreachable: "Google Calendar couldn't be reached. Pull down to try again."
         case .expired: "Google took back Totality's access to this account. Connect it again to keep seeing its calendars."
         case .notAllowed: "This Google account isn't allowed to share its calendars with Totality yet."
+        case .notSetUp: "Totality isn't set up to read Google Calendar yet. That's on Totality's side, not your account's. Try again later."
         case .unexpected: "Google Calendar sent something Totality didn't understand. Pull down to try again."
         }
     }
@@ -193,8 +197,7 @@ struct GoogleCalendarAPI: Sendable {
         case 401: throw GoogleCalendarProblem.expired
         case 403:
             // Google says "too many" with a 403 as well as a 429. Either way, try again later.
-            let text = String(decoding: data.prefix(2_000), as: UTF8.self)
-            throw text.contains("ateLimitExceeded") ? GoogleCalendarProblem.unreachable : GoogleCalendarProblem.notAllowed
+            throw Self.refusal(data)
         case 410: throw GoogleSyncExpired()
         case 429, 500...: throw GoogleCalendarProblem.unreachable
         default: throw GoogleCalendarProblem.unexpected
@@ -202,6 +205,15 @@ struct GoogleCalendarAPI: Sendable {
     }
 
     // MARK: Checking what Google says
+
+    /// What a 403 means. Google says "too many" with a 403 as well as a 429, and a project without the
+    /// Calendar API turned on is Totality's setup, not the person's permission.
+    static func refusal(_ data: Data) -> GoogleCalendarProblem {
+        let text = String(decoding: data.prefix(4_000), as: UTF8.self)
+        if text.contains("ateLimitExceeded") || text.contains("RATE_LIMIT_EXCEEDED") { return .unreachable }
+        if text.contains("accessNotConfigured") || text.contains("SERVICE_DISABLED") { return .notSetUp }
+        return .notAllowed
+    }
 
     static let pathAllowed: CharacterSet = {
         var allowed = CharacterSet.alphanumerics.intersection(.init(charactersIn: Unicode.Scalar(0)..<Unicode.Scalar(128)))

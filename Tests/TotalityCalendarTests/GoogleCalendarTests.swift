@@ -202,6 +202,17 @@ private func setUp(_ fake: FakeGoogleCalendar, keys: MemoryKeys = MemoryKeys(), 
         #expect(try store.names().isEmpty)
     }
 
+    /// The owner saw "isn't allowed" when the Calendar API was off in Totality's own project (2026-11-09).
+    @Test func tellsSetupApartFromPermission() {
+        let disabled = #"{"error":{"code":403,"errors":[{"reason":"accessNotConfigured"}],"status":"PERMISSION_DENIED","details":[{"reason":"SERVICE_DISABLED"}]}}"#
+        let refused = #"{"error":{"code":403,"errors":[{"reason":"insufficientPermissions"}],"status":"PERMISSION_DENIED"}}"#
+        let busy = #"{"error":{"code":403,"errors":[{"reason":"rateLimitExceeded"}]}}"#
+        #expect(GoogleCalendarAPI.refusal(Data(disabled.utf8)) == .notSetUp)
+        #expect(GoogleCalendarAPI.refusal(Data(refused.utf8)) == .notAllowed)
+        #expect(GoogleCalendarAPI.refusal(Data(busy.utf8)) == .unreachable)
+        #expect(!GoogleCalendarProblem.notSetUp.message.contains("account isn't"))
+    }
+
     @Test func refusesWhatDoesntFit() {
         #expect(!GoogleCalendarAPI.isCalendarID(""))
         #expect(!GoogleCalendarAPI.isCalendarID("a b"))
