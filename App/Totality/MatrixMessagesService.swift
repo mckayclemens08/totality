@@ -246,7 +246,13 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         let other = "@\(username):\(Self.serverName)"
         guard other != userID else { throw MessagesError.ownUsername }
         do {
-            if let existing = try client.getDmRoom(userId: other) { return existing.id() }
+            // Reused only while it's still just the two of you: anyone in a chat can invite a third
+            // person, and everything sent after that would reach them.
+            if let existing = try client.getDmRoom(userId: other),
+               await existing.isEncrypted(),
+               DirectChatRule.isJustTheTwoOfYou(members: await Self.activeMembers(of: existing), own: userID, other: other) {
+                return existing.id()
+            }
             do {
                 _ = try await client.getProfile(userId: other)
             } catch let error as ClientError {
@@ -317,9 +323,10 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             let title = info?.displayName ?? room.displayName() ?? "Chat"
             let isGroup = !(info?.isDirect ?? true)
             let other = isGroup ? nil : info?.heroes.first?.userId
+            let extra = isGroup ? [] : DirectChatRule.extraPeople(members: await Self.activeMembers(of: room), own: userID, other: other)
             return MatrixChat(
                 client: client, room: room, timeline: try await room.timeline(), title: title, ownUserID: userID,
-                isGroup: isGroup, otherPerson: other, photo: isGroup ? info?.avatarUrl : nil
+                isGroup: isGroup, otherPerson: other, extraPeople: extra, photo: isGroup ? info?.avatarUrl : nil
             )
         } catch {
             throw Self.translate(error)
@@ -333,6 +340,16 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             height: UInt64(photo.height), width: UInt64(photo.width), mimetype: "image/jpeg", size: UInt64(photo.data.count),
             thumbnailInfo: nil, thumbnailSource: nil, blurhash: nil, isAnimated: false
         )
+    }
+
+    /// Everyone joined or invited. On any failure it lists nobody, which never passes as "just the two of you".
+    static func activeMembers(of room: Room) async -> [String] {
+        guard let iterator = try? await room.members() else { return [] }
+        var members: [String] = []
+        while let chunk = iterator.nextChunk(chunkSize: 100) {
+            members += chunk.filter { $0.membership == .join || $0.membership == .invite }.map(\.userId)
+        }
+        return members
     }
 
     static func translate(_ error: any Error) -> any Error {
@@ -392,9 +409,11 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
     var id: String { room.id() }
 
     let photo: String?
+    let extraPeople: [String]
 
-    init(client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String, isGroup: Bool, otherPerson: String?, photo: String?) {
+    init(client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String, isGroup: Bool, otherPerson: String?, extraPeople: [String], photo: String?) {
         self.photo = photo
+        self.extraPeople = extraPeople
         self.client = client
         self.room = room
         self.timeline = timeline

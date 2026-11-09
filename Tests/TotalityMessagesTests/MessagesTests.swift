@@ -126,6 +126,7 @@ private final class FakeChannel: ChatChannel, @unchecked Sendable {
     private(set) var groupPhotos: [GroupPhoto?] = []
     func rename(_ name: String?) async throws { lock.withLock { names.append(name) } }
     func setPhoto(_ photo: GroupPhoto?) async throws { lock.withLock { groupPhotos.append(photo) } }
+    var extraPeople: [String] = []
 
     func observe(messages: @escaping @Sendable ([ChatMessage]) -> Void, typing: @escaping @Sendable ([String]) -> Void) async {
         messages(startingMessages)
@@ -790,4 +791,21 @@ private func on(_ setting: Disappearing) -> DisappearingState {
     #expect(channel.names == ["Lake trip"])
     #expect(channel.groupPhotos.count == 2)
     #expect(channel.groupPhotos.last! == nil)
+}
+
+// MARK: One-to-one chats stay one-to-one
+
+@Test func aChatIsReusedOnlyWhileItsJustTheTwoOfYou() {
+    let me = "@mckay_clemens:usetotality.com", ana = "@ana_ruiz:usetotality.com", eve = "@eve_x:usetotality.com"
+    #expect(DirectChatRule.isJustTheTwoOfYou(members: [me, ana], own: me, other: ana))
+    #expect(DirectChatRule.isJustTheTwoOfYou(members: [ana, me], own: me, other: ana))
+    // Someone invited a third person.
+    #expect(!DirectChatRule.isJustTheTwoOfYou(members: [me, ana, eve], own: me, other: ana))
+    // They left, or a stranger is there instead.
+    #expect(!DirectChatRule.isJustTheTwoOfYou(members: [me], own: me, other: ana))
+    #expect(!DirectChatRule.isJustTheTwoOfYou(members: [me, eve], own: me, other: ana))
+    // Members couldn't be read: never treated as safe.
+    #expect(!DirectChatRule.isJustTheTwoOfYou(members: [], own: me, other: ana))
+    #expect(!DirectChatRule.isJustTheTwoOfYou(members: [me, ana, ana], own: me, other: ana))
+    #expect(DirectChatRule.extraPeople(members: [me, ana, eve], own: me, other: ana) == [eve])
 }

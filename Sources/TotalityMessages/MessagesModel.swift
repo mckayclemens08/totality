@@ -310,6 +310,7 @@ public final class ChatModel {
     public var isGroup: Bool { channel.isGroup }
     public var chatID: String { channel.id }
     public var otherPerson: String? { channel.otherPerson }
+    public var extraPeople: [String] { channel.extraPeople }
     public private(set) var sendingVideo = false
     private let channel: any ChatChannel
     private var typingSent = false
