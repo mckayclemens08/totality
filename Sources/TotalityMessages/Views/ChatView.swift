@@ -56,6 +56,9 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: Space.s2) {
                         EncryptionNote()
+                        if !model.extraPeople.isEmpty {
+                            ExtraPeopleNote(people: model.extraPeople, with: model.otherPerson)
+                        }
                         if model.disappearing != .off {
                             DisappearingNote(setting: model.disappearing, changedBy: model.disappearingChangedBy)
                         }
@@ -283,6 +286,25 @@ private struct EncryptionNote: View {
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.vertical, Space.s3)
+    }
+}
+
+/// A one-to-one chat that someone else has been added to. Said plainly, because what you send reaches them.
+private struct ExtraPeopleNote: View {
+    let people: [String]
+    let with: String?
+
+    var body: some View {
+        let theme = Theme.current
+        let names = people.map(MessagesUsername.display).formatted(.list(type: .and))
+        let fresh = with.map { " To talk to \(MessagesUsername.display($0)) alone, start a new chat with them." } ?? ""
+        Label("\(names) \(people.count == 1 ? "is" : "are") also in this chat. Anything you send here reaches them too.\(fresh)", systemImage: "person.2.badge.plus")
+            .font(Typeface.caption)
+            .foregroundStyle(theme.danger.color)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, Space.s2)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 

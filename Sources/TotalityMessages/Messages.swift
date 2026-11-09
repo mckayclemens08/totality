@@ -274,6 +274,8 @@ public protocol ChatChannel: AnyObject, Sendable {
     var id: String { get }
     /// The other person in a one-to-one chat. Nil in a group.
     var otherPerson: String? { get }
+    /// People in a one-to-one chat who aren't you or the person it's with. Anything sent reaches them too.
+    var extraPeople: [String] { get }
     var isGroup: Bool { get }
     /// The chat's disappearing setting, now and whenever someone changes it.
     func observeDisappearing(_ onChange: @escaping @Sendable (DisappearingState) -> Void) async
@@ -409,6 +411,19 @@ public enum DisappearingRule {
             if let lifetime = setting.lifetime { return message.time.addingTimeInterval(lifetime) <= now }
             return setting == .afterViewing && message.seen
         }
+    }
+}
+
+/// Who may be in a one-to-one chat. Anyone in a chat can invite others, so an existing chat with a
+/// person is only reused while it holds exactly the two of you, joined or invited.
+public enum DirectChatRule {
+    public static func isJustTheTwoOfYou(members: [String], own: String, other: String) -> Bool {
+        Set(members) == [own, other] && members.count == 2
+    }
+
+    /// Anyone in a one-to-one chat besides you and the person it's with.
+    public static func extraPeople(members: [String], own: String, other: String?) -> [String] {
+        members.filter { $0 != own && $0 != other }
     }
 }
 
