@@ -126,6 +126,7 @@ struct ScopeScreen: View {
     @State private var newName = ""
     @State private var confirmingDelete = false
     @State private var confirmingEmpty = false
+    @State private var sharingAlbum = false
 
     var body: some View {
         let theme = Theme.current
@@ -152,6 +153,9 @@ struct ScopeScreen: View {
             if case .album(let id) = scope, let album = model.album(id) {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
+                        if model.sender != nil, !model.items(in: scope).isEmpty {
+                            Button("Share Album", systemImage: "paperplane") { sharingAlbum = true }
+                        }
                         Button("Rename", systemImage: "pencil") {
                             newName = album.name
                             renaming = true
@@ -166,6 +170,11 @@ struct ScopeScreen: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Delete All", role: .destructive) { confirmingEmpty = true }
                 }
+            }
+        }
+        .sheet(isPresented: $sharingAlbum) {
+            if case .album(let id) = scope, let album = model.album(id) {
+                ShareSheet(model: model, items: model.items(in: scope), albumName: album.name)
             }
         }
         .alert("Rename Album", isPresented: $renaming) {

@@ -16,6 +16,7 @@ struct PhotoViewer: View {
     @State private var confirmingSave = false
     @State private var confirmingDelete = false
     @State private var isSaving = false
+    @State private var sharingItem: PhotoItem?
 
     private var items: [PhotoItem] {
         let byID = Dictionary(model.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -52,6 +53,9 @@ struct PhotoViewer: View {
         .onKeyPress(.rightArrow) { move(1, in: items); return .handled }
         #endif
         .onKeyPress(.escape) { onClose(); return .handled }
+        .sheet(item: $sharingItem) { item in
+            ShareSheet(model: model, items: [item], albumName: nil)
+        }
         .sheet(isPresented: $showingInfo) {
             if let item = items.first(where: { $0.id == current }) {
                 PhotoInfoSheet(model: model, item: item)
@@ -147,6 +151,9 @@ struct PhotoViewer: View {
                             actionButton("Info", systemImage: "info.circle") { showingInfo = true }
                         }
                         albumMenu(item)
+                        if model.sender != nil {
+                            actionButton("Share", systemImage: "paperplane") { sharingItem = item }
+                        }
                         if isSaving {
                             ProgressView().frame(width: Space.s7, height: Space.s7).accessibilityLabel("Saving to Photos")
                         } else {

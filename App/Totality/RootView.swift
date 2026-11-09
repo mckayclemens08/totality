@@ -334,16 +334,27 @@ struct RootView: View {
         let canSync = await account?.backup?.deviceCanSync() ?? false
         if turn == photosTurn, await photosWiring.use(account: canSync ? owner : nil), turn == photosTurn {
             let model = PhotosModel(library: photosWiring.library, unavailable: photosReason())
+            model.sender = photosSender()
             photos = model
             await model.load()
         } else if turn == photosTurn, photos.account != photosWiring.library?.account
                     || (photosWiring.library == nil && photos.phase != .unavailable(title: photosReason().title, detail: photosReason().detail)) {
             // The model on screen must always be the current library's, or none.
             let model = PhotosModel(library: photosWiring.library, unavailable: photosReason())
+            model.sender = photosSender()
             photos = model
             await model.load()
         }
         await web?.use(account: owner)
+    }
+
+    /// Photos shares through Messages, which runs only where the Matrix SDK is linked.
+    private func photosSender() -> (any PersonSender)? {
+        #if canImport(MatrixRustSDK)
+        return MessagesSender(messages: messages)
+        #else
+        return nil
+        #endif
     }
 
     /// Why Photos can't open on this device, in the words its screen shows.

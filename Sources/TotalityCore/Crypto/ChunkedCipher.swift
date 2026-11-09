@@ -182,9 +182,18 @@ public enum ChunkedCipher {
             return result
         }
 
-        /// Writes the whole plaintext to `output`, a chunk at a time.
+        /// Writes the whole plaintext to `output`, a chunk at a time. On iPhone the file can only be read
+        /// while the device is unlocked, so a plain copy left behind isn't readable from a locked phone.
         public func copyPlain(to output: URL) throws {
-            FileManager.default.createFile(atPath: output.path, contents: nil)
+            #if os(iOS)
+            let attributes: [FileAttributeKey: Any] = [.protectionKey: FileProtectionType.complete]
+            #else
+            let attributes: [FileAttributeKey: Any] = [:]
+            #endif
+            try? FileManager.default.removeItem(at: output)
+            guard FileManager.default.createFile(atPath: output.path, contents: nil, attributes: attributes) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
             let writer = try FileHandle(forWritingTo: output)
             defer { try? writer.close() }
             try writer.truncate(atOffset: 0)

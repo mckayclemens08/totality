@@ -454,7 +454,15 @@ public actor PhotoLibrary {
         let name = item.id.uuidString.lowercased()
         let part = try cache.location(of: "\(name).video-part")
         let limit = ChunkedCipher.sealedLength(plain: min(max(byteCount, 0), VideoImport.maxBytes))
-        guard try await store.download(blob, to: part, limit: limit) else { throw PhotoError.missing }
+        let found: Bool
+        do {
+            found = try await store.download(blob, to: part, limit: limit)
+        } catch SealedStoreError.tooBig {
+            // More than this movie can be: not this photo's, so nothing of it is kept to carry on from.
+            try? cache.delete("\(name).video-part")
+            throw PhotoError.tooBig
+        }
+        guard found else { throw PhotoError.missing }
         try checkOpen()
         do {
             // Every chunk is checked once, so nothing damaged anywhere is kept to fail partway through playing.

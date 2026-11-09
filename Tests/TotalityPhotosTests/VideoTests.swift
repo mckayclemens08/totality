@@ -116,7 +116,13 @@ func sampleVideo(seconds: Double = 1, side: Int = 64) async throws -> URL {
         await store.swap(first.details.original, second.details.original, for: mckay)
         let (mac, macCache) = try library(store: store, rows: rows)
         let item = try #require(try await mac.list().items.first { $0.id == first.id })
-        await #expect(throws: PhotoError.cantOpen) { _ = try await mac.movie(of: item) }
+        // Refused as not this photo's, or as bigger than it can be when the two movies' sizes differ.
+        do {
+            _ = try await mac.movie(of: item)
+            Issue.record("A swapped movie opened")
+        } catch let error as PhotoError {
+            #expect([PhotoError.cantOpen, .tooBig].contains(error))
+        }
         // Nothing damaged is kept to be tried again.
         #expect(try macCache.names().filter { $0.contains("video") }.isEmpty)
     }
