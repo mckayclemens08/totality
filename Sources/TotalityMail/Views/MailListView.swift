@@ -98,7 +98,12 @@ struct MailListView: View {
     }
 
     @ViewBuilder private var empty: some View {
-        if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if case .loading = model.phase {
+            MailStateView(
+                systemImage: "tray", title: "Nothing here yet",
+                detail: "Mail already on this device shows as soon as it's open, and new mail joins it."
+            )
+        } else if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let words = MailWording.empty(model.place)
             MailStateView(systemImage: "tray", title: words.title, detail: words.detail)
         } else {
@@ -373,10 +378,36 @@ struct MailMailboxNotes: View {
         }
     }
 
+    /// What's under way with Totality mail, while it is.
+    private var checking: String? {
+        if let download = model.download, download.total > 0 {
+            return "Downloading new mail: \(download.done.formatted()) of \(download.total.formatted())"
+        }
+        return model.isChecking ? "Checking for new mail" : nil
+    }
+
     var body: some View {
         let theme = Theme.current
         if model.isOffline {
             Label(offline, systemImage: "wifi.slash")
+                .font(Typeface.caption)
+                .foregroundStyle(theme.textSecondary.color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Space.s4)
+        }
+        if let checking {
+            HStack(spacing: Space.s2) {
+                ProgressView().controlSize(.small)
+                Text(checking)
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Space.s4)
+        }
+        if model.checkFailed {
+            Label("Totality's server didn't answer. Your stored mail still opens, and the next check tries again.", systemImage: "exclamationmark.triangle")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .frame(maxWidth: .infinity, alignment: .leading)

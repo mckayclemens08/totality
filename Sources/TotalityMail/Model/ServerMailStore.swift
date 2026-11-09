@@ -21,6 +21,8 @@ public actor ServerMailStore: MailStore {
     private let outsideCheck: OutsideSignInCheck
     /// Nil when this build has no Google sign-in, so Gmail can't be added.
     private let google: GoogleOAuth?
+    /// How long the key backup check may take before what's here opens without it.
+    private let backupCheckLimit: Duration
 
     /// What publishing answered for this store. `.alreadyThere` means the server's mailbox is the one
     /// mail was downloaded from, so what it no longer lists was deleted on purpose.
@@ -43,7 +45,8 @@ public actor ServerMailStore: MailStore {
         username: @escaping @Sendable () async -> String?,
         now: @escaping @Sendable () -> Date = { Date() },
         outsideCheck: OutsideSignInCheck = OutsideSignInCheck(),
-        google: GoogleOAuth? = nil
+        google: GoogleOAuth? = nil,
+        backupCheckLimit: Duration = .seconds(10)
     ) throws {
         guard let mailboxID = UUID(uuidString: account), vault.account == account else { throw MailStoreError.noAccount }
         self.account = account
@@ -57,25 +60,61 @@ public actor ServerMailStore: MailStore {
         self.now = now
         self.outsideCheck = outsideCheck
         self.google = google
+        self.backupCheckLimit = backupCheckLimit
     }
 
     // MARK: Opening
 
     public func open(progress: @escaping @Sendable (MailDownload) -> Void) async throws -> MailOpening {
         if hasConflict { throw MailStoreError.keyConflict }
-        guard await canPublish() else { throw MailStoreError.waitingForBackup }
+        var clock = MailClock("open")
+        defer { clock.done() }
+        let publicKey = try key.publicKey()
+        // A key this device has seen published is already the mailbox's for good, so the backup check,
+        // which only guards publishing, isn't waited on again.
+        let wasPublished = await vault.isPublished(publicKey)
+        if !wasPublished {
+            let canPublish = canPublish
+            let allowed = await mailAnswer(within: backupCheckLimit) { await canPublish() }
+            clock.mark("backup check")
+            switch allowed {
+            case true?: break
+            case false?: throw MailStoreError.waitingForBackup
+            case nil: return MailOpening(mailbox: try await stored(), isOffline: true)
+            }
+        }
 
         do {
-            try await publishIfNeeded()
+            if !wasPublished {
+                try await publishIfNeeded(publicKey)
+                clock.mark("publish")
+            }
             let unkept = try await keepWhatWaits()
-            let list = try await server.list()
+            let list: MailServerList
+            do {
+                list = try await server.list()
+            } catch MailServerError.unavailable where wasPublished {
+                // Maybe the server lost the mailbox: the next open publishes again before listing.
+                try? await vault.forgetPublished()
+                throw MailServerError.unavailable
+            }
+            clock.mark("list")
             let downloaded = try await download(list, progress: progress)
+            clock.mark("download")
+            // Pruning needs the server to say it's the same mailbox, so the publish still happens, after
+            // the mail is in.
+            if wasPublished {
+                try await publishIfNeeded(publicKey)
+                clock.mark("publish")
+            }
             if publication == .alreadyThere { try await pruneDeletedElsewhere(listed: Set(list.messages.map(\.id)).union(unkept)) }
             var mailbox = try await stored()
             mailbox.isFull = list.isFull
+            clock.mark("read stored mail")
             return MailOpening(mailbox: mailbox, isOffline: !downloaded)
         } catch MailServerError.keyConflict {
             hasConflict = true
+            try? await vault.forgetPublished()
             throw MailStoreError.keyConflict
         } catch let error as MailServerError where error == .offline || error == .signedOut {
             // A sign-in token that can't refresh is almost always a missing network: the store is only
@@ -87,13 +126,17 @@ public actor ServerMailStore: MailStore {
     }
 
     public func cached() async -> Mailbox? {
+        var clock = MailClock("cached")
+        defer { clock.done() }
         guard !hasConflict, let mailbox = try? await stored(), !mailbox.messages.isEmpty else { return nil }
+        clock.mark("read stored mail")
         return mailbox
     }
 
-    private func publishIfNeeded() async throws {
+    private func publishIfNeeded(_ publicKey: Data) async throws {
         guard publication == nil else { return }
-        publication = try await server.publish(publicKey: try key.publicKey())
+        publication = try await server.publish(publicKey: publicKey)
+        try? await vault.notePublished(publicKey)
     }
 
     /// Sent copies the server didn't take when they were sent go to it now. What still won't go stays
@@ -653,7 +696,7 @@ public actor ServerMailStore: MailStore {
         guard raw.count <= MailDraft.maxBytes else { throw MailSendError.tooBig }
         do {
             // The Sent copy needs this account's own mailbox to exist.
-            try await publishIfNeeded()
+            try await publishIfNeeded(try key.publicKey())
         } catch MailServerError.keyConflict {
             hasConflict = true
             throw MailStoreError.keyConflict

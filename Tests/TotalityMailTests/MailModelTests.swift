@@ -18,6 +18,7 @@ private actor FakeStore: MailStore {
     }
 
     func set(offline: Bool) { isOffline = offline }
+    func set(failure: MailStoreError?) { self.failure = failure }
 
     func open(progress: @escaping @Sendable (MailDownload) -> Void) async throws -> MailOpening {
         if let failure { throw failure }
@@ -130,6 +131,23 @@ private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
         let failed = MailModel(store: FakeStore(Mailbox(), failure: .unavailable))
         await failed.load()
         #expect(failed.phase == .failed)
+    }
+
+    @Test func mailAlreadyShowingStaysWhenACheckFails() async {
+        let message = MailMessage(
+            conversationID: UUID(), from: sam, to: [MailAddress(address: "mckay@usetotality.com")], subject: "Deck plans",
+            date: now, body: .plain("Attached."), route: .outside, marks: MailMarks()
+        )
+        let (model, store) = await opened([message])
+        await store.set(failure: .unavailable)
+        await model.refresh()
+        #expect(model.phase == .ready)
+        #expect(model.checkFailed)
+        #expect(model.mailbox.messages.count == 1)
+        #expect(!model.isChecking)
+        await store.set(failure: nil)
+        await model.refresh()
+        #expect(!model.checkFailed)
     }
 
     // MARK: The home page
