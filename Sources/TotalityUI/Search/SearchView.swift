@@ -78,8 +78,8 @@ public struct SearchView: View {
         let results = model.results
         if model.phase == .waiting {
             SearchMessage(
-                systemImage: "magnifyingglass", title: "Search your notes, files, and events",
-                detail: "Searching happens on this device. Nothing you type is saved or sent."
+                systemImage: "magnifyingglass", title: "Search everything in Totality",
+                detail: "Reader, Calendar, Mail, Messages, Photos, and Web bookmarks. Searching happens on this device. Nothing you type is saved or sent."
             )
         } else if results.groups.isEmpty {
             if model.phase == .searching {

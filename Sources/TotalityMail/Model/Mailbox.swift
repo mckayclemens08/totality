@@ -146,6 +146,14 @@ public struct Mailbox: Sendable, Equatable {
             .sorted { ($0.latest.date, $0.id.uuidString) > ($1.latest.date, $1.id.uuidString) }
     }
 
+    /// Every conversation outside Spam and Trash, newest first, for the home search.
+    public func searchableConversations() -> [MailConversation] {
+        let seen = messages.filter(MailPlace.inbox.shows)
+        return Dictionary(grouping: seen, by: \.conversationID)
+            .map { MailConversation(id: $0.key, messages: $0.value) }
+            .sorted { ($0.latest.date, $0.id.uuidString) > ($1.latest.date, $1.id.uuidString) }
+    }
+
     public func conversation(_ id: UUID, in place: MailPlace) -> MailConversation? {
         let seen = messages.filter { $0.conversationID == id && place.shows($0) }
         guard seen.contains(where: place.lists) else { return nil }

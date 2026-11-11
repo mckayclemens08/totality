@@ -146,10 +146,41 @@ public final class MailModel {
 
     /// Asked for from the home page. The Inbox is where it lives, so that's where it opens.
     public func requestFromHome(_ conversation: UUID) {
-        place = .inbox
+        request(conversation, in: .inbox)
+    }
+
+    /// Opens a conversation in the place that lists it, such as Archive or Sent for a search result.
+    public func request(_ conversation: UUID, in place: MailPlace) {
+        self.place = place
         query = ""
         requestedConversation = conversation
     }
+
+    /// Mail in the home search: every conversation on this device outside Spam and Trash, matched the
+    /// way the Mail list matches. Nothing leaves the device.
+    public func searchHits(_ query: String) -> [SearchHit] {
+        let terms = SearchText.terms(in: query)
+        guard phase == .ready, !terms.isEmpty else { return [] }
+        return mailbox.searchableConversations()
+            .filter { conversation in terms.allSatisfy { conversation.matches($0) } }
+            .prefix(Self.searchLimit)
+            .map { conversation in
+                SearchHit(
+                    module: .mail, itemID: conversation.id.uuidString, title: conversation.subject,
+                    detail: conversation.latest.from.name.isEmpty ? conversation.latest.from.address : conversation.latest.from.name,
+                    date: conversation.latest.date
+                )
+            }
+    }
+
+    /// Where a search result opens: the folder its newest message is in.
+    public func requestFromSearch(_ conversation: UUID) {
+        let folder = mailbox.messages.last { $0.conversationID == conversation }?.marks.folder ?? .inbox
+        let place = MailPlace.folder(folder)
+        request(conversation, in: mailbox.conversation(conversation, in: place) != nil ? place : .inbox)
+    }
+
+    static let searchLimit = 50
     public var today: Date { now() }
 
     /// How many changes are still on their way.

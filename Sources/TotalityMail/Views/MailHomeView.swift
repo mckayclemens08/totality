@@ -92,7 +92,7 @@ public struct MailHomeView: View {
     private func openRequested() {
         guard let id = model.requestedConversation, model.phase == .ready else { return }
         model.requestedConversation = nil
-        if model.mailbox.conversation(id, in: .inbox) != nil { opened = id }
+        if model.mailbox.conversation(id, in: model.place) != nil { opened = id }
     }
 
     @ViewBuilder private func content(isWide: Bool) -> some View {

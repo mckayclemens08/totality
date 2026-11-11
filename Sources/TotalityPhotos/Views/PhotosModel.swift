@@ -654,6 +654,30 @@ public final class PhotosModel {
         return "Uploading \(count)…"
     }
 
+    /// Photos in the home search: captions and album names, read from what's already open on this device.
+    public func searchHits(_ query: String) -> [SearchHit] {
+        let terms = SearchText.terms(in: query)
+        guard phase == .ready, !terms.isEmpty else { return [] }
+        func matches(_ text: String) -> Bool { terms.allSatisfy { SearchText.find($0, in: text) != nil } }
+        let names = Dictionary(uniqueKeysWithValues: albums.map { ($0.id, $0.name) })
+        return items
+            .filter { $0.details.trashed == nil }
+            .compactMap { item -> SearchHit? in
+                let caption = item.details.caption ?? ""
+                let inAlbums = item.details.albumIDs.compactMap { names[$0] }
+                let text = ([caption] + inAlbums).joined(separator: " ")
+                guard matches(text) else { return nil }
+                let title = caption.isEmpty ? (inAlbums.first ?? "Photo") : caption
+                let detail = inAlbums.isEmpty ? nil : inAlbums.joined(separator: ", ")
+                return SearchHit(module: .photos, itemID: item.id.uuidString, title: title, detail: detail, date: item.date)
+            }
+            .sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+            .prefix(Self.searchLimit)
+            .map { $0 }
+    }
+
+    static let searchLimit = 50
+
     public var glance: ModuleGlance? {
         guard library != nil, phase == .ready else { return nil }
         let shown = items(in: .library)
