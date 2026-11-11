@@ -392,6 +392,21 @@ and uploads that carry on. Step 5 is the home tile, the empty and error states, 
   goes as a snapshot: its name as a message, then up to 50 photos. Recently Deleted is never shared.
   Nothing goes until Send is pressed, and the sheet says that deleting the message stops new opens but
   can't take back a copy already seen or saved. Share shows only where Messages runs (the iPhone app).
+- **iPhone sync** (issue 77, agreed 2026-11-08). Off until the person turns it on, and turning it on is
+  the first time Totality reads the device's library (`NSPhotoLibraryUsageDescription`). Full or Limited
+  access both work. Limited syncs only what was chosen. From the day it's turned on, new photos and Live
+  Photos come in, plus any earlier months chosen. Videos have their own switch, off at first. Each item
+  is read with PhotoKit into a plain temporary copy, readable only while unlocked, sealed through the
+  same `add`, `addLive` and `addVideo` as a picked photo, and then uploaded before the next is read. A
+  sealed record per account (`<account>.iphone-sync`, purpose `.photoSync`, on the device only) keeps
+  the settings and the iPhone IDs already brought in or skipped. So nothing comes in twice, something
+  deleted in Totality never comes back, and something deleted on the iPhone stays in Totality. Totality
+  never writes to or deletes from the device's library. The version synced is the item as it is then,
+  and later edits don't sync. It runs when Photos opens and in iOS background processing time while
+  charging (`app.totality.photos.sync`), on Wi-Fi only unless mobile data is turned on. Originals kept
+  only in iCloud come down only on Wi-Fi. A full account stops sync and says how much is left on the
+  iPhone only. The limit stays 20 GB, with no paid storage. Not covered: a reinstall loses the record,
+  so photos still in Totality could come in again.
 
 ## Mail
 

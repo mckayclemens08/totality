@@ -32,7 +32,7 @@ public final class PhotosModel {
     public private(set) var albums: [PhotoAlbum] = []
     public private(set) var usage: SealedStoreUsage?
     public private(set) var waitingCount = 0
-    public private(set) var isFull = false
+    public internal(set) var isFull = false
     public private(set) var isOffline = false
     public private(set) var isAdding = false
     public private(set) var unreadable = 0
@@ -65,6 +65,15 @@ public final class PhotosModel {
     #endif
 
     private let library: PhotoLibrary?
+    /// iPhone sync for this library, where the device has a photo library to read (issue 77).
+    let librarySync: LibrarySync?
+    /// How sync is set and what it has brought, once read. Nil before then, or where there's no sync.
+    public internal(set) var syncRecord: SyncRecord?
+    /// The last run's outcome, for the line under the library.
+    public internal(set) var syncReport: SyncReport?
+    /// How far the run going now has got.
+    public internal(set) var syncProgress: (done: Int, total: Int)?
+    var syncTask: Task<Void, Never>?
     /// Leftover plain files are cleared once each launch, before anything new is picked.
     private static var sweptThisLaunch = false
     private let unavailable: (title: String, detail: String)
@@ -73,13 +82,34 @@ public final class PhotosModel {
     private static let thumbnailsKept = 400
 
     /// With no library, Photos explains why, in `unavailable`'s words.
-    public init(library: PhotoLibrary?, unavailable: (title: String, detail: String) = PhotosModel.signedOut, fix: Fix? = .openAccount) {
+    public init(
+        library: PhotoLibrary?, unavailable: (title: String, detail: String) = PhotosModel.signedOut, fix: Fix? = .openAccount,
+        syncSource: (any SyncSource)? = PhotosModel.deviceLibrary
+    ) {
         self.library = library
         self.unavailable = unavailable
+        librarySync = library.flatMap { library in syncSource.map { LibrarySync(library: library, source: $0) } }
         if library == nil {
             phase = .unavailable(title: unavailable.title, detail: unavailable.detail)
             self.fix = fix
         }
+        // Background time iOS gives goes to this library's sync, or to nothing once it's gone.
+        if librarySync == nil {
+            SyncSchedule.run = nil
+            SyncSchedule.stop = nil
+        } else {
+            SyncSchedule.run = { @MainActor [weak self] in await self?.runSync() }
+            SyncSchedule.stop = { @MainActor [weak self] in self?.stopSync() }
+        }
+    }
+
+    /// The device's own photo library, on iPhone only (P9).
+    public static var deviceLibrary: (any SyncSource)? {
+        #if os(iOS)
+        PhotoKitSource()
+        #else
+        nil
+        #endif
     }
 
     public static let signedOut = (
@@ -135,6 +165,8 @@ public final class PhotosModel {
         }
         usage = try? await library.usage()
         await upload()
+        await loadSync()
+        startSync()
     }
 
     /// After "Photos couldn't open", shows the spinner again and has another go.
@@ -162,6 +194,17 @@ public final class PhotosModel {
             usage = try? await library.usage()
         }
         waitingCount = items.filter(\.isWaiting).count
+    }
+
+    /// The library as it is after sync brought things in.
+    func refreshAfterSync() async {
+        guard let library else { return }
+        if let listing = try? await library.list() {
+            items = listing.items
+            isOffline = !listing.isCurrent
+        }
+        waitingCount = items.filter(\.isWaiting).count
+        usage = try? await library.usage()
     }
 
     // MARK: Adding
