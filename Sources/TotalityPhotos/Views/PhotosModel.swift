@@ -107,6 +107,11 @@ public final class PhotosModel {
             SyncSchedule.run = { @MainActor [weak self] in await self?.runSync() }
             SyncSchedule.stop = { @MainActor [weak self] in self?.stopSync() }
         }
+        refresher.add("library") { [weak self] in
+            guard let self else { return .done }
+            await self.refreshAfterSync()
+            return self.isOffline ? .offline : .done
+        }
     }
 
     /// The device's own photo library, on iPhone only (P9).
@@ -136,6 +141,9 @@ public final class PhotosModel {
     )
 
     public var account: String? { library?.account }
+
+    /// Brings the library list up to date, quietly. It never starts backing up the camera roll.
+    public let refresher = Refresher()
 
     // MARK: Loading
 

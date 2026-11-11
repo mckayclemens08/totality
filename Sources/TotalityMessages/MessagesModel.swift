@@ -41,7 +41,17 @@ public final class MessagesModel {
         self.account = account
         self.connector = connector
         self.unavailableReason = unavailableReason
+        // Matrix keeps the chat list live while connected, so being fresh means being connected.
+        refresher.add("chats") { [weak self] in
+            guard let self else { return .done }
+            await self.connect()
+            if case .failed(let message) = self.phase { return .failed(message) }
+            return .done
+        }
     }
+
+    /// Keeps the chat list fresh. The app runs it before Messages opens, and a pull runs it too.
+    public let refresher = Refresher()
 
     public var userID: String? { service?.userID }
 

@@ -249,7 +249,7 @@ struct PhotoGrid<Footer: View>: View {
                     }
                 }
         )
-        .refreshable { await model.load() }
+        .pullsToRefresh(with: model.refresher)
         .accessibilityAction(named: "Bigger photos") { model.change(columnsBy: -1) }
         .accessibilityAction(named: "Smaller photos") { model.change(columnsBy: 1) }
     }

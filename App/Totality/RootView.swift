@@ -27,6 +27,8 @@ struct RootView: View {
     @State private var photosWiring = PhotosWiring()
     /// Counts each change of who Photos is for, so an older one that finishes late is ignored.
     @State private var photosTurn = 0
+    /// Each module's refresher, which `AppRefresh` reaches through the registry.
+    @State private var refreshers = ModuleRefreshers()
     @State private var registry: ModuleRegistry?
     @State private var syncAreas: [any SyncArea] = []
     @State private var contentProblem: ContentProblem?
@@ -145,6 +147,7 @@ struct RootView: View {
                 await refreshAhead()
             }
         }
+        .onChange(of: ObjectIdentifier(photos), initial: true) { refreshers[.photos] = photos.refresher }
         .onChange(of: defaultHomeStyle) { chosenHomeStyle = nil }
         .onChange(of: showingAccount) {
             if !showingAccount { Task { await messages.checkAccount() } }
@@ -319,10 +322,26 @@ struct RootView: View {
             return
         }
         do {
-            let content = try ContentSetup.makeModels(mailRefresh: { @MainActor [mail] in await mail.current.refresh() })
+            let content = try ContentSetup.makeModels(
+                mailRefresh: { @MainActor [mail] in await mail.current.refresh() },
+                refresh: { [refreshers] module in await refreshers.refresh(module) }
+            )
             reader = content.reader
             calendar = content.calendar
             web = content.web
+            refreshers[.reader] = content.reader.refresher
+            refreshers[.calendar] = content.calendar.refresher
+            refreshers[.web] = content.web.refresher
+            refreshers[.messages] = messages.refresher
+            // A pull also brings in the person's other devices. The app already syncs with them on
+            // opening and on coming back, so the minute-by-minute refresh leaves it out.
+            for refresher in [content.reader.refresher, content.calendar.refresher, content.web.refresher] {
+                refresher.add("other devices", limit: .seconds(120), onlyWhenPulled: true) { [account] in
+                    guard let sync = account?.sync else { return .done }
+                    await sync.syncNow()
+                    return sync.isAvailable && sync.status == .failed ? .failed(Refresher.syncLine) : .done
+                }
+            }
             web?.onSentToReader = { Task { await reader?.load() } }
             web?.onOpenInReader = { show($0) }
             mailWiring.connect(content.mail)
