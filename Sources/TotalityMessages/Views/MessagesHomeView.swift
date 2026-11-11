@@ -170,7 +170,7 @@ public struct MessagesHomeView: View {
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         if let onClose {
             ToolbarItem(placement: .cancellationAction) {
-                MessagesBarIcon("Home", systemImage: "circle.hexagongrid", action: onClose)
+                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
         }
         if model.phase == .ready {
@@ -181,18 +181,15 @@ public struct MessagesHomeView: View {
                         Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
                         Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
                     } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(Typeface.body)
-                            .imageScale(.large)
-                            .frame(minWidth: Space.s6, minHeight: Space.s6)
+                        ToolbarGlyph(systemImage: "ellipsis")
                     }
                     .accessibilityLabel("Messages settings")
                     #if os(iOS)
                     if CameraPicker.isAvailable && !model.chats.isEmpty {
-                        MessagesBarIcon("Camera", systemImage: "camera") { showingCamera = true }
+                        ToolbarIcon("Camera", systemImage: "camera.fill") { showingCamera = true }
                     }
                     #endif
-                    MessagesBarIcon("New message", systemImage: "square.and.pencil") { composing = true }
+                    ToolbarIcon("New message", systemImage: "square.and.pencil") { composing = true }
                 }
             }
         }

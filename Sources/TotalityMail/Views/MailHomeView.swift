@@ -157,7 +157,7 @@ public struct MailHomeView: View {
         MailConversationView(id: id, model: model, onOpenLink: onOpenLink, onWrite: { composing = $0 }) { opened = nil }
     }
 
-    /// Each side is one item of fixed-size icons, so the buttons sit together instead of iPhone giving
+    /// Each side is one item of fixed-size icons (ToolbarIcon), so the buttons sit together instead of iPhone giving
     /// each its own wide slot. Home and Mailboxes go left, as places; writing and selecting go right.
     @ToolbarContentBuilder private func toolbar(isWide: Bool) -> some ToolbarContent {
         let ready = model.phase == .ready
@@ -165,10 +165,10 @@ public struct MailHomeView: View {
             ToolbarItem(placement: .cancellationAction) {
                 HStack(spacing: Space.s3) {
                     if let onClose {
-                        BarIcon("Home", systemImage: "circle.hexagongrid", action: onClose)
+                        ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
                     }
                     if ready && !isWide {
-                        BarIcon("Mailboxes", systemImage: "tray.2") { showingFolders = true }
+                        ToolbarIcon("Mailboxes", systemImage: "tray.2.fill") { showingFolders = true }
                     }
                 }
             }
@@ -176,14 +176,14 @@ public struct MailHomeView: View {
         if ready {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: Space.s3) {
-                    BarIcon("New Message", systemImage: "square.and.pencil", isEnabled: !model.isSelecting) {
+                    ToolbarIcon("New Message", systemImage: "square.and.pencil", isEnabled: !model.isSelecting) {
                         composing = .new(in: model)
                     }
                     if model.isSelecting {
                         Button("Done") { model.endSelecting() }
                             .font(Typeface.headline)
                     } else {
-                        BarIcon("Select", systemImage: "checkmark.circle", isEnabled: !model.conversations.isEmpty) {
+                        ToolbarIcon("Select", systemImage: "checkmark.circle.fill", isEnabled: !model.conversations.isEmpty) {
                             model.beginSelecting()
                         }
                     }
@@ -223,36 +223,5 @@ public struct MailHomeView: View {
         .padding(.horizontal, Space.s4)
         .padding(.bottom, Space.s8)
         .transition(.move(edge: .bottom).combined(with: .opacity))
-    }
-}
-
-/// An icon in Mail's top bar: a fixed size, so a row of them keeps one small gap instead of the wide slots
-/// iPhone gives separate toolbar items. Its name is what VoiceOver says.
-private struct BarIcon: View {
-    let title: String
-    let systemImage: String
-    var isEnabled = true
-    let action: () -> Void
-
-    init(_ title: String, systemImage: String, isEnabled: Bool = true, action: @escaping () -> Void) {
-        self.title = title
-        self.systemImage = systemImage
-        self.isEnabled = isEnabled
-        self.action = action
-    }
-
-    var body: some View {
-        let theme = Theme.current
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(Typeface.body)
-                .imageScale(.large)
-                .foregroundStyle(isEnabled ? theme.accent.color : theme.textTertiary.color)
-                .frame(minWidth: Space.s6, minHeight: Space.s6)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .accessibilityLabel(title)
     }
 }

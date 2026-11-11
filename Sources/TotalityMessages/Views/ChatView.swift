@@ -49,6 +49,7 @@ struct ChatView: View {
     @State private var viewing: ChatMessage?
     @State private var deleting: ChatMessage?
     @State private var showingCamera = false
+    @State private var showingPhotos = false
     /// The newest message is on screen. New ones scroll into view only then, so reading back isn't interrupted.
     @State private var atBottom = true
     /// The chat has been shown at its newest message once, after it first loaded.
@@ -141,6 +142,7 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task { await model.start() }
+        .photosPicker(isPresented: $showingPhotos, selection: $pickedPhoto, matching: .any(of: [.images, .videos]), preferredItemEncoding: .compatible)
         .onChange(of: pickedPhoto) {
             guard let item = pickedPhoto else { return }
             pickedPhoto = nil
@@ -258,52 +260,112 @@ struct ChatView: View {
                     confirmingLeave = true
                 }
             } label: {
-                Image(systemName: model.disappearing == .off ? "ellipsis.circle" : "timer")
-                    .font(Typeface.body)
-                    .imageScale(.large)
+                ToolbarGlyph(systemImage: model.disappearing == .off ? "ellipsis" : "timer")
             }
             .accessibilityLabel("Chat settings")
         }
     }
 
     private var composer: some View {
+        #if os(iOS)
+        let camera = CameraPicker.isAvailable
+        #else
+        let camera = false
+        #endif
+        return ChatComposer(
+            draft: $model.draft, writing: $writing,
+            busy: model.sendingPhoto || model.sendingVideo, canUseCamera: camera,
+            onCamera: { showingCamera = true }, onPhotos: { showingPhotos = true },
+            onSend: { Task { await model.send() } },
+            onDraftChanged: { Task { await model.draftChanged() } }
+        )
+    }
+}
+
+/// The bar at the bottom of a chat: one raised capsule holding a single attach button, the message, and
+/// send. The owner chose it on 2026-11-10 over a field with separate outlined camera and photo icons.
+struct ChatComposer: View {
+    @Binding var draft: String
+    var writing: FocusState<Bool>.Binding
+    let busy: Bool
+    let canUseCamera: Bool
+    let onCamera: () -> Void
+    let onPhotos: () -> Void
+    let onSend: () -> Void
+    let onDraftChanged: () -> Void
+
+    private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
         let theme = Theme.current
-        let empty = model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let busy = model.sendingPhoto || model.sendingVideo
-        let accent = theme.accent.color
-        return HStack(alignment: .bottom, spacing: Space.s3) {
-            #if os(iOS)
-            if CameraPicker.isAvailable {
-                MessagesBarIcon("Camera", systemImage: "camera") { showingCamera = true }
-                    .padding(.bottom, Space.s2)
-            }
-            #endif
-            PhotosPicker(selection: $pickedPhoto, matching: .any(of: [.images, .videos]), preferredItemEncoding: .compatible) {
-                Image(systemName: busy ? "hourglass" : "photo")
-                    .font(Typeface.title)
-                    .foregroundStyle(accent)
-                    .frame(width: 32, height: 32)
+        ComposerBar(canSend: !empty, onSend: onSend) {
+            Menu {
+                if canUseCamera {
+                    Button("Take a photo or video", systemImage: "camera", action: onCamera)
+                }
+                Button("Choose from your library", systemImage: "photo.on.rectangle", action: onPhotos)
+            } label: {
+                ComposerBar<EmptyView, EmptyView>.attachGlyph(busy: busy)
             }
             .disabled(busy)
-            .accessibilityLabel("Send a photo or video")
-            .padding(.bottom, Space.s2)
-            TextField("Message", text: $model.draft, axis: .vertical)
+            .accessibilityLabel(busy ? "Sending a photo or video" : "Add a photo or video")
+        } field: {
+            TextField("Message", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(Typeface.body)
+                .foregroundStyle(theme.textPrimary.color)
                 .lineLimit(1...6)
-                .focused($writing)
-                .padding(Space.s3)
-                .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
-                .onChange(of: model.draft) { Task { await model.draftChanged() } }
-                .onSubmit { Task { await model.send() } }
-            MessagesBarIcon("Send", systemImage: "arrow.up.circle.fill", isEnabled: !empty) {
-                Task { await model.send() }
-            }
-            .padding(.bottom, Space.s2)
+                .focused(writing)
+                .onChange(of: draft) { onDraftChanged() }
+                .onSubmit(onSend)
         }
+    }
+}
+
+/// The composer's layout on its own: attach, the field, and send in one raised capsule. Kept apart from
+/// the menu and text field so a render can draw it with stand-ins for those system controls.
+struct ComposerBar<Attach: View, Field: View>: View {
+    let canSend: Bool
+    let onSend: () -> Void
+    @ViewBuilder let attach: Attach
+    @ViewBuilder let field: Field
+
+    var body: some View {
+        let theme = Theme.current
+        HStack(alignment: .bottom, spacing: Space.s2) {
+            attach
+            field
+                .padding(.vertical, Space.s2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: onSend) {
+                Image(systemName: "arrow.up")
+                    .font(Typeface.callout.weight(.bold))
+                    .foregroundStyle(canSend ? theme.accentOn.color : theme.textTertiary.color)
+                    .frame(width: ToolbarGlyph.diameter, height: ToolbarGlyph.diameter)
+                    .background(Circle().fill(canSend ? theme.accent.color : theme.surfaceSunken.color))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .accessibilityLabel("Send")
+        }
+        .padding(Space.s1 + Space.s1 / 2)
+        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: (ToolbarGlyph.diameter + Space.s2) / 2))
         .padding(.horizontal, Space.s4)
-        .padding(.vertical, Space.s3)
+        .padding(.top, Space.s2)
+        .padding(.bottom, Space.s3)
         .background(theme.bg.color)
+    }
+
+    /// The single attach button's face.
+    static func attachGlyph(busy: Bool) -> some View {
+        let theme = Theme.current
+        return Image(systemName: busy ? "hourglass" : "plus")
+            .font(Typeface.callout.weight(.semibold))
+            .foregroundStyle(theme.textSecondary.color)
+            .frame(width: ToolbarGlyph.diameter, height: ToolbarGlyph.diameter)
+            .background(Circle().fill(theme.surfaceSunken.color))
+            .contentShape(Circle())
     }
 }
 
@@ -388,7 +450,7 @@ private struct ReplyBar: View {
     }
 }
 
-private struct Bubble: View {
+struct Bubble: View {
     let message: ChatMessage
     let model: ChatModel
     let showsSender: Bool
