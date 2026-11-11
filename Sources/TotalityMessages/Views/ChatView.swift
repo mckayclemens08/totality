@@ -388,7 +388,7 @@ private struct ReplyBar: View {
     }
 }
 
-private struct Bubble: View {
+struct Bubble: View {
     let message: ChatMessage
     let model: ChatModel
     let showsSender: Bool

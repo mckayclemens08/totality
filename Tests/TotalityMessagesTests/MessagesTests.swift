@@ -103,7 +103,7 @@ private final class FakeService: MessagesService, @unchecked Sendable {
     }
 }
 
-private final class FakeChannel: ChatChannel, @unchecked Sendable {
+final class FakeChannel: ChatChannel, @unchecked Sendable {
     let title = "mckay_test"
     private let lock = NSLock()
     private(set) var sent: [String] = []
