@@ -33,6 +33,8 @@ public enum KeyPurpose: String, Sendable, Hashable {
     case photoVideo = "photo-video"
     /// What's kept on a device of a connected Google account's calendars (issue 76). It never syncs.
     case googleCalendar = "google-calendar"
+    /// What iPhone sync has already brought in, and how it's set, kept on the device only (issue 77).
+    case photoSync = "photo-sync"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.

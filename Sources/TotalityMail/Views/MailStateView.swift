@@ -19,8 +19,11 @@ struct MailStateView: View {
         let theme = Theme.current
         VStack(spacing: Space.s3) {
             Image(systemName: systemImage)
-                .font(Typeface.display)
+                .font(Typeface.title)
                 .foregroundStyle(theme.textSecondary.color)
+                .frame(width: Space.s8 + Space.s4, height: Space.s8 + Space.s4)
+                .neumorphic(.raised, in: Circle())
+                .padding(.bottom, Space.s3)
                 .accessibilityHidden(true)
             Text(title)
                 .font(Typeface.title)
@@ -30,47 +33,23 @@ struct MailStateView: View {
                 .font(Typeface.body)
                 .foregroundStyle(theme.textSecondary.color)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             if !address.isEmpty {
                 AddressLine("Your address", address: address)
                     .fixedSize(horizontal: true, vertical: false)
                     .padding(.top, Space.s3)
             }
             if let action {
-                Button(action.label, action: action.run)
-                    .font(Typeface.callout)
-                    .foregroundStyle(theme.accent.color)
-                    .buttonStyle(.plain)
-                    .padding(.top, Space.s3)
-            }
-        }
-        .padding(Space.s6)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-/// The first download, and how far along it is.
-struct MailDownloadView: View {
-    let download: MailDownload?
-
-    var body: some View {
-        let theme = Theme.current
-        VStack(spacing: Space.s3) {
-            Image(systemName: "envelope")
-                .font(Typeface.display)
-                .foregroundStyle(theme.textSecondary.color)
-                .accessibilityHidden(true)
-            Text(download == nil ? "Opening your mail" : "Downloading your mail")
-                .font(Typeface.title)
-                .foregroundStyle(theme.textPrimary.color)
-            if let download {
-                ProgressView(value: download.fraction)
-                    .tint(theme.accent.color)
-                Text("\(download.done.formatted()) of \(download.total.formatted()) messages. It's opened here, on this device.")
-                    .font(Typeface.caption)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .multilineTextAlignment(.center)
-            } else {
-                ProgressView()
+                Button(action: action.run) {
+                    Text(action.label)
+                        .font(Typeface.callout)
+                        .foregroundStyle(theme.accent.color)
+                        .padding(.horizontal, Space.s5)
+                        .padding(.vertical, Space.s3)
+                        .neumorphic(.raised, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, Space.s3)
             }
         }
         .padding(Space.s6)

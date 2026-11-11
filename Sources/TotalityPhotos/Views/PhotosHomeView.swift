@@ -13,6 +13,7 @@ public struct PhotosHomeView: View {
     @State private var viewing: Viewing?
     @State private var tab = Tab.library
     @State private var path: [PhotosModel.Scope] = []
+    @State private var showingSync = false
 
     enum Tab: Hashable { case library, albums }
 
@@ -67,6 +68,9 @@ public struct PhotosHomeView: View {
             Text(model.notice ?? "")
         }
         .task { await model.load() }
+        #if os(iOS)
+        .sheet(isPresented: $showingSync) { SyncSheet(model: model) }
+        #endif
         .onChange(of: model.requestedItem, initial: true) { openRequested() }
         .onChange(of: model.phase) { openRequested() }
     }
@@ -104,6 +108,15 @@ public struct PhotosHomeView: View {
                 .fixedSize()
             }
             ToolbarItem(placement: .primaryAction) { addButton(label: "Add") }
+            #if os(iOS)
+            if model.canSync {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Sync this iPhone", systemImage: model.isSyncing ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath") {
+                        showingSync = true
+                    }
+                }
+            }
+            #endif
         }
         #if os(iOS)
         if model.phase != .ready {
@@ -251,6 +264,9 @@ struct LibraryFooter: View {
                     : "\(model.unreadable) photos can't be opened with this device's key.")
                     + " Check in your account that this device has joined your recovery key.")
                     .foregroundStyle(theme.textSecondary.color)
+            }
+            if let sync = model.syncLine {
+                Text(sync).foregroundStyle(model.syncReport?.full == true ? theme.danger.color : theme.textSecondary.color)
             }
             if let usage = model.usageLine {
                 Text(usage).foregroundStyle(theme.textSecondary.color)

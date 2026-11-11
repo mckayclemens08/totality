@@ -28,6 +28,7 @@ struct MailListView: View {
         VStack(spacing: Space.s2) {
             MailSampleNote(model: model)
             MailMailboxNotes(model: model)
+            MailAccountChips(model: model)
             if conversations.isEmpty, drafts.isEmpty {
                 // Still a scroll, so a pull checks for mail here too.
                 GeometryReader { space in
@@ -85,7 +86,7 @@ struct MailListView: View {
         let theme = Theme.current
         return MailDraftRow(draft: draft)
             .tappable { onWrite(.resume(draft, in: model)) }
-            .listRowInsets(EdgeInsets(top: Space.s2, leading: Space.s4, bottom: Space.s2, trailing: Space.s4))
+            .listRowInsets(EdgeInsets(top: Space.s1 / 2, leading: Space.s2, bottom: Space.s1 / 2, trailing: Space.s2))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .swipeActions(edge: .trailing) {
@@ -216,7 +217,8 @@ struct MailListView: View {
     }
 }
 
-/// One conversation on a list. Unread mail carries a dot and heavier type, so it reads without colour.
+/// One conversation on a list: who, when, what about, and the start of it. Unread mail carries a dot and
+/// heavier type, so it reads without colour.
 struct MailRow: View {
     let conversation: MailConversation
     let heading: String
@@ -239,16 +241,23 @@ struct MailRow: View {
         HStack(alignment: .top, spacing: Space.s3) {
             if isSelecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(Typeface.body)
+                    .font(Typeface.headline)
                     .foregroundStyle(isSelected ? theme.accent.color : theme.textSecondary.color)
+                    .frame(height: Space.s6 + Space.s2)
             }
-            VStack(alignment: .leading, spacing: Space.s1) {
-                HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+            MailAvatar(name: heading, systemImage: conversation.isUnreadable ? "lock" : nil)
+                .overlay(alignment: .topLeading) {
+                    // Unread shows as a dot as well as heavier type, so it reads without colour.
                     if isUnread {
                         Circle()
                             .fill(theme.accent.color)
-                            .frame(width: Space.s2, height: Space.s2)
+                            .frame(width: Space.s3, height: Space.s3)
+                            .overlay(Circle().stroke(theme.bg.color, lineWidth: Space.hairline * 2))
+                            .offset(x: -Space.s1, y: -Space.s1)
                     }
+                }
+            VStack(alignment: .leading, spacing: Space.s1) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                     Text(heading)
                         .font(isUnread ? Typeface.headline : Typeface.callout)
                         .foregroundStyle(theme.textPrimary.color)
@@ -257,11 +266,14 @@ struct MailRow: View {
                         Text("\(conversation.messages.count)")
                             .font(Typeface.micro)
                             .foregroundStyle(theme.textSecondary.color)
+                            .padding(.horizontal, Space.s2)
+                            .padding(.vertical, Space.s1 / 2)
+                            .background(theme.surfaceSunken.color, in: Capsule())
                     }
                     Spacer(minLength: Space.s2)
                     Text(date)
-                        .font(Typeface.caption)
-                        .foregroundStyle(theme.textSecondary.color)
+                        .font(isUnread ? Typeface.caption.weight(.semibold) : Typeface.caption)
+                        .foregroundStyle(isUnread ? theme.accent.color : theme.textSecondary.color)
                         .lineLimit(1)
                 }
                 if conversation.isUnreadable {
@@ -271,8 +283,8 @@ struct MailRow: View {
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                         Text(conversation.subject)
-                            .font(isUnread ? Typeface.callout : Typeface.body)
-                            .foregroundStyle(theme.textPrimary.color)
+                            .font(isUnread ? Typeface.callout.weight(.semibold) : Typeface.callout)
+                            .foregroundStyle(isUnread ? theme.textPrimary.color : theme.textSecondary.color)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         if conversation.hasAttachments {
@@ -287,6 +299,18 @@ struct MailRow: View {
                                 .foregroundStyle(theme.accent.color)
                                 .accessibilityLabel("Starred")
                         }
+                        if let outside = conversation.latest.outsideAccount {
+                            // Which account it came through, small, on the subject's line.
+                            Text(outside.provider.name)
+                                .font(Typeface.micro)
+                                .foregroundStyle(theme.textSecondary.color)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, Space.s2)
+                                .padding(.vertical, Space.s1 / 2)
+                                .background(theme.surfaceSunken.color, in: Capsule())
+                                .accessibilityLabel("In \(outside.provider.name), \(outside.address)")
+                        }
                     }
                     if let problem {
                         Text(problem)
@@ -298,20 +322,19 @@ struct MailRow: View {
                             .foregroundStyle(theme.textSecondary.color)
                             .lineLimit(2)
                     }
-                    if let outside = conversation.latest.outsideAccount {
-                        Label(outside.address, systemImage: "tray")
-                            .font(Typeface.micro)
-                            .foregroundStyle(theme.textSecondary.color)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .accessibilityLabel("In \(outside.provider.name), \(outside.address)")
-                    }
                 }
             }
         }
-        .padding(Space.s3)
+        .padding(.horizontal, Space.s3)
+        .padding(.vertical, Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .neumorphic(isOpen || isSelected ? .pressed : .subtle, in: RoundedRectangle(cornerRadius: Radius.md))
+        .background {
+            // Only the open or picked row is set in. The rest sit flat, so the list reads as one surface.
+            if isOpen || isSelected {
+                Color.clear.neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+            }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: Radius.md))
         .accessibilityElement(children: .combine)
         .accessibilityValue(isUnread ? "Unread" : "")
     }
@@ -378,54 +401,24 @@ struct MailMailboxNotes: View {
         }
     }
 
-    /// What's under way with Totality mail, while it is.
-    private var checking: String? {
-        if let download = model.download, download.total > 0 {
-            return "Downloading new mail: \(download.done.formatted()) of \(download.total.formatted())"
-        }
-        return model.isChecking ? "Checking for new mail" : nil
-    }
-
     var body: some View {
         let theme = Theme.current
-        if model.isOffline {
+        // Syncs are quiet: nothing says one is under way, and a problem shows once it has lasted.
+        if model.isOffline, model.problemHasLasted || model.waiting > 0 {
             Label(offline, systemImage: "wifi.slash")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Space.s4)
         }
-        if let checking {
-            HStack(spacing: Space.s2) {
-                ProgressView().controlSize(.small)
-                Text(checking)
-                    .font(Typeface.caption)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Space.s4)
-        }
-        if model.checkFailed {
-            Label("Totality's server didn't answer. Your stored mail still opens, and the next check tries again.", systemImage: "exclamationmark.triangle")
+        if model.checkFailed, model.problemHasLasted {
+            Label("Totality's server isn't answering. Your stored mail still opens, and new mail comes in once it's back.", systemImage: "exclamationmark.triangle")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Space.s4)
         }
-        if let download = model.outsideDownload {
-            HStack(spacing: Space.s2) {
-                ProgressView().controlSize(.small)
-                Text("Bringing in \(download.address) for the first time: \(download.done) so far")
-                    .font(Typeface.caption)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Space.s4)
-        }
-        ForEach(model.outsideProblems, id: \.self) { problem in
+        ForEach(model.lastingOutsideProblems, id: \.self) { problem in
             Label(problem, systemImage: "exclamationmark.triangle")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.danger.color)

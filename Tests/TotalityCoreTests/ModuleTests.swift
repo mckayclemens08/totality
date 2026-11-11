@@ -22,6 +22,20 @@ private struct Receiver: ContentReceiver {
     func receive(file data: Data, named filename: String) async throws -> ContentRef { ref() }
 }
 
+private final class Count: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func add() { lock.withLock { value += 1 } }
+    var now: Int { lock.withLock { value } }
+}
+
+private struct Refresher: ModuleRefresher {
+    let module: ModuleID
+    let kinds: Set<ContentKind> = []
+    let count: Count
+    func refreshAhead() async { count.add() }
+}
+
 @Suite("Module contracts")
 struct ModuleTests {
     private func ref(_ kind: ContentKind) -> ContentRef {
@@ -40,6 +54,31 @@ struct ModuleTests {
         let registry = try ModuleRegistry(handlers: [Receiver(module: .reader), Handler(module: .web, kinds: [])])
         #expect(registry.receiver(for: .web)?.module == .reader)
         #expect(registry.receiver(for: .reader) == nil)
+    }
+
+    @Test("Only modules that refresh ahead are asked to")
+    func refreshers() async throws {
+        let count = Count()
+        let registry = try ModuleRegistry(handlers: [Refresher(module: .mail, count: count), Handler(module: .web, kinds: [])])
+        #expect(registry.refreshers.map(\.module) == [.mail])
+        for refresher in registry.refreshers { await refresher.refreshAhead() }
+        #expect(count.now == 1)
+    }
+
+    @Test("The app's refresh runs every refresher, and one asked for meanwhile waits for it")
+    @MainActor func appRefreshCoalesces() async throws {
+        let count = Count()
+        let refresh = AppRefresh()
+        await refresh.refresh()
+        #expect(count.now == 0)
+        refresh.registry = try ModuleRegistry(handlers: [Refresher(module: .mail, count: count), Refresher(module: .calendar, count: count)])
+        async let first: Void = refresh.refresh()
+        async let second: Void = refresh.refresh()
+        _ = await (first, second)
+        #expect(count.now <= 4)
+        #expect(count.now >= 2)
+        await refresh.refresh()
+        #expect(count.now >= 4)
     }
 
     @Test func rejectsTwoHandlersForOneModuleOrKind() {

@@ -58,7 +58,8 @@ enum ContentSetup {
     }
 
     /// The key step finishes any move that was interrupted, so this always opens with the right key.
-    static func makeModels() throws -> (
+    /// `mailRefresh` brings the signed-in account's mailbox up to date, for Mail's registry entry.
+    static func makeModels(mailRefresh: @escaping @Sendable () async -> Void) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, areas: [any SyncArea], registry: ModuleRegistry,
         mail: MailContent, photos: PhotosContent
     ) {
@@ -74,7 +75,7 @@ enum ContentSetup {
             ReaderModule(vault: readerVault),
             CalendarModule(vault: calendarVault, devices: devices, google: google, hidden: { CalendarModel.hiddenCalendars(in: .standard) }),
             WebModule(),
-            MailModule(),
+            MailModule(refresh: mailRefresh),
             PhotosModule(),
         ])
         return (
