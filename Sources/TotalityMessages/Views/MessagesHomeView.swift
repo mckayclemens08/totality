@@ -133,6 +133,15 @@ public struct MessagesHomeView: View {
                 if let notice = model.notice {
                     Banner(text: notice)
                 }
+                if model.keys != .backedUp, let summary = model.keys.summary {
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Banner(text: summary)
+                        if model.keys == .needsRecoveryKey, let onOpenAccount {
+                            Button("Set up your recovery key", action: onOpenAccount)
+                                .font(Typeface.callout)
+                        }
+                    }
+                }
                 SearchField(text: $query)
                 if !model.requests.isEmpty && query.isEmpty {
                     SectionTitle("Requests")
@@ -181,6 +190,11 @@ public struct MessagesHomeView: View {
                         Button("New group", systemImage: "person.3") { makingGroup = true }
                         Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
                         Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
+                        if model.keys == .backedUp {
+                            Section {
+                                Label("History backed up, this device verified", systemImage: "checkmark.shield")
+                            }
+                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(Typeface.body)

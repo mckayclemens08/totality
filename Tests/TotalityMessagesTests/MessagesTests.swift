@@ -93,6 +93,13 @@ private final class FakeService: MessagesService, @unchecked Sendable {
         update { $0.removeAll { $0.id == chat } }
     }
 
+    private(set) var secretsSeen: [String?] = []
+
+    func settleKeys(recoverySecret: String?) async -> MessageKeys {
+        lock.withLock { secretsSeen.append(recoverySecret) }
+        return recoverySecret == nil ? .needsRecoveryKey : .backedUp
+    }
+
     func stop() async { lock.withLock { stopped = true } }
 
     private func record(_ action: String) { lock.withLock { actions.append(action) } }
@@ -849,4 +856,41 @@ private func on(_ setting: Disappearing) -> DisappearingState {
     #expect(hits.first?.snippet == nil)
     #expect(try await searcher.search("4417").isEmpty)
     #expect(try await searcher.search("ana").map(\.itemID) == ["!ana"])
+}
+
+// MARK: Key backup under the recovery key
+
+@Test func theBackupSecretComesFromTheContentKeyAlone() throws {
+    let key = try ContentRootKey(bytes: Data(repeating: 7, count: 32))
+    let same = try ContentRootKey(bytes: Data(repeating: 7, count: 32))
+    let other = try ContentRootKey(bytes: Data(repeating: 8, count: 32))
+    #expect(key.matrixRecoverySecret() == same.matrixRecoverySecret())
+    #expect(key.matrixRecoverySecret() != other.matrixRecoverySecret())
+    #expect(key.matrixRecoverySecret() != Data(repeating: 7, count: 32).base64EncodedString())
+    #expect(Data(base64Encoded: key.matrixRecoverySecret())?.count == 32)
+}
+
+@MainActor
+@Test func messagesSaysWhenTheRecoveryKeyIsMissingAndWhenItsBackedUp() async {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [])
+    let secret = LockedSecret()
+    let model = MessagesModel(account: { mckay }, connector: { _ in service }, recoverySecret: { secret.value })
+    await model.connect()
+    #expect(model.keys == .needsRecoveryKey)
+    #expect(model.keys.summary?.contains("recovery key") == true)
+    secret.value = "from-the-content-key"
+    await model.settleKeys()
+    #expect(model.keys == .backedUp)
+    #expect(service.secretsSeen == [nil, "from-the-content-key"])
+    await model.disconnect()
+    #expect(model.keys == .checking)
+}
+
+private final class LockedSecret: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: String?
+    var value: String? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
 }
