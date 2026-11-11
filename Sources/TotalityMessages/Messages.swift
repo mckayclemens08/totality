@@ -302,7 +302,6 @@ public protocol ChatChannel: AnyObject, Sendable {
     func close()
 }
 
-/// Opens a connection for an account. Throws `notSignedIn` when there's no Totality sign-in.
 /// Whether this account's message history is backed up under the recovery key, and this device verified.
 public enum MessageKeys: Equatable, Sendable {
     case checking
@@ -326,6 +325,7 @@ public enum MessageKeys: Equatable, Sendable {
     }
 }
 
+/// Opens a connection for an account. Throws `notSignedIn` when there's no Totality sign-in.
 public typealias MessagesConnector = @Sendable (_ account: String) async throws -> any MessagesService
 
 /// Read receipts and typing are on by default (owner, 2026-11-05), with one switch to stop sending yours.
