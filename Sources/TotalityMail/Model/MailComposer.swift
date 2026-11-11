@@ -10,8 +10,6 @@ public enum MailTiming {
     public static let notice = Duration.seconds(4)
     /// How long writing pauses before the draft is saved.
     public static let autosave = Duration.seconds(2)
-    /// How often Mail checks for new mail while it's open.
-    public static let sync = Duration.seconds(120)
 }
 
 /// The three lines a message's people go on.

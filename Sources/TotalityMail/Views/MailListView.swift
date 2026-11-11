@@ -378,54 +378,24 @@ struct MailMailboxNotes: View {
         }
     }
 
-    /// What's under way with Totality mail, while it is.
-    private var checking: String? {
-        if let download = model.download, download.total > 0 {
-            return "Downloading new mail: \(download.done.formatted()) of \(download.total.formatted())"
-        }
-        return model.isChecking ? "Checking for new mail" : nil
-    }
-
     var body: some View {
         let theme = Theme.current
-        if model.isOffline {
+        // Syncs are quiet: nothing says one is under way, and a problem shows once it has lasted.
+        if model.isOffline, model.problemHasLasted || model.waiting > 0 {
             Label(offline, systemImage: "wifi.slash")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Space.s4)
         }
-        if let checking {
-            HStack(spacing: Space.s2) {
-                ProgressView().controlSize(.small)
-                Text(checking)
-                    .font(Typeface.caption)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Space.s4)
-        }
-        if model.checkFailed {
-            Label("Totality's server didn't answer. Your stored mail still opens, and the next check tries again.", systemImage: "exclamationmark.triangle")
+        if model.checkFailed, model.problemHasLasted {
+            Label("Totality's server isn't answering. Your stored mail still opens, and new mail comes in once it's back.", systemImage: "exclamationmark.triangle")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Space.s4)
         }
-        if let download = model.outsideDownload {
-            HStack(spacing: Space.s2) {
-                ProgressView().controlSize(.small)
-                Text("Bringing in \(download.address) for the first time: \(download.done) so far")
-                    .font(Typeface.caption)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Space.s4)
-        }
-        ForEach(model.outsideProblems, id: \.self) { problem in
+        ForEach(model.lastingOutsideProblems, id: \.self) { problem in
             Label(problem, systemImage: "exclamationmark.triangle")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.danger.color)

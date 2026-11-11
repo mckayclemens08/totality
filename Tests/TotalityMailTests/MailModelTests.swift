@@ -145,9 +145,15 @@ private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
         #expect(model.checkFailed)
         #expect(model.mailbox.messages.count == 1)
         #expect(!model.isChecking)
+        // Syncs are quiet, so one failed check isn't mentioned. Three in a row are.
+        #expect(!model.problemHasLasted)
+        await model.refresh()
+        await model.refresh()
+        #expect(model.problemHasLasted)
         await store.set(failure: nil)
         await model.refresh()
         #expect(!model.checkFailed)
+        #expect(!model.problemHasLasted)
     }
 
     // MARK: The home page
