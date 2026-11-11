@@ -135,7 +135,8 @@ struct PhotoViewer: View {
                         .padding(.vertical, Space.s2)
                         .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.sm))
                 }
-                HStack(spacing: Space.s5) {
+                // Packed together in one raised capsule, so six buttons fit a phone with room to spare.
+                HStack(spacing: Space.s1) {
                     if scope == .recentlyDeleted {
                         actionButton("Restore", systemImage: "arrow.uturn.backward") {
                             Task { await model.restore(item); closeIfGone() }
@@ -155,16 +156,16 @@ struct PhotoViewer: View {
                             actionButton("Share", systemImage: "paperplane") { sharingItem = item }
                         }
                         if isSaving {
-                            ProgressView().frame(width: Space.s7, height: Space.s7).accessibilityLabel("Saving to Photos")
+                            ProgressView().frame(width: Self.actionSize, height: Self.actionSize).accessibilityLabel("Saving to Photos")
                         } else {
                             actionButton("Save to Photos", systemImage: "square.and.arrow.down") { confirmingSave = true }
                         }
                         actionButton("Delete", systemImage: "trash") { confirmingDelete = true }
                     }
                 }
-                .padding(.horizontal, Space.s4)
-                .padding(.vertical, Space.s2)
-                .neumorphic(.subtle, in: Capsule())
+                .padding(.horizontal, Space.s3)
+                .padding(.vertical, Space.s1)
+                .neumorphic(.raised, in: Capsule())
             }
             .padding(Space.s4)
         }
@@ -174,13 +175,17 @@ struct PhotoViewer: View {
         let theme = Theme.current
         return Button(action: action) {
             Image(systemName: systemImage)
-                .font(Typeface.body)
-                .foregroundStyle(tint ?? theme.textPrimary.color)
-                .frame(width: Space.s7, height: Space.s7)
+                .font(Typeface.body.weight(.semibold))
+                .foregroundStyle(tint ?? theme.textSecondary.color)
+                .frame(width: Self.actionSize, height: Self.actionSize)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
     }
+
+    /// Apple's smallest comfortable tap target.
+    private static let actionSize: CGFloat = Space.s6 + Space.s3
 
     private func albumMenu(_ item: PhotoItem) -> some View {
         let theme = Theme.current
@@ -198,9 +203,9 @@ struct PhotoViewer: View {
             }
         } label: {
             Image(systemName: "rectangle.stack.badge.plus")
-                .font(Typeface.body)
-                .foregroundStyle(theme.textPrimary.color)
-                .frame(width: Space.s7, height: Space.s7)
+                .font(Typeface.body.weight(.semibold))
+                .foregroundStyle(theme.textSecondary.color)
+                .frame(width: Self.actionSize, height: Self.actionSize)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
