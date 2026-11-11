@@ -20,3 +20,15 @@ extension WebModule: ModuleRefresher {
     }
 }
 
+/// Web in the home search: bookmarks, which are already open on this device.
+public struct WebSearcher: ModuleSearcher {
+    public let module = ModuleID.web
+    public let kinds: Set<ContentKind> = []
+    private let find: @Sendable (String) async -> [SearchHit]
+
+    public init(model: WebModel) {
+        find = { query in await model.searchHits(query) }
+    }
+
+    public func search(_ query: String) async throws -> [SearchHit] { await find(query) }
+}

@@ -355,3 +355,16 @@ import TotalityCore
         #expect(model.openTabCount == 1)
     }
 }
+
+@Suite struct WebHomeSearchTests {
+    @Test @MainActor func findsBookmarksButNeverHistory() async throws {
+        let model = WebModel(client: nil, vault: WebVault(store: MemoryBlobStore(), rootKey: try .generate()))
+        await model.use(account: "user-1")
+        await model.addBookmark(title: "Tram 28 timetable", url: URL(string: "https://www.carris.pt/en/tram-28")!)
+        let hit = try #require(model.searchHits("tram timetable").first)
+        #expect(hit.module == .web)
+        #expect(hit.itemID == "https://www.carris.pt/en/tram-28")
+        #expect(model.searchHits("carris.pt").count == 1)
+        #expect(model.searchHits("lisbon").isEmpty)
+    }
+}

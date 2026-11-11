@@ -530,6 +530,18 @@ public final class WebModel {
     public enum Panel: Sendable { case tabs, downloads }
     public var requestedPanel: Panel?
 
+    /// Web in the home search: bookmarks only. History stays inside Web, as it does on the home tile.
+    public func searchHits(_ query: String) -> [SearchHit] {
+        let terms = SearchText.terms(in: query)
+        guard !terms.isEmpty else { return [] }
+        return bookmarks
+            .filter { bookmark in
+                let text = bookmark.title + " " + bookmark.url.absoluteString + " " + bookmark.folder
+                return terms.allSatisfy { SearchText.find($0, in: text) != nil }
+            }
+            .map { SearchHit(module: .web, itemID: $0.url.absoluteString, title: $0.title.isEmpty ? ($0.url.host() ?? $0.url.absoluteString) : $0.title, detail: $0.url.host(), date: $0.updatedAt) }
+    }
+
     public func open(_ url: URL, in tab: WebTab? = nil) {
         let tab = tab ?? current
         page(for: tab).load(url)

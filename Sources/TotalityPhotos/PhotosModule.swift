@@ -20,3 +20,15 @@ extension PhotosModule: ModuleRefresher {
     }
 }
 
+/// Photos in the home search: captions and album names, on this device only.
+public struct PhotosSearcher: ModuleSearcher {
+    public let module = ModuleID.photos
+    public let kinds: Set<ContentKind> = []
+    private let find: @Sendable (String) async -> [SearchHit]
+
+    public init(model: PhotosModel) {
+        find = { query in await model.searchHits(query) }
+    }
+
+    public func search(_ query: String) async throws -> [SearchHit] { await find(query) }
+}

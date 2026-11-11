@@ -1144,3 +1144,21 @@ final class FakeGoogle: GoogleHTTP, GoogleDownloader, @unchecked Sendable {
         #expect(names == ["Moab trip", "Zion"])
     }
 }
+
+@Suite struct PhotosHomeSearchTests {
+    @Test @MainActor func findsCaptionsAndAlbumNames() async throws {
+        let key = try ContentRootKey.generate()
+        let (library, _) = try newLibrary(account: UUID().uuidString.lowercased(), key: key, store: FakeStore(), rows: FakeRows())
+        let model = PhotosModel(library: library)
+        for side in 0..<2 { _ = try await library.add(samplePhoto(width: 300 + side, height: 200)) }
+        #expect(model.searchHits("tram").isEmpty)
+        await model.load()
+        let photo = try #require(model.items.first)
+        await model.setCaption(photo, to: "Tram 28 up to the castle")
+        let hit = try #require(model.searchHits("castle tram").first)
+        #expect(hit.module == .photos)
+        #expect(hit.itemID == photo.id.uuidString)
+        #expect(hit.title == "Tram 28 up to the castle")
+        #expect(model.searchHits("tram bicycle").isEmpty)
+    }
+}

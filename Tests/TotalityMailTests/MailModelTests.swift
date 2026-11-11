@@ -532,3 +532,24 @@ private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
         func add(_ fraction: Double) { fractions.append(fraction) }
     }
 }
+
+@MainActor
+@Suite struct MailHomeSearchTests {
+    @Test func findsMailOnThisDeviceAndOpensItWhereItIs() async throws {
+        let model = MailModel(store: SampleMailStore(now: now, pause: .zero), now: { now })
+        #expect(model.searchHits("trailhead").isEmpty)
+        await model.load()
+        let hits = model.searchHits("saturday TRAILHEAD")
+        let hit = try #require(hits.first)
+        #expect(hit.module == .mail)
+        #expect(hit.title.contains("Saturday trailhead plan"))
+        #expect(model.searchHits("trailhead nowhere-at-all").isEmpty)
+
+        model.query = "something else"
+        let id = try #require(UUID(uuidString: hit.itemID))
+        model.requestFromSearch(id)
+        #expect(model.requestedConversation == id)
+        #expect(model.query.isEmpty)
+        #expect(model.mailbox.conversation(id, in: model.place) != nil)
+    }
+}

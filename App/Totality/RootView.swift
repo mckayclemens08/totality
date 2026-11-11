@@ -199,7 +199,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $showingSearch) {
             if let registry {
-                SearchView(search: UniversalSearch(searchers: registry.searchers + [MessagesSearcher(model: messages)]), onOpen: show) { showingSearch = false }
+                SearchView(search: UniversalSearch(searchers: homeSearchers(registry)), onOpen: show) { showingSearch = false }
             } else {
                 contentMessage { showingSearch = false }
             }
@@ -477,6 +477,13 @@ struct RootView: View {
         bringUp(.reader)
     }
 
+    /// Every module the home search looks in. Each reads only what's already open on this device.
+    private func homeSearchers(_ registry: ModuleRegistry) -> [any ModuleSearcher] {
+        var searchers = registry.searchers + [MessagesSearcher(model: messages), MailSearcher(model: mail), PhotosSearcher(model: photos)]
+        if let web { searchers.append(WebSearcher(model: web)) }
+        return searchers
+    }
+
     /// Only the module that found a result knows what its ID means, so it goes back there to open.
     private func show(_ hit: SearchHit) {
         showingSearch = false
@@ -484,6 +491,13 @@ struct RootView: View {
         case .reader: reader?.requestedItem = UUID(uuidString: hit.itemID)
         case .calendar: calendar?.requestedHit = hit
         case .messages: messages.requestedChat = hit.itemID
+        case .mail:
+            guard let id = UUID(uuidString: hit.itemID) else { return }
+            mail.current.requestFromSearch(id)
+        case .photos: photos.requestedItem = UUID(uuidString: hit.itemID)
+        case .web:
+            guard let url = URL(string: hit.itemID) else { return }
+            web?.open(url)
         default: return
         }
         bringUp(hit.module)

@@ -18,3 +18,16 @@ public struct MailModule: ModuleRefresher {
         await refresh()
     }
 }
+
+/// Mail in the home search. It reads the mailbox already open on this device, whichever account holds the key.
+public struct MailSearcher: ModuleSearcher {
+    public let module = ModuleID.mail
+    public let kinds: Set<ContentKind> = []
+    private let find: @Sendable (String) async -> [SearchHit]
+
+    public init(model: MailAccountModel) {
+        find = { query in await model.current.searchHits(query) }
+    }
+
+    public func search(_ query: String) async throws -> [SearchHit] { await find(query) }
+}
