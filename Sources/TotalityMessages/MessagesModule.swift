@@ -16,6 +16,22 @@ public enum MessagesModule {
     }
 }
 
+/// Messages' entry for keeping the chat list fresh before Messages is opened. It reconnects if the
+/// connection dropped, and Matrix's own sync does the rest.
+public struct MessagesRefresher: ModuleRefresher {
+    public let module = ModuleID.messages
+    public let kinds: Set<ContentKind> = []
+    private let refresh: @Sendable () async -> Void
+
+    public init(refresh: @escaping @Sendable () async -> Void) {
+        self.refresh = refresh
+    }
+
+    public func refreshAhead() async {
+        await refresh()
+    }
+}
+
 /// Messages in the home search. It reads the chat list already on the device, names only.
 public struct MessagesSearcher: ModuleSearcher {
     public let module = ModuleID.messages

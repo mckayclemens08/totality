@@ -232,6 +232,30 @@ public final class CalendarModel {
         month = today.firstOfMonth
         selectedDay = today
         hiddenCalendars = Self.hiddenCalendars(in: defaults)
+        refresher.add("device") { [weak self] in
+            self?.refreshDeviceCalendars()
+            return .done
+        }
+        refresher.add("google") { [weak self] in
+            guard let self else { return .done }
+            await self.refreshGoogle()
+            // Passing problems show only once they last. The ones the person has to act on have their
+            // own line, which shows straight away.
+            let passing = self.googleProblems.values.filter(\.isPassing)
+            if passing.contains(.offline) { return .offline }
+            return passing.first.map { .failed($0.message) } ?? .done
+        }
+    }
+
+    /// Brings every source up to date: this device's calendars, Google, and, added by the app, the
+    /// person's other devices.
+    public let refresher = Refresher()
+
+    /// Reads this device's calendars again, which is quick and needs no network.
+    public func refreshDeviceCalendars() {
+        guard phase == .ready else { return }
+        refreshDevice()
+        rebuild()
     }
 
     /// Opaque IDs from the system, not calendar names.
@@ -717,10 +741,10 @@ public final class CalendarModel {
         googleTargets = await google.targets()
     }
 
-    /// One line for the Calendar to show about Google, or nil when there's nothing to say.
+    /// One line for the Calendar to show about Google, or nil when there's nothing to say. Passing
+    /// problems, like being offline, are left to the refresh line, which waits to see whether they last.
     public var googleStatus: String? {
-        if let problem = googleProblems.values.first { return problem.message }
-        return nil
+        googleProblems.values.first { !$0.isPassing }?.message
     }
 
     /// Connects a Google account for Calendar, or, with an account already connected for Mail or

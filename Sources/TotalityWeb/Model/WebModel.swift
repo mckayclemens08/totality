@@ -134,7 +134,14 @@ public final class WebModel {
         let first = WebTab()
         tabs = [first]
         currentID = first.id
+        refresher.add("device") { [weak self] in
+            await self?.load()
+            return .done
+        }
     }
+
+    /// Brings bookmarks up to date. The app adds the step that syncs with the person's other devices.
+    public let refresher = Refresher()
 
     /// Says who's here. Only the account that owns this device's key has things kept, because its
     /// bookmarks sync under that key. Signed out or anyone else, the browser works and keeps nothing.

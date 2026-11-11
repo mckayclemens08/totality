@@ -3,6 +3,14 @@ import TotalityCore
 
 /// Why Google Calendar couldn't be read, in words the Calendar can show.
 public enum GoogleCalendarProblem: Error, Equatable, Sendable {
+    /// True for a problem that usually clears on its own, which shows only once it lasts.
+    public var isPassing: Bool {
+        switch self {
+        case .offline, .unreachable, .unexpected: true
+        case .expired, .notAllowed, .notSetUp, .changedOnGoogle, .gone: false
+        }
+    }
+
     /// No connection to the internet.
     case offline
     /// Google couldn't be reached properly, or is busy.

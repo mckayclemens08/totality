@@ -25,11 +25,13 @@ struct WebLibraryView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, Space.s4)
+                RefreshStatusLine(model.refresher)
                 switch section {
                 case .bookmarks: bookmarks
                 case .history: history
                 }
             }
+            .pullsToRefresh(with: model.refresher)
         }
         .sheet(item: $editing) { bookmark in
             WebBookmarkEditor(model: model, bookmark: bookmark) { editing = nil }
