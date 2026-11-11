@@ -9,10 +9,14 @@ public enum MessagesModule {
     public static func makeModel(
         account: (@Sendable () async -> String?)?,
         connector: MessagesConnector?,
-        unavailableReason: String? = nil
+        unavailableReason: String? = nil,
+        recoverySecret: @escaping @Sendable () async -> String? = { nil }
     ) -> MessagesModel {
         guard let account else { return MessagesModel(account: { nil }, connector: nil) }
-        return MessagesModel(account: account, connector: connector, unavailableReason: connector == nil ? unavailableReason : nil)
+        return MessagesModel(
+            account: account, connector: connector, unavailableReason: connector == nil ? unavailableReason : nil,
+            recoverySecret: recoverySecret
+        )
     }
 }
 
