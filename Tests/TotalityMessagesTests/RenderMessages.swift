@@ -70,15 +70,20 @@ import TotalityUI
     }
 }
 
+/// The real composer layout. ImageRenderer can't draw the system menu or text field, so plain views
+/// stand in for those two.
 private struct ComposerHost: View {
-    @State var draft: String
-    @FocusState private var writing: Bool
+    let draft: String
 
     var body: some View {
-        ChatComposer(
-            draft: $draft, writing: $writing, busy: false, canUseCamera: true,
-            onCamera: {}, onPhotos: {}, onSend: {}, onDraftChanged: {}
-        )
+        let theme = Theme.current
+        ComposerBar(canSend: !draft.isEmpty, onSend: {}) {
+            ComposerBar<EmptyView, EmptyView>.attachGlyph(busy: false)
+        } field: {
+            Text(draft.isEmpty ? "Message" : draft)
+                .font(Typeface.body)
+                .foregroundStyle(draft.isEmpty ? theme.textTertiary.color : theme.textPrimary.color)
+        }
     }
 }
 

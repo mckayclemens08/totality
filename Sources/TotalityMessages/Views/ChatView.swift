@@ -298,41 +298,55 @@ struct ChatComposer: View {
 
     var body: some View {
         let theme = Theme.current
-        HStack(alignment: .bottom, spacing: Space.s2) {
+        ComposerBar(canSend: !empty, onSend: onSend) {
             Menu {
                 if canUseCamera {
                     Button("Take a photo or video", systemImage: "camera", action: onCamera)
                 }
                 Button("Choose from your library", systemImage: "photo.on.rectangle", action: onPhotos)
             } label: {
-                Image(systemName: busy ? "hourglass" : "plus")
-                    .font(Typeface.callout.weight(.semibold))
-                    .foregroundStyle(theme.textSecondary.color)
-                    .frame(width: ToolbarGlyph.diameter, height: ToolbarGlyph.diameter)
-                    .background(Circle().fill(theme.surfaceSunken.color))
-                    .contentShape(Circle())
+                ComposerBar<EmptyView, EmptyView>.attachGlyph(busy: busy)
             }
             .disabled(busy)
             .accessibilityLabel(busy ? "Sending a photo or video" : "Add a photo or video")
+        } field: {
             TextField("Message", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(Typeface.body)
                 .foregroundStyle(theme.textPrimary.color)
                 .lineLimit(1...6)
                 .focused(writing)
-                .padding(.vertical, Space.s2)
                 .onChange(of: draft) { onDraftChanged() }
                 .onSubmit(onSend)
+        }
+    }
+}
+
+/// The composer's layout on its own: attach, the field, and send in one raised capsule. Kept apart from
+/// the menu and text field so a render can draw it with stand-ins for those system controls.
+struct ComposerBar<Attach: View, Field: View>: View {
+    let canSend: Bool
+    let onSend: () -> Void
+    @ViewBuilder let attach: Attach
+    @ViewBuilder let field: Field
+
+    var body: some View {
+        let theme = Theme.current
+        HStack(alignment: .bottom, spacing: Space.s2) {
+            attach
+            field
+                .padding(.vertical, Space.s2)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: onSend) {
                 Image(systemName: "arrow.up")
                     .font(Typeface.callout.weight(.bold))
-                    .foregroundStyle(empty ? theme.textTertiary.color : theme.accentOn.color)
+                    .foregroundStyle(canSend ? theme.accentOn.color : theme.textTertiary.color)
                     .frame(width: ToolbarGlyph.diameter, height: ToolbarGlyph.diameter)
-                    .background(Circle().fill(empty ? theme.surfaceSunken.color : theme.accent.color))
+                    .background(Circle().fill(canSend ? theme.accent.color : theme.surfaceSunken.color))
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .disabled(empty)
+            .disabled(!canSend)
             .accessibilityLabel("Send")
         }
         .padding(Space.s1 + Space.s1 / 2)
@@ -341,6 +355,17 @@ struct ChatComposer: View {
         .padding(.top, Space.s2)
         .padding(.bottom, Space.s3)
         .background(theme.bg.color)
+    }
+
+    /// The single attach button's face.
+    static func attachGlyph(busy: Bool) -> some View {
+        let theme = Theme.current
+        return Image(systemName: busy ? "hourglass" : "plus")
+            .font(Typeface.callout.weight(.semibold))
+            .foregroundStyle(theme.textSecondary.color)
+            .frame(width: ToolbarGlyph.diameter, height: ToolbarGlyph.diameter)
+            .background(Circle().fill(theme.surfaceSunken.color))
+            .contentShape(Circle())
     }
 }
 
