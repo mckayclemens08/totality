@@ -144,8 +144,8 @@ struct MailActionBar: View {
             Menu {
                 MailActionButtons(model: model, conversations: conversations) { confirmingDelete = true }
             } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(Typeface.body)
+                Image(systemName: "ellipsis")
+                    .font(Typeface.body.weight(.semibold))
                     .frame(width: Space.s7, height: Space.s7)
                     .contentShape(Rectangle())
             }

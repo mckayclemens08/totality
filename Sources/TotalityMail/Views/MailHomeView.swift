@@ -181,14 +181,14 @@ public struct MailHomeView: View {
         if ready {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: Space.s3) {
-                    ToolbarIcon("New Message", systemImage: "square.and.pencil.circle.fill", isEnabled: !model.isSelecting) {
+                    ToolbarIcon("New Message", systemImage: "square.and.pencil", isEnabled: !model.isSelecting) {
                         composing = .new(in: model)
                     }
                     if model.isSelecting {
                         Button("Done") { model.endSelecting() }
                             .font(Typeface.headline)
                     } else {
-                        ToolbarIcon("Select", systemImage: "checkmark.circle.fill", isEnabled: !model.conversations.isEmpty) {
+                        ToolbarIcon("Select", systemImage: "checkmark", isEnabled: !model.conversations.isEmpty) {
                             model.beginSelecting()
                         }
                     }

@@ -34,7 +34,7 @@ struct ReaderItemView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                ToolbarIcon("Listen", systemImage: "headphones.circle.fill") {
+                ToolbarIcon("Listen", systemImage: "headphones") {
                     Task { await model.startListening(to: item.id) }
                 }
             }
@@ -247,7 +247,7 @@ private struct FileReader: View {
                         }
                         }
                     } label: {
-                        ToolbarGlyph(systemImage: "list.bullet.circle.fill").accessibilityLabel("Chapters")
+                        ToolbarGlyph(systemImage: "list.bullet").accessibilityLabel("Chapters")
                     }
                 }
             }

@@ -260,7 +260,7 @@ struct ChatView: View {
                     confirmingLeave = true
                 }
             } label: {
-                ToolbarGlyph(systemImage: model.disappearing == .off ? "ellipsis" : "timer.circle.fill")
+                ToolbarGlyph(systemImage: model.disappearing == .off ? "ellipsis" : "timer")
             }
             .accessibilityLabel("Chat settings")
         }

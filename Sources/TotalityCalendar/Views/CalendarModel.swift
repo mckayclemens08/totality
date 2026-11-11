@@ -153,13 +153,13 @@ public final class CalendarModel {
             }
         }
 
-        /// The same idea filled, for the toolbar's raised disc.
+        /// The same idea for the toolbar's raised disc: filled where a fill exists, never inside its own circle.
         public var toolbarImage: String {
             switch self {
-            case .month: "calendar.circle.fill"
+            case .month: "calendar"
             case .day: "calendar.day.timeline.left"
             case .week: "rectangle.split.3x1.fill"
-            case .schedule: "list.bullet.circle.fill"
+            case .schedule: "list.bullet"
             }
         }
     }
