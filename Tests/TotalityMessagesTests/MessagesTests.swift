@@ -850,3 +850,29 @@ private func on(_ setting: Disappearing) -> DisappearingState {
     #expect(try await searcher.search("4417").isEmpty)
     #expect(try await searcher.search("ana").map(\.itemID) == ["!ana"])
 }
+
+// MARK: Scrolling and the double-tap heart
+
+@Test func newMessagesScrollIntoViewOnlyWhenYoureAtTheBottomOrSentThem() {
+    #expect(ChatScroll.follows(atBottom: true, newestIsOwn: false))
+    #expect(ChatScroll.follows(atBottom: false, newestIsOwn: true))
+    #expect(!ChatScroll.follows(atBottom: false, newestIsOwn: false))
+}
+
+@Test func onlyMessagesOnTheServerCanTakeAHeart() {
+    let sent = ChatMessage(id: "$a", sender: "@ana:x", body: "See you at six", isOwn: false, time: jan1)
+    #expect(ChatScroll.canHeart(sent))
+    #expect(!ChatScroll.canHeart(ChatMessage(id: "t", sender: "@me:x", body: "On my way", isOwn: true, time: jan1, state: .sending)))
+    #expect(!ChatScroll.canHeart(ChatMessage(id: "$b", sender: "@ana:x", body: "", isOwn: false, time: jan1, decrypted: false)))
+    #expect(!ChatScroll.canHeart(ChatMessage(id: "$c", sender: "@ana:x", body: "Message deleted", isOwn: false, time: jan1, kind: .deleted)))
+    #expect(QuickReactions.heart == "❤️")
+}
+
+@MainActor
+@Test func aDoubleTapHeartGoesToThatMessage() async {
+    let channel = FakeChannel()
+    let chat = ChatModel(channel: channel)
+    let message = ChatMessage(id: "$a", sender: "@ana:x", body: "See you at six", isOwn: false, time: jan1)
+    await chat.toggleReaction(QuickReactions.heart, on: message)
+    #expect(channel.reactions == ["❤️@$a"])
+}
