@@ -131,6 +131,8 @@ struct RootView: View {
             await account?.backup?.settleDevice()
             connectSync()
             await openContentForHome()
+            // So the Messages tile shows who's written without opening Messages first.
+            Task { await messages.connect() }
             await refreshAhead()
             await account?.sync?.syncNow()
         }
@@ -194,7 +196,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $showingSearch) {
             if let registry {
-                SearchView(search: UniversalSearch(searchers: registry.searchers), onOpen: show) { showingSearch = false }
+                SearchView(search: UniversalSearch(searchers: registry.searchers + [MessagesSearcher(model: messages)]), onOpen: show) { showingSearch = false }
             } else {
                 contentMessage { showingSearch = false }
             }
@@ -267,6 +269,12 @@ struct RootView: View {
             return {
                 web?.openFromHome(bookmark)
                 bringUp(.web)
+            }
+        case .messages:
+            guard let chat = messages.glanceChat(at: line) else { return nil }
+            return {
+                messages.requestedChat = chat
+                bringUp(.messages)
             }
         case .mail:
             guard let id = mail.current.glanceConversation(at: line) else { return nil }
@@ -454,6 +462,7 @@ struct RootView: View {
         switch hit.module {
         case .reader: reader?.requestedItem = UUID(uuidString: hit.itemID)
         case .calendar: calendar?.requestedHit = hit
+        case .messages: messages.requestedChat = hit.itemID
         default: return
         }
         bringUp(hit.module)
