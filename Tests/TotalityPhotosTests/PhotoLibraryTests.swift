@@ -942,3 +942,169 @@ final class FakeSource: SyncSource, @unchecked Sendable {
         await #expect(throws: PhotoError.cantOpen) { try await otherKey.syncRecord() }
     }
 }
+
+
+/// Stands in for Google's Photos Picker API and its photo hosts.
+final class FakeGoogle: GoogleHTTP, GoogleDownloader, @unchecked Sendable {
+    private let lock = NSLock()
+    var items: [(id: String, video: Bool, ready: Bool, data: Data)] = []
+    var setAfterPolls = 1
+    var linksExpireAfter: Int?
+    var disabled = false
+    private(set) var polls = 0
+    private(set) var downloads = 0
+    private(set) var deleted: [String] = []
+    private(set) var tokens: [String] = []
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        lock.withLock { tokens.append(request.value(forHTTPHeaderField: "Authorization") ?? "") }
+        let url = request.url!
+        func answer(_ status: Int, _ body: String) -> (Data, HTTPURLResponse) {
+            (Data(body.utf8), HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        }
+        if disabled { return answer(403, #"{"error":{"status":"PERMISSION_DENIED","details":[{"reason":"SERVICE_DISABLED"}]}}"#) }
+        switch (request.httpMethod, url.path) {
+        case ("POST", "/v1/sessions"):
+            return answer(200, #"{"id":"s1","pickerUri":"https://photos.google.com/picker/s1","pollingConfig":{"pollInterval":"2s","timeoutIn":"60s"},"mediaItemsSet":false}"#)
+        case ("GET", "/v1/sessions/s1"):
+            let set = lock.withLock { polls += 1; return polls >= setAfterPolls }
+            return answer(200, #"{"id":"s1","pollingConfig":{"pollInterval":"2s","timeoutIn":"60s"},"mediaItemsSet":\#(set)}"#)
+        case ("DELETE", "/v1/sessions/s1"):
+            lock.withLock { deleted.append("s1") }
+            return answer(200, "{}")
+        case ("GET", "/v1/mediaItems"):
+            let list = items.map { item in
+                #"{"id":"\#(item.id)","type":"\#(item.video ? "VIDEO" : "PHOTO")","mediaFile":{"baseUrl":"https://lh3.googleusercontent.com/\#(item.id)","mimeType":"image/jpeg","mediaFileMetadata":{"width":10,"height":10\#(item.video ? #","videoMetadata":{"processingStatus":"\#(item.ready ? "READY" : "PROCESSING")"}"# : "")}}}"#
+            }
+            return answer(200, #"{"mediaItems":[\#(list.joined(separator: ","))]}"#)
+        default:
+            return answer(404, "{}")
+        }
+    }
+
+    func download(_ request: URLRequest, to file: URL, limit: Int) async throws -> HTTPURLResponse {
+        let url = request.url!
+        let count = lock.withLock { downloads += 1; return downloads }
+        if let after = linksExpireAfter, count > after {
+            return HTTPURLResponse(url: url, statusCode: 403, httpVersion: nil, headerFields: nil)!
+        }
+        let id = String(url.lastPathComponent.split(separator: "=").first ?? "")
+        guard url.absoluteString.hasSuffix("=d") || url.absoluteString.hasSuffix("=dv"),
+              let item = items.first(where: { $0.id == id }) else {
+            return HTTPURLResponse(url: url, statusCode: 404, httpVersion: nil, headerFields: nil)!
+        }
+        try item.data.write(to: file)
+        return HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+    }
+}
+
+@Suite struct GooglePhotosImportTests {
+    let key = try! ContentRootKey.generate()
+    let mckay = UUID().uuidString.lowercased()
+
+    private func importer(_ library: PhotoLibrary, _ google: FakeGoogle) -> GooglePhotosImport {
+        GooglePhotosImport(library: library, picker: GooglePhotosPicker(http: google, downloader: google, token: { "token-1" }), pause: { _ in })
+    }
+
+    @Test func whatWasPickedComesInSealedOnceAndIntoTheAlbumNamed() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (library, _) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let google = FakeGoogle()
+        let photo = samplePhoto(width: 400, height: 300)
+        google.items = [("g1", false, true, photo), ("g2", false, true, samplePhoto(width: 500, height: 300))]
+        google.setAfterPolls = 3
+        let run = importer(library, google)
+        let session = try await run.start()
+        #expect(session.pickerUri?.host == "photos.google.com")
+        try await run.waitForPicks(session)
+        #expect(google.polls == 3)
+
+        let report = await run.bring(session.id, albumName: "Moab trip")
+        #expect(report.brought == 2)
+        #expect(report.problem == nil)
+        #expect(google.deleted == ["s1"])
+        #expect(google.tokens.allSatisfy { $0 == "Bearer token-1" })
+        let items = try await library.list().items
+        #expect(items.count == 2)
+        let album = try #require(try await library.albums().albums.first)
+        #expect(album.name == "Moab trip")
+        #expect(items.allSatisfy { $0.details.albums == [album.id] })
+        // Nothing of the photo reaches the server readable.
+        for blob in await store.all() { #expect(blob.range(of: photo.prefix(64)) == nil) }
+
+        // Picked again: skipped, never fetched twice.
+        let again = await run.bring(session.id, albumName: nil)
+        #expect(again.brought == 0)
+        #expect(again.already == 2)
+        #expect(google.downloads == 2)
+    }
+
+    @Test func expiredLinksStopAndPickingAgainCarriesOn() async throws {
+        let (library, _) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        let google = FakeGoogle()
+        google.items = [("a", false, true, samplePhoto(width: 300, height: 200)), ("b", false, true, samplePhoto(width: 310, height: 200))]
+        google.linksExpireAfter = 1
+        let run = importer(library, google)
+        let session = try await run.start()
+        let first = await run.bring(session.id, albumName: nil)
+        #expect(first.brought == 1)
+        #expect(first.problem == .linksExpired)
+        #expect(google.deleted.isEmpty)
+        #expect(PhotosModel.googleSummary(first).hasPrefix("1 item came in"))
+
+        google.linksExpireAfter = nil
+        let second = await run.bring(session.id, albumName: nil)
+        #expect(second.brought == 1)
+        #expect(second.already == 1)
+    }
+
+    @Test func videosGoogleIsStillPreparingWaitAndATurnedOffAPIIsSaidPlainly() async throws {
+        let (library, _) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        let google = FakeGoogle()
+        google.items = [("v", true, false, Data(count: 10))]
+        let run = importer(library, google)
+        let session = try await run.start()
+        let report = await run.bring(session.id, albumName: nil)
+        #expect(report.notReady == 1)
+        #expect(google.downloads == 0)
+
+        google.disabled = true
+        await #expect(throws: GooglePhotosProblem.turnedOff) { _ = try await run.start() }
+    }
+
+    @Test func onlyGooglesOwnPhotoHostsAreEverAsked() throws {
+        func item(_ url: String) -> PickedItem {
+            PickedItem(id: "x", type: "PHOTO", mediaFile: .init(baseUrl: URL(string: url)!, mimeType: nil, mediaFileMetadata: nil))
+        }
+        #expect(GooglePhotosPicker.downloadURL(item("https://lh3.googleusercontent.com/abc"))?.absoluteString == "https://lh3.googleusercontent.com/abc=d")
+        #expect(GooglePhotosPicker.downloadURL(item("https://evil.example.com/abc")) == nil)
+        #expect(GooglePhotosPicker.downloadURL(item("http://lh3.googleusercontent.com/abc")) == nil)
+        #expect(GooglePhotosPicker.downloadURL(item("https://googleusercontent.com.evil.example/abc")) == nil)
+        #expect(GooglePhotosPicker.isPhotoHost(URL(string: "https://video-downloads.googleusercontent.com/x")!))
+        #expect(!GooglePhotosPicker.isPhotoHost(URL(string: "https://example.com/googleusercontent.com")!))
+        #expect(PickerSession.seconds("1.5s") == 1.5)
+        #expect(PickerSession.seconds("-1s") == nil)
+        #expect(!GooglePhotosImport.isGoogle(URL(string: "https://photos.google.com.evil.example/x")!))
+    }
+
+    /// Issue 77's two-user case for Google import: Dana's record on the same device is her own, and
+    /// what McKay brought in never shows for her.
+    @Test func user2sImportOnTheSameDeviceHasItsOwnRecordAndNoneOfUser1s() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (mine, cache) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let google = FakeGoogle()
+        google.items = [("g1", false, true, samplePhoto(width: 300, height: 200))]
+        let run = importer(mine, google)
+        _ = await run.bring(try await run.start().id, albumName: nil)
+
+        let dana = UUID().uuidString.lowercased()
+        let (hers, _) = try newLibrary(account: dana, key: key, store: store, rows: rows, cache: cache)
+        #expect(try await hers.googleRecord() == GoogleImportRecord())
+        #expect(try await hers.list().items.isEmpty)
+        let sealed = try #require(try cache.read("\(mckay).google-import"))
+        try cache.write(sealed, as: "\(dana).google-import")
+        await #expect(throws: PhotoError.cantOpen) { try await hers.googleRecord() }
+    }
+}
