@@ -30,6 +30,7 @@ struct PhotoBubble: View {
     let message: ChatMessage
     let model: ChatModel
     let onOpen: () -> Void
+    var onDoubleTap: (() -> Void)? = nil
     @State private var data: Data?
     @State private var failed = false
 
@@ -39,7 +40,7 @@ struct PhotoBubble: View {
             if case .photo(let w?, let h?) = message.kind, w > 0, h > 0 { return CGFloat(w) / CGFloat(h) }
             return 4.0 / 3.0
         }()
-        Button(action: onOpen) {
+        Group {
             ZStack {
                 RoundedRectangle(cornerRadius: Radius.md).fill(theme.surface.color)
                 if let data {
@@ -56,7 +57,12 @@ struct PhotoBubble: View {
             .frame(maxWidth: 240, maxHeight: 320)
             .clipShape(RoundedRectangle(cornerRadius: Radius.md))
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        // The double tap is checked first, so a single tap opens it a moment later.
+        .onTapGesture(count: 2) { onDoubleTap?() }
+        .onTapGesture(perform: onOpen)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onOpen() }
         .accessibilityLabel(message.isOwn ? "Your photo" : "Photo from \(MessagesUsername.display(message.sender))")
         // Runs again once a photo you sent reaches the server: until then there's nothing to fetch.
         .task(id: "\(message.id)|\(message.state == .sent)") {
@@ -120,11 +126,12 @@ struct VideoBubble: View {
     let message: ChatMessage
     let model: ChatModel
     let onOpen: () -> Void
+    var onDoubleTap: (() -> Void)? = nil
     @State private var still: Data?
 
     var body: some View {
         let theme = Theme.current
-        Button(action: onOpen) {
+        Group {
             ZStack {
                 RoundedRectangle(cornerRadius: Radius.md).fill(theme.surface.color)
                 if let still { OpenedImage(data: still) }
@@ -145,7 +152,12 @@ struct VideoBubble: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        // The double tap is checked first, so a single tap opens it a moment later.
+        .onTapGesture(count: 2) { onDoubleTap?() }
+        .onTapGesture(perform: onOpen)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onOpen() }
         .accessibilityLabel(message.isOwn ? "Your video" : "Video from \(MessagesUsername.display(message.sender))")
         .task(id: "\(message.id)|\(message.state == .sent)") {
             guard message.state == .sent else { return }

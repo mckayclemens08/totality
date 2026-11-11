@@ -3,6 +3,7 @@ import TotalityAccount
 import TotalityCalendar
 import TotalityCore
 import TotalityMail
+import TotalityMessages
 import TotalityPhotos
 import TotalityReader
 import TotalityWeb
@@ -58,8 +59,11 @@ enum ContentSetup {
     }
 
     /// The key step finishes any move that was interrupted, so this always opens with the right key.
-    /// `mailRefresh` brings the signed-in account's mailbox up to date, for Mail's registry entry.
-    static func makeModels(mailRefresh: @escaping @Sendable () async -> Void) throws -> (
+    /// `mailRefresh` brings the signed-in account's mailbox up to date, for Mail's registry entry, and
+    /// `refresh` brings any other module up to date through its own `Refresher`.
+    static func makeModels(
+        mailRefresh: @escaping @Sendable () async -> Void, refresh: @escaping @Sendable (ModuleID) async -> Void
+    ) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, areas: [any SyncArea], registry: ModuleRegistry,
         mail: MailContent, photos: PhotosContent
     ) {
@@ -72,11 +76,15 @@ enum ContentSetup {
         let devices = SystemCalendarSource()
         let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
         let registry = try ModuleRegistry(handlers: [
-            ReaderModule(vault: readerVault),
-            CalendarModule(vault: calendarVault, devices: devices, google: google, hidden: { CalendarModel.hiddenCalendars(in: .standard) }),
-            WebModule(),
+            ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
+            CalendarModule(
+                vault: calendarVault, devices: devices, google: google, hidden: { CalendarModel.hiddenCalendars(in: .standard) },
+                refresh: { await refresh(.calendar) }
+            ),
+            WebModule(refresh: { await refresh(.web) }),
             MailModule(refresh: mailRefresh),
-            PhotosModule(),
+            PhotosModule(refresh: { await refresh(.photos) }),
+            MessagesRefresher(refresh: { await refresh(.messages) }),
         ])
         return (
             ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices())),
@@ -277,5 +285,22 @@ final class DeviceContentKeys: ContentKeyAccess {
 
     func markJoined(_ fingerprint: String) async throws {
         try ContentSetup.keyRing().markJoined(fingerprint)
+    }
+}
+
+/// Which `Refresher` keeps each module fresh, so the registry's entries can reach a model made after
+/// them, or replaced, like Photos' when the account changes.
+@MainActor
+final class ModuleRefreshers {
+    private var refreshers: [ModuleID: Refresher] = [:]
+
+    subscript(module: ModuleID) -> Refresher? {
+        get { refreshers[module] }
+        set { refreshers[module] = newValue }
+    }
+
+    /// An automatic refresh, which shows nothing unless a problem lasts.
+    func refresh(_ module: ModuleID) async {
+        await refreshers[module]?.refresh(.automatic)
     }
 }

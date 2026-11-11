@@ -63,15 +63,9 @@ public struct CalendarHomeView: View {
             await model.load()
             model.takeRequestedDay()
             if let entry = model.takeRequestedEntry() { path = [entry] }
-            // Google's changes come in on opening and every few minutes while the Calendar is open.
-            // Pulling down asks straight away.
-            await model.refreshGoogle()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(300))
-                if Task.isCancelled { break }
-                await model.refreshGoogle()
-            }
         }
+        // The app keeps every source fresh before the Calendar opens. Pulling down asks straight away.
+        .pullsToRefresh(with: model.refresher)
     }
 
     private var isCreating: Binding<Bool> {
@@ -122,9 +116,9 @@ public struct CalendarHomeView: View {
             VStack(spacing: Space.s3) {
                 header
                 UnreadableNote(model: model)
+                RefreshStatusLine(model.refresher)
                 GoogleSyncNote(model: model)
                 page
-                    .refreshable { await model.refreshGoogle() }
                     .id(model.title)
                     .transition(.push(from: movingForward ? .trailing : .leading))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -264,23 +258,14 @@ struct UnreadableNote: View {
     }
 }
 
-/// Says when Google Calendar is being read, and when it couldn't be.
+/// Says when Google Calendar couldn't be read, and why.
 struct GoogleSyncNote: View {
     let model: CalendarModel
 
     var body: some View {
         let theme = Theme.current
-        if model.isSyncingGoogle, !model.googleAccounts.isEmpty {
-            HStack(spacing: Space.s2) {
-                ProgressView().controlSize(.small)
-                Text("Updating Google Calendar")
-            }
-            .font(Typeface.caption)
-            .foregroundStyle(theme.textSecondary.color)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Space.s4)
-            .accessibilityElement(children: .combine)
-        } else if let status = model.googleStatus {
+        // The refresh line covers being offline for every source, so this only adds Google's own problems.
+        if model.refresher.problem == nil, let status = model.googleStatus {
             Label(status, systemImage: "exclamationmark.arrow.triangle.2.circlepath")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.danger.color)

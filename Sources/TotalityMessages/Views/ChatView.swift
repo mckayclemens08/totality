@@ -49,6 +49,10 @@ struct ChatView: View {
     @State private var viewing: ChatMessage?
     @State private var deleting: ChatMessage?
     @State private var showingCamera = false
+    /// The newest message is on screen. New ones scroll into view only then, so reading back isn't interrupted.
+    @State private var atBottom = true
+    /// The chat has been shown at its newest message once, after it first loaded.
+    @State private var startedAtBottom = false
 
     var body: some View {
         let theme = Theme.current
@@ -92,14 +96,34 @@ struct ChatView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .id("typing")
                         }
+                        // Seen only while the bottom of the chat is on screen.
+                        Color.clear
+                            .frame(height: 1)
+                            .id(ChatScroll.bottom)
+                            .onAppear { atBottom = true }
+                            .onDisappear { atBottom = false }
                     }
                     .padding(.horizontal, Space.s4)
                     .padding(.vertical, Space.s3)
                 }
                 .defaultScrollAnchor(.bottom)
                 .onChange(of: model.messages.last?.id) {
-                    guard let last = model.messages.last?.id else { return }
-                    withAnimation(Motion.quick) { proxy.scrollTo(last, anchor: .bottom) }
+                    guard let last = model.messages.last else { return }
+                    if !startedAtBottom {
+                        // The first messages arrive a few at a time: land on the newest without animating,
+                        // and again once the list has laid itself out.
+                        startedAtBottom = true
+                        proxy.scrollTo(ChatScroll.bottom, anchor: .bottom)
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(150))
+                            proxy.scrollTo(ChatScroll.bottom, anchor: .bottom)
+                        }
+                    } else if ChatScroll.follows(atBottom: atBottom, newestIsOwn: last.isOwn) {
+                        withAnimation(Motion.quick) { proxy.scrollTo(ChatScroll.bottom, anchor: .bottom) }
+                    }
+                }
+                .onChange(of: model.typing.isEmpty) {
+                    if atBottom { withAnimation(Motion.quick) { proxy.scrollTo(ChatScroll.bottom, anchor: .bottom) } }
                 }
                 .refreshable { await model.loadEarlier() }
             }
@@ -389,6 +413,8 @@ private struct Bubble: View {
                 content
             }
             .contextMenu { menu }
+            .onTapGesture(count: 2) { heart() }
+            .accessibilityAction(named: "Heart") { heart() }
             if !message.decrypted {
                 Text("It will open once the sender's device shares the key, usually when they're next online.")
                     .font(Typeface.micro)
@@ -409,9 +435,9 @@ private struct Bubble: View {
         let theme = Theme.current
         switch message.kind {
         case .photo:
-            PhotoBubble(message: message, model: model, onOpen: onOpenPhoto)
+            PhotoBubble(message: message, model: model, onOpen: onOpenPhoto, onDoubleTap: heart)
         case .video:
-            VideoBubble(message: message, model: model, onOpen: onOpenPhoto)
+            VideoBubble(message: message, model: model, onOpen: onOpenPhoto, onDoubleTap: heart)
         case .deleted:
             Text("Message deleted")
                 .font(Typeface.caption)
@@ -434,6 +460,12 @@ private struct Bubble: View {
                 }
                 .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
         }
+    }
+
+    /// A double tap puts a heart on the message, or takes yours off again.
+    private func heart() {
+        guard ChatScroll.canHeart(message) else { return }
+        Task { await model.toggleReaction(QuickReactions.heart, on: message) }
     }
 
     @ViewBuilder private var menu: some View {
@@ -615,5 +647,18 @@ struct NewMessageView: View {
             working = false
             if let chat { onDone(chat) }
         }
+    }
+}
+
+/// Where a chat's list scrolls to, and when.
+enum ChatScroll {
+    static let bottom = "chat-bottom"
+
+    /// A new message scrolls into view when you were already at the newest one, or it's one you just sent.
+    static func follows(atBottom: Bool, newestIsOwn: Bool) -> Bool { atBottom || newestIsOwn }
+
+    /// Only a message that's on the server and opened can take a reaction.
+    static func canHeart(_ message: ChatMessage) -> Bool {
+        message.state == .sent && message.decrypted && message.kind != .deleted && message.canReply
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// One level of the library, or the top of it. Folders come first, then everything else.
@@ -28,6 +29,9 @@ struct ReaderFolderView: View {
 
     var body: some View {
         content
+            // On each folder's list, not on a document being read.
+            .pullsToRefresh(with: model.refresher)
+            .safeAreaInset(edge: .top, spacing: 0) { RefreshStatusLine(model.refresher) }
             .background(theme.bg.color)
             .navigationTitle(title)
             .toolbar { toolbar }

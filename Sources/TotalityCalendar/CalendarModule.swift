@@ -11,12 +11,16 @@ public struct CalendarModule: ContentHandler {
     private let hidden: @Sendable () -> Set<String>
     private let display: Calendar
     private let now: @Sendable () -> Date
+    private let refresh: @Sendable () async -> Void
 
+    /// `refresh` brings every calendar source up to date, quietly.
     public init(
         vault: CalendarVault? = nil, devices: (any DeviceCalendarSource)? = nil, google: GoogleCalendars? = nil,
         hidden: @escaping @Sendable () -> Set<String> = { [] },
-        display: Calendar = CalendarModel.personalCalendar, now: @escaping @Sendable () -> Date = { Date() }
+        display: Calendar = CalendarModel.personalCalendar, now: @escaping @Sendable () -> Date = { Date() },
+        refresh: @escaping @Sendable () async -> Void = {}
     ) {
+        self.refresh = refresh
         self.vault = vault
         self.devices = devices
         self.google = google
@@ -40,5 +44,12 @@ extension CalendarModule: ModuleSearcher {
         let to = today.adding(days: CalendarSearch.reach, in: display).start(in: display)
         let deviceEvents = (devices?.events(from: from, to: to, calendarIDs: chosen) ?? []) + (await google?.events(from: from, to: to) ?? [])
         return CalendarSearch.hits(terms: terms, events: events, deviceEvents: deviceEvents, display: display, now: current)
+    }
+}
+
+/// The app keeps this module fresh before it's opened, through `AppRefresh`, without showing it.
+extension CalendarModule: ModuleRefresher {
+    public func refreshAhead() async {
+        await refresh()
     }
 }

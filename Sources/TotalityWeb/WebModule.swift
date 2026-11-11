@@ -5,6 +5,18 @@ import TotalityCore
 public struct WebModule: ContentHandler {
     public let module = ModuleID.web
     public let kinds: Set<ContentKind> = [.bookmark]
+    private let refresh: @Sendable () async -> Void
 
-    public init() {}
+    /// `refresh` brings bookmarks up to date, quietly.
+    public init(refresh: @escaping @Sendable () async -> Void = {}) {
+        self.refresh = refresh
+    }
 }
+
+/// The app keeps this module fresh before it's opened, through `AppRefresh`, without showing it.
+extension WebModule: ModuleRefresher {
+    public func refreshAhead() async {
+        await refresh()
+    }
+}
+

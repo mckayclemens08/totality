@@ -36,7 +36,14 @@ public final class ReaderModel {
         listen.onPosition = { [vault] id, offset in
             Task { try? await vault.setListenPosition(offset, of: id) }
         }
+        refresher.add("device") { [weak self] in
+            await self?.load()
+            return .done
+        }
     }
+
+    /// Brings the library up to date. The app adds the step that syncs with the person's other devices.
+    public let refresher = Refresher()
 
     public var isSearching: Bool {
         !query.trimmingCharacters(in: .whitespaces).isEmpty

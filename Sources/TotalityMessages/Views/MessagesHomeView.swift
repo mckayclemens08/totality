@@ -1,4 +1,5 @@
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// Messages' first screen: requests, then conversations newest first, a search box, and New message.
@@ -119,6 +120,7 @@ public struct MessagesHomeView: View {
             MessagesStateView(systemImage: "bubble.left", title: "Messages isn't here yet", detail: reason)
         case .ready:
             list
+                .pullsToRefresh(with: model.refresher)
         }
     }
 

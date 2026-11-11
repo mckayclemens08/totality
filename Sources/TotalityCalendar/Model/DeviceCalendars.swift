@@ -27,6 +27,31 @@ public struct DeviceEvent: Identifiable, Sendable, Hashable {
     public let isAllDay: Bool
     public let calendarTitle: String
     public var origin: Origin = .device
+    /// Where a Google event lives, for changing it. Nil for everything else.
+    public var google: GoogleEventKey?
+}
+
+/// One Google event and the calendar it's on, which is everything needed to change it.
+public struct GoogleEventKey: Sendable, Hashable {
+    public let account: String
+    public let calendar: String
+    public let calendarTitle: String
+    public let event: GoogleCalendarEvent
+    /// It's on the person's own calendar and the account allows editing (issue 88, decision 3).
+    public let canEdit: Bool
+    /// It's on the person's own calendar, but the account hasn't allowed editing yet.
+    public let canAllowEditing: Bool
+
+    public var repeats: Bool { event.seriesID != nil }
+}
+
+/// One of the person's own Google calendars that Totality can add events to.
+public struct GoogleTarget: Sendable, Hashable, Identifiable {
+    public let account: String
+    public let calendar: String
+    public let title: String
+
+    public var id: String { "\(account)\n\(calendar)" }
 }
 
 public enum DeviceCalendarAccess: Sendable {

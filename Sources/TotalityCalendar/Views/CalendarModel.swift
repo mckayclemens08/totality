@@ -113,8 +113,24 @@ public struct EventDraft: Equatable, Sendable {
     }
 }
 
-public enum EditScope: Sendable {
+public enum EditScope: Sendable, Hashable {
     case thisOccurrence, allOccurrences
+}
+
+/// A change waiting for the person's press on Save to Google, with what the confirm sheet shows.
+public struct GoogleChange: Identifiable, Sendable, Equatable {
+    public enum Action: Sendable, Equatable {
+        case create(GoogleTarget)
+        case update(GoogleEventKey, EditScope)
+    }
+
+    public let id = UUID()
+    public let action: Action
+    public let body: GoogleEventBody
+    public let account: String
+    public let calendarTitle: String
+    /// Google won't email them, and the sheet says so.
+    public let hasGuests: Bool
 }
 
 /// What the Calendar screens show. Own events live in the vault. Device events stay in memory here.
@@ -187,6 +203,11 @@ public final class CalendarModel {
     public private(set) var isSyncingGoogle = false
     /// True while Google's page is open or its answer is being checked.
     public private(set) var isConnectingGoogle = false
+    /// Accounts that allow changing events on their own calendars, and those calendars.
+    public private(set) var googleEditable: Set<String> = []
+    public private(set) var googleTargets: [GoogleTarget] = []
+    /// True from the press on Save to Google until Google answers.
+    public private(set) var isSendingToGoogle = false
     private var googleEvents: [DeviceEvent] = []
     private var entriesByDay: [CalendarDay: [CalendarEntry]] = [:]
     private var built: (first: CalendarDay, last: CalendarDay)?
@@ -211,6 +232,30 @@ public final class CalendarModel {
         month = today.firstOfMonth
         selectedDay = today
         hiddenCalendars = Self.hiddenCalendars(in: defaults)
+        refresher.add("device") { [weak self] in
+            self?.refreshDeviceCalendars()
+            return .done
+        }
+        refresher.add("google") { [weak self] in
+            guard let self else { return .done }
+            await self.refreshGoogle()
+            // Passing problems show only once they last. The ones the person has to act on have their
+            // own line, which shows straight away.
+            let passing = self.googleProblems.values.filter(\.isPassing)
+            if passing.contains(.offline) { return .offline }
+            return passing.first.map { .failed($0.message) } ?? .done
+        }
+    }
+
+    /// Brings every source up to date: this device's calendars, Google, and, added by the app, the
+    /// person's other devices.
+    public let refresher = Refresher()
+
+    /// Reads this device's calendars again, which is quick and needs no network.
+    public func refreshDeviceCalendars() {
+        guard phase == .ready else { return }
+        refreshDevice()
+        rebuild()
     }
 
     /// Opaque IDs from the system, not calendar names.
@@ -393,7 +438,10 @@ public final class CalendarModel {
             phase = .failed
             return
         }
-        if let google { googleAccounts = await google.kept() }
+        if let google {
+            googleAccounts = await google.kept()
+            await keepGoogleEditing(google)
+        }
         refreshDevice()
         rebuild()
         await syncReminders()
@@ -663,7 +711,8 @@ public final class CalendarModel {
             calendarIDs: chosen
         )
         googleEvents = GoogleCalendars.events(
-            in: googleAccounts, from: window.first.start(in: display), to: window.last.adding(days: 1, in: display).start(in: display)
+            in: googleAccounts, from: window.first.start(in: display), to: window.last.adding(days: 1, in: display).start(in: display),
+            editable: googleEditable
         )
     }
 
@@ -682,14 +731,20 @@ public final class CalendarModel {
         googleAccounts = result.accounts
         googleNeedsAllowing = result.needsAllowing
         googleProblems = result.problems
+        await keepGoogleEditing(google)
         refreshDevice()
         rebuild()
     }
 
-    /// One line for the Calendar to show about Google, or nil when there's nothing to say.
+    private func keepGoogleEditing(_ google: GoogleCalendars) async {
+        googleEditable = await google.editableAccounts()
+        googleTargets = await google.targets()
+    }
+
+    /// One line for the Calendar to show about Google, or nil when there's nothing to say. Passing
+    /// problems, like being offline, are left to the refresh line, which waits to see whether they last.
     public var googleStatus: String? {
-        if let problem = googleProblems.values.first { return problem.message }
-        return nil
+        googleProblems.values.first { !$0.isPassing }?.message
     }
 
     /// Connects a Google account for Calendar, or, with an account already connected for Mail or
@@ -747,6 +802,122 @@ public final class CalendarModel {
         googleProblems[account] = nil
         refreshDevice()
         rebuild()
+    }
+
+    // MARK: Changing Google events (issue 88)
+
+    /// A draft for editing a Google event. How it repeats stays Google Calendar's.
+    public func draft(for key: GoogleEventKey) -> EventDraft {
+        let event = key.event
+        var gmt = Calendar(identifier: .gregorian)
+        gmt.timeZone = .gmt
+        var draft = event.isAllDay
+            ? EventDraft(start: CalendarDay(event.start, in: gmt).start(in: display), end: CalendarDay(event.end, in: gmt).start(in: display))
+            : EventDraft(start: event.start, end: event.end)
+        draft.title = event.title
+        draft.location = event.location
+        draft.notes = event.notes
+        draft.isAllDay = event.isAllDay
+        return draft
+    }
+
+    /// The newest kept version of a Google event, with Google's newest ETag.
+    public func latest(_ key: GoogleEventKey) -> GoogleEventKey {
+        googleEvents.lazy.compactMap(\.google).first {
+            $0.account == key.account && $0.calendar == key.calendar && $0.event.id == key.event.id
+        } ?? key
+    }
+
+    /// What a press on Save to Google would send, for the confirm sheet to show. Nothing goes to Google
+    /// here: only `send` does, and only from that press (issue 88, decision 2). Nil when the draft
+    /// can't be saved, with the reason in `notice`.
+    public func googleChange(_ draft: EventDraft, to target: GoogleTarget) -> GoogleChange? {
+        guard let body = googleBody(from: draft, repeating: true) else { return nil }
+        return GoogleChange(action: .create(target), body: body, account: target.account, calendarTitle: target.title, hasGuests: false)
+    }
+
+    public func googleChange(_ draft: EventDraft, editing key: GoogleEventKey, scope: EditScope) -> GoogleChange? {
+        guard key.canEdit, let body = googleBody(from: draft, repeating: false) else { return nil }
+        return GoogleChange(action: .update(key, scope), body: body, account: key.account, calendarTitle: key.calendarTitle, hasGuests: key.event.hasGuests)
+    }
+
+    private func googleBody(from draft: EventDraft, repeating: Bool) -> GoogleEventBody? {
+        var draft = draft
+        if !repeating { draft.frequency = nil }
+        guard let times = times(from: draft, keeping: nil) else { return nil }
+        return GoogleEventBody(
+            title: Self.cleaned(draft.title), location: Self.cleaned(draft.location), notes: draft.notes,
+            start: times.start, end: times.end, isAllDay: draft.isAllDay,
+            repeatRule: repeating ? rule(from: draft) : nil, timeZone: display.timeZone
+        )
+    }
+
+    /// The person pressed Save to Google. Returns nil once Google has it, or what went wrong, with the
+    /// draft left as it was so nothing typed is lost.
+    public func send(_ change: GoogleChange) async -> GoogleCalendarProblem? {
+        guard let google, !isSendingToGoogle else { return .unexpected }
+        isSendingToGoogle = true
+        defer { isSendingToGoogle = false }
+        do {
+            switch change.action {
+            case .create(let target): try await google.create(change.body, in: target)
+            case .update(let key, let scope): try await google.update(key, with: change.body, scope: scope)
+            }
+        } catch {
+            let problem = GoogleCalendarProblem.from(error)
+            // Show the newer version, so the person can check it before saving again.
+            if problem == .changedOnGoogle { await refreshGoogle() }
+            return problem
+        }
+        await afterGoogleChange(google)
+        return nil
+    }
+
+    /// The person pressed Delete in the question that names the event. Returns what went wrong, or nil.
+    public func deleteGoogle(_ key: GoogleEventKey, scope: EditScope) async -> GoogleCalendarProblem? {
+        guard let google, key.canEdit, !isSendingToGoogle else { return .unexpected }
+        isSendingToGoogle = true
+        defer { isSendingToGoogle = false }
+        do {
+            try await google.delete(key, scope: scope)
+        } catch {
+            let problem = GoogleCalendarProblem.from(error)
+            if problem == .changedOnGoogle { await refreshGoogle() }
+            return problem
+        }
+        await afterGoogleChange(google)
+        return nil
+    }
+
+    private func afterGoogleChange(_ google: GoogleCalendars) async {
+        googleAccounts = await google.kept()
+        await keepGoogleEditing(google)
+        refreshDevice()
+        rebuild()
+    }
+
+    /// One consent tap on Google's page, on the account already connected, to allow editing.
+    public func allowGoogleEditing(_ account: String, signingIn web: GoogleWebSignIn) async {
+        guard let google, let authorization = await google.editingAuthorization(for: account), !isConnectingGoogle else { return }
+        isConnectingGoogle = true
+        defer { isConnectingGoogle = false }
+        do {
+            let callback = try await web(authorization.url, authorization.callbackScheme)
+            try await google.finishEditing(authorization, callback: callback)
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            return
+        } catch is CancellationError {
+            return
+        } catch let problem as GoogleCalendarProblem {
+            notice = problem == .notAllowed
+                ? "Editing wasn't allowed on Google's page, so Google events stay read-only. Try again and leave editing ticked."
+                : problem.message
+            return
+        } catch {
+            notice = GoogleCalendarProblem.from(error).message
+            return
+        }
+        await afterGoogleChange(google)
     }
 
     // MARK: Attachments

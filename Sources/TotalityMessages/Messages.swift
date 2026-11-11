@@ -136,6 +136,8 @@ public struct ReplyPreview: Sendable, Equatable {
 /// The few reactions a long press offers: four, so they fit in one row of the menu.
 public enum QuickReactions {
     public static let all = ["❤️", "😂", "👍", "😢"]
+    /// What a double tap puts on a message.
+    public static let heart = "❤️"
 }
 
 /// Whether the device can reach the Matrix server right now.

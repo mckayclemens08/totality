@@ -6,9 +6,12 @@ public struct ReaderModule: ContentProvider {
     public let module = ModuleID.reader
     public let kinds: Set<ContentKind> = [.note, .file]
     private let vault: ReaderVault?
+    private let refresh: @Sendable () async -> Void
 
-    public init(vault: ReaderVault? = nil) {
+    /// `refresh` brings the library up to date, quietly.
+    public init(vault: ReaderVault? = nil, refresh: @escaping @Sendable () async -> Void = {}) {
         self.vault = vault
+        self.refresh = refresh
     }
 
     public func attachable() async throws -> [ContentRef] {
@@ -53,5 +56,12 @@ extension ReaderModule: ModuleSearcher {
                 detail: hit.item.detail, snippet: hit.snippet, date: hit.item.updatedAt
             )
         } ?? []
+    }
+}
+
+/// The app keeps this module fresh before it's opened, through `AppRefresh`, without showing it.
+extension ReaderModule: ModuleRefresher {
+    public func refreshAhead() async {
+        await refresh()
     }
 }

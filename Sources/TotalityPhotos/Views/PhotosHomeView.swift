@@ -14,6 +14,7 @@ public struct PhotosHomeView: View {
     @State private var tab = Tab.library
     @State private var path: [PhotosModel.Scope] = []
     @State private var showingSync = false
+    @State private var showingGoogle = false
 
     enum Tab: Hashable { case library, albums }
 
@@ -68,6 +69,7 @@ public struct PhotosHomeView: View {
             Text(model.notice ?? "")
         }
         .task { await model.load() }
+        .sheet(isPresented: $showingGoogle) { GoogleImportSheet(model: model) }
         #if os(iOS)
         .sheet(isPresented: $showingSync) { SyncSheet(model: model) }
         #endif
@@ -108,6 +110,11 @@ public struct PhotosHomeView: View {
                 .fixedSize()
             }
             ToolbarItem(placement: .primaryAction) { addButton(label: "Add") }
+            if model.canImportFromGoogle {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Add from Google Photos", systemImage: "square.and.arrow.down.on.square") { showingGoogle = true }
+                }
+            }
             #if os(iOS)
             if model.canSync {
                 ToolbarItem(placement: .primaryAction) {
@@ -242,7 +249,7 @@ struct PhotoGrid<Footer: View>: View {
                     }
                 }
         )
-        .refreshable { await model.load() }
+        .pullsToRefresh(with: model.refresher)
         .accessibilityAction(named: "Bigger photos") { model.change(columnsBy: -1) }
         .accessibilityAction(named: "Smaller photos") { model.change(columnsBy: 1) }
     }

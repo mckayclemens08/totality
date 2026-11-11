@@ -29,7 +29,7 @@ public final class PhotosModel {
     public private(set) var phase: Phase = .loading
     /// Every photo, Recently Deleted included. `items(in:)` picks the ones a screen shows.
     public private(set) var items: [PhotoItem] = []
-    public private(set) var albums: [PhotoAlbum] = []
+    public internal(set) var albums: [PhotoAlbum] = []
     public private(set) var usage: SealedStoreUsage?
     public private(set) var waitingCount = 0
     public internal(set) var isFull = false
@@ -74,6 +74,12 @@ public final class PhotosModel {
     /// How far the run going now has got.
     public internal(set) var syncProgress: (done: Int, total: Int)?
     var syncTask: Task<Void, Never>?
+    /// The device's Google accounts, shared with Mail and Calendar, set by the app where there's a client ID.
+    public var googleAccounts: GoogleAccounts?
+    /// Where a Google Photos import stands.
+    public internal(set) var googleState: GoogleImportState = .idle
+    var googleTask: Task<Void, Never>?
+    var photoLibrary: PhotoLibrary? { library }
     /// Leftover plain files are cleared once each launch, before anything new is picked.
     private static var sweptThisLaunch = false
     private let unavailable: (title: String, detail: String)
@@ -100,6 +106,11 @@ public final class PhotosModel {
         } else {
             SyncSchedule.run = { @MainActor [weak self] in await self?.runSync() }
             SyncSchedule.stop = { @MainActor [weak self] in self?.stopSync() }
+        }
+        refresher.add("library") { [weak self] in
+            guard let self else { return .done }
+            await self.refreshAfterSync()
+            return self.isOffline ? .offline : .done
         }
     }
 
@@ -130,6 +141,9 @@ public final class PhotosModel {
     )
 
     public var account: String? { library?.account }
+
+    /// Brings the library list up to date, quietly. It never starts backing up the camera roll.
+    public let refresher = Refresher()
 
     // MARK: Loading
 

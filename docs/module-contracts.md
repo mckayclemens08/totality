@@ -168,6 +168,7 @@ Spec: issue #76, decision 8 (owner, 2026-11-08: "i shouldn't have to sign in to 
 Spec: issue #12, and issue #23 for the redesign. An event is one sealed blob with its times inside, so storage shows only an ID. Events use their own key purpose, so a Reader blob can't open as an event, and the ID inside must match the one outside.
 
 - Google Calendar (issue 76, step 2) is read-only, on the shared Google sign-in, with the scope `calendar.readonly`. The Google Cloud project behind `TotalityGoogleClientID` must have the **Google Calendar API** enabled. Without it, Google answers 403 `accessNotConfigured` / `SERVICE_DISABLED`, which the Calendar shows as Totality's setup problem, not the person's permission. Events are kept sealed per device under `googleCalendar`, in their own folder, and never sync. Only changes are read after the first time, using Google's sync tokens.
+- Changing Google events (issue 88, step 3) asks for one more scope, `calendar.events.owned`, as incremental consent on the same connection, so it reaches only calendars the person owns. Every create, edit and delete stops for the person's press on a confirm sheet, or on a delete question that names the event, and nothing is queued for later. Every change sends `sendUpdates=none` and never touches guests, and every edit or delete sends Google's ETag in `If-Match`, so a newer version on Google is never overwritten. Nothing new is stored: the next sync brings the saved event into the sealed cache.
 - All-day events are midnight GMT on their first and last days, so they're plain dates in any zone. Timed events repeat in their own zone, so 3 PM at home stays 3 PM at home while the person travels.
 - Repeats that don't exist, like the 31st of a short month, are skipped rather than moved. Editing one occurrence adds it to `skipped` and makes a standalone event.
 - Device calendars are read through EventKit, held in memory, and never written to Totality's storage. Totality doesn't encrypt them, and the UI says so. Only opaque calendar IDs are kept, in `UserDefaults`, to remember which are hidden.
@@ -407,6 +408,22 @@ and uploads that carry on. Step 5 is the home tile, the empty and error states, 
   only in iCloud come down only on Wi-Fi. A full account stops sync and says how much is left on the
   iPhone only. The limit stays 20 GB, with no paid storage. Not covered: a reinstall loses the record,
   so photos still in Totality could come in again.
+- **Google Photos import** (issue 77, agreed 2026-11-08). It uses Google's Photos Picker API, because no
+  app can read a whole Google Photos library any more: the person picks photos, videos or albums in
+  Google Photos, up to 2,000 at a time, and Totality gets only those. It runs on the shared Google
+  connection in `TotalityCore`, adding the scope `photospicker.mediaitems.readonly` with one consent
+  tap, so a Google account already connected for Mail or Calendar needs no second sign-in. The Google
+  Cloud project behind `TotalityGoogleClientID` must have the **Photos Picker API** enabled, or Google
+  answers `SERVICE_DISABLED` and Photos says it's Totality's setup. Each item comes from Google's photo
+  hosts (`*.googleusercontent.com` only, HTTPS, redirects elsewhere refused so the token stays with
+  Google) straight to this device, stops at the size limit while downloading, and is sealed and uploaded
+  before the next. Photos come at full resolution with Google's location removed (`=d`), and videos as
+  Google's re-encoded copy (`=dv`). Videos Google is still preparing wait for another pick. Google gives
+  no album names, so an optional "Put them in an album" field puts everything from one pick into one new
+  album (G3, changed and agreed 2026-11-09). A sealed record per account (`<account>.google-import`,
+  `.photoSync`, on the device only) keeps the Google IDs already brought in, so nothing comes twice, and
+  the session and album of an import that stopped. Links last about an hour: when they run out the
+  import stops, says so, and picking again carries on. Google Photos itself is never changed.
 
 ## Mail
 
