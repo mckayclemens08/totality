@@ -118,7 +118,7 @@ public struct PhotosHomeView: View {
             #if os(iOS)
             if model.canSync {
                 ToolbarItem(placement: .primaryAction) {
-                    ToolbarIcon("Sync this iPhone", systemImage: model.isSyncing ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath") {
+                    ToolbarIcon("Sync this iPhone", systemImage: model.isSyncing ? "hourglass.circle.fill" : "arrow.triangle.2.circlepath.circle.fill") {
                         showingSync = true
                     }
                 }

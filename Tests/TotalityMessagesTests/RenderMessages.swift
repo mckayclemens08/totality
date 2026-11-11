@@ -124,7 +124,7 @@ private struct MailToolbarSample: View {
                 ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill") {}
                 ToolbarIcon("Mailboxes", systemImage: "tray.2.fill") {}
                 Spacer()
-                ToolbarIcon("New Message", systemImage: "square.and.pencil") {}
+                ToolbarIcon("New Message", systemImage: "square.and.pencil.circle.fill") {}
                 ToolbarIcon("Select", systemImage: "checkmark.circle.fill") {}
             }
         }

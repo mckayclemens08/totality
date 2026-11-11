@@ -114,7 +114,7 @@ private struct TopBarIcon: View {
 
     var body: some View {
         Image(systemName: systemImage)
-            .font(Typeface.body)
+            .font(Typeface.body.weight(.semibold))
             .foregroundStyle(Theme.current.textSecondary.color)
             .frame(width: Space.s7, height: Space.s7)
             .neumorphic(.subtle, in: Circle())

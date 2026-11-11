@@ -104,7 +104,8 @@ struct ReaderFolderView: View {
                 ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
         }
-        ToolbarItem(placement: .secondaryAction) {
+        // In the bar, not the overflow, so iOS doesn't add its own outlined "more" button.
+        ToolbarItem(placement: .primaryAction) {
             Menu {
                 Picker("Sort by", selection: $sort) {
                     ForEach(ReaderSort.allCases, id: \.self) { order in
@@ -116,7 +117,7 @@ struct ReaderFolderView: View {
                     Label("Grid", systemImage: "square.grid.2x2").tag(true)
                 }
             } label: {
-                Label("Sort and view", systemImage: "arrow.up.arrow.down")
+                ToolbarGlyph(systemImage: "arrow.up.arrow.down").accessibilityLabel("Sort and view")
             }
         }
         ToolbarItem(placement: .primaryAction) {

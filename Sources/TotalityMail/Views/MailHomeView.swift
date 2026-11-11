@@ -181,7 +181,7 @@ public struct MailHomeView: View {
         if ready {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: Space.s3) {
-                    ToolbarIcon("New Message", systemImage: "square.and.pencil", isEnabled: !model.isSelecting) {
+                    ToolbarIcon("New Message", systemImage: "square.and.pencil.circle.fill", isEnabled: !model.isSelecting) {
                         composing = .new(in: model)
                     }
                     if model.isSelecting {

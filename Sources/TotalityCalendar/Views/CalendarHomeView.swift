@@ -92,7 +92,7 @@ public struct CalendarHomeView: View {
                 Divider()
                 Button("Calendars", systemImage: "calendar.badge.checkmark") { showingSources = true }
             } label: {
-                ToolbarGlyph(systemImage: model.mode.systemImage)
+                ToolbarGlyph(systemImage: model.mode.toolbarImage)
                     .accessibilityLabel("View")
             }
         }
