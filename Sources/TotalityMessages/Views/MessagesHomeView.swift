@@ -189,7 +189,7 @@ public struct MessagesHomeView: View {
                         ToolbarIcon("Camera", systemImage: "camera.fill") { showingCamera = true }
                     }
                     #endif
-                    ToolbarIcon("New message", systemImage: "square.and.pencil.circle.fill") { composing = true }
+                    ToolbarIcon("New message", systemImage: "square.and.pencil") { composing = true }
                 }
             }
         }

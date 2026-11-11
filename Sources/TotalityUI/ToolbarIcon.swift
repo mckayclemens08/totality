@@ -17,7 +17,8 @@ public struct ToolbarGlyph: View {
     public var body: some View {
         let theme = Theme.current
         // Filled symbols wherever one exists. Ones made only of lines, like + or a chevron, get a heavier
-        // weight so they don't read as thin outlines beside the filled ones.
+        // weight so they don't read as thin outlines beside the filled ones. Never a `.circle.fill` symbol:
+        // the disc is already the circle, and a dark circle inside it looked heavy (owner, 2026-11-11).
         Image(systemName: systemImage)
             .font(Typeface.callout.weight(.semibold))
             .foregroundStyle(isEnabled ? theme.textSecondary.color : theme.textTertiary.color)

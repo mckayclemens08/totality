@@ -1,8 +1,8 @@
 import SwiftUI
 import TotalityUI
 
-/// One event on a list. The person's own events are raised. Device events sit in the surface, because
-/// they're only shown here.
+/// One event on a list, in the same raised look as a text box (owner, 2026-11-11). Every event is raised
+/// and readable, wherever it comes from.
 struct EventTile: View {
     let entry: CalendarEntry
     let isNext: Bool
@@ -32,7 +32,7 @@ struct EventTile: View {
             VStack(alignment: .leading, spacing: Space.s1) {
                 Text(entry.title)
                     .font(Typeface.headline)
-                    .foregroundStyle(isOwn ? theme.textPrimary.color : theme.textSecondary.color)
+                    .foregroundStyle(theme.textPrimary.color)
                     .lineLimit(2)
                 if !caption.isEmpty {
                     Text(caption)
@@ -43,8 +43,9 @@ struct EventTile: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(Space.s3)
-        .eventSurface(isOwn: isOwn, in: RoundedRectangle(cornerRadius: Radius.md))
+        .padding(.horizontal, Space.s4)
+        .padding(.vertical, Space.s3)
+        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityValue(isNext ? "Next event" : "")
     }
@@ -60,7 +61,8 @@ extension View {
             .accessibilityAction { action() }
     }
 
+    /// Blocks on the day timeline. None are pressed in: that look read as an old text box.
     func eventSurface<S: Shape>(isOwn: Bool, in shape: S) -> some View {
-        neumorphic(isOwn ? .subtle : .pressed, in: shape)
+        neumorphic(.subtle, in: shape)
     }
 }
