@@ -144,6 +144,26 @@ describe('Messages two-user test', () => {
     assert.equal(event.content.body, undefined)
   })
 
+  test('nobody else can read your secret storage or key backup', async () => {
+    const enc = (id) => encodeURIComponent(id)
+    const key = { algorithm: 'm.secret_storage.v1.aes-hmac-sha2', passphrase: { algorithm: 'm.pbkdf2', iterations: 500000, salt: 's' } }
+    assert.equal((await call(one.token, 'PUT', `/user/${enc(one.id)}/account_data/m.secret_storage.key.k1`, key)).status, 200)
+    assert.equal((await call(one.token, 'PUT', `/user/${enc(one.id)}/account_data/m.secret_storage.default_key`, { key: 'k1' })).status, 200)
+    assert.equal((await call(one.token, 'GET', `/user/${enc(one.id)}/account_data/m.secret_storage.default_key`)).json.key, 'k1')
+    assert.ok(refused((await call(three.token, 'GET', `/user/${enc(one.id)}/account_data/m.secret_storage.default_key`)).status))
+    assert.ok(refused((await call(three.token, 'GET', `/user/${enc(one.id)}/account_data/m.secret_storage.key.k1`)).status))
+    assert.notEqual((await call(three.token, 'PUT', `/user/${enc(one.id)}/account_data/m.secret_storage.default_key`, { key: 'evil' })).status, 200)
+
+    const backup = await call(one.token, 'POST', '/room_keys/version', {
+      algorithm: 'm.megolm_backup.v1.curve25519-aes-sha2', auth_data: { public_key: 'one-public-key' },
+    })
+    assert.equal(backup.status, 200)
+    // Each person's backup is their own: user 3 sees none, and can't reach user 1's by its version.
+    assert.equal((await call(three.token, 'GET', '/room_keys/version')).status, 404)
+    const theirs = await call(three.token, 'GET', `/room_keys/keys?version=${backup.json.version}`)
+    assert.ok(theirs.status !== 200 || Object.keys(theirs.json.rooms ?? {}).length === 0)
+  })
+
   test('media needs a signed-in person', async () => {
     const upload = await fetch(`${base}/_matrix/media/v3/upload`, {
       method: 'POST',
