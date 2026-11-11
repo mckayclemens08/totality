@@ -370,6 +370,7 @@ struct RootView: View {
         if turn == photosTurn, await photosWiring.use(account: canSync ? owner : nil), turn == photosTurn {
             let model = PhotosModel(library: photosWiring.library, unavailable: photosReason())
             model.sender = photosSender()
+            model.googleAccounts = ContentSetup.googleAccounts()
             photos = model
             await model.load()
         } else if turn == photosTurn, photos.account != photosWiring.library?.account
@@ -377,6 +378,7 @@ struct RootView: View {
             // The model on screen must always be the current library's, or none.
             let model = PhotosModel(library: photosWiring.library, unavailable: photosReason())
             model.sender = photosSender()
+            model.googleAccounts = ContentSetup.googleAccounts()
             photos = model
             await model.load()
         }

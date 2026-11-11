@@ -407,6 +407,22 @@ and uploads that carry on. Step 5 is the home tile, the empty and error states, 
   only in iCloud come down only on Wi-Fi. A full account stops sync and says how much is left on the
   iPhone only. The limit stays 20 GB, with no paid storage. Not covered: a reinstall loses the record,
   so photos still in Totality could come in again.
+- **Google Photos import** (issue 77, agreed 2026-11-08). It uses Google's Photos Picker API, because no
+  app can read a whole Google Photos library any more: the person picks photos, videos or albums in
+  Google Photos, up to 2,000 at a time, and Totality gets only those. It runs on the shared Google
+  connection in `TotalityCore`, adding the scope `photospicker.mediaitems.readonly` with one consent
+  tap, so a Google account already connected for Mail or Calendar needs no second sign-in. The Google
+  Cloud project behind `TotalityGoogleClientID` must have the **Photos Picker API** enabled, or Google
+  answers `SERVICE_DISABLED` and Photos says it's Totality's setup. Each item comes from Google's photo
+  hosts (`*.googleusercontent.com` only, HTTPS, redirects elsewhere refused so the token stays with
+  Google) straight to this device, stops at the size limit while downloading, and is sealed and uploaded
+  before the next. Photos come at full resolution with Google's location removed (`=d`), and videos as
+  Google's re-encoded copy (`=dv`). Videos Google is still preparing wait for another pick. Google gives
+  no album names, so an optional "Put them in an album" field puts everything from one pick into one new
+  album (G3, changed and agreed 2026-11-09). A sealed record per account (`<account>.google-import`,
+  `.photoSync`, on the device only) keeps the Google IDs already brought in, so nothing comes twice, and
+  the session and album of an import that stopped. Links last about an hour: when they run out the
+  import stops, says so, and picking again carries on. Google Photos itself is never changed.
 
 ## Mail
 
