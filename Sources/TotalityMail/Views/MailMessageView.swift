@@ -38,7 +38,8 @@ struct MailMessageView: View {
 
     private var header: some View {
         let theme = Theme.current
-        return HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+        return HStack(alignment: .center, spacing: Space.s3) {
+            MailAvatar(name: message.from.displayName, size: isOpen ? Space.s6 + Space.s2 : Space.s6)
             VStack(alignment: .leading, spacing: Space.s1) {
                 Text(message.from.displayName)
                     .font(Typeface.headline)

@@ -35,6 +35,15 @@ public final class MailModel {
     public private(set) var isChecking = false
     /// Totality's server couldn't be reached on the last check, while stored mail stayed on screen.
     public private(set) var checkFailed = false
+    /// Checks in a row that were offline or failed. Syncs are quiet, so a problem is mentioned only once
+    /// it has lasted this many.
+    public private(set) var troubledChecks = 0
+    public static let lastingChecks = 3
+    public var problemHasLasted: Bool { troubledChecks >= Self.lastingChecks }
+    /// Outside syncs in a row that came back with a problem.
+    private var troubledOutside = 0
+    /// The outside accounts' problems, once they've lasted.
+    public var lastingOutsideProblems: [String] { troubledOutside >= Self.lastingChecks ? outsideProblems : [] }
     /// What went wrong with outside accounts on the last download, one line each.
     public private(set) var outsideProblems: [String] = []
     @ObservationIgnored private var isDownloadingOutside = false
@@ -81,8 +90,19 @@ public final class MailModel {
         outside = (store as? any OutsideAccountStore).map { OutsideAccountsModel(store: $0) }
     }
 
+    /// Whose mail the list shows. Only the folders split by account; other places show everyone's.
+    public var accountFilter = MailAccountFilter.all
+
     public var conversations: [MailConversation] {
-        mailbox.conversations(in: place, matching: query)
+        let all = mailbox.conversations(in: place, matching: query)
+        guard case .folder = place, shownFilter != .all else { return all }
+        return all.filter { $0.messages.contains(where: shownFilter.includes) }
+    }
+
+    /// The filter, or All once the account it picked has gone.
+    var shownFilter: MailAccountFilter {
+        if case .outside(let id) = accountFilter, !mailbox.outsideAccounts.contains(where: { $0.id == id }) { return .all }
+        return accountFilter
     }
 
     public var placeName: String { mailbox.name(of: place) }
@@ -182,6 +202,7 @@ public final class MailModel {
             isOffline = opening.isOffline
             phase = .ready
             checkFailed = false
+            troubledChecks = opening.isOffline ? troubledChecks + 1 : 0
             download = nil
             isChecking = false
             clock.mark("Totality mail")
@@ -203,6 +224,7 @@ public final class MailModel {
             // Mail that's already showing stays, with a line saying the check didn't go through.
             if phase == .ready, !mailbox.messages.isEmpty {
                 checkFailed = true
+                troubledChecks += 1
             } else {
                 phase = .failed
             }
@@ -235,12 +257,14 @@ public final class MailModel {
             Task { @MainActor in self?.outsideDownload = download }
         }) else {
             outsideProblems = []
+            troubledOutside = 0
             return
         }
         var fresh = merged(result.mailbox, here: since[fetch] ?? Since())
         fresh.isFull = mailbox.isFull
         mailbox = fresh
         outsideProblems = result.problems
+        troubledOutside = result.problems.isEmpty ? 0 : troubledOutside + 1
     }
 
     /// Asks each outside account for older mail matching the search, from the person's press. What's

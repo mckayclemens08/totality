@@ -2,9 +2,19 @@ import TotalityCore
 
 /// Mail's entry in the registry. It takes nothing from other modules yet, and search inside Totality
 /// doesn't reach it. Saving an attachment goes the other way, to whichever module receives files.
-public struct MailModule: ContentHandler {
+///
+/// It refreshes ahead: the app fetches mail before Mail is opened, so it's already there.
+public struct MailModule: ModuleRefresher {
     public let module = ModuleID.mail
     public let kinds: Set<ContentKind> = []
+    private let refresh: @Sendable () async -> Void
 
-    public init() {}
+    /// `refresh` brings the signed-in account's mailbox up to date.
+    public init(refresh: @escaping @Sendable () async -> Void = {}) {
+        self.refresh = refresh
+    }
+
+    public func refreshAhead() async {
+        await refresh()
+    }
 }

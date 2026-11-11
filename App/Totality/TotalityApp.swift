@@ -1,4 +1,5 @@
 import SwiftUI
+import TotalityCore
 
 @main
 struct TotalityApp: App {
@@ -14,6 +15,9 @@ struct TotalityApp: App {
         WindowGroup {
             RootView()
                 .preferredColorScheme(.light)
+        }
+        .backgroundTask(.appRefresh(AppRefresh.backgroundIdentifier)) {
+            await AppRefresh.shared.runInBackground()
         }
         #endif
     }

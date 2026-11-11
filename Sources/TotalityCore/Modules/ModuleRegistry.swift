@@ -20,6 +20,14 @@ public protocol ContentReceiver: ContentProvider {
     func receive(file data: Data, named filename: String) async throws -> ContentRef
 }
 
+/// A module that keeps its content up to date ahead of being opened, so opening it never waits: the app
+/// asks at launch, on coming back, every minute while it's in front, and when iOS lets it refresh in the
+/// background.
+public protocol ModuleRefresher: ContentHandler {
+    /// Fetches what's new without showing that it's doing so, and returns once it's done or gave up.
+    func refreshAhead() async
+}
+
 public enum ModuleRegistryError: Error, Equatable {
     case duplicateModule(ModuleID)
     case duplicateKind(ContentKind)
@@ -59,6 +67,11 @@ public struct ModuleRegistry: Sendable {
     /// The module that keeps what `module` hands over, which is never `module` itself.
     public func receiver(for module: ModuleID) -> (any ContentReceiver)? {
         handlers.compactMap { $0 as? any ContentReceiver }.first { $0.module != module }
+    }
+
+    /// Every module that keeps itself up to date ahead of being opened.
+    public var refreshers: [any ModuleRefresher] {
+        handlers.compactMap { $0 as? any ModuleRefresher }
     }
 
     /// Every module that can be searched, in the order they were registered.

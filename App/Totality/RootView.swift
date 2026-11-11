@@ -123,6 +123,7 @@ struct RootView: View {
                 await photosWiring.disconnect()
                 photos = PhotosModel(library: nil)
                 registry = nil
+                AppRefresh.shared.registry = nil
                 syncAreas = []
                 contentProblem = nil
             }
@@ -132,14 +133,34 @@ struct RootView: View {
             await openContentForHome()
             // So the Messages tile shows who's written without opening Messages first.
             Task { await messages.connect() }
+            await refreshAhead()
             await account?.sync?.syncNow()
+        }
+        // Every minute while Totality is in front, the modules fetch what's new, so opening one never waits.
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: AppRefresh.every)
+                guard !Task.isCancelled else { return }
+                await refreshAhead()
+            }
         }
         .onChange(of: defaultHomeStyle) { chosenHomeStyle = nil }
         .onChange(of: showingAccount) {
             if !showingAccount { Task { await messages.checkAccount() } }
         }
         .onChange(of: scenePhase) {
-            if scenePhase == .active { Task { await account?.sync?.syncNow() } }
+            switch scenePhase {
+            case .active:
+                Task {
+                    await refreshAhead()
+                    await account?.sync?.syncNow()
+                }
+            case .background:
+                AppRefresh.shared.scheduleBackground()
+            default:
+                break
+            }
         }
         .onChange(of: open) {
             guard open == nil else { return }
@@ -298,7 +319,7 @@ struct RootView: View {
             return
         }
         do {
-            let content = try ContentSetup.makeModels()
+            let content = try ContentSetup.makeModels(mailRefresh: { @MainActor [mail] in await mail.current.refresh() })
             reader = content.reader
             calendar = content.calendar
             web = content.web
@@ -309,6 +330,7 @@ struct RootView: View {
             mail.receiver = content.registry.receiver(for: .mail)
             mail.onSentToReader = { Task { await reader?.load() } }
             registry = content.registry
+            AppRefresh.shared.registry = content.registry
             syncAreas = content.areas
             refreshRecoveryLabels()
             Task { await tellWhoIsHere() }
@@ -329,6 +351,11 @@ struct RootView: View {
         await tellWhoIsHere()
         // So the Mail tile has something to show before Mail is opened.
         if mail.current.phase != .ready { await mail.current.refresh() }
+    }
+
+    /// Each module that keeps itself up to date fetches what's new, quietly.
+    private func refreshAhead() async {
+        await AppRefresh.shared.refresh()
     }
 
     /// Web keeps things only for the key's owner, and Mail shows only the owner's mailbox.
@@ -404,8 +431,8 @@ struct RootView: View {
             await reader?.load()
             await calendar?.load()
             await web?.load()
-            // Marks from another device. Mail only fetches while it's showing.
-            if open == .mail, mail.current.phase == .ready { await mail.current.refresh() }
+            // Marks from another device, so Mail is already up to date when it's opened.
+            if mail.current.phase == .ready { await mail.current.refresh() }
         }
         backup.onJoined = {
             await sync.syncNow()
