@@ -738,3 +738,207 @@ final class FakeSender: PersonSender {
         #expect(PhotosModel.tooLongNotice(60) == "Videos over a minute can't be shared in a chat.")
     }
 }
+
+/// Stands in for the iPhone's library: photos made here, some only "in iCloud".
+final class FakeSource: SyncSource, @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [SyncCandidate] = []
+    private var inICloud: Set<String> = []
+    private(set) var reads: [String] = []
+
+    func add(_ id: String, created: Date, kind: SyncCandidate.Kind = .photo, duration: Double? = nil, inICloud: Bool = false) {
+        lock.withLock {
+            items.insert(SyncCandidate(id: id, created: created, kind: kind, duration: duration), at: 0)
+            if inICloud { self.inICloud.insert(id) }
+        }
+    }
+
+    func remove(_ id: String) { lock.withLock { items.removeAll { $0.id == id } } }
+    var readCount: Int { lock.withLock { reads.count } }
+
+    func candidates() async -> [SyncCandidate] { lock.withLock { items.sorted { ($0.created ?? .distantPast) > ($1.created ?? .distantPast) } } }
+
+    func export(_ candidate: SyncCandidate, download: Bool) async throws -> SyncExport {
+        let local = lock.withLock { () -> Bool in
+            reads.append(candidate.id)
+            return !inICloud.contains(candidate.id)
+        }
+        guard local || download else { throw SyncSourceError.inICloud }
+        return .photo(samplePhoto(width: 320, height: 240))
+    }
+}
+
+@Suite struct LibrarySyncTests {
+    let key = try! ContentRootKey.generate()
+    let mckay = UUID().uuidString.lowercased()
+    let start = Date(timeIntervalSince1970: 1_793_000_000)
+
+    private func turnOn(_ library: PhotoLibrary, months: Set<String> = [], videos: Bool = false) async throws {
+        let start = start
+        try await library.updateSyncRecord { record in
+            record.isOn = true
+            record.start = start
+            record.months = months
+            record.videos = videos
+        }
+    }
+
+    @Test func offBringsNothingAndOnBringsOnlyWhatsNewSinceItWasTurnedOn() async throws {
+        let store = FakeStore()
+        let (library, _) = try newLibrary(account: mckay, key: key, store: store, rows: FakeRows())
+        let source = FakeSource()
+        source.add("old", created: start - 86_400 * 40)
+        source.add("new", created: start + 3_600)
+        let sync = LibrarySync(library: library, source: source)
+        #expect(await sync.run(onWiFi: true) == SyncReport())
+
+        try await turnOn(library)
+        let report = await sync.run(onWiFi: true)
+        #expect(report.brought == 1)
+        #expect(report.remaining == 0)
+        #expect(source.reads == ["new"])
+        let items = try await library.list().items
+        #expect(items.count == 1)
+        #expect(items.allSatisfy { !$0.isWaiting })
+
+        // A second run reads nothing again.
+        #expect(await sync.run(onWiFi: true).brought == 0)
+        #expect(source.readCount == 1)
+    }
+
+    @Test func anEarlierMonthCanBeChosenAndVideosWaitForTheirSwitch() async throws {
+        let (library, _) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        let source = FakeSource()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let october = start - 86_400 * 20
+        source.add("october", created: october)
+        source.add("september", created: start - 86_400 * 50)
+        source.add("clip", created: start + 60, kind: .video, duration: 12)
+        let sync = LibrarySync(library: library, source: source, calendar: calendar)
+        try await turnOn(library, months: [LibrarySync.month(of: october, calendar)])
+        let pending = await sync.pending(try await library.syncRecord())
+        #expect(pending.map(\.id) == ["october"])
+        #expect(await sync.months().map(\.count).reduce(0, +) == 3)
+    }
+
+    @Test func deletingInTotalityNeverBringsItBackAndDeletingOnTheIPhoneKeepsIt() async throws {
+        let (library, _) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        let source = FakeSource()
+        source.add("a", created: start + 10)
+        source.add("b", created: start + 20)
+        let sync = LibrarySync(library: library, source: source)
+        try await turnOn(library)
+        _ = await sync.run(onWiFi: true)
+        let items = try await library.list().items
+        #expect(items.count == 2)
+
+        try await library.deleteForGood(items[0])
+        source.remove("b")
+        #expect(await sync.run(onWiFi: true).brought == 0)
+        // One deleted in Totality stays gone, and the one deleted on the iPhone stays in Totality.
+        #expect(try await library.list().items.count == 1)
+    }
+
+    @Test func iCloudOnlyOriginalsAndMobileDataWaitForWiFi() async throws {
+        let (library, _) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        let source = FakeSource()
+        source.add("here", created: start + 10)
+        source.add("cloud", created: start + 20, inICloud: true)
+        let sync = LibrarySync(library: library, source: source)
+        try await turnOn(library)
+
+        let cellular = await sync.run(onWiFi: false)
+        #expect(cellular.offline)
+        #expect(cellular.brought == 0)
+
+        try await library.updateSyncRecord { $0.mobileData = true }
+        let noWiFi = await sync.run(onWiFi: false)
+        #expect(noWiFi.brought == 1)
+        #expect(noWiFi.waitingForWiFi == 1)
+        #expect(noWiFi.remaining == 1)
+        #expect(PhotosModel.syncLine(noWiFi) == "1 item is only in iCloud and will sync on Wi-Fi.")
+
+        #expect(await sync.run(onWiFi: true).brought == 1)
+    }
+
+    @Test func aFullAccountStopsAndSaysSoWithNothingLostOnTheIPhone() async throws {
+        let store = FakeStore()
+        let (library, _) = try newLibrary(account: mckay, key: key, store: store, rows: FakeRows())
+        let source = FakeSource()
+        for index in 0..<3 { source.add("p\(index)", created: start + Double(index)) }
+        let sync = LibrarySync(library: library, source: source)
+        try await turnOn(library)
+        await store.setLimit(0)
+        let report = await sync.run(onWiFi: true)
+        #expect(report.full)
+        #expect(report.brought == 1)
+        #expect(report.remaining == 2)
+        #expect(PhotosModel.syncLine(report)?.hasPrefix("Sync stopped because your space is full.") == true)
+    }
+
+    @Test func aVideoTooLongIsSkippedOnceAndNotReadAgain() async throws {
+        let (library, _) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        let source = FakeSource()
+        source.add("film", created: start + 10, kind: .video, duration: 3_600)
+        let sync = LibrarySync(library: library, source: source)
+        try await turnOn(library, videos: true)
+        #expect(await sync.run(onWiFi: true).cantTake == 1)
+        #expect(source.readCount == 0)
+        #expect(await sync.run(onWiFi: true) == SyncReport())
+    }
+
+    @Test @MainActor func turningSyncBackOnStartsFromThatDayAndAnUnusedRecordIsRemoved() async throws {
+        let (library, cache) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        let source = FakeSource()
+        let model = PhotosModel(library: library, syncSource: source)
+        let first = start
+        await model.setSync(on: true, now: first)
+        #expect(model.syncRecord?.start == first)
+        model.stopSync()
+        await model.setSync(on: false)
+        // Nothing came in, so nothing of sync is left on the device to count as content.
+        #expect(try !cache.names().contains("\(mckay).iphone-sync"))
+
+        let later = start + 86_400 * 30
+        await model.setSync(on: true, now: later)
+        await model.setSync(on: true, now: later + 60)
+        #expect(model.syncRecord?.start == later)
+        model.stopSync()
+    }
+
+    @Test func aRecordThatWontOpenIsStartedAgainRatherThanStuck() async throws {
+        let (library, cache) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        try cache.write(Data("not sealed".utf8), as: "\(mckay).iphone-sync")
+        await #expect(throws: PhotoError.cantOpen) { try await library.syncRecord() }
+        let record = try await library.updateSyncRecord { $0.isOn = true }
+        #expect(record.isOn)
+        #expect(try await library.syncRecord().isOn)
+    }
+
+    /// Issue 77's two-user case for sync: on one device, Dana's sync has its own sealed record, can't
+    /// read McKay's, and brings nothing in under McKay.
+    @Test func user2sSyncOnTheSameDeviceHasItsOwnRecordAndNoneOfUser1s() async throws {
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (mine, cache) = try newLibrary(account: mckay, key: key, store: store, rows: rows)
+        let source = FakeSource()
+        source.add("a", created: start + 10)
+        try await turnOn(mine)
+        _ = await LibrarySync(library: mine, source: source).run(onWiFi: true)
+
+        let dana = UUID().uuidString.lowercased()
+        let (hers, _) = try newLibrary(account: dana, key: key, store: store, rows: rows, cache: cache)
+        #expect(try await hers.syncRecord() == SyncRecord())
+        #expect(try await hers.list().items.isEmpty)
+        #expect(await LibrarySync(library: hers, source: source).run(onWiFi: true) == SyncReport())
+
+        // McKay's record, sealed to McKay's name, doesn't open as Dana's, even moved into her place.
+        let sealed = try #require(try cache.read("\(mckay).iphone-sync"))
+        try cache.write(sealed, as: "\(dana).iphone-sync")
+        await #expect(throws: PhotoError.cantOpen) { try await hers.syncRecord() }
+        // And a device with another key can't read it at all.
+        let (otherKey, _) = try newLibrary(account: mckay, key: try ContentRootKey.generate(), store: store, rows: rows, cache: cache)
+        await #expect(throws: PhotoError.cantOpen) { try await otherKey.syncRecord() }
+    }
+}

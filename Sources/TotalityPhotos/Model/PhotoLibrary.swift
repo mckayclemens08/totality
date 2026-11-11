@@ -53,7 +53,7 @@ public actor PhotoLibrary {
     public static let sealedPurposes: [String: KeyPurpose] = [
         ".thumb": .photoThumbnail, ".details": .photoDetails,
         ".waiting-original": .photo, ".waiting-thumb": .photoThumbnail, ".waiting-details": .photoDetails,
-        ".deleting": .photoDetails, ".album": .photoAlbum,
+        ".deleting": .photoDetails, ".album": .photoAlbum, ".iphone-sync": .photoSync,
     ]
     /// How long a photo stays in Recently Deleted.
     public static let trashDays = 30
@@ -95,6 +95,68 @@ public actor PhotoLibrary {
 
     private func checkOpen() throws {
         if isClosed { throw PhotoError.closed }
+    }
+
+    // MARK: iPhone sync's record
+
+    /// What iPhone sync has brought in on this device, sealed, under this account's own name, so another
+    /// account on the device starts with its own. It's kept even after a photo is deleted here, so sync
+    /// never brings back what the person removed.
+    public func syncRecord() throws -> SyncRecord {
+        try checkOpen()
+        guard let id = UUID(uuidString: account), let sealed = try cache.read("\(account).iphone-sync") else { return SyncRecord() }
+        let plain = try sealer.open(sealed, .sync, of: id)
+        guard let record = try? JSONDecoder.syncRecord.decode(SyncRecord.self, from: plain), record.account == account else {
+            throw PhotoError.cantOpen
+        }
+        return record
+    }
+
+    /// Reads, changes and saves the record in one step, so a sync run and a settings change can't lose
+    /// each other's changes.
+    @discardableResult
+    public func updateSyncRecord(_ change: @Sendable (inout SyncRecord) -> Void) throws -> SyncRecord {
+        // A record that won't open (after a key mishap, say) is started again rather than leaving sync
+        // stuck. Only the list of what came in is lost, so a later run could bring some of it again.
+        var record: SyncRecord
+        do {
+            record = try syncRecord()
+        } catch PhotoError.cantOpen {
+            record = SyncRecord()
+        }
+        change(&record)
+        try saveSyncRecord(record)
+        return record
+    }
+
+    private var isSyncing = false
+
+    /// One sync run at a time for this library, however many screens ask.
+    func beginSync() -> Bool {
+        guard !isClosed, !isSyncing else { return false }
+        isSyncing = true
+        return true
+    }
+
+    func endSync() {
+        isSyncing = false
+    }
+
+    /// Removes the record, when sync was turned off having brought nothing, so a device whose only
+    /// sealed file is an unused record can still be handed on as empty.
+    func removeSyncRecordIfUnused() throws {
+        try checkOpen()
+        guard let record = try? syncRecord(), !record.isOn, record.synced.isEmpty, record.skipped.isEmpty else { return }
+        try cache.delete("\(account).iphone-sync")
+    }
+
+    public func saveSyncRecord(_ record: SyncRecord) throws {
+        try checkOpen()
+        guard let id = UUID(uuidString: account) else { throw PhotoError.cantOpen }
+        var record = record
+        record.account = account
+        let plain = try JSONEncoder.syncRecord.encode(record)
+        try cache.write(try sealer.seal(plain, .sync, of: id), as: "\(account).iphone-sync")
     }
 
     // MARK: Adding

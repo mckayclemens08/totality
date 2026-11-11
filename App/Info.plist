@@ -23,6 +23,8 @@
 	<string>Lets a site you're on see your location when you agree. Totality doesn't keep it.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Records sound for a short video you send in Messages, and lets a site you're on use your microphone when you agree. Totality keeps nothing you don't send.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Only if you turn on Sync this iPhone in Photos: brings your photos into Totality, sealed on this iPhone before they upload. Sync never changes or deletes anything in your library.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Saves a photo or an image from a page to your photos, only when you choose to.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
@@ -43,10 +45,12 @@
 	<array>
 		<string>audio</string>
 		<string>fetch</string>
+		<string>processing</string>
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>app.totality.client.refresh</string>
+		<string>app.totality.photos.sync</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
