@@ -21,6 +21,10 @@ public enum GoogleImportState: Equatable, Sendable {
 extension PhotosModel {
     public var canImportFromGoogle: Bool { googleAccounts != nil && account != nil }
 
+    /// An import is signing in, picking, bringing, or still stopping. Only one runs at a time, and a
+    /// stopped one has to finish stopping before another starts.
+    public var isGoogleBusy: Bool { googleTask != nil || googleState == .connecting }
+
     /// Google accounts connected on this device, by address.
     public func googleConnections() -> [GoogleConnection] {
         (try? googleAccounts?.connections()) ?? []
@@ -29,7 +33,7 @@ extension PhotosModel {
     /// Asks Google to allow Google Photos on `account`, or on a new account with nil, then lets the person
     /// pick in Google Photos, waits, and brings in what they picked.
     public func importFromGoogle(account: String?, albumName: String?, signIn: PhotosWebSignIn, open: @escaping @MainActor (URL) -> Void) async {
-        guard let googleAccounts, let library = photoLibrary, googleTask == nil else { return }
+        guard let googleAccounts, let library = photoLibrary, !isGoogleBusy else { return }
         let address: String
         googleState = .connecting
         do {
@@ -64,6 +68,7 @@ extension PhotosModel {
             http: EphemeralHTTP(), downloader: EphemeralDownloader(),
             token: { try await googleAccounts.accessToken(address, for: [GooglePhotos.scope]) }
         ))
+        // Only this task clears its own handle, once it has really ended.
         googleTask = Task { [weak self] in
             await self?.runImport(importer, albumName: albumName, open: open)
             self?.googleTask = nil
@@ -74,16 +79,21 @@ extension PhotosModel {
         do {
             let session = try await importer.start()
             guard let page = session.pickerUri else { throw GooglePhotosProblem.unexpected }
+            try Task.checkCancellation()
             googleState = .picking
             open(page)
             try await importer.waitForPicks(session)
+            try Task.checkCancellation()
             googleState = .bringing(done: 0, total: 0)
             let background = BackgroundTime.begin()
             defer { background.end() }
             let report = await importer.bring(session.id, albumName: albumName) { [weak self] done, total in
-                await MainActor.run { self?.googleState = .bringing(done: done, total: total) }
+                await MainActor.run {
+                    guard !Task.isCancelled else { return }
+                    self?.googleState = .bringing(done: done, total: total)
+                }
             }
-            googleState = report.problem.map { .problem($0.message) } ?? .finished(report)
+            if !Task.isCancelled { googleState = report.problem.map { .problem($0.message) } ?? .finished(report) }
             if report.full { isFull = true }
             if report.brought > 0 {
                 await refreshAfterSync()
@@ -99,7 +109,6 @@ extension PhotosModel {
     /// Stops waiting or bringing. What came in stays, and is skipped if picked again.
     public func stopGoogleImport() {
         googleTask?.cancel()
-        googleTask = nil
         googleState = .idle
     }
 

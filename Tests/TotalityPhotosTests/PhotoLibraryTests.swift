@@ -951,6 +951,7 @@ final class FakeGoogle: GoogleHTTP, GoogleDownloader, @unchecked Sendable {
     var setAfterPolls = 1
     var linksExpireAfter: Int?
     var disabled = false
+    var pagesForever = false
     private(set) var polls = 0
     private(set) var downloads = 0
     private(set) var deleted: [String] = []
@@ -976,6 +977,7 @@ final class FakeGoogle: GoogleHTTP, GoogleDownloader, @unchecked Sendable {
             let list = items.map { item in
                 #"{"id":"\#(item.id)","type":"\#(item.video ? "VIDEO" : "PHOTO")","mediaFile":{"baseUrl":"https://lh3.googleusercontent.com/\#(item.id)","mimeType":"image/jpeg","mediaFileMetadata":{"width":10,"height":10\#(item.video ? #","videoMetadata":{"processingStatus":"\#(item.ready ? "READY" : "PROCESSING")"}"# : "")}}}"#
             }
+            if pagesForever { return answer(200, #"{"mediaItems":[],"nextPageToken":"same"}"#) }
             return answer(200, #"{"mediaItems":[\#(list.joined(separator: ","))]}"#)
         default:
             return answer(404, "{}")
@@ -1081,7 +1083,13 @@ final class FakeGoogle: GoogleHTTP, GoogleDownloader, @unchecked Sendable {
         #expect(GooglePhotosPicker.downloadURL(item("https://evil.example.com/abc")) == nil)
         #expect(GooglePhotosPicker.downloadURL(item("http://lh3.googleusercontent.com/abc")) == nil)
         #expect(GooglePhotosPicker.downloadURL(item("https://googleusercontent.com.evil.example/abc")) == nil)
-        #expect(GooglePhotosPicker.isPhotoHost(URL(string: "https://video-downloads.googleusercontent.com/x")!))
+        #expect(GooglePhotosPicker.isPhotoHost(URL(string: "https://lh5.googleusercontent.com/x")!))
+        #expect(!GooglePhotosPicker.isPhotoHost(URL(string: "https://video-downloads.googleusercontent.com/x")!))
+        #expect(!GooglePhotosPicker.isPhotoHost(URL(string: "https://lh.googleusercontent.com/x")!))
+        #expect(GooglePhotosPicker.isRedirectHost(URL(string: "https://video-downloads.googleusercontent.com/x")!))
+        #expect(GooglePhotosPicker.isRedirectHost(URL(string: "https://r1.googlevideo.com/x")!))
+        #expect(!GooglePhotosPicker.isRedirectHost(URL(string: "https://evil.example/x")!))
+        #expect(!GooglePhotosPicker.isRedirectHost(URL(string: "http://r1.googlevideo.com/x")!))
         #expect(!GooglePhotosPicker.isPhotoHost(URL(string: "https://example.com/googleusercontent.com")!))
         #expect(PickerSession.seconds("1.5s") == 1.5)
         #expect(PickerSession.seconds("-1s") == nil)
@@ -1106,5 +1114,33 @@ final class FakeGoogle: GoogleHTTP, GoogleDownloader, @unchecked Sendable {
         let sealed = try #require(try cache.read("\(mckay).google-import"))
         try cache.write(sealed, as: "\(dana).google-import")
         await #expect(throws: PhotoError.cantOpen) { try await hers.googleRecord() }
+    }
+
+    @Test func iPhoneSyncsRecordCantStandInForGooglesAndAPageThatRepeatsStops() async throws {
+        let (library, cache) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        try await library.updateSyncRecord { $0.isOn = true }
+        let sync = try #require(try cache.read("\(mckay).iphone-sync"))
+        try cache.write(sync, as: "\(mckay).google-import")
+        await #expect(throws: (any Error).self) { try await library.googleRecord() }
+
+        let google = FakeGoogle()
+        google.pagesForever = true
+        let report = await importer(library, google).bring("s1", albumName: nil)
+        #expect(report.problem == .unexpected)
+    }
+
+    @Test func aNewPickNeverReusesTheAlbumOfOneThatStopped() async throws {
+        let (library, _) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        let google = FakeGoogle()
+        google.items = [("a", false, true, samplePhoto(width: 300, height: 200)), ("b", false, true, samplePhoto(width: 310, height: 200))]
+        google.linksExpireAfter = 1
+        let run = importer(library, google)
+        _ = await run.bring(try await run.start().id, albumName: "Moab trip")
+        #expect(try await library.googleRecord().album != nil)
+
+        google.linksExpireAfter = nil
+        _ = await run.bring(try await run.start().id, albumName: "Zion")
+        let names = try await library.albums().albums.map(\.name).sorted()
+        #expect(names == ["Moab trip", "Zion"])
     }
 }

@@ -53,7 +53,7 @@ public actor PhotoLibrary {
     public static let sealedPurposes: [String: KeyPurpose] = [
         ".thumb": .photoThumbnail, ".details": .photoDetails,
         ".waiting-original": .photo, ".waiting-thumb": .photoThumbnail, ".waiting-details": .photoDetails,
-        ".deleting": .photoDetails, ".album": .photoAlbum, ".iphone-sync": .photoSync, ".google-import": .photoSync,
+        ".deleting": .photoDetails, ".album": .photoAlbum, ".iphone-sync": .photoSync, ".google-import": .photoGoogleImport,
     ]
     /// How long a photo stays in Recently Deleted.
     public static let trashDays = 30
@@ -137,7 +137,7 @@ public actor PhotoLibrary {
     public func googleRecord() throws -> GoogleImportRecord {
         try checkOpen()
         guard let id = UUID(uuidString: account), let sealed = try cache.read("\(account).google-import") else { return GoogleImportRecord() }
-        let plain = try sealer.open(sealed, .sync, of: id)
+        let plain = try sealer.open(sealed, .googleImport, of: id)
         guard let record = try? JSONDecoder.syncRecord.decode(GoogleImportRecord.self, from: plain), record.account == account else {
             throw PhotoError.cantOpen
         }
@@ -155,7 +155,7 @@ public actor PhotoLibrary {
         change(&record)
         record.account = account
         guard let id = UUID(uuidString: account) else { throw PhotoError.cantOpen }
-        try cache.write(try sealer.seal(try JSONEncoder.syncRecord.encode(record), .sync, of: id), as: "\(account).google-import")
+        try cache.write(try sealer.seal(try JSONEncoder.syncRecord.encode(record), .googleImport, of: id), as: "\(account).google-import")
         return record
     }
 

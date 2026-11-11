@@ -22,6 +22,9 @@ struct GoogleImportSheet: View {
                     if case .problem(let message) = model.googleState {
                         Section { Text(message).foregroundStyle(theme.danger.color) }
                     }
+                    if model.isGoogleBusy {
+                        Section { ProgressView("Stopping…") }
+                    }
                     Section {
                         TextField("Put them in an album (optional)", text: $albumName)
                     } footer: {
@@ -31,8 +34,10 @@ struct GoogleImportSheet: View {
                     Section {
                         ForEach(connections, id: \.address) { connection in
                             Button("Choose with \(connection.address)") { start(connection.address) }
+                                .disabled(model.isGoogleBusy)
                         }
                         Button(connections.isEmpty ? "Choose in Google Photos" : "Use Another Google Account") { start(nil) }
+                            .disabled(model.isGoogleBusy)
                     } footer: {
                         Text("You pick photos, videos or albums in Google Photos, up to 2,000 at a time. They come from Google straight to this device and are sealed here before they upload. Google removes where photos were taken, and videos come as Google's re-encoded copy. Your Google Photos library isn't changed, and Totality keeps nothing else from Google.")
                             .font(Typeface.caption)

@@ -46,8 +46,20 @@ public actor GooglePhotosImport {
     func start() async throws -> PickerSession {
         let session = try await picker.createSession()
         guard session.pickerUri.map({ Self.isGoogle($0) }) == true else { throw GooglePhotosProblem.unexpected }
-        try await library.updateGoogleRecord { $0.session = session.id }
+        // A new pick starts fresh, so an album from one that stopped isn't reused for a different name.
+        try await library.updateGoogleRecord { record in
+            record.session = session.id
+            record.album = nil
+        }
         return session
+    }
+
+    /// Room for `size` more bytes and 500 MB to spare, where the files are. Unknown counts as room.
+    static func hasRoom(for size: Int, beside file: URL) -> Bool {
+        let folder = file.deletingLastPathComponent()
+        guard let free = try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage, free > 0 else { return true }
+        return free >= Int64(size) + 500_000_000
     }
 
     static func isGoogle(_ url: URL) -> Bool {
@@ -59,7 +71,8 @@ public actor GooglePhotosImport {
     func waitForPicks(_ session: PickerSession) async throws {
         var current = session
         var waited = 0.0
-        let limit = PickerSession.seconds(session.pollingConfig?.timeoutIn) ?? 1_800
+        // Google says how long it waits. Totality waits no more than an hour, whatever it says.
+        let limit = min(PickerSession.seconds(session.pollingConfig?.timeoutIn) ?? 1_800, 3_600)
         while current.mediaItemsSet != true {
             let interval = min(max(PickerSession.seconds(current.pollingConfig?.pollInterval) ?? 5, 1), 60)
             guard waited + interval <= limit else { throw GooglePhotosProblem.timedOut }
@@ -91,6 +104,11 @@ public actor GooglePhotosImport {
         report.already = items.count - todo.count
         for item in todo {
             if Task.isCancelled { break }
+            // Read again each time, so an item another import on this device brought in meanwhile is skipped.
+            if (try? await library.googleRecord().imported.contains(item.id)) == true {
+                report.already += 1
+                continue
+            }
             guard item.isReady else {
                 report.notReady += 1
                 continue
@@ -102,7 +120,11 @@ public actor GooglePhotosImport {
             let added: PhotoItem
             do {
                 try await picker.download(item, to: file, limit: item.isVideo ? VideoImport.maxBytes : PhotoImport.maxBytes)
+                if Task.isCancelled { break }
                 if item.isVideo {
+                    // Sealing writes a second copy as big as the video, so it needs that room and some over.
+                    let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                    guard Self.hasRoom(for: size, beside: file) else { throw GooglePhotosProblem.noRoom }
                     added = try await library.addVideo(file)
                 } else {
                     let data = try Data(contentsOf: file)

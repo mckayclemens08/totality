@@ -24,6 +24,8 @@ public enum GooglePhotosProblem: Error, Equatable, Sendable {
     case linksExpired
     /// Picking took longer than Google waits.
     case timedOut
+    /// The device hasn't room for a video and its sealed copy.
+    case noRoom
     case unreachable
     case unexpected
 
@@ -34,6 +36,7 @@ public enum GooglePhotosProblem: Error, Equatable, Sendable {
         case .turnedOff: "Google Photos isn't switched on for Totality yet, so nothing came in. This needs a change in Totality's Google settings."
         case .linksExpired: "Google's links to what you picked ran out. Pick again: anything already brought in is skipped."
         case .timedOut: "Google stopped waiting for you to pick. Start again when you're ready."
+        case .noRoom: "This device is out of space, so the rest didn't come in. Free some up and pick again: anything already brought in is skipped."
         case .unreachable: "Google couldn't be reached. Try again when you're online."
         case .unexpected: "Google sent something Totality didn't expect. Try again in a moment."
         }
@@ -86,69 +89,133 @@ public protocol GoogleDownloader: Sendable {
     func download(_ request: URLRequest, to file: URL, limit: Int) async throws -> HTTPURLResponse
 }
 
-/// The device's own download, remembering nothing between requests.
+/// The device's own download, remembering nothing between requests. The bytes go straight into
+/// `file`, which is made first with complete protection, so no unprotected copy of a photo is ever left
+/// in a system folder, and the download stops as soon as it passes the limit.
 public struct EphemeralDownloader: GoogleDownloader {
-    private let session: URLSession
+    public init() {}
 
-    public init() {
+    public func download(_ request: URLRequest, to file: URL, limit: Int) async throws -> HTTPURLResponse {
+        try? FileManager.default.removeItem(at: file)
+        #if os(iOS)
+        let attributes: [FileAttributeKey: Any] = [.protectionKey: FileProtectionType.complete]
+        #else
+        let attributes: [FileAttributeKey: Any] = [:]
+        #endif
+        guard FileManager.default.createFile(atPath: file.path, contents: nil, attributes: attributes) else {
+            throw PhotoError.cantOpen
+        }
+        let handle = try FileHandle(forWritingTo: file)
+        let writer = DownloadWriter(handle: handle, limit: limit, host: request.url?.host?.lowercased())
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.urlCache = nil
         configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
         configuration.timeoutIntervalForRequest = 60
-        session = URLSession(configuration: configuration)
-    }
-
-    public func download(_ request: URLRequest, to file: URL, limit: Int) async throws -> HTTPURLResponse {
-        let watch = DownloadWatch(limit: limit)
-        let temporary: URL
-        let response: URLResponse
+        let session = URLSession(configuration: configuration, delegate: writer, delegateQueue: nil)
+        defer {
+            session.invalidateAndCancel()
+            try? handle.close()
+        }
+        let task = session.dataTask(with: request)
+        let response: HTTPURLResponse
         do {
-            (temporary, response) = try await session.download(for: request, delegate: watch)
+            response = try await withTaskCancellationHandler {
+                try await writer.finished(task)
+            } onCancel: {
+                task.cancel()
+            }
         } catch {
-            if watch.wentOver { throw PhotoError.tooBig }
+            if writer.wentOver { throw PhotoError.tooBig }
             throw error
         }
-        defer { try? FileManager.default.removeItem(at: temporary) }
-        guard let http = response as? HTTPURLResponse else { throw GooglePhotosProblem.unexpected }
-        guard (200..<300).contains(http.statusCode) else { return http }
-        let size = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard size > 0, size <= limit else { throw PhotoError.tooBig }
-        try? FileManager.default.removeItem(at: file)
-        try FileManager.default.moveItem(at: temporary, to: file)
-        #if os(iOS)
-        try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: file.path)
-        #endif
-        return http
+        guard (200..<300).contains(response.statusCode) else { return response }
+        guard writer.written > 0, writer.written <= limit else { throw PhotoError.tooBig }
+        return response
     }
 }
 
-/// Watches one download: it stops as soon as it passes the size limit, rather than filling the
-/// device first, and follows a redirect only to another of Google's photo hosts, so the Google token
-/// never goes anywhere else.
-private final class DownloadWatch: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+/// Writes one download into its file as it arrives. It follows a redirect only to Google's photo
+/// hosts, and drops the Google token on any redirect to a different host, so the token goes only
+/// where Google's own item link points.
+private final class DownloadWriter: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let handle: FileHandle
     private let limit: Int
+    private let host: String?
     private let lock = NSLock()
     private var over = false
+    private var count = 0
+    private var failure: Error?
+    private var response: HTTPURLResponse?
+    private var continuation: CheckedContinuation<HTTPURLResponse, Error>?
 
-    init(limit: Int) { self.limit = limit }
-
-    var wentOver: Bool { lock.withLock { over } }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
-                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard totalBytesWritten > Int64(limit) || totalBytesExpectedToWrite > Int64(limit) else { return }
-        lock.withLock { over = true }
-        downloadTask.cancel()
+    init(handle: FileHandle, limit: Int, host: String?) {
+        self.handle = handle
+        self.limit = limit
+        self.host = host
     }
 
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
+    var wentOver: Bool { lock.withLock { over } }
+    var written: Int { lock.withLock { count } }
+
+    func finished(_ task: URLSessionDataTask) async throws -> HTTPURLResponse {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.withLock { self.continuation = continuation }
+            task.resume()
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard let http = response as? HTTPURLResponse else {
+            lock.withLock { failure = GooglePhotosProblem.unexpected }
+            completionHandler(.cancel)
+            return
+        }
+        let tooBig = (200..<300).contains(http.statusCode) && http.expectedContentLength > Int64(limit)
+        lock.withLock {
+            self.response = http
+            if tooBig { over = true }
+        }
+        // Only a success has bytes worth keeping.
+        completionHandler(tooBig || !(200..<300).contains(http.statusCode) ? .cancel : .allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        let stop: Bool = lock.withLock {
+            guard !over, failure == nil else { return true }
+            count += data.count
+            if count > limit {
+                over = true
+                return true
+            }
+            do { try handle.write(contentsOf: data) } catch { failure = error; return true }
+            return false
+        }
+        if stop { dataTask.cancel() }
+    }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest) async -> URLRequest? {
-        guard let url = request.url, GooglePhotosPicker.isPhotoHost(url) else { return nil }
-        return request
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let url = request.url, GooglePhotosPicker.isRedirectHost(url) else { return completionHandler(nil) }
+        var next = request
+        if url.host?.lowercased() != host { next.setValue(nil, forHTTPHeaderField: "Authorization") }
+        completionHandler(next)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let (continuation, response, failure) = lock.withLock {
+            let held = self.continuation
+            self.continuation = nil
+            return (held, self.response, self.failure)
+        }
+        if let failure { return continuation?.resume(throwing: failure) ?? () }
+        // A refusal was cancelled on purpose once its status arrived, so its status is the answer.
+        if let response, !(200..<300).contains(response.statusCode) { return continuation?.resume(returning: response) ?? () }
+        if let error { return continuation?.resume(throwing: error) ?? () }
+        guard let response else { return continuation?.resume(throwing: GooglePhotosProblem.unexpected) ?? () }
+        continuation?.resume(returning: response)
     }
 }
 
@@ -179,6 +246,7 @@ struct GooglePhotosPicker: Sendable {
         }
         var all: [PickedItem] = []
         var token: String?
+        var seen: Set<String> = []
         repeat {
             var components = URLComponents(url: Self.base.appendingPathComponent("mediaItems"), resolvingAgainstBaseURL: false)!
             components.queryItems = [URLQueryItem(name: "sessionId", value: session), URLQueryItem(name: "pageSize", value: "100")]
@@ -186,8 +254,12 @@ struct GooglePhotosPicker: Sendable {
             let page: Page = try await decode(try await authorized(components.url!, method: "GET"))
             all += page.mediaItems ?? []
             token = page.nextPageToken
-            // Google gives at most 2,000, so anything past that is refused rather than followed for ever.
-            guard all.count <= GooglePhotos.maxItems else { throw GooglePhotosProblem.unexpected }
+            // Google gives at most 2,000, a page of 100 at a time, so anything past that, or a page
+            // token that comes round again, is refused rather than followed for ever.
+            if let token, !seen.insert(token).inserted { throw GooglePhotosProblem.unexpected }
+            guard all.count <= GooglePhotos.maxItems, seen.count <= GooglePhotos.maxItems / 100 + 5 else {
+                throw GooglePhotosProblem.unexpected
+            }
         } while token != nil
         return all
     }
@@ -206,10 +278,19 @@ struct GooglePhotosPicker: Sendable {
         return URL(string: base.absoluteString + (item.isVideo ? "=dv" : "=d"))
     }
 
-    /// Google's own photo hosts, over HTTPS.
+    /// The hosts Google's picked-item links point at (`lh3.googleusercontent.com` and its numbered
+    /// siblings), over HTTPS. These are the only hosts the Google token is sent to.
     static func isPhotoHost(_ url: URL) -> Bool {
+        guard url.scheme == "https", let host = url.host?.lowercased(), host.hasSuffix(".googleusercontent.com") else { return false }
+        let name = host.dropLast(".googleusercontent.com".count)
+        return name.hasPrefix("lh") && name.count > 2 && name.dropFirst(2).allSatisfy(\.isNumber)
+    }
+
+    /// Where a download may be sent on by Google: its photo and video hosts, over HTTPS. The token goes
+    /// along only when the host stays the same.
+    static func isRedirectHost(_ url: URL) -> Bool {
         guard url.scheme == "https", let host = url.host?.lowercased() else { return false }
-        return host == "googleusercontent.com" || host.hasSuffix(".googleusercontent.com")
+        return isPhotoHost(url) || host.hasSuffix(".googleusercontent.com") || host.hasSuffix(".googlevideo.com")
     }
 
     /// Tells Google the session is done with, which it asks for once the bytes are fetched.

@@ -154,11 +154,12 @@ public enum PhotoError: Error, Equatable, Sendable {
 /// between parts.
 struct PhotoSealer: Sendable {
     enum Part {
-        case original, thumbnail, details, album, sync
+        case original, thumbnail, details, album, sync, googleImport
 
         var purpose: KeyPurpose {
             switch self {
             case .sync: .photoSync
+            case .googleImport: .photoGoogleImport
             case .original: .photo
             case .thumbnail: .photoThumbnail
             case .details: .photoDetails
