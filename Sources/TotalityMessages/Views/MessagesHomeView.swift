@@ -17,9 +17,12 @@ public struct MessagesHomeView: View {
     @State private var showingBlocked = false
     @AppStorage(MessagesPreferences.shareReadAndTypingKey) private var shareReadAndTyping = true
 
-    public init(model: MessagesModel, onClose: (() -> Void)? = nil) {
+    private let onOpenAccount: (() -> Void)?
+
+    public init(model: MessagesModel, onClose: (() -> Void)? = nil, onOpenAccount: (() -> Void)? = nil) {
         self.model = model
         self.onClose = onClose
+        self.onOpenAccount = onOpenAccount
     }
 
     /// Opens a chat the home tile or search asked for.

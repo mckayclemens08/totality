@@ -249,6 +249,9 @@ public protocol MessagesService: AnyObject, Sendable {
     func blocked() async throws -> [String]
     func unblock(_ person: String) async throws
     func leave(_ chat: String) async throws
+    /// Backs up message keys under the secret from the recovery key, or opens the backup with it, which
+    /// also verifies this device. Nil when this device doesn't have the recovery key. Never resets.
+    func settleKeys(recoverySecret: String?) async -> MessageKeys
     func stop() async
 }
 
@@ -298,6 +301,29 @@ public protocol ChatChannel: AnyObject, Sendable {
 }
 
 /// Opens a connection for an account. Throws `notSignedIn` when there's no Totality sign-in.
+/// Whether this account's message history is backed up under the recovery key, and this device verified.
+public enum MessageKeys: Equatable, Sendable {
+    case checking
+    /// Backed up, and this device is verified by the account's own keys.
+    case backedUp
+    /// This device doesn't have the account's recovery key yet, so it can't back up or be verified.
+    case needsRecoveryKey
+    /// A backup exists, but this account's recovery key doesn't open it.
+    case doesntOpen
+    case failed(String)
+
+    /// Said plainly in Messages' menu.
+    public var summary: String? {
+        switch self {
+        case .checking: nil
+        case .backedUp: "Your message history is backed up with your recovery key, and this device is verified."
+        case .needsRecoveryKey: "Set up your recovery key to back up your message history and verify this device. Messages works without it, but a new phone won't get your history."
+        case .doesntOpen: "Your message history backup didn't open with your recovery key. New messages still work, but older ones may not open on this device."
+        case .failed(let reason): reason
+        }
+    }
+}
+
 public typealias MessagesConnector = @Sendable (_ account: String) async throws -> any MessagesService
 
 /// Read receipts and typing are on by default (owner, 2026-11-05), with one switch to stop sending yours.

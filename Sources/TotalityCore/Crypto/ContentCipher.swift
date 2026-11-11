@@ -50,6 +50,13 @@ public struct ContentRootKey: Sendable, Equatable {
         return try ContentRootKey(bytes: Data(random))
     }
 
+    /// What locks this account's Messages key backup on the Matrix server (its secret storage). It comes
+    /// from this key, which only the recovery key restores on a new device, and never from the password,
+    /// which the account server receives. Working backwards from it to this key isn't possible.
+    public func matrixRecoverySecret() -> String {
+        hkdf(ikm: bytes, salt: Data(), info: Data("totality/matrix-recovery/v1".utf8), length: 32).base64EncodedString()
+    }
+
     /// The key for one object. Sharing it never reveals the root or any other object's key.
     /// The same text gives the same ID on every device with this key, and nobody else can work it out.
     public func derivedID(from text: String) -> UUID {

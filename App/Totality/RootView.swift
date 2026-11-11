@@ -92,7 +92,7 @@ struct RootView: View {
                 MailHomeView(model: mail.current, onClose: { open = nil }, onOpenLink: openInWeb)
                     .id(ObjectIdentifier(mail.current))
             case .messages:
-                MessagesHomeView(model: messages) { open = nil }
+                MessagesHomeView(model: messages, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
             case .photos:
                 PhotosHomeView(model: photos, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
                     .id(ObjectIdentifier(photos))
@@ -136,7 +136,13 @@ struct RootView: View {
         }
         .onChange(of: defaultHomeStyle) { chosenHomeStyle = nil }
         .onChange(of: showingAccount) {
-            if !showingAccount { Task { await messages.checkAccount() } }
+            if !showingAccount {
+                Task {
+                    await messages.checkAccount()
+                    // The recovery key may have just been set up or entered.
+                    await messages.settleKeys()
+                }
+            }
         }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { await account?.sync?.syncNow() } }

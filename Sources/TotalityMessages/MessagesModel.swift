@@ -25,6 +25,9 @@ public final class MessagesModel {
     public private(set) var blockedPeople: [String] = []
     /// The last thing that went wrong with an action, shown until the next one.
     public var notice: String?
+    public private(set) var keys: MessageKeys = .checking
+    /// The secret that locks the key backup, from the recovery key. Nil until it's on this device.
+    private let recoverySecret: @Sendable () async -> String?
 
     private let account: @Sendable () async -> String?
     private let connector: MessagesConnector?
@@ -36,8 +39,10 @@ public final class MessagesModel {
     public init(
         account: @escaping @Sendable () async -> String?,
         connector: MessagesConnector?,
-        unavailableReason: String? = nil
+        unavailableReason: String? = nil,
+        recoverySecret: @escaping @Sendable () async -> String? = { nil }
     ) {
+        self.recoverySecret = recoverySecret
         self.account = account
         self.connector = connector
         self.unavailableReason = unavailableReason
@@ -82,10 +87,22 @@ public final class MessagesModel {
                     self.show(all)
                 }
             }
-            if mine == generation { phase = .ready }
+            if mine == generation {
+                phase = .ready
+                await settleKeys()
+            }
         } catch {
             if mine == generation { phase = .failed(Self.describe(error)) }
         }
+    }
+
+    /// Checks the key backup again, such as after the recovery key was set up or entered.
+    public func settleKeys() async {
+        guard let service, phase == .ready else { return }
+        let mine = generation
+        if keys != .backedUp { keys = .checking }
+        let result = await service.settleKeys(recoverySecret: await recoverySecret())
+        if mine == generation { keys = result }
     }
 
     /// Stops this account's connection once someone else, or no one, is signed in, so a signed-out
@@ -98,6 +115,7 @@ public final class MessagesModel {
     /// Stops syncing and forgets the lists. The stores stay on the device for next time.
     public func disconnect() async {
         generation += 1
+        keys = .checking
         chats = []
         requests = []
         connection = .connecting
