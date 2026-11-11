@@ -3,6 +3,7 @@ import TotalityAccount
 import TotalityCalendar
 import TotalityCore
 import TotalityMail
+import TotalityMessages
 import TotalityPhotos
 import TotalityReader
 import TotalityWeb
