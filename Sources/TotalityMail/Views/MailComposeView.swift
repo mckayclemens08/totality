@@ -91,21 +91,18 @@ struct MailComposeView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        let theme = Theme.current
         switch composer.phase {
         case .writing:
             ToolbarItem(placement: .cancellationAction) {
                 Button("Close", action: onClose)
             }
             ToolbarItem(placement: .destructiveAction) {
-                Button("Discard", systemImage: "trash") { confirmingDiscard = true }
-                    .foregroundStyle(theme.danger.color)
+                ToolbarIcon("Discard", systemImage: "trash.fill") { confirmingDiscard = true }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Send", systemImage: "paperplane.fill") {
+                ToolbarIcon("Send", systemImage: "paperplane.fill", isEnabled: composer.canSend) {
                     Task { await composer.pressSend() }
                 }
-                .disabled(!composer.canSend)
             }
         case .finished, .discarded:
             ToolbarItem(placement: .confirmationAction) {
@@ -144,8 +141,7 @@ struct MailComposeView: View {
                     .foregroundStyle(theme.textPrimary.color)
                     .textFieldStyle(.plain)
                     .focused($focus, equals: .subject)
-                    .padding(Space.s3)
-                    .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md))
+                    .raisedField()
 
                 TextEditor(text: $composer.draft.body)
                     .font(Typeface.body)
@@ -153,8 +149,7 @@ struct MailComposeView: View {
                     .scrollContentBackground(.hidden)
                     .focused($focus, equals: .body)
                     .frame(minHeight: Self.bodyHeight)
-                    .padding(Space.s2)
-                    .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+                    .raisedField(.block)
                     .accessibilityLabel("Message")
 
                 ForEach(composer.draft.attachments) { file in

@@ -26,6 +26,7 @@ struct ShareSheet: View {
                         .textInputAutocapitalization(.never)
                         #endif
                         .autocorrectionDisabled()
+                        .raisedField()
                         .disabled(model.sharing != nil || finished)
                 } header: {
                     Text(title(plan))

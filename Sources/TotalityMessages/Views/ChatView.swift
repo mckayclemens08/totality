@@ -350,7 +350,7 @@ struct ComposerBar<Attach: View, Field: View>: View {
             .accessibilityLabel("Send")
         }
         .padding(Space.s1 + Space.s1 / 2)
-        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: (ToolbarGlyph.diameter + Space.s2) / 2))
+        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
         .padding(.horizontal, Space.s4)
         .padding(.top, Space.s2)
         .padding(.bottom, Space.s3)
@@ -662,8 +662,7 @@ struct NewMessageView: View {
                         .accessibilityLabel("Their username")
                 }
                 .font(Typeface.body)
-                .padding(Space.s3)
-                .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
+                .raisedField()
                 Text("If you haven't talked before, they'll see a request to accept first.")
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)

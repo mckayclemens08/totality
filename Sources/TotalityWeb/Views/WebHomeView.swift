@@ -142,9 +142,7 @@ public struct WebHomeView: View {
                         .foregroundStyle(theme.textSecondary.color)
                 }
             }
-            .padding(.horizontal, Space.s4)
-            .frame(height: Space.s7)
-            .neumorphic(.pressed, in: Capsule())
+            .raisedField()
             control("chevron.up", label: "Previous match", enabled: !findText.isEmpty) { Task { await find(backwards: true) } }
             control("chevron.down", label: "Next match", enabled: !findText.isEmpty) { Task { await find() } }
             Button("Done") {
@@ -218,15 +216,7 @@ public struct WebHomeView: View {
         let theme = Theme.current
         return HStack(spacing: Space.s2) {
             if let onClose {
-                Button(action: onClose) {
-                    Image(systemName: "circle.hexagongrid")
-                        .font(Typeface.body)
-                        .foregroundStyle(theme.accent.color)
-                        .frame(width: Space.s7, height: Space.s7)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Home")
+                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
             HStack(spacing: Space.s2) {
                 if tab.isPrivate {
@@ -287,9 +277,7 @@ public struct WebHomeView: View {
                     .accessibilityLabel(page.isLoading ? "Stop" : "Reload")
                 }
             }
-            .padding(.horizontal, Space.s4)
-            .frame(height: Space.s7)
-            .neumorphic(.pressed, in: Capsule())
+            .raisedField()
         }
         .padding(.horizontal, Space.s3)
         .padding(.vertical, Space.s2)
@@ -349,23 +337,18 @@ public struct WebHomeView: View {
             }
             if let url = page?.url {
                 ShareLink(item: url) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(Typeface.body)
-                        .frame(width: Space.s7, height: Space.s7)
+                    ToolbarGlyph(systemImage: "square.and.arrow.up.fill")
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Share")
                 Spacer(minLength: 0)
             }
-            control("book", label: "Bookmarks and history", enabled: true) { showingLibrary = true }
+            control("book.fill", label: "Bookmarks and history", enabled: true) { showingLibrary = true }
             Spacer(minLength: 0)
             Button {
                 showingTabs = true
             } label: {
-                Image(systemName: "\(min(model.tabs.count, 50)).square")
-                    .font(Typeface.body)
-                    .frame(width: Space.s7, height: Space.s7)
-                    .contentShape(Rectangle())
+                ToolbarGlyph(systemImage: "\(min(model.tabs.count, 50)).square.fill")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Tabs, \(model.tabs.count) open")
@@ -388,10 +371,7 @@ public struct WebHomeView: View {
             Button("Downloads", systemImage: "arrow.down.circle") { showingDownloads = true }
             Button("Web Settings", systemImage: "gearshape") { showingSettings = true }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(Typeface.body)
-                .frame(width: Space.s7, height: Space.s7)
-                .contentShape(Rectangle())
+            ToolbarGlyph(systemImage: "ellipsis")
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -434,16 +414,7 @@ public struct WebHomeView: View {
     }
 
     private func control(_ systemImage: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(Typeface.body)
-                .frame(width: Space.s7, height: Space.s7)
-                .contentShape(Rectangle())
-                .opacity(enabled ? 1 : 0.35)
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(label)
+        ToolbarIcon(label, systemImage: systemImage, isEnabled: enabled, action: action)
     }
 }
 

@@ -9,7 +9,7 @@ public struct ToolbarGlyph: View {
     let systemImage: String
     var isEnabled = true
 
-    public init(systemImage: String, isEnabled: Bool = true) {
+    public nonisolated init(systemImage: String, isEnabled: Bool = true) {
         self.systemImage = systemImage
         self.isEnabled = isEnabled
     }

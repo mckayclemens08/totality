@@ -222,8 +222,7 @@ struct MailSignatureView: View {
                     .foregroundStyle(theme.textPrimary.color)
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: Self.editorHeight)
-                    .padding(Space.s2)
-                    .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+                    .raisedField(.block)
                     .accessibilityLabel("Signature")
                 Spacer(minLength: 0)
             }

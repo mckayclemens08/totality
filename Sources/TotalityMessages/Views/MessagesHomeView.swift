@@ -132,7 +132,7 @@ public struct MessagesHomeView: View {
                 if let notice = model.notice {
                     Banner(text: notice)
                 }
-                SearchField(text: $query)
+                SearchBox("Search", text: $query)
                 if !model.requests.isEmpty && query.isEmpty {
                     SectionTitle("Requests")
                     ForEach(model.requests) { request in
@@ -283,28 +283,6 @@ private struct RequestRow: View {
     }
 }
 
-private struct SearchField: View {
-    @Binding var text: String
-
-    var body: some View {
-        let theme = Theme.current
-        HStack(spacing: Space.s2) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(theme.textSecondary.color)
-                .accessibilityHidden(true)
-            TextField("Search", text: $text)
-                .textFieldStyle(.plain)
-                .autocorrectionDisabled()
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                #endif
-        }
-        .font(Typeface.body)
-        .padding(Space.s3)
-        .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
-    }
-}
-
 private struct SectionTitle: View {
     let text: String
     init(_ text: String) { self.text = text }
@@ -378,8 +356,7 @@ struct NewGroupView: View {
                     .font(Typeface.body)
                     .lineLimit(1...4)
                     .focused($focused)
-                    .padding(Space.s3)
-                    .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
+                    .raisedField()
                     .accessibilityLabel("Their usernames")
                 Text("Up to \(GroupMembers.limit) people, you included. Each of them gets a request to accept.")
                     .font(Typeface.caption)

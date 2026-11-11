@@ -34,7 +34,7 @@ struct ReaderItemView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Listen", systemImage: "headphones") {
+                ToolbarIcon("Listen", systemImage: "headphones") {
                     Task { await model.startListening(to: item.id) }
                 }
             }

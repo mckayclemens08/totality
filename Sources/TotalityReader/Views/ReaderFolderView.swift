@@ -101,7 +101,7 @@ struct ReaderFolderView: View {
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         if let onClose {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Home", systemImage: "circle.hexagongrid", action: onClose)
+                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
         }
         ToolbarItem(placement: .secondaryAction) {
@@ -128,7 +128,7 @@ struct ReaderFolderView: View {
                 }
                 Button("Import files", systemImage: "square.and.arrow.down") { importing = true }
             } label: {
-                Label("Add", systemImage: "plus")
+                ToolbarGlyph(systemImage: "plus").accessibilityLabel("Add")
             }
         }
     }

@@ -313,8 +313,7 @@ struct OutsideAddAccountView: View {
         content()
             .font(Typeface.body)
             .foregroundStyle(Theme.current.textPrimary.color)
-            .padding(Space.s3)
-            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
+            .raisedField()
             .disabled(model.isAdding)
     }
 

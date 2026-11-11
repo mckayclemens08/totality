@@ -25,8 +25,7 @@ struct GroupFields: View {
                 TextField("Group name (optional)", text: $name)
                     .textFieldStyle(.plain)
                     .font(Typeface.body)
-                    .padding(Space.s3)
-                    .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
+                    .raisedField()
                     .accessibilityLabel("Group name")
             }
             if let onRemovePhoto, current != nil, photo == nil {

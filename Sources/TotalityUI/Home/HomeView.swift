@@ -92,7 +92,7 @@ public struct HomeView: View {
                 Button {
                     style = style == .tiles ? .flower : .tiles
                 } label: {
-                    TopBarIcon(systemImage: style == .tiles ? "circle.hexagongrid" : "square.grid.2x2")
+                    TopBarIcon(systemImage: style == .tiles ? "circle.hexagongrid.fill" : "square.grid.2x2.fill")
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(style == .tiles ? "Show flower" : "Show tiles")
@@ -108,13 +108,14 @@ public struct HomeView: View {
     }
 }
 
+/// The home page's own buttons, a little larger than a toolbar's but in the same look.
 private struct TopBarIcon: View {
     let systemImage: String
 
     var body: some View {
         Image(systemName: systemImage)
             .font(Typeface.body)
-            .foregroundStyle(Theme.current.textPrimary.color)
+            .foregroundStyle(Theme.current.textSecondary.color)
             .frame(width: Space.s7, height: Space.s7)
             .neumorphic(.subtle, in: Circle())
     }

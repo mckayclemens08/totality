@@ -162,7 +162,7 @@ struct ScopeScreen: View {
                         }
                         Button("Delete Album", systemImage: "trash", role: .destructive) { confirmingDelete = true }
                     } label: {
-                        Label("Album", systemImage: "ellipsis.circle")
+                        ToolbarGlyph(systemImage: "ellipsis").accessibilityLabel("Album")
                     }
                 }
             }

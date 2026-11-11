@@ -21,6 +21,7 @@ struct PhotoInfoSheet: View {
                 Section("Caption") {
                     TextField("Add a caption", text: $caption, axis: .vertical)
                         .lineLimit(1...5)
+                        .raisedField()
                 }
                 Section("Details") {
                     row("Taken", details.taken?.formatted(date: .long, time: .shortened) ?? "Not in the file")

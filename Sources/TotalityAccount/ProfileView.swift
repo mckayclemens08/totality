@@ -173,9 +173,7 @@ private struct ProfileField: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(Typeface.body)
-            .textFieldStyle(.plain)
-            .padding(Space.s4)
-            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+            .raisedField()
     }
 }
 

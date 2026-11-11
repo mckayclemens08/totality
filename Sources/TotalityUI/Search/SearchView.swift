@@ -64,9 +64,7 @@ public struct SearchView: View {
                     .accessibilityLabel("Clear search")
                 }
             }
-            .padding(.horizontal, Space.s4)
-            .frame(height: Space.s7)
-            .neumorphic(.pressed, in: Capsule())
+            .raisedField()
             Button("Close", action: onClose)
                 .font(Typeface.callout)
                 .foregroundStyle(theme.accent.color)

@@ -97,7 +97,7 @@ public struct PhotosHomeView: View {
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         if let onClose {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Home", systemImage: "circle.hexagongrid", action: onClose)
+                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
         }
         if model.phase == .ready {
@@ -109,16 +109,16 @@ public struct PhotosHomeView: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
             }
-            ToolbarItem(placement: .primaryAction) { addButton(label: "Add") }
+            ToolbarItem(placement: .primaryAction) { addButton(label: "Add", inToolbar: true) }
             if model.canImportFromGoogle {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Add from Google Photos", systemImage: "square.and.arrow.down.on.square") { showingGoogle = true }
+                    ToolbarIcon("Add from Google Photos", systemImage: "square.and.arrow.down.on.square.fill") { showingGoogle = true }
                 }
             }
             #if os(iOS)
             if model.canSync {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Sync this iPhone", systemImage: model.isSyncing ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath") {
+                    ToolbarIcon("Sync this iPhone", systemImage: model.isSyncing ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath") {
                         showingSync = true
                     }
                 }
@@ -146,11 +146,13 @@ public struct PhotosHomeView: View {
         }
     }
 
-    private func addButton(label: String) -> some View {
+    private func addButton(label: String, inToolbar: Bool = false) -> some View {
         let isAdding = model.isAdding
         return PhotosPicker(selection: $picked, matching: .any(of: [.images, .videos, .livePhotos]), preferredItemEncoding: .current, photoLibrary: .shared()) {
             if isAdding {
                 ProgressView().accessibilityLabel("Adding photos")
+            } else if inToolbar {
+                ToolbarGlyph(systemImage: "plus").accessibilityLabel(label)
             } else {
                 Label(label, systemImage: "plus")
             }

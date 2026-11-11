@@ -117,15 +117,14 @@ struct EventDetailView: View {
                     Button("Edit") { editing = true }
                 }
                 ToolbarItem(placement: .destructiveAction) {
-                    Button("Delete", systemImage: "trash") { confirmingDelete = true }
+                    ToolbarIcon("Delete", systemImage: "trash.fill") { confirmingDelete = true }
                 }
             } else if google?.canEdit == true {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Edit") { editingGoogle = true }
                 }
                 ToolbarItem(placement: .destructiveAction) {
-                    Button("Delete", systemImage: "trash") { confirmingGoogleDelete = true }
-                        .disabled(model.isSendingToGoogle)
+                    ToolbarIcon("Delete", systemImage: "trash.fill", isEnabled: !model.isSendingToGoogle) { confirmingGoogleDelete = true }
                 }
             }
         }
@@ -321,7 +320,9 @@ struct EventEditorView: View {
                 TextField("Title", text: $draft.title)
                     .font(Typeface.title)
                     .focused($typingTitle)
+                    .raisedField()
                 TextField("Location", text: $draft.location)
+                    .raisedField()
             }
             Section {
                 Toggle("All day", isOn: $draft.isAllDay)
@@ -363,6 +364,7 @@ struct EventEditorView: View {
                 if showingNotes || !draft.notes.isEmpty {
                     TextField("Notes", text: $draft.notes, axis: .vertical)
                         .lineLimit(3...8)
+                        .raisedField(.block)
                 } else {
                     Button("Add notes", systemImage: "text.alignleft") { showingNotes = true }
                 }
