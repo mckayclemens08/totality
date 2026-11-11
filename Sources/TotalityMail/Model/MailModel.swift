@@ -90,8 +90,19 @@ public final class MailModel {
         outside = (store as? any OutsideAccountStore).map { OutsideAccountsModel(store: $0) }
     }
 
+    /// Whose mail the list shows. Only the folders split by account; other places show everyone's.
+    public var accountFilter = MailAccountFilter.all
+
     public var conversations: [MailConversation] {
-        mailbox.conversations(in: place, matching: query)
+        let all = mailbox.conversations(in: place, matching: query)
+        guard case .folder = place, shownFilter != .all else { return all }
+        return all.filter { $0.messages.contains(where: shownFilter.includes) }
+    }
+
+    /// The filter, or All once the account it picked has gone.
+    var shownFilter: MailAccountFilter {
+        if case .outside(let id) = accountFilter, !mailbox.outsideAccounts.contains(where: { $0.id == id }) { return .all }
+        return accountFilter
     }
 
     public var placeName: String { mailbox.name(of: place) }
