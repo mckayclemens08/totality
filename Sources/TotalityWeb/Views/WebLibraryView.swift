@@ -94,9 +94,7 @@ struct WebLibraryView: View {
                 .font(Typeface.body)
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
-                .padding(.horizontal, Space.s4)
-                .frame(height: Space.s7)
-                .neumorphic(.pressed, in: Capsule())
+                .raisedField()
                 .padding(Space.s4)
             List {
                 ForEach(visits) { visit in
@@ -186,9 +184,6 @@ private struct WebBookmarkEditor: View {
     private func field(_ label: String, text: Binding<String>) -> some View {
         TextField(label, text: text)
             .font(Typeface.body)
-            .textFieldStyle(.plain)
-            .padding(.horizontal, Space.s4)
-            .frame(height: Space.s7)
-            .neumorphic(.pressed, in: Capsule())
+            .raisedField()
     }
 }

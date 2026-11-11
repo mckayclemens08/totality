@@ -101,10 +101,11 @@ struct ReaderFolderView: View {
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         if let onClose {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Home", systemImage: "circle.hexagongrid", action: onClose)
+                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
         }
-        ToolbarItem(placement: .secondaryAction) {
+        // In the bar, not the overflow, so iOS doesn't add its own outlined "more" button.
+        ToolbarItem(placement: .primaryAction) {
             Menu {
                 Picker("Sort by", selection: $sort) {
                     ForEach(ReaderSort.allCases, id: \.self) { order in
@@ -116,7 +117,7 @@ struct ReaderFolderView: View {
                     Label("Grid", systemImage: "square.grid.2x2").tag(true)
                 }
             } label: {
-                Label("Sort and view", systemImage: "arrow.up.arrow.down")
+                ToolbarGlyph(systemImage: "arrow.up.arrow.down").accessibilityLabel("Sort and view")
             }
         }
         ToolbarItem(placement: .primaryAction) {
@@ -128,7 +129,7 @@ struct ReaderFolderView: View {
                 }
                 Button("Import files", systemImage: "square.and.arrow.down") { importing = true }
             } label: {
-                Label("Add", systemImage: "plus")
+                ToolbarGlyph(systemImage: "plus").accessibilityLabel("Add")
             }
         }
     }

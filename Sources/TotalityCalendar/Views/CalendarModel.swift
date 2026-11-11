@@ -152,6 +152,16 @@ public final class CalendarModel {
             case .schedule: "list.bullet"
             }
         }
+
+        /// The same idea filled, for the toolbar's raised disc.
+        public var toolbarImage: String {
+            switch self {
+            case .month: "calendar.circle.fill"
+            case .day: "calendar.day.timeline.left"
+            case .week: "rectangle.split.3x1.fill"
+            case .schedule: "list.bullet.circle.fill"
+            }
+        }
     }
 
     public static let reminderChoices: [Int?] = [nil, 0, 5, 10, 15, 30, 60, 1_440]

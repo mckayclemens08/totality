@@ -34,12 +34,12 @@ struct ReaderItemView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Listen", systemImage: "headphones") {
+                ToolbarIcon("Listen", systemImage: "headphones.circle.fill") {
                     Task { await model.startListening(to: item.id) }
                 }
             }
-            ToolbarItem(placement: .secondaryAction) {
-                Button("Add to Listen queue", systemImage: "text.badge.plus") {
+            ToolbarItem(placement: .primaryAction) {
+                ToolbarIcon("Add to Listen queue", systemImage: "text.badge.plus") {
                     Task { await model.addToQueue(item.id) }
                 }
             }
@@ -238,7 +238,7 @@ private struct FileReader: View {
         .navigationTitle(item.displayTitle)
         .toolbar {
             if chapters.count > 1 {
-                ToolbarItem(placement: .secondaryAction) {
+                ToolbarItem(placement: .primaryAction) {
                     Menu {
                         ForEach(chapters, id: \.index) { chapter in
                             Button(chapter.title) {
@@ -247,7 +247,7 @@ private struct FileReader: View {
                         }
                         }
                     } label: {
-                        Label("Chapters", systemImage: "list.bullet")
+                        ToolbarGlyph(systemImage: "list.bullet.circle.fill").accessibilityLabel("Chapters")
                     }
                 }
             }

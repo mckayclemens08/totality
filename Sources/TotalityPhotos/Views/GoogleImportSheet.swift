@@ -27,6 +27,7 @@ struct GoogleImportSheet: View {
                     }
                     Section {
                         TextField("Put them in an album (optional)", text: $albumName)
+                            .raisedField()
                     } footer: {
                         Text("Google doesn't say which album something came from, so name one here to keep them together.")
                             .font(Typeface.caption)

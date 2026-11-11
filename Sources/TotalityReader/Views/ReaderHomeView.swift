@@ -45,7 +45,12 @@ public struct ReaderHomeView: View {
                             ReaderTrashView(model: model)
                         }
                     }
-                    .searchable(text: $model.query, prompt: "Search titles and text")
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        SearchBox("Search titles and text", text: $model.query)
+                            .padding(.horizontal, Space.s4)
+                            .padding(.vertical, Space.s2)
+                            .background(Theme.current.bg.color)
+                    }
             }
             .tint(Theme.current.accent.color)
             if model.listen.isActive {

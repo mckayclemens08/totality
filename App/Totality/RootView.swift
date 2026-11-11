@@ -299,9 +299,9 @@ struct RootView: View {
         Button {
             showingAccount = true
         } label: {
-            Image(systemName: "person")
-                .font(Typeface.body)
-                .foregroundStyle(Theme.current.textPrimary.color)
+            Image(systemName: "person.fill")
+                .font(Typeface.body.weight(.semibold))
+                .foregroundStyle(Theme.current.textSecondary.color)
                 .frame(width: Space.s7, height: Space.s7)
                 .neumorphic(.subtle, in: Circle())
         }

@@ -79,7 +79,7 @@ public struct CalendarHomeView: View {
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         if let onClose {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Home", systemImage: "circle.hexagongrid", action: onClose)
+                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
         }
         ToolbarItem(placement: .automatic) {
@@ -92,11 +92,12 @@ public struct CalendarHomeView: View {
                 Divider()
                 Button("Calendars", systemImage: "calendar.badge.checkmark") { showingSources = true }
             } label: {
-                Label("View", systemImage: model.mode.systemImage)
+                ToolbarGlyph(systemImage: model.mode.toolbarImage)
+                    .accessibilityLabel("View")
             }
         }
         ToolbarItem(placement: .primaryAction) {
-            Button("New event", systemImage: "plus") { creating = model.newDraft() }
+            ToolbarIcon("New event", systemImage: "plus") { creating = model.newDraft() }
         }
     }
 

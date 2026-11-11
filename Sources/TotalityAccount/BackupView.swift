@@ -152,8 +152,7 @@ struct BackupView: View {
             .textInputAutocapitalization(.never)
             #endif
             .opacity(keyOpacity)
-            .padding(Space.s4)
-            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+            .raisedField(.block)
     }
 }
 

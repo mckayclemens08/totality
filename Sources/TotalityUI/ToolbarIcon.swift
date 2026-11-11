@@ -9,15 +9,17 @@ public struct ToolbarGlyph: View {
     let systemImage: String
     var isEnabled = true
 
-    public init(systemImage: String, isEnabled: Bool = true) {
+    public nonisolated init(systemImage: String, isEnabled: Bool = true) {
         self.systemImage = systemImage
         self.isEnabled = isEnabled
     }
 
     public var body: some View {
         let theme = Theme.current
+        // Filled symbols wherever one exists. Ones made only of lines, like + or a chevron, get a heavier
+        // weight so they don't read as thin outlines beside the filled ones.
         Image(systemName: systemImage)
-            .font(Typeface.callout)
+            .font(Typeface.callout.weight(.semibold))
             .foregroundStyle(isEnabled ? theme.textSecondary.color : theme.textTertiary.color)
             .frame(width: Self.diameter, height: Self.diameter)
             .neumorphic(isEnabled ? .subtle : .flat, in: Circle())

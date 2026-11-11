@@ -58,6 +58,7 @@ Nothing else. No `elevationXL`, no coloured shadows, no border as a substitute.
 | `radiusSm` | 10 | chips, badges, inline controls |
 | `radiusMd` | 18 | cards, fields, sheets |
 | `radiusLg` | 28 | large cards, feed cover cards |
+| `radiusField` | 24 | text boxes and the composer: a capsule at one line, rounded as text grows |
 | `radiusFull` | ∞ | module bubbles, avatars |
 
 Generous radii are part of the neumorphic read. Nothing in the app is square-cornered.
@@ -103,6 +104,23 @@ One motion vocabulary. `matchedGeometryEffect` for bubble → module transitions
 
 SF Symbols for system chrome; Lucide for the module bubbles — **pending the owner's decision**
 (architecture proposal §11-E). One stroke weight either way. No emoji as icons, ever.
+
+## Text boxes and toolbar icons
+
+The owner chose one look for both on 2026-11-10 ("Yes, every module"): option A, the raised capsule.
+
+- **Text boxes** use `raisedField()` from TotalityUI: `elevationRaised` on `surface`, `radiusField`
+  corners, `space4` across and `space3` down, at least `space7` tall, no line around it. Paragraph
+  boxes (a signature, a mail body, event notes) use `raisedField(.block)`, which has `radiusMd` corners.
+  In a Form it clears the row's own background. Put it on the row when a field shares it with icons.
+- **The chat composer** is one raised capsule (`radiusField`): a single + attach button on
+  `surfaceSunken`, the message, and send, which fills with `accent` once there's text.
+- **Toolbar icons** use `ToolbarIcon` (a button) or `ToolbarGlyph` (a menu's label): a filled SF Symbol
+  in `textSecondary`, `callout` size, on a raised disc (`elevationSubtle`) `space6 + space1` across.
+  Disabled ones are `textTertiary` on a flat disc. Text buttons such as Close and Done stay text.
+- Search above a list is `SearchBox`, a raised field with a magnifying glass and a clear button, in
+  place of the system search bar.
+- System alerts keep the system's text field, which can't take this style.
 
 ## Rules for every module
 

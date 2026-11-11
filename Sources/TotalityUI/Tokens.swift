@@ -59,6 +59,8 @@ public enum Radius {
     public static let sm: CGFloat = 10
     public static let md: CGFloat = 18
     public static let lg: CGFloat = 28
+    /// Text boxes and the composer: a capsule at one line, softly rounded as the text grows.
+    public static let field: CGFloat = 24
 }
 
 public enum Space {

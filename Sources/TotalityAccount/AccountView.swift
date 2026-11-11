@@ -47,12 +47,7 @@ public struct AccountView: View {
                 }
                 if isSignedIn {
                     ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            showingSettings = true
-                        } label: {
-                            Image(systemName: "gearshape")
-                        }
-                        .accessibilityLabel("Settings")
+                        ToolbarIcon("Settings", systemImage: "gearshape.fill") { showingSettings = true }
                     }
                 }
             }
@@ -137,8 +132,7 @@ public struct AccountView: View {
             #if os(iOS)
             .textInputAutocapitalization(.never)
             #endif
-            .padding(Space.s4)
-            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+            .raisedField()
     }
 
     private func passwordField(_ prompt: String, text: Binding<String>) -> some View {
@@ -153,8 +147,7 @@ public struct AccountView: View {
             #else
             .textContentType(.password)
             #endif
-            .padding(Space.s4)
-            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+            .raisedField()
     }
 
     private func submit() {

@@ -150,7 +150,12 @@ public struct MailHomeView: View {
 
     private var list: some View {
         MailListView(model: model, opened: opened, onOpen: { opened = $0.id }, onWrite: { composing = $0 })
-            .searchable(text: $model.query, prompt: "Search mail on this device")
+            .safeAreaInset(edge: .top, spacing: 0) {
+                SearchBox("Search mail on this device", text: $model.query)
+                    .padding(.horizontal, Space.s4)
+                    .padding(.vertical, Space.s2)
+                    .background(Theme.current.bg.color)
+            }
     }
 
     private func conversationPage(_ id: UUID) -> some View {
@@ -176,7 +181,7 @@ public struct MailHomeView: View {
         if ready {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: Space.s3) {
-                    ToolbarIcon("New Message", systemImage: "square.and.pencil", isEnabled: !model.isSelecting) {
+                    ToolbarIcon("New Message", systemImage: "square.and.pencil.circle.fill", isEnabled: !model.isSelecting) {
                         composing = .new(in: model)
                     }
                     if model.isSelecting {
