@@ -4,7 +4,7 @@ import TotalityUI
 
 /// What the Calendar says about Google, in one place so it stays literally true (CLAUDE.md rule 5).
 enum GoogleCalendarWording {
-    static let intro = "Connect a Google account to show its calendars here. They're read-only in Totality. Google can read them, so they aren't end-to-end encrypted, and this device keeps a copy encrypted with your key so they open straight away. Nothing from them goes to Totality's server."
+    static let intro = "Connect a Google account to show its calendars here. Google can read them, so they aren't end-to-end encrypted, and this device keeps a copy encrypted with your key so they open straight away. Nothing from them goes to Totality's server. Once you allow editing, you can add and change events on your own Google calendars, and nothing reaches Google until you press Save to Google."
 
     static let empty = "No Google account is connected yet."
 
@@ -24,8 +24,26 @@ enum GoogleCalendarWording {
         return base + " Google takes back all of Totality's access at once, so \(ListFormatter.localizedString(byJoining: others)) for this account stop too, until you connect it again."
     }
 
-    static func origin(_ calendar: String) -> String {
-        "From your \(calendar) Google calendar. It's read-only here. Google can read it, and this device keeps an encrypted copy."
+    static func origin(_ calendar: String, canEdit: Bool = false) -> String {
+        canEdit
+            ? "From your \(calendar) Google calendar. Google can read it, and this device keeps an encrypted copy."
+            : "From your \(calendar) Google calendar. It's read-only here. Google can read it, and this device keeps an encrypted copy."
+    }
+
+    /// Said wherever a change goes to Google (CLAUDE.md rule 5).
+    static let savedToGoogle = "Saved to Google Calendar. Google can read this event."
+    static let allowEditing = "This is your own Google calendar. Allow editing to change its events here."
+    static let repeatStaysGoogle = "To change how this event repeats, use Google Calendar."
+    static let guestsUntouched = "Google won't email the guests about this change, and they stay as they are."
+    static let deleteDetail = "It goes to Google Calendar's bin, which keeps it for 30 days."
+
+    /// Why a change didn't reach Google. Offline says the draft waits for the person (issue 88, decision 7).
+    static func notSaved(_ problem: GoogleCalendarProblem) -> String {
+        switch problem {
+        case .offline: "You're offline. This saves to Google when you're back online and press Save again."
+        case .notAllowed: "Google didn't allow this change. Totality only changes events on your own calendars, once you allow editing."
+        default: problem.message
+        }
     }
 }
 

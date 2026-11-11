@@ -31,7 +31,7 @@ public struct GoogleCalendarSync: Sendable, Equatable {
     public var needsAllowing: [String] = []
 }
 
-/// Google calendars, read only (issue 76). Google sign-in is the one shared in `TotalityCore`, so an
+/// Google calendars (issue 76), with events on the person's own calendars changeable after one consent tap (issue 88). Google sign-in is the one shared in `TotalityCore`, so an
 /// account already connected for Mail or Photos only needs one tap to allow Calendar. Events are kept
 /// sealed on this device so the Calendar opens straight away and works offline. They never go to
 /// Totality's server and aren't part of sync: each device reads Google itself.
@@ -115,24 +115,122 @@ public actor GoogleCalendars {
 
     /// The events to show between two moments, from the calendars that are on.
     public func events(from start: Date, to end: Date) -> [DeviceEvent] {
-        Self.events(in: kept(), from: start, to: end)
+        Self.events(in: kept(), from: start, to: end, editable: editableAccounts())
     }
 
-    static func events(in accounts: [GoogleCalendarAccount], from start: Date, to end: Date) -> [DeviceEvent] {
+    static func events(in accounts: [GoogleCalendarAccount], from start: Date, to end: Date, editable: Set<String> = []) -> [DeviceEvent] {
         var found: [DeviceEvent] = []
         for account in accounts {
             for calendar in account.calendars where calendar.isOn {
                 for event in calendar.events.values where event.start < end && (event.isAllDay ? event.end.addingTimeInterval(86_400) : event.end) > start {
+                    let canEdit = calendar.info.isOwned && editable.contains(account.address)
                     found.append(DeviceEvent(
                         id: "google-\(UUID(derivedFrom: "\(account.address)\n\(calendar.id)\n\(event.id)").uuidString.lowercased())",
                         title: event.title, location: event.location, notes: event.notes,
                         start: event.start, end: event.end, isAllDay: event.isAllDay,
-                        calendarTitle: calendar.info.title, origin: .google(account: account.address, link: event.link)
+                        calendarTitle: calendar.info.title, origin: .google(account: account.address, link: event.link),
+                        google: GoogleEventKey(
+                            account: account.address, calendar: calendar.id, calendarTitle: calendar.info.title, event: event,
+                            canEdit: canEdit, canAllowEditing: calendar.info.isOwned && !canEdit
+                        )
                     ))
                 }
             }
         }
         return found
+    }
+
+    // MARK: Changing events (issue 88)
+
+    /// Accounts that allow Totality to change events on their own calendars.
+    public func editableAccounts() -> Set<String> {
+        let connected = (try? accounts?.connections()) ?? []
+        return Set(connected.filter { $0.allows([GoogleCalendarAPI.editScope]) }.map(\.address))
+    }
+
+    /// Google's page to allow editing, one tap on the account already connected (issue 88).
+    public func editingAuthorization(for account: String) -> GoogleAuthorization? {
+        accounts?.authorization(for: [GoogleCalendarAPI.scope, GoogleCalendarAPI.editScope], account: account)
+    }
+
+    /// Finishes on Google's page. Unticking editing there is said, not ignored.
+    public func finishEditing(_ authorization: GoogleAuthorization, callback: URL) async throws {
+        guard let accounts else { throw GoogleCalendarProblem.unexpected }
+        let connection: GoogleConnection
+        do {
+            connection = try await accounts.finish(authorization, callback: callback)
+        } catch GoogleSignInError.cancelled {
+            throw CancellationError()
+        } catch {
+            throw GoogleCalendarProblem.from(error)
+        }
+        guard connection.allows([GoogleCalendarAPI.editScope]) else { throw GoogleCalendarProblem.notAllowed }
+    }
+
+    /// The person's own calendars on accounts that allow editing, for the editor's calendar picker.
+    public func targets() -> [GoogleTarget] {
+        let editable = editableAccounts()
+        return kept().filter { editable.contains($0.address) }.flatMap { account in
+            account.calendars.filter { $0.info.isOwned && $0.isOn }.map {
+                GoogleTarget(account: account.address, calendar: $0.id, title: $0.info.title)
+            }
+        }
+    }
+
+    /// Adds an event to one of the person's own calendars. Only ever called from their press on the
+    /// confirm sheet (issue 88, decision 2).
+    public func create(_ body: GoogleEventBody, in target: GoogleTarget) async throws {
+        let (api, token) = try await writer(target.account, calendar: target.calendar)
+        try await api.insert(body, calendar: target.calendar, accessToken: token)
+        _ = try? await sync(target.account)
+    }
+
+    /// Changes one event, or every occurrence of a repeating one. A repeating one moves by however much
+    /// the opened occurrence moved, in the series' own zone.
+    public func update(_ key: GoogleEventKey, with body: GoogleEventBody, scope: EditScope) async throws {
+        let (api, token) = try await writer(key.account, calendar: key.calendar)
+        if scope == .allOccurrences, let seriesID = key.event.seriesID {
+            let series = try await api.series(calendar: key.calendar, event: seriesID, accessToken: token)
+            var moved = body
+            let shift = body.start.timeIntervalSince(key.event.start)
+            moved.start = series.start.addingTimeInterval(shift)
+            moved.end = moved.start.addingTimeInterval(body.end.timeIntervalSince(body.start))
+            if let zone = series.timeZone { moved.timeZone = zone }
+            let original = GoogleCalendarEvent(
+                id: seriesID, title: key.event.title, location: key.event.location, notes: key.event.notes,
+                start: series.start, end: series.end, isAllDay: series.isAllDay, link: nil
+            )
+            try await api.patch(moved, from: original, calendar: key.calendar, event: seriesID, etag: series.etag, accessToken: token)
+        } else {
+            try await api.patch(body, from: key.event, calendar: key.calendar, event: key.event.id, etag: key.event.etag, accessToken: token)
+        }
+        _ = try? await sync(key.account)
+    }
+
+    /// Moves an event, or a whole repeating one, to Google Calendar's bin.
+    public func delete(_ key: GoogleEventKey, scope: EditScope) async throws {
+        let (api, token) = try await writer(key.account, calendar: key.calendar)
+        if scope == .allOccurrences, let seriesID = key.event.seriesID {
+            let series = try await api.series(calendar: key.calendar, event: seriesID, accessToken: token)
+            try await api.delete(calendar: key.calendar, event: seriesID, etag: series.etag, accessToken: token)
+        } else {
+            try await api.delete(calendar: key.calendar, event: key.event.id, etag: key.event.etag, accessToken: token)
+        }
+        _ = try? await sync(key.account)
+    }
+
+    /// Only the person's own calendar, on an account that allowed editing.
+    private func writer(_ address: String, calendar: String) async throws -> (GoogleCalendarAPI, String) {
+        guard let accounts, let api else { throw GoogleCalendarProblem.unexpected }
+        guard !isClosed else { throw CalendarError.closed }
+        guard let kept = try load(address), kept.calendars.contains(where: { $0.id == calendar && $0.info.isOwned }) else {
+            throw GoogleCalendarProblem.notAllowed
+        }
+        do {
+            return (api, try await accounts.accessToken(address, for: [GoogleCalendarAPI.editScope]))
+        } catch {
+            throw GoogleCalendarProblem.from(error)
+        }
     }
 
     public func setOn(_ isOn: Bool, calendar: String, account address: String) throws {
