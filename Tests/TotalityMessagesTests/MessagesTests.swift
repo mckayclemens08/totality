@@ -809,3 +809,44 @@ private func on(_ setting: Disappearing) -> DisappearingState {
     #expect(!DirectChatRule.isJustTheTwoOfYou(members: [me, ana, ana], own: me, other: ana))
     #expect(DirectChatRule.extraPeople(members: [me, ana, eve], own: me, other: ana) == [eve])
 }
+
+// MARK: Home tile and search
+
+@MainActor
+@Test func tileLinesOpenTheChatTheyName() async {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [
+        ChatSummary(id: "!ana", title: "ana_ruiz", lastMessage: "See you there", lastActivity: jan1, unread: 2),
+        ChatSummary(id: "!lake", title: "Lake trip", lastMessage: "Bring the map", lastActivity: jan1.addingTimeInterval(-60), unread: 1, isGroup: true),
+        ChatSummary(id: "!req", title: "mckay_test", isRequest: true, from: "@mckay_test:usetotality.com"),
+    ])
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    await model.connect()
+    await settle()
+    #expect(model.glance.lines == ["1 request", "2 unread chats", "ana_ruiz", "Lake trip"])
+    #expect(model.glanceChat(at: 0) == nil)
+    #expect(model.glanceChat(at: 1) == nil)
+    #expect(model.glanceChat(at: 2) == "!ana")
+    #expect(model.glanceChat(at: 3) == "!lake")
+    #expect(model.glanceChat(at: 4) == nil)
+    // Never message text on the tile.
+    #expect(!model.glance.lines.contains { $0.contains("See you") || $0.contains("map") })
+}
+
+@MainActor
+@Test func searchFindsChatsByNameButNeverByMessageText() async throws {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [
+        ChatSummary(id: "!ana", title: "ana_ruiz", lastMessage: "The gate code is 4417", lastActivity: jan1),
+        ChatSummary(id: "!lake", title: "Lake trip", lastMessage: "Bring the map", lastActivity: jan1, isGroup: true),
+    ])
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    let searcher = MessagesSearcher(model: model)
+    #expect(try await searcher.search("lake").isEmpty)
+    await model.connect()
+    await settle()
+    let hits = try await searcher.search("LAKE trip")
+    #expect(hits.map(\.itemID) == ["!lake"])
+    #expect(hits.first?.detail == "Group")
+    #expect(hits.first?.snippet == nil)
+    #expect(try await searcher.search("4417").isEmpty)
+    #expect(try await searcher.search("ana").map(\.itemID) == ["!ana"])
+}

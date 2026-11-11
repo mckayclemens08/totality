@@ -245,8 +245,36 @@ public final class MessagesModel {
         var lines: [String] = []
         if !requests.isEmpty { lines.append(requests.count == 1 ? "1 request" : "\(requests.count) requests") }
         lines.append(unread.isEmpty ? "No unread messages" : unread.count == 1 ? "1 unread chat" : "\(unread.count) unread chats")
-        lines += (unread.isEmpty ? chats : unread).prefix(3).map(\.title)
+        lines += glanceChats.map(\.title)
         return ModuleGlance(lines: lines, isQuiet: unread.isEmpty && requests.isEmpty)
+    }
+
+    /// The chats named on the tile, in order.
+    private var glanceChats: [ChatSummary] {
+        let unread = chats.filter { $0.unread > 0 }
+        return Array((unread.isEmpty ? chats : unread).prefix(3))
+    }
+
+    /// Which chat a line of the tile opens. The count lines at the top open Messages itself.
+    public func glanceChat(at line: Int) -> String? {
+        guard phase == .ready else { return nil }
+        let names = glanceChats
+        let first = glance.lines.count - names.count
+        guard line >= first, line - first < names.count else { return nil }
+        return names[line - first].id
+    }
+
+    /// A chat another part of the app asked to open, such as the home tile or search.
+    public var requestedChat: String?
+
+    /// Chats whose name, or a person's name, matches every word. Message text is never searched or
+    /// shown, so search can't put a private message on screen outside its chat.
+    public func searchHits(_ query: String) -> [SearchHit] {
+        let terms = SearchText.terms(in: query)
+        guard phase == .ready, !terms.isEmpty else { return [] }
+        return chats
+            .filter { chat in terms.allSatisfy { SearchText.find($0, in: chat.title) != nil } }
+            .map { SearchHit(module: .messages, itemID: $0.id, title: $0.title, detail: $0.isGroup ? "Group" : "Chat", date: $0.lastActivity) }
     }
 
     public func filtered(_ query: String) -> [ChatSummary] {

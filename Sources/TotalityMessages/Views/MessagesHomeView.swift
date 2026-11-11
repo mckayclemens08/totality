@@ -22,6 +22,13 @@ public struct MessagesHomeView: View {
         self.onClose = onClose
     }
 
+    /// Opens a chat the home tile or search asked for.
+    private func openRequested() {
+        guard let chat = model.requestedChat else { return }
+        model.requestedChat = nil
+        opened = chat
+    }
+
     public var body: some View {
         let theme = Theme.current
         NavigationStack {
@@ -88,6 +95,8 @@ public struct MessagesHomeView: View {
             BlockedView(model: model) { showingBlocked = false }
         }
         .task { await model.connect() }
+        .onAppear(perform: openRequested)
+        .onChange(of: model.requestedChat) { openRequested() }
         .task(id: model.notice) {
             guard model.notice != nil else { return }
             try? await Task.sleep(for: .seconds(5))
