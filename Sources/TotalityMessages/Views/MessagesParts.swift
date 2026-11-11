@@ -76,35 +76,6 @@ struct Initial: View {
     }
 }
 
-struct MessagesBarIcon: View {
-    let title: String
-    let systemImage: String
-    var isEnabled = true
-    let action: () -> Void
-
-    init(_ title: String, systemImage: String, isEnabled: Bool = true, action: @escaping () -> Void) {
-        self.title = title
-        self.systemImage = systemImage
-        self.isEnabled = isEnabled
-        self.action = action
-    }
-
-    var body: some View {
-        let theme = Theme.current
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(Typeface.body)
-                .imageScale(.large)
-                .foregroundStyle(isEnabled ? theme.accent.color : theme.textTertiary.color)
-                .frame(minWidth: Space.s6, minHeight: Space.s6)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .accessibilityLabel(title)
-    }
-}
-
 enum MessagesTime {
     /// A time today, the weekday this week, and the date before that.
     static func short(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
