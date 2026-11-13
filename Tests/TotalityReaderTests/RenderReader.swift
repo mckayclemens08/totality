@@ -29,7 +29,7 @@ import TotalityUI
             "person.wave.2", "trash", "text.line.first.and.arrowtriangle.forward", "arrow.down.to.line", "text.badge.plus", "circle.hexagongrid", "iphone",
             "doc.text", "doc.richtext", "book.closed", "doc.plaintext", "folder", "folder.badge.plus",
             "folder.badge.questionmark", "arrow.up.arrow.down", "list.bullet", "list.number",
-            "square.grid.2x2", "chevron.right", "arrow.uturn.backward", "bold", "italic", "link",
+            "square.grid.2x2", "chevron.right", "arrow.uturn.backward", "bold", "italic", "link", "checklist", "text.quote",
         ]
         for name in names {
             #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "\(name)")
@@ -67,6 +67,16 @@ import TotalityUI
                 detail: "Write a note, or import a PDF or text file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
             )
             try write(empty, name: "reader-empty-\(label).png", to: directory)
+            let writing = VStack(spacing: Space.s4) {
+                ConversionNotice(onConfirm: {}, onShowOriginal: {})
+                ReaderMessage(
+                    systemImage: "exclamationmark.triangle", title: "The writing page didn't start",
+                    detail: "The writing page couldn't be shut off from the internet, so it didn't open."
+                )
+                WritingFormatBar(controller: WritingEditorController())
+            }
+            .padding(.top, Space.s4)
+            try write(writing, name: "writing-states-\(label).png", to: directory)
         }
     }
 }

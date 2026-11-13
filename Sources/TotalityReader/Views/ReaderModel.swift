@@ -190,8 +190,24 @@ public final class ReaderModel {
         String(decoding: try await vault.body(of: id), as: UTF8.self)
     }
 
-    public func loadDoc(_ id: UUID) async throws -> DocText {
-        try await vault.doc(id)
+    /// A note's Markdown for the writing editor. Opening an older doc converts it, which the library
+    /// shows as its kept original appearing.
+    public func loadMarkdown(_ id: UUID) async throws -> (item: ReaderItem, text: String) {
+        let opened = try await vault.markdown(of: id)
+        if opened.item.keptOriginalID != nil, !items.contains(where: { $0.id == opened.item.keptOriginalID }) { await load() }
+        return opened
+    }
+
+    /// The converted doc looks right, so its kept original goes to Recently Deleted.
+    public func confirmConversion(_ id: UUID) async -> Bool {
+        do {
+            try await vault.confirmConversion(id)
+            await load()
+            return true
+        } catch {
+            notice = "The original couldn't be moved to Recently Deleted."
+            return false
+        }
     }
 
     /// Returns false when the save failed, so the editor keeps the text for another try.
@@ -210,8 +226,8 @@ public final class ReaderModel {
 
     /// For an open note. Returns the version now saved, or nil if the save failed. If the note changed
     /// elsewhere, what was typed is kept as a copy, and that copy opens so typing carries on there.
-    public func saveDoc(_ id: UUID, title: String, doc: DocText, basedOn: Date) async -> NoteSave? {
-        await saveNote(id, title: title, body: doc.markdown, mime: ReadableText.markdownMime, basedOn: basedOn)
+    public func saveMarkdown(_ id: UUID, title: String, text: String, basedOn: Date) async -> NoteSave? {
+        await saveNote(id, title: title, body: text, mime: MarkdownText.mime, basedOn: basedOn)
     }
 
     public func saveNote(_ id: UUID, title: String, body: String, mime: String? = nil, basedOn: Date) async -> NoteSave? {

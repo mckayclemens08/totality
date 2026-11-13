@@ -18,9 +18,23 @@ A new contract is recorded here before it is implemented.
 kept the `note` content kind and their IDs so that existing items, refs, and sync rows carry on. Nothing
 uses the `doc` kind yet, so a `doc` ref draws its preview chip.
 
-A doc's body is a small Markdown subset inside the sealed blob: headings, bold, italic, bullet and
-numbered lists, and links. `DocText` reads and writes it, and an old plain note opens as it always did.
-Only `http`, `https`, and `mailto` links open. Anything else stays as text.
+A doc's body is Pandoc-flavoured Markdown inside the sealed blob, stored exactly as typed, with the mime
+`text/markdown; variant=pandoc` (RFC 7763). Issue 104 is the spec. The writing page is a `WKWebView`
+running CodeMirror 6, bundled from `web/reader-editor` by `scripts/build-reader-editor.sh` from a pinned
+lockfile, with the built files committed so the app builds without Node. The page is shut in: it's one
+inline document whose policy lets only the bundled script run (by hash) and loads nothing, a compiled
+rule list blocks every request, its data store keeps nothing, its proxy goes nowhere, and every
+navigation but its own first load is cancelled. Its one message handler, `editor`, carries only
+`ready`, `changed`, `text`, `format`, `link` and `open`; `WritingMessage.parse` drops anything else,
+and `open` passes only `http`, `https` and `mailto`. Swift sends text and commands in through
+`callAsyncJavaScript` arguments, never by building script. `MarkdownText` reads the Markdown for
+Listen, search and headings.
+
+A doc from before the writing editor (the older Markdown subset that `DocText` reads, or a plain note)
+converts once, the first time it opens. Its date stays, because tidying up isn't an edit. Its old body is
+kept beside it as a read-only `file` item, "(before the new editor)", whose ID derives from the doc's and
+the root key, so two devices converting alone land on one copy. The doc names that copy in
+`keptOriginalID` until the person taps Looks right, which moves the copy to Recently Deleted.
 
 Folders are sealed items, travelling as `note` rows, so the server can't tell a folder from a doc or
 see a name. An item names its parent inside its sealed details. A missing parent or a loop puts an item

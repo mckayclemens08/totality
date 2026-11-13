@@ -18,6 +18,9 @@ public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
     /// Where Listen stopped, as a UTF-16 offset into the item's readable text.
     public var listenPosition: Int
     public var folderID: UUID? = nil
+    /// A doc converted for the writing editor keeps its old self here until the person says the new
+    /// version looks right.
+    public var keptOriginalID: UUID? = nil
 
     public var displayTitle: String {
         title.isEmpty ? "Untitled" : title
