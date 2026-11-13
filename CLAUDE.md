@@ -55,7 +55,11 @@ These fail review, full stop. There is no "just for now" version of any of them.
    Gmail account asks for `gmail.modify`, so read state, stars, archiving and Trash made in Totality
    reach Gmail, and Google lets that grant send. Totality's code still sends from Gmail only after that
    account's Send switch is turned on and its own `gmail.send` request is allowed, and every send stops
-   for the person's press. Nothing else gets this exception.
+   for the person's press. A second exception, which the owner chose on 2026-11-13 ("Broad, change the
+   rule"): the Reader may ask for full Google Drive access, so the person can link Drive folders of their
+   choice and open, edit and import their files. Totality shows only the folders the person linked, the
+   device talks to Google directly, and Totality's server never sees Drive files or the sign-in.
+   Nothing else gets these exceptions.
 
 ## Definition of done (every module)
 
