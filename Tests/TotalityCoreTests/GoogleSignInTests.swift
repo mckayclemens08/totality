@@ -279,5 +279,6 @@ private final class MemoryKeychain: KeyStore, @unchecked Sendable {
         #expect(GoogleUse.uses(of: ["https://www.googleapis.com/auth/gmail.modify", "openid", "email"]) == [.mail])
         #expect(GoogleUse.uses(of: [calendarScope, photosScope]) == [.calendar, .photos])
         #expect(GoogleUse.uses(of: ["https://www.googleapis.com/auth/userinfo.email"]).isEmpty)
+        #expect(GoogleUse.uses(of: ["https://www.googleapis.com/auth/drive", calendarScope]) == [.drive, .calendar])
     }
 }

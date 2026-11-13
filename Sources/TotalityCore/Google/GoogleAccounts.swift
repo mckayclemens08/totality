@@ -164,13 +164,14 @@ public struct GoogleAccounts: Sendable {
 /// Which parts of Totality a Google connection is used for, read from the scopes it carries, so a screen
 /// can say what disconnecting it ends. It's told apart by Google's own scope names, not by any module.
 public enum GoogleUse: String, CaseIterable, Sendable, Hashable {
-    case mail, calendar, photos
+    case mail, calendar, photos, drive
 
     public var name: String {
         switch self {
         case .mail: "Gmail"
         case .calendar: "Google Calendar"
         case .photos: "Google Photos"
+        case .drive: "Google Drive"
         }
     }
 
@@ -180,6 +181,7 @@ public enum GoogleUse: String, CaseIterable, Sendable, Hashable {
             if path.hasPrefix("gmail.") { return .mail }
             if path.hasPrefix("calendar") { return .calendar }
             if path.hasPrefix("photos") { return .photos }
+            if path.hasPrefix("drive") { return .drive }
             return nil
         })
     }

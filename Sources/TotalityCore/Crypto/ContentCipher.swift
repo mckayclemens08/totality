@@ -38,6 +38,12 @@ public enum KeyPurpose: String, Sendable, Hashable {
     /// Which Google Photos items have already come in, kept on the device only (issue 77). Its own
     /// purpose, so it can't be swapped with iPhone sync's record.
     case photoGoogleImport = "photo-google-import"
+    /// Which Google Drive folders the Reader links, and their cached listings (issue 102). On the device
+    /// only, never synced.
+    case googleDrive = "google-drive"
+    /// A Drive file kept on the device after it was opened (issue 102). Its own purpose, so a cached file
+    /// can't pass for a listing, or for anything of the Reader's own.
+    case googleDriveFile = "google-drive-file"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.
