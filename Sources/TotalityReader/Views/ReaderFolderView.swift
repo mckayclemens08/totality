@@ -72,6 +72,10 @@ struct ReaderFolderView: View {
             .sheet(isPresented: $linkingDrive) {
                 if let drive = model.drive { DriveLinkSheet(model: drive) }
             }
+            .task {
+                // Linked folders show on the top level as soon as the Reader opens.
+                if folder == nil { await model.drive?.load() }
+            }
             .sheet(item: $moving) { entry in
                 ReaderMoveSheet(entry: entry, library: model.library) { destination in
                     Task { await model.move(entry, to: destination) }
@@ -184,7 +188,7 @@ struct ReaderFolderView: View {
     }
 
     private var isEmptyLibrary: Bool {
-        folder == nil && model.items.isEmpty && model.library.folders.isEmpty && model.trash.isEmpty && model.unreadable == 0
+        folder == nil && (model.drive?.links.isEmpty ?? true) && model.items.isEmpty && model.library.folders.isEmpty && model.trash.isEmpty && model.unreadable == 0
     }
 
     private var breadcrumbs: some View {
@@ -267,6 +271,7 @@ struct ReaderFolderView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
+            if folder == nil, let drive = model.drive { DriveLinksSection(drive: drive) }
             if isEmptyFolder {
                 Text(folder == nil ? "Nothing at the top level." : "This folder is empty. Add a doc, or import a file here.")
                     .font(Typeface.body)
@@ -298,6 +303,10 @@ struct ReaderFolderView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s3) {
                 if folder == nil { status }
+                if folder == nil, let drive = model.drive {
+                    VStack(alignment: .leading, spacing: Space.s2) { DriveLinksSection(drive: drive) }
+                        .buttonStyle(.plain)
+                }
                 if isEmptyFolder {
                     Text(folder == nil ? "Nothing at the top level." : "This folder is empty. Add a doc, or import a file here.")
                         .font(Typeface.body)

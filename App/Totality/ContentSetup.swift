@@ -80,7 +80,11 @@ enum ContentSetup {
         let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
         let reader = ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices()))
         let drive = GoogleDrive(accounts: googleAccounts(), store: stores.googleDrive, rootKey: rootKey)
-        if drive.isAvailable { reader.drive = DriveModel(drive: drive) }
+        if drive.isAvailable {
+            let model = DriveModel(drive: drive)
+            model.attach(to: reader.refresher)
+            reader.drive = model
+        }
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(

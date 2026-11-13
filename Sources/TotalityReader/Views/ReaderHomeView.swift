@@ -5,12 +5,14 @@ enum ReaderRoute: Hashable {
     case folder(UUID)
     case item(ReaderItem)
     case trash
+    /// A folder in Google Drive (issue 102).
+    case drive(DriveLocation)
 
     var opens: UUID? {
         switch self {
         case .folder(let id): id
         case .item(let item): item.id
-        case .trash: nil
+        case .trash, .drive: nil
         }
     }
 }
@@ -43,6 +45,10 @@ public struct ReaderHomeView: View {
                             ReaderItemView(item: item, model: model)
                         case .trash:
                             ReaderTrashView(model: model)
+                        case .drive(let location):
+                            if let drive = model.drive {
+                                DriveFolderView(location: location, drive: drive)
+                            }
                         }
                     }
                     .safeAreaInset(edge: .top, spacing: 0) {

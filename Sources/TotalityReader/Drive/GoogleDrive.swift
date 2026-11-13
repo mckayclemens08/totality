@@ -19,6 +19,22 @@ public struct DriveLink: Codable, Equatable, Hashable, Sendable, Identifiable {
     public var id: String { account + "/" + folderID }
 }
 
+/// One folder's contents as Drive last listed them, kept sealed so the folder opens instantly.
+public struct DriveListing: Codable, Equatable, Sendable {
+    public let account: String
+    public let folderID: String
+    public let entries: [DriveEntry]
+    public let readAt: Date
+}
+
+/// What a refresh of every linked folder found.
+public struct DriveRefresh: Equatable, Sendable {
+    /// Folders that couldn't be read this time, by `"account/folderID"`. What was kept still shows.
+    public var problems: [String: DriveProblem] = [:]
+    /// Accounts with linked folders that no longer allow Drive.
+    public var needsAllowing: Set<String> = []
+}
+
 /// A connected Google account, as the Drive screens need it: whether it has allowed Drive yet.
 public struct DriveAccount: Equatable, Hashable, Sendable, Identifiable {
     public let address: String
@@ -130,6 +146,109 @@ public actor GoogleDrive {
         try saveLinks(try loadLinks().filter { $0.id != link.id })
     }
 
+    // MARK: Browsing linked folders
+
+    static func key(_ account: String, _ folderID: String) -> String { account.lowercased() + "/" + folderID }
+
+    /// What was last read of a folder inside a linked one, without asking Google. Nil when it was never
+    /// read, or when it's no longer inside a linked folder.
+    public func kept(_ folderID: String, account: String) throws -> DriveListing? {
+        let state = try loadState()
+        guard reachable(in: state).contains(Self.key(account, folderID)),
+              let id = state.listings[Self.key(account, folderID)], let plain = try open(id)
+        else { return nil }
+        let listing = try JSONDecoder().decode(DriveListing.self, from: plain)
+        guard listing.account == account.lowercased(), listing.folderID == folderID else { return nil }
+        return listing
+    }
+
+    /// Reads a folder from Google and keeps it. Only a linked folder, or a folder found inside one, can
+    /// be read here: the rest of the person's Drive is only ever listed on the chooser.
+    @discardableResult
+    public func refresh(_ folderID: String, account: String) async throws -> DriveListing {
+        guard try reachable(in: loadState()).contains(Self.key(account, folderID)) else { throw DriveProblem.notFound }
+        let (api, token) = try await reader(account)
+        let entries = try await api.list(.folder(id: folderID, name: ""), foldersOnly: false, accessToken: token)
+        let listing = DriveListing(account: account.lowercased(), folderID: folderID, entries: entries, readAt: now())
+        // Unlinked while Google was answering: nothing is kept.
+        var state = try loadState()
+        guard reachable(in: state).contains(Self.key(account, folderID)) else { throw DriveProblem.notFound }
+        let id = state.listings[Self.key(account, folderID)] ?? UUID()
+        try seal(JSONEncoder().encode(listing), id: id)
+        if state.listings[Self.key(account, folderID)] == nil {
+            state.listings[Self.key(account, folderID)] = id
+            try saveState(state)
+        }
+        return listing
+    }
+
+    /// Brings every linked folder up to date, and every folder inside them that was opened before, so
+    /// they open instantly next time. What can't be read keeps what was there.
+    public func refreshAll() async -> DriveRefresh {
+        var result = DriveRefresh()
+        guard !isClosed, let state = try? loadState() else { return result }
+        let connections = connections()
+        let allowed = Set(connections.filter(\.allowsDrive).map(\.address))
+        result.needsAllowing = Set(connections.filter { !$0.allowsDrive }.map(\.address))
+            .intersection(state.links.map(\.account))
+        // An account disconnected elsewhere, like from Calendar, leaves nothing of its folders behind.
+        let connected = Set(connections.map(\.address))
+        if state.links.contains(where: { !connected.contains($0.account) }) {
+            try? saveLinks(state.links.filter { connected.contains($0.account) })
+        }
+        var waiting = state.links.filter { allowed.contains($0.account) }.map { ($0.account, $0.folderID) }
+        var done = Set<String>()
+        while let (account, folderID) = waiting.first, done.count < Self.mostRefreshed {
+            waiting.removeFirst()
+            guard done.insert(Self.key(account, folderID)).inserted else { continue }
+            do {
+                let listing = try await refresh(folderID, account: account)
+                // Only folders already opened once are kept fresh, not the whole tree.
+                let opened = (try? loadState().listings) ?? [:]
+                waiting += listing.entries.filter { $0.isFolder && opened[Self.key(account, $0.id)] != nil }.map { (account, $0.id) }
+            } catch {
+                let problem = DriveProblem.from(error)
+                result.problems[Self.key(account, folderID)] = problem
+                // An account Google took back, or a Drive API that isn't on, stops everything for it.
+                if [.expired, .notAllowed, .notSetUp, .offline].contains(problem) {
+                    waiting.removeAll { $0.0 == account }
+                }
+            }
+        }
+        return result
+    }
+
+    /// The most folders one quiet refresh reads, so a big tree can't keep the phone busy.
+    static let mostRefreshed = 40
+
+    /// Every folder that can be read: the linked ones, and the folders found inside them in what's kept.
+    private func reachable(in state: State) -> Set<String> {
+        var found = Set<String>()
+        var waiting = state.links.map { Self.key($0.account, $0.folderID) }
+        while let next = waiting.popLast() {
+            guard found.insert(next).inserted else { continue }
+            guard let id = state.listings[next], let plain = try? open(id),
+                  let listing = try? JSONDecoder().decode(DriveListing.self, from: plain),
+                  Self.key(listing.account, listing.folderID) == next
+            else { continue }
+            waiting += listing.entries.filter(\.isFolder).map { Self.key(listing.account, $0.id) }
+        }
+        return found
+    }
+
+    /// Drops every kept listing that's no longer inside a linked folder, like after an unlink.
+    func prune() throws {
+        var state = try loadState()
+        let kept = reachable(in: state)
+        let gone = state.listings.filter { !kept.contains($0.key) }
+        guard !gone.isEmpty else { return }
+        for (key, id) in gone {
+            try store.delete(Self.name(id))
+            state.listings[key] = nil
+        }
+        try saveState(state)
+    }
+
     /// Only an account that's connected and allows Drive gets a token.
     private func reader(_ address: String) async throws -> (DriveAPI, String) {
         guard let accounts, let api else { throw DriveProblem.unexpected }
@@ -147,24 +266,55 @@ public actor GoogleDrive {
 
     static func name(_ id: UUID) -> String { id.uuidString.lowercased() + suffix }
 
-    private struct Links: Codable {
-        var links: [DriveLink]
+    /// Everything that says what's kept, in one sealed blob with a fixed ID. Every other blob has a random
+    /// ID recorded here, so storage shows nothing about which folders or files they are.
+    struct State: Codable {
+        var links: [DriveLink] = []
+        /// Each kept listing's blob, by `"account/folderID"`.
+        var listings: [String: UUID] = [:]
+
+        init() {}
+
+        init(from decoder: any Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            links = try values.decode([DriveLink].self, forKey: .links)
+            listings = try values.decodeIfPresent([String: UUID].self, forKey: .listings) ?? [:]
+        }
     }
 
-    /// A links blob this key can't open belongs to someone else, so it reads as no links at all.
-    private func loadLinks() throws -> [DriveLink] {
-        guard let sealed = try store.read(Self.name(Self.linksID)) else { return [] }
+    /// A state blob this key can't open belongs to someone else, so it reads as nothing kept at all.
+    func loadState() throws -> State {
+        guard !isClosed else { throw ReaderError.closed }
+        guard let sealed = try store.read(Self.name(Self.linksID)) else { return State() }
         guard let plain = try? ContentCipher.open(sealed, key: rootKey.objectKey(for: Self.linksID, purpose: .googleDrive), objectID: Self.linksID) else {
-            return []
+            return State()
         }
-        return try JSONDecoder().decode(Links.self, from: plain).links
+        return try JSONDecoder().decode(State.self, from: plain)
+    }
+
+    func saveState(_ state: State) throws {
+        try seal(JSONEncoder().encode(state), id: Self.linksID)
+    }
+
+    private func loadLinks() throws -> [DriveLink] {
+        try loadState().links
     }
 
     private func saveLinks(_ links: [DriveLink]) throws {
+        var state = try loadState()
+        state.links = links
+        try saveState(state)
+        try prune()
+    }
+
+    func seal(_ plain: Data, id: UUID) throws {
         guard !isClosed else { throw ReaderError.closed }
-        let sealed = try ContentCipher.seal(
-            JSONEncoder().encode(Links(links: links)), key: rootKey.objectKey(for: Self.linksID, purpose: .googleDrive), objectID: Self.linksID
-        )
-        try store.write(sealed, as: Self.name(Self.linksID))
+        try store.write(try ContentCipher.seal(plain, key: rootKey.objectKey(for: id, purpose: .googleDrive), objectID: id), as: Self.name(id))
+    }
+
+    func open(_ id: UUID) throws -> Data? {
+        guard !isClosed else { throw ReaderError.closed }
+        guard let sealed = try store.read(Self.name(id)) else { return nil }
+        return try? ContentCipher.open(sealed, key: rootKey.objectKey(for: id, purpose: .googleDrive), objectID: id)
     }
 }
