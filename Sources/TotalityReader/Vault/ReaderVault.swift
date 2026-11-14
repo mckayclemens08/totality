@@ -268,6 +268,14 @@ public actor ReaderVault {
         return original
     }
 
+    /// Setting a target isn't an edit, so the date stays and an open doc elsewhere isn't told it fell behind.
+    public func setWordTarget(_ target: Int?, of id: UUID) throws {
+        var current = try item(id)
+        guard current.kind == .note else { throw ReaderError.notANote }
+        current.wordTarget = target.flatMap { $0 > 0 ? min($0, 10_000_000) : nil }
+        try writeMeta(current)
+    }
+
     /// The person says the converted doc looks right, so its old self goes to Recently Deleted, where it
     /// can still be brought back for a while.
     public func confirmConversion(_ id: UUID) throws {

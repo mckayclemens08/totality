@@ -30,6 +30,14 @@ and `open` passes only `http`, `https` and `mailto`. Swift sends text and comman
 `callAsyncJavaScript` arguments, never by building script. `MarkdownText` reads the Markdown for
 Listen, search and headings.
 
+The writing tools (issue 104, step 2) work on the Markdown itself. Find and replace is a native bar that
+drives CodeMirror's search, with its own panel kept empty. Counts, the outline and find results come back
+as `stats`, `outline`, `find` and `matches` messages, parsed and clamped like the rest. Folding a section
+from the outline only hides lines on the page. Focus mode, typewriter scrolling, smart quotes and dashes,
+and serif or sans are settings on the device (`reader.writing.*`). A doc's word target is `wordTarget`,
+sealed in its details, and setting it leaves the date alone. The daily goal counts words added on this
+device, in any doc, and keeps only a date and two numbers in the device's settings, never any words.
+
 A doc from before the writing editor (the older Markdown subset that `DocText` reads, or a plain note)
 converts once, the first time it opens. Its date stays, because tidying up isn't an edit. Its old body is
 kept beside it as a read-only `file` item, "(before the new editor)", whose ID derives from the doc's and

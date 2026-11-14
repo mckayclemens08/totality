@@ -130,3 +130,43 @@ body {
   padding: 0 var(--tl-s2);
   font-size: 0.9em;
 }
+
+/* Focus mode: everything but the paragraph being written fades back. */
+.cm-tl-dim {
+  opacity: 0.35;
+  transition: opacity 120ms ease-out;
+}
+/* Typewriter scrolling needs room below the last line to keep it in the middle. */
+.tl-typewriter #editor {
+  padding-bottom: 50vh;
+}
+
+/* Find: matches in the Listen highlight, the current one stronger. Swift draws the bar itself. */
+.cm-searchMatch {
+  background: var(--tl-highlight);
+  border-radius: 2px;
+}
+.cm-searchMatch.cm-searchMatch-selected,
+.cm-searchMatch-selected {
+  background: var(--tl-highlight-strong);
+}
+.cm-panels,
+.cm-panels-top {
+  border: none !important;
+  background: transparent !important;
+}
+.cm-tl-find {
+  display: none;
+}
+
+/* A folded section shows as one soft chip after its heading. */
+.cm-foldPlaceholder {
+  background: var(--tl-sunken);
+  border: none;
+  border-radius: var(--tl-radius-sm);
+  color: var(--tl-text2);
+  padding: 0 var(--tl-s2);
+  margin-left: var(--tl-s2);
+  font-size: 0.8em;
+  vertical-align: middle;
+}

@@ -23,6 +23,16 @@ final class WritingEditorController: NSObject {
     private(set) var format = WritingFormat()
     /// Set when the person asks for a link. The screen asks for the address and clears it.
     var linkRequest: String?
+    private(set) var stats = WritingStats()
+    private(set) var outline: [WritingHeading] = []
+    private(set) var matches = WritingMatches()
+    /// Goes up each time Command-F is pressed in the page.
+    private(set) var findRequests = 0
+    private(set) var settings = WritingSettings()
+
+    /// Words added since the doc opened, as they're typed. Deleting doesn't take any back.
+    @ObservationIgnored var onWordsWritten: ((Int) -> Void)?
+    @ObservationIgnored private var countedWords: Int?
 
     /// Where links the page asks to open go. They've already been checked.
     @ObservationIgnored var onOpen: ((URL) -> Void)?
@@ -80,12 +90,14 @@ final class WritingEditorController: NSObject {
     }
 
     /// Puts a doc in the page, replacing what's there.
-    func load(_ text: String, placeholder: String = "Start writing", serif: Bool = false) {
+    func load(_ text: String, placeholder: String = "Start writing", settings: WritingSettings = WritingSettings()) {
         latestText = text
         hasText = true
         pageRevision = 0
         typedRevision = 0
-        options = ["placeholder": placeholder, "serif": serif]
+        countedWords = nil
+        self.settings = settings
+        options = ["placeholder": placeholder, "settings": settings.dictionary]
         revision += 1
         sendLoad()
     }
@@ -116,10 +128,41 @@ final class WritingEditorController: NSObject {
     }
 
     func run(_ command: String, _ argument: Any? = nil) {
-        guard let webView, pageReady else { return }
-        var arguments: [String: Any] = ["name": command]
-        arguments["argument"] = argument ?? NSNull()
-        Task { _ = try? await webView.callAsyncJavaScript("window.totality.command(name, argument)", arguments: arguments, in: nil, contentWorld: .page) }
+        Task { _ = await call(command, argument) }
+    }
+
+    /// Runs a command and returns what the page answers. Nil if the page isn't there.
+    @discardableResult
+    func call(_ command: String, _ argument: Any? = nil) async -> Any? {
+        guard let webView, pageReady else { return nil }
+        let arguments: [String: Any] = ["name": command, "argument": argument ?? NSNull()]
+        return try? await webView.callAsyncJavaScript("return window.totality.command(name, argument)", arguments: arguments, in: nil, contentWorld: .page)
+    }
+
+    func apply(_ settings: WritingSettings) {
+        self.settings = settings
+        options["settings"] = settings.dictionary
+        run("settings", settings.dictionary)
+    }
+
+    // MARK: Find
+
+    func find(_ query: String, replacement: String = "", caseSensitive: Bool = false, wholeWord: Bool = false) async {
+        let options: [String: Any] = ["query": query, "replace": replacement, "caseSensitive": caseSensitive, "wholeWord": wholeWord]
+        updateMatches(await call("find", options))
+    }
+
+    func findStep(_ command: String) async {
+        updateMatches(await call(command))
+    }
+
+    func closeFind() {
+        matches = WritingMatches()
+        run("closeFind")
+    }
+
+    private func updateMatches(_ reply: Any?) {
+        if let values = reply as? [String: Any] { matches = WritingMatches(values) }
     }
 
     private func accept(_ text: String, revision: Int) {
@@ -146,6 +189,16 @@ final class WritingEditorController: NSObject {
             linkRequest = address
         case .open(let url):
             onOpen?(url)
+        case .stats(let counts):
+            if let before = countedWords, counts.words > before { onWordsWritten?(counts.words - before) }
+            countedWords = counts.words
+            if counts != stats { stats = counts }
+        case .outline(let headings):
+            outline = headings
+        case .find:
+            findRequests += 1
+        case .matches(let found):
+            matches = found
         }
     }
 

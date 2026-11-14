@@ -4,16 +4,22 @@
 // It never fetches, stores, or opens anything itself.
 import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView, keymap, drawSelection, placeholder } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from "@codemirror/commands";
 import { markdown, markdownLanguage, markdownKeymap } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { Strikethrough, Subscript, Superscript, Table, TaskList } from "@lezer/markdown";
 import { livePreview } from "./livePreview.js";
 import { toggleWrap, setHeading, toggleList, toggleQuote, setLink, formatState } from "./commands.js";
+import {
+  outline, stats, folding, toggleSection, revealing, focusMode, typewriter, smartPunctuation,
+  findSupport, setFind, matches, find,
+} from "./tools.js";
 
 /// How long typing has to pause before the text goes to Swift. Swift saves shortly after that.
 const SEND_PAUSE = 250;
+/// Counts and the outline are worked out over the whole doc, so they wait for a slightly longer pause.
+const COUNT_PAUSE = 400;
 
 function post(message) {
   const handler = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.editor;
@@ -38,6 +44,12 @@ const pageTheme = EditorView.theme({
 });
 
 const editable = new Compartment();
+const focusing = new Compartment();
+const centring = new Compartment();
+const punctuation = new Compartment();
+let settings = { focus: false, typewriter: false, smartPunctuation: true, serif: false };
+let countTimer = null;
+let lastOutline = "";
 let view;
 let revision = 0;
 let sendTimer = null;
@@ -47,6 +59,37 @@ function sendText() {
   clearTimeout(sendTimer);
   sendTimer = null;
   post({ type: "text", revision, text: view.state.doc.toString() });
+}
+
+function sendCounts() {
+  clearTimeout(countTimer);
+  countTimer = null;
+  if (!view) return;
+  const headings = outline(view.state.doc);
+  post({ type: "stats", stats: stats(view.state, headings) });
+  const shape = JSON.stringify(headings.map((h) => [h.level, h.text, h.from]));
+  if (shape !== lastOutline) {
+    lastOutline = shape;
+    post({ type: "outline", headings: headings.map(({ level, text, from }) => ({ level, text, from })) });
+  }
+}
+
+function scheduleCounts() {
+  clearTimeout(countTimer);
+  countTimer = setTimeout(sendCounts, COUNT_PAUSE);
+}
+
+function applySettings() {
+  document.documentElement.classList.toggle("tl-serif", Boolean(settings.serif));
+  document.documentElement.classList.toggle("tl-typewriter", Boolean(settings.typewriter));
+  if (!view) return;
+  view.dispatch({
+    effects: [
+      focusing.reconfigure(settings.focus ? focusMode : []),
+      centring.reconfigure(settings.typewriter ? typewriter : []),
+      punctuation.reconfigure(settings.smartPunctuation ? smartPunctuation : []),
+    ],
+  });
 }
 
 function sendFormat() {
@@ -73,7 +116,15 @@ const shortcuts = [
   { key: "Mod-Alt-3", run: (v) => run(setHeading(v.state, 3)) },
   { key: "Mod-Shift-8", run: (v) => run(toggleList(v.state, "bullet")) },
   { key: "Mod-Shift-7", run: (v) => run(toggleList(v.state, "numbered")) },
+  // Find belongs to Swift's bar, which also takes Command-G for the next match.
+  { key: "Mod-f", run: () => (post({ type: "find" }), true) },
+  { key: "Mod-g", run: (v) => (find.findNext(v), sendMatches(), true) },
+  { key: "Mod-Shift-g", run: (v) => (find.findPrevious(v), sendMatches(), true) },
 ];
+
+function sendMatches() {
+  post({ type: "matches", ...matches(view.state) });
+}
 
 function create(text, options) {
   const state = EditorState.create({
@@ -88,6 +139,11 @@ function create(text, options) {
       syntaxHighlighting(highlight),
       pageTheme,
       livePreview,
+      folding,
+      findSupport,
+      focusing.of(settings.focus ? focusMode : []),
+      centring.of(settings.typewriter ? typewriter : []),
+      punctuation.of(settings.smartPunctuation ? smartPunctuation : []),
       placeholder(options.placeholder || ""),
       keymap.of([...shortcuts, ...markdownKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
       EditorView.contentAttributes.of({ "aria-label": "Doc", autocapitalize: "sentences", spellcheck: "true", autocorrect: "on" }),
@@ -98,7 +154,10 @@ function create(text, options) {
           clearTimeout(sendTimer);
           sendTimer = setTimeout(sendText, SEND_PAUSE);
         }
-        if (update.docChanged || update.selectionSet) sendFormat();
+        if (update.docChanged || update.selectionSet) {
+          sendFormat();
+          scheduleCounts();
+        }
       }),
       EditorView.domEventHandlers({
         // A link opens with Command on the Mac. A plain click edits it, as in any editor.
@@ -145,14 +204,51 @@ const formatting = {
   link: (s, url) => setLink(s, typeof url === "string" ? url : ""),
 };
 
+/// Commands that act on the view and answer Swift with a result.
+const tools = {
+  undo: () => undo(view),
+  redo: () => redo(view),
+  find: (options) => {
+    setFind(view, options && typeof options === "object" ? options : {});
+    return matches(view.state);
+  },
+  findNext: () => (find.findNext(view), matches(view.state)),
+  findPrevious: () => (find.findPrevious(view), matches(view.state)),
+  replace: () => (find.replaceNext(view), matches(view.state)),
+  replaceAll: () => (find.replaceAll(view), matches(view.state)),
+  closeFind: () => find.closeSearchPanel(view),
+  // Puts the keyboard away on iPhone.
+  blur: () => view.contentDOM.blur(),
+  jump: (pos) => {
+    const at = Math.max(0, Math.min(Number(pos) || 0, view.state.doc.length));
+    view.dispatch({
+      effects: [...revealing(view.state, at), EditorView.scrollIntoView(at, { y: "start", yMargin: 24 })],
+      selection: { anchor: at },
+    });
+    return true;
+  },
+  fold: (pos) => toggleSection(view, Number(pos) || 0),
+  settings: (next) => {
+    if (next && typeof next === "object") {
+      for (const key of Object.keys(settings)) {
+        if (key in next) settings[key] = Boolean(next[key]);
+      }
+    }
+    applySettings();
+    return settings;
+  },
+};
+
 window.totality = Object.freeze({
   /// Replaces the page's doc. `revision` restarts, because Swift only compares within one load.
   load(text, options) {
     revision = 0;
     lastState = "";
+    lastOutline = "";
     create(typeof text === "string" ? text : "", options || {});
-    document.documentElement.classList.toggle("tl-serif", Boolean(options && options.serif));
+    tools.settings(options && options.settings);
     sendFormat();
+    sendCounts();
   },
   /// The current text, for a save that can't wait for the next pause.
   text() {
@@ -161,7 +257,13 @@ window.totality = Object.freeze({
     return { revision, text: view ? view.state.doc.toString() : "" };
   },
   command(name, argument) {
-    if (!view || !Object.prototype.hasOwnProperty.call(formatting, name)) return false;
+    if (!view) return false;
+    if (Object.prototype.hasOwnProperty.call(tools, name)) {
+      const result = tools[name](argument);
+      if (name === "undo" || name === "redo") view.focus();
+      return result === undefined ? true : result;
+    }
+    if (!Object.prototype.hasOwnProperty.call(formatting, name)) return false;
     const transaction = formatting[name](view.state, argument);
     if (transaction) view.dispatch(transaction);
     view.focus();
