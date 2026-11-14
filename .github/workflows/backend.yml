@@ -18,6 +18,24 @@ jobs:
           cache-dependency-path: backend-tests/package-lock.json
       - run: npm ci
       - run: npm test
+  reader-editor:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/reader-editor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/reader-editor/package-lock.json
+      - run: npm ci
+      - run: npm test
+      # The app ships the committed bundle, so it has to be exactly what the pinned packages build.
+      - run: npm run build
+      - run: cmp dist/editor.js ../../Sources/TotalityReader/Resources/Editor/editor.js
+      - run: cmp src/editor.css ../../Sources/TotalityReader/Resources/Editor/editor.css
   gateway-tests:
     runs-on: ubuntu-latest
     defaults:
