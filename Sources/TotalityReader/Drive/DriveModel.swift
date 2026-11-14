@@ -32,14 +32,79 @@ public final class DriveModel {
     public private(set) var needsAllowing: Set<String> = []
 
     let drive: GoogleDrive
+    /// Where an opened file is held, so the Reader's viewers and Listen can read it.
+    private let vault: ReaderVault?
+    private let settings: UserDefaults
 
-    public init(drive: GoogleDrive) {
+    /// Holds only a number, and stays with the device.
+    static let cacheLimitKey = "reader.drive.cacheLimit"
+
+    public init(drive: GoogleDrive, vault: ReaderVault? = nil, settings: UserDefaults = .standard) {
         self.drive = drive
+        self.vault = vault
+        self.settings = settings
+        let stored = settings.integer(forKey: Self.cacheLimitKey)
+        cacheLimit = DriveCacheLimit.choices.contains(stored) ? stored : DriveCacheLimit.standard
+    }
+
+    // MARK: Opening files
+
+    /// How much opened files may take on this device.
+    public private(set) var cacheLimit: Int
+    /// How much they take now, once it's been read.
+    public private(set) var cachedBytes: Int?
+
+    public func setCacheLimit(_ limit: Int) async {
+        guard DriveCacheLimit.choices.contains(limit) else { return }
+        cacheLimit = limit
+        settings.set(limit, forKey: Self.cacheLimitKey)
+        try? await drive.trimCache(to: limit)
+        await readCacheSize()
+    }
+
+    public func readCacheSize() async {
+        cachedBytes = try? await drive.cachedBytes()
+    }
+
+    public func clearCache() async {
+        do {
+            try await drive.clearCache()
+        } catch {
+            problem = "Downloaded files couldn't be cleared."
+        }
+        await readCacheSize()
+    }
+
+    /// The ID a Drive file opens under in the Reader. The same file gets the same one, so Listen picks up
+    /// where it was in this run. It's never stored.
+    static func readerID(account: String, fileID: String) -> UUID {
+        UUID(derivedFrom: "totality.reader.drive.file.\(GoogleDrive.key(account, fileID))")
+    }
+
+    /// Opens a file, from what's kept or from Google, and hands it to the Reader as an item held in
+    /// memory only. Drive files open read-only for now.
+    public func openFile(_ entry: DriveEntry, in folderID: String, account: String) async throws -> (item: ReaderItem, file: DriveOpenedFile) {
+        guard let vault else { throw ReaderError.notFound }
+        let file = try await drive.file(entry.id, in: folderID, account: account, limit: cacheLimit)
+        let item = ReaderItem(
+            id: Self.readerID(account: account, fileID: entry.id), kind: .file, title: file.entry.name, collection: nil,
+            mime: file.mime, byteCount: file.data.count, createdAt: file.modifiedAt ?? Date(),
+            updatedAt: file.modifiedAt ?? Date(), listenPosition: 0
+        )
+        try await vault.hold(item, body: file.data)
+        await readCacheSize()
+        return (item, file)
     }
 
     public var isAvailable: Bool { drive.isAvailable }
 
+    @ObservationIgnored private var swept = false
+
     public func load() async {
+        if !swept {
+            // Once per run: anything another key left in the cache folder goes.
+            swept = (try? await drive.sweepCache()) != nil
+        }
         accounts = await drive.connections()
         do {
             links = try await drive.links()
@@ -178,6 +243,7 @@ public final class DriveModel {
                 try await drive.link(folder, account: account)
             } else if let link = links.first(where: { $0.account == account && $0.folderID == folder.id }) {
                 try await drive.unlink(link)
+                await vault?.releaseHeld()
             }
         } catch {
             problem = isLinked ? "\(folder.name) couldn't be linked." : "\(folder.name) couldn't be unlinked."
@@ -188,6 +254,7 @@ public final class DriveModel {
     public func unlink(_ link: DriveLink) async {
         do {
             try await drive.unlink(link)
+            await vault?.releaseHeld()
         } catch {
             problem = "\(link.name) couldn't be unlinked."
         }

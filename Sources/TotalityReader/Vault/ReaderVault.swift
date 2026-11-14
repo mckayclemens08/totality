@@ -71,6 +71,12 @@ public actor ReaderVault {
     private var textCache: [UUID: String] = [:]
     private var isClosed = false
     private var hashes: [UUID: String] = [:]
+    /// Files opened from outside the vault, like Google Drive (issue 102). In memory only: they're never
+    /// written here, listed, searched, or synced, but the viewers and Listen read them like any item.
+    private var held: [UUID: (item: ReaderItem, body: Data)] = [:]
+    private var heldOrder: [UUID] = []
+    /// A few, so Listen can keep going on one while another is opened.
+    static let mostHeld = 3
 
     public init(store: any BlobStore, rootKey: ContentRootKey) {
         self.store = store
@@ -86,10 +92,12 @@ public actor ReaderVault {
     /// sealed under the old key, would be lost when the old key goes.
     public func close() {
         isClosed = true
+        releaseHeld()
     }
 
     private func writeMeta(_ item: ReaderItem) throws {
         guard !isClosed else { throw ReaderError.closed }
+        guard held[item.id] == nil else { throw ReaderError.notFound }
         hashes[item.id] = nil
         let key = rootKey.objectKey(for: item.id, purpose: .metadata)
         try store.write(try ContentCipher.seal(JSONEncoder().encode(item), key: key, objectID: item.id), as: metaName(item.id))
@@ -97,6 +105,7 @@ public actor ReaderVault {
 
     private func writeBody(_ data: Data, id: UUID) throws {
         guard !isClosed else { throw ReaderError.closed }
+        guard held[id] == nil else { throw ReaderError.notFound }
         hashes[id] = nil
         let key = rootKey.objectKey(for: id, purpose: .content)
         try store.write(try ContentCipher.seal(data, key: key, objectID: id), as: bodyName(id))
@@ -104,6 +113,7 @@ public actor ReaderVault {
     }
 
     public func item(_ id: UUID) throws -> ReaderItem {
+        if let outside = held[id] { return outside.item }
         guard let sealed = try store.read(metaName(id)) else { throw ReaderError.notFound }
         let key = rootKey.objectKey(for: id, purpose: .metadata)
         return try JSONDecoder().decode(ReaderItem.self, from: ContentCipher.open(sealed, key: key, objectID: id))
@@ -295,6 +305,7 @@ public actor ReaderVault {
     }
 
     public func body(of id: UUID) throws -> Data {
+        if let outside = held[id] { return outside.body }
         guard let sealed = try store.read(bodyName(id)) else { throw ReaderError.notFound }
         return try ContentCipher.open(sealed, key: rootKey.objectKey(for: id, purpose: .content), objectID: id)
     }
@@ -323,6 +334,10 @@ public actor ReaderVault {
 
     /// Listening is not editing, so `updatedAt` stays put.
     public func setListenPosition(_ offset: Int, of id: UUID) throws {
+        if held[id] != nil {
+            held[id]?.item.listenPosition = max(0, offset)
+            return
+        }
         var updated = try item(id)
         updated.listenPosition = max(0, offset)
         try writeMeta(updated)
@@ -332,6 +347,7 @@ public actor ReaderVault {
     @discardableResult
     public func delete(_ id: UUID) throws -> [UUID] {
         guard !isClosed else { throw ReaderError.closed }
+        guard held[id] == nil else { throw ReaderError.notFound }
         let inside = (try? item(id).kind) == .folder ? try library().descendants(of: id).map(\.id) : []
         for target in inside + [id] {
             // The record goes first, so a crash can't lose the fact that this was deleted on purpose.
@@ -571,5 +587,30 @@ extension ReaderVault: SyncArea {
         )
         try writeBody(body, id: copy.id)
         try writeMeta(copy)
+    }
+
+    // MARK: Files from outside (issue 102)
+
+    /// Lets the viewers and Listen open a file that isn't the vault's, like one from Google Drive. Its ID
+    /// must not be one of the vault's own. Only the latest few are held, and nothing is written.
+    public func hold(_ item: ReaderItem, body: Data) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        guard try store.read(metaName(item.id)) == nil else { throw ReaderError.notFound }
+        held[item.id] = (item, body)
+        textCache[item.id] = nil
+        heldOrder.removeAll { $0 == item.id }
+        heldOrder.append(item.id)
+        while heldOrder.count > Self.mostHeld {
+            let gone = heldOrder.removeFirst()
+            held[gone] = nil
+            textCache[gone] = nil
+        }
+    }
+
+    /// Forgets every held file, like after unlinking its folder.
+    public func releaseHeld() {
+        for id in heldOrder { textCache[id] = nil }
+        held = [:]
+        heldOrder = []
     }
 }

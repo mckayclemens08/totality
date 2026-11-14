@@ -17,12 +17,14 @@ public enum DriveProblem: Error, Equatable, Sendable {
     case notFound
     /// Google said something that doesn't fit.
     case unexpected
+    /// Too big for Google to export, or for the Reader to open.
+    case tooLarge
 
     /// True for a problem that usually clears on its own.
     public var isPassing: Bool {
         switch self {
         case .offline, .unreachable, .unexpected: true
-        case .expired, .notAllowed, .notSetUp, .notFound: false
+        case .expired, .notAllowed, .notSetUp, .notFound, .tooLarge: false
         }
     }
 
@@ -52,6 +54,7 @@ public enum DriveProblem: Error, Equatable, Sendable {
         case .notSetUp: "Totality isn't set up to use Google Drive yet. That's on Totality's side, not your account's. Try again later."
         case .notFound: "This is no longer in Google Drive, or it's no longer shared with you."
         case .unexpected: "Google Drive sent something Totality didn't understand. Pull down to try again."
+        case .tooLarge: "This file is too big to open here. It's still in Google Drive."
         }
     }
 }
@@ -165,6 +168,25 @@ struct DriveAPI: Sendable {
         return entry
     }
 
+    // MARK: Files
+
+    /// A file's bytes. Google's own formats have none, so they come as an export in `export`'s format.
+    func download(_ entry: DriveEntry, exportingAs export: String?, accessToken: String) async throws -> Data {
+        guard Self.isID(entry.id) else { throw DriveProblem.unexpected }
+        let url = if let export {
+            Self.url("files/\(entry.id)/export", [URLQueryItem(name: "mimeType", value: export)])
+        } else {
+            Self.url("files/\(entry.id)", [
+                URLQueryItem(name: "alt", value: "media"),
+                URLQueryItem(name: "supportsAllDrives", value: "true"),
+            ])
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 120
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        return try await send(request)
+    }
+
     // MARK: Asking Google
 
     struct File: Decodable {
@@ -237,6 +259,7 @@ struct DriveAPI: Sendable {
         let text = String(decoding: data.prefix(4_000), as: UTF8.self)
         if text.contains("ateLimitExceeded") || text.contains("RATE_LIMIT_EXCEEDED") { return .unreachable }
         if text.contains("accessNotConfigured") || text.contains("SERVICE_DISABLED") { return .notSetUp }
+        if text.contains("exportSizeLimitExceeded") { return .tooLarge }
         if text.contains("insufficientPermissions") || text.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT") { return .notAllowed }
         return .notFound
     }

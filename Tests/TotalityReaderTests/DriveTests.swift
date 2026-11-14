@@ -23,6 +23,10 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
     var children: [String: [[String: Any]]] = [:]
     var status = 200
     var errorBody: [String: Any] = ["error": ["message": "no"]]
+    /// Each file's bytes, and each Google format's export, by file ID.
+    var contents: [String: Data] = [:]
+    var exports: [String: Data] = [:]
+    private(set) var downloads: [URLComponents] = []
     private(set) var asked: [URLComponents] = []
     private(set) var revoked = 0
 
@@ -40,6 +44,18 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
         if status == 0 { return (Data("<html>".utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!) }
         if status != 200 { return answer(status, errorBody) }
         let query = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { $1 })
+        if components.path.hasSuffix("/export") {
+            lock.withLock { downloads.append(components) }
+            let id = components.path.dropFirst("/drive/v3/files/".count).dropLast("/export".count)
+            guard let data = exports[String(id)] else { return answer(404, errorBody) }
+            return (data, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        if query["alt"] == "media" {
+            lock.withLock { downloads.append(components) }
+            let id = String(components.path.dropFirst("/drive/v3/files/".count))
+            guard let data = contents[id] else { return answer(404, errorBody) }
+            return (data, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
         #expect(components.path == "/drive/v3/files")
         let q = try #require(query["q"])
         let parent: String
@@ -60,7 +76,8 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
         return answer(200, ["files": query["pageToken"] == nil ? files : Array(files.dropFirst())])
     }
 
-    var listings: [URLComponents] { lock.withLock { asked } }
+    var listings: [URLComponents] { lock.withLock { asked }.filter { $0.path == "/drive/v3/files" } }
+    var downloaded: [URLComponents] { lock.withLock { downloads } }
 
     private func answer(_ status: Int, _ body: [String: Any]) -> (Data, HTTPURLResponse) {
         (try! JSONSerialization.data(withJSONObject: body), HTTPURLResponse(url: GoogleSignIn.tokenURL, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!)
@@ -82,17 +99,26 @@ struct DriveSetup {
     let accounts: GoogleAccounts
     let store: MemoryBlobStore
     let rootKey: ContentRootKey
+    let cache: MemoryBlobStore
 }
 
 func makeDrive(
     _ fake: FakeDrive, keys: MemoryKeys = MemoryKeys(), store: MemoryBlobStore = MemoryBlobStore(),
-    rootKey: ContentRootKey? = nil, granted: Set<String>? = [DriveAPI.scope]
+    cache: MemoryBlobStore = MemoryBlobStore(), rootKey: ContentRootKey? = nil, granted: Set<String>? = [DriveAPI.scope]
 ) throws -> DriveSetup {
     let accounts = GoogleAccounts(signIn: try #require(GoogleSignIn(clientID: clientID, http: fake)), keychain: keys)
     if let granted { try accounts.keep(address: driveOwner, refreshToken: "1//shared", granted: granted) }
     let key = try rootKey ?? .generate()
-    let drive = GoogleDrive(accounts: accounts, store: store, rootKey: key, now: { Date(timeIntervalSince1970: 1_794_000_000) })
-    return DriveSetup(drive: drive, accounts: accounts, store: store, rootKey: key)
+    let clock = Clock()
+    let drive = GoogleDrive(accounts: accounts, store: store, cache: cache, rootKey: key, now: { clock.tick() })
+    return DriveSetup(drive: drive, accounts: accounts, store: store, rootKey: key, cache: cache)
+}
+
+/// Moves on a second every time it's read, so "opened longest ago" is always clear.
+final class Clock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seconds: TimeInterval = 1_794_000_000
+    func tick() -> Date { lock.withLock { seconds += 1; return Date(timeIntervalSince1970: seconds) } }
 }
 
 @Suite struct DriveConnectTests {

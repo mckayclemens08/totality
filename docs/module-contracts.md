@@ -139,6 +139,18 @@ The misses over 100 ms aren't all timing errors, because a comma isn't always th
 
 Speed happens in playback, through `AVAudioUnitTimePitch`, and Michael is always made at the model's own pace. The model's speed setting squeezes every sound, so at 2× Michael slurred his words (owner, 2026-11-01). That setting is now always 1, so the marks above hold at every speed, each miss shrinks with the speed, and a speed change keeps the sentence made ahead. At 1× the unit is bypassed, so that audio is exactly what the model made. The player's clock follows the speed: on a Mac and in the iOS simulator, a 3 s buffer at 0.75× to 2× reported its progress at the right pace and finished within 0.2 s of the expected time, the same margin as 1×. The system voice keeps its own rate.
 
+## Reader: Google Drive
+
+Spec: issue #102 (owner agreed 2026-11-13). Full Drive access is the owner's named exception to minimal Google scopes (CLAUDE.md, rule 8). The Google Cloud project behind `TotalityGoogleClientID` must have the **Google Drive API** enabled. Without it, Drive answers 403 `accessNotConfigured`, which the Reader shows as Totality's setup problem.
+
+- `GoogleDrive` (an actor in `TotalityReader`) uses the shared Google sign-in with incremental consent for `https://www.googleapis.com/auth/drive`. The device talks to Google directly. Totality's server and Supabase never see Drive files, names, or the token, and nothing reaches Supabase unless the person imports it (step 4).
+- Links, kept listings and the cache index are one sealed state blob with a fixed ID, under the purpose `googleDrive`, in the never-synced `GoogleDrive` area. Each listing is its own blob with a random ID named in the state, so storage shows nothing about which folder it is. A state blob that won't open with this key reads as nothing at all.
+- Only linked folders, and folders found inside them in kept listings, can be read. The rest of Drive is listed only on the folder chooser, and never kept. Unlinking, or disconnecting the Google account anywhere, drops everything kept under it.
+- Refresh: pull-to-refresh, and the Reader's `Refresher` quietly at most every five minutes, for linked folders and folders opened before, up to 40 a run.
+- Opening (step 3): a file in a kept listing is downloaded, or exported (Google Docs as Markdown, Sheets, Slides and Drawings as PDF), up to 100 MB. It's sealed under `googleDriveFile` with a random ID into a cache in the system's Caches folder: out of backups, not carried through a key move, and swept of anything the state doesn't name. A kept copy opens without asking Google unless the listing's version or change time moved. Past the allowance (500 MB by default, 100 MB to 2 GB in the Drive sheet; `reader.drive.cacheLimit` holds only the number), the least recently opened go first.
+- An opened file reaches the Reader's viewers and Listen through `ReaderVault.hold`: in memory only, at most three, never listed, searched, synced or written, and an ID already the vault's own is refused. Every write path refuses a held ID.
+- Everything from Drive is labelled "Stored in Google Drive, not end-to-end encrypted" (rule 5).
+
 ## Home page
 
 - `HomeLayout` is the tiles' order and sizes and the optional big square, saved on the device under `home.layout`. It holds module names and sizes, never content, and it isn't synced. Tiles for modules that no longer exist drop out and new modules join the end, so an update can't lose a tile.

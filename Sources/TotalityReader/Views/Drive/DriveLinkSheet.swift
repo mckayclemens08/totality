@@ -74,6 +74,9 @@ private struct DriveAccountsPage: View {
                         .font(Typeface.caption)
                 }
             }
+            if !model.links.isEmpty {
+                DriveCacheSection(model: model)
+            }
             Section {
                 if model.isConnecting {
                     ProgressView("Connecting to Google…")
@@ -244,5 +247,43 @@ private struct DriveChooserPage: View {
         } catch {
             phase = .failed(DriveProblem.from(error).message)
         }
+    }
+}
+
+/// How much opened Drive files may take on this device, and a way to clear them.
+private struct DriveCacheSection: View {
+    let model: DriveModel
+
+    var body: some View {
+        Section {
+            Picker("Keep up to", selection: limit) {
+                ForEach(DriveCacheLimit.choices, id: \.self) { choice in
+                    Text(Self.size(choice)).tag(choice)
+                }
+            }
+            Button("Clear Downloaded Files", role: .destructive) {
+                Task { await model.clearCache() }
+            }
+            .disabled(model.cachedBytes == 0)
+        } header: {
+            Text("On this device")
+        } footer: {
+            Text(footer).font(Typeface.caption)
+        }
+        .task { await model.readCacheSize() }
+    }
+
+    private var limit: Binding<Int> {
+        Binding(get: { model.cacheLimit }, set: { new in Task { await model.setCacheLimit(new) } })
+    }
+
+    private var footer: String {
+        let used = model.cachedBytes.map { "Using \(Self.size($0)). " } ?? ""
+        return used + "Files you open are kept here, sealed with your key, so they open quickly and offline. "
+            + "The ones opened longest ago go first once this is full. They stay in Google Drive either way."
+    }
+
+    static func size(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 }
