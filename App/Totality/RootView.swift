@@ -382,6 +382,9 @@ struct RootView: View {
         photosTurn += 1
         let turn = photosTurn
         let owner = await account?.backup?.deviceOwner()
+        // Drive files open in memory only, and go whenever who's here changes, signing out included.
+        let isSignedIn = if case .signedIn = account?.phase { true } else { false }
+        await reader?.drive?.use(owner: isSignedIn ? owner : nil)
         let newVault = await mailWiring.use(account: owner)
         mail.use(account: owner, restart: newVault)
         // Photos go to the server as they're added, so only a device that can sync gets a library.

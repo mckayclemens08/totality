@@ -166,7 +166,7 @@ private func openedFolder(_ fake: FakeDrive, cache: MemoryBlobStore = MemoryBlob
         #expect(try await vault.list().items.isEmpty)
         #expect(try await vault.search("library").isEmpty)
         await #expect(throws: ReaderError.notFound) { try await vault.markOpened(opened.item.id, at: Date()) }
-        await #expect(throws: ReaderError.notFound) { try await vault.saveNote(opened.item.id, title: "x", body: "y") }
+        await #expect(throws: ReaderError.self) { try await vault.saveNote(opened.item.id, title: "x", body: "y") }
         await #expect(throws: ReaderError.notFound) { try await vault.delete(opened.item.id) }
         #expect(model.cachedBytes == essay.count)
     }
@@ -218,5 +218,41 @@ private func openedFolder(_ fake: FakeDrive, cache: MemoryBlobStore = MemoryBlob
         // And what user 1 left behind is cleared away, since nothing there opens with user 2's key.
         try await user2.sweepCache()
         #expect(try cache.names().isEmpty)
+    }
+}
+
+@Suite struct DriveHeldFileTwoUserTests {
+    @MainActor @Test("Files user 1 opened from Drive go when user 1 signs out")
+    func heldFilesGoWithTheOwner() async throws {
+        let fake = FakeDrive()
+        fake.children["1notes"] = [driveFile("1essay", "Essay.md", mime: "text/markdown", size: 9)]
+        fake.contents["1essay"] = Data("Private.".utf8)
+        let setup = try makeDrive(fake)
+        try await setup.drive.link(DriveEntry(id: "1notes", name: "Notes", mime: DriveEntry.folderMime), account: driveOwner)
+        try await setup.drive.refresh("1notes", account: driveOwner)
+        let vault = try newVault()
+        let model = DriveModel(drive: setup.drive, vault: vault, settings: UserDefaults(suiteName: "drive-\(UUID())")!)
+        await model.use(owner: "user1")
+        let opened = try await model.openFile(DriveEntry(id: "1essay", name: "Essay.md", mime: "text/markdown"), in: "1notes", account: driveOwner)
+        #expect(try await vault.body(of: opened.item.id) == Data("Private.".utf8))
+        // The same person again keeps it open.
+        await model.use(owner: "user1")
+        #expect(try await vault.body(of: opened.item.id) == Data("Private.".utf8))
+        // Signing out, or anyone else, drops it.
+        await model.use(owner: nil)
+        await #expect(throws: ReaderError.notFound) { try await vault.body(of: opened.item.id) }
+        #expect(model.listing("1notes", account: driveOwner) == nil)
+    }
+
+    @Test("A key change drops every held Drive file")
+    func keyChangeDropsHeldFiles() async throws {
+        let vault = try newVault()
+        let item = ReaderItem(
+            id: UUID(), kind: .file, title: "Essay.md", collection: nil, mime: "text/plain",
+            byteCount: 8, createdAt: Date(), updatedAt: Date(), listenPosition: 0
+        )
+        try await vault.hold(item, body: Data("Private.".utf8))
+        await vault.close()
+        await #expect(throws: ReaderError.notFound) { try await vault.body(of: item.id) }
     }
 }

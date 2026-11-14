@@ -261,6 +261,23 @@ public final class DriveModel {
         await load()
     }
 
+    /// Who's signed in, as the app last said. Nil inside means signed out.
+    @ObservationIgnored private var owner: String??
+
+    /// Any change of who's here, signing out included, drops every Drive file held open and what's shown
+    /// of folders, so nothing opened by one person can be read after them.
+    public func use(owner: String?) async {
+        defer { self.owner = .some(owner) }
+        guard let before = self.owner, before != owner else { return }
+        await forgetOpened()
+    }
+
+    func forgetOpened() async {
+        await vault?.releaseHeld()
+        listings = [:]
+        folderProblems = [:]
+    }
+
     /// For a key move or a change of account.
     public func close() async {
         await drive.close()
