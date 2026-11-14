@@ -201,6 +201,17 @@ public final class ReaderModel {
         return opened
     }
 
+    public func setWordTarget(_ target: Int?, of id: UUID) async -> Bool {
+        do {
+            try await vault.setWordTarget(target, of: id)
+            await load()
+            return true
+        } catch {
+            notice = "The word target wasn't saved."
+            return false
+        }
+    }
+
     /// The converted doc looks right, so its kept original goes to Recently Deleted.
     public func confirmConversion(_ id: UUID) async -> Bool {
         do {

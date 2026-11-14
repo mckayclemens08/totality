@@ -34,7 +34,8 @@ enum WritingPage {
         let colours: [(String, ColorToken)] = [
             ("bg", theme.bg), ("surface", theme.surface), ("sunken", theme.surfaceSunken),
             ("text", theme.textPrimary), ("text2", theme.textSecondary), ("text3", theme.textTertiary),
-            ("accent", theme.accent), ("highlight", theme.highlight), ("shadow-dark", theme.shadowDark),
+            ("accent", theme.accent), ("highlight", theme.highlight), ("highlight-strong", theme.highlightStrong),
+            ("shadow-dark", theme.shadowDark),
         ]
         let sizes: [(String, CGFloat)] = [
             ("s1", Space.s1), ("s2", Space.s2), ("s3", Space.s3), ("s4", Space.s4),
@@ -104,6 +105,11 @@ enum WritingMessage: Equatable {
     /// The person asked to add or change a link. Carries the current address, if any.
     case link(String)
     case open(URL)
+    case stats(WritingStats)
+    case outline([WritingHeading])
+    /// Command-F: the person wants the find bar.
+    case find
+    case matches(WritingMatches)
 
     /// A doc can be as large as an imported file, and no larger.
     static let maxText = ReaderVault.maxImportBytes
@@ -132,6 +138,16 @@ enum WritingMessage: Equatable {
                   let url = URL(string: raw), DocText.isOpenable(url)
             else { return nil }
             return .open(url)
+        case "stats":
+            guard let stats = message["stats"] as? [String: Any] else { return nil }
+            return .stats(WritingStats(stats))
+        case "outline":
+            guard let headings = message["headings"] as? [[String: Any]] else { return nil }
+            return .outline(headings.prefix(WritingHeading.limit).compactMap(WritingHeading.init))
+        case "find":
+            return .find
+        case "matches":
+            return .matches(WritingMatches(message))
         default:
             return nil
         }
@@ -157,6 +173,79 @@ struct WritingFormat: Equatable {
         self.list = ["bullet", "numbered", "task"].contains(list) ? list : ""
         quote = state["quote"] as? Bool ?? false
         link = String((state["link"] as? String ?? "").prefix(DocText.maxLinkLength))
+    }
+}
+
+/// Counts the page works out after each pause.
+struct WritingStats: Equatable {
+    var words = 0
+    var selection = 0
+    var section = 0
+    var characters = 0
+
+    init() {}
+
+    init(_ values: [String: Any]) {
+        let count = { (key: String) in max(0, values[key] as? Int ?? 0) }
+        words = count("words")
+        selection = count("selection")
+        section = count("section")
+        characters = count("characters")
+    }
+}
+
+/// One heading in the outline, and where it starts in the text.
+struct WritingHeading: Equatable, Identifiable {
+    static let limit = 2000
+
+    let level: Int
+    let text: String
+    let from: Int
+
+    var id: Int { from }
+
+    init?(_ values: [String: Any]) {
+        guard let level = values["level"] as? Int, (1...6).contains(level),
+              let text = values["text"] as? String, let from = values["from"] as? Int, from >= 0
+        else { return nil }
+        self.level = level
+        self.text = String(text.prefix(200))
+        self.from = from
+    }
+
+    init(level: Int, text: String, from: Int) {
+        self.level = level
+        self.text = text
+        self.from = from
+    }
+}
+
+/// How many matches find has, and which one is selected (0 when none is).
+struct WritingMatches: Equatable {
+    var count = 0
+    var current = 0
+
+    init(count: Int = 0, current: Int = 0) {
+        self.count = count
+        self.current = current
+    }
+
+    init(_ values: [String: Any]) {
+        count = max(0, values["count"] as? Int ?? 0)
+        current = min(count, max(0, values["current"] as? Int ?? 0))
+    }
+}
+
+/// The page's settings, kept on this device. They change how the page looks and behaves, never the text,
+/// except smart punctuation, which changes what's typed from then on.
+struct WritingSettings: Equatable {
+    var focus = false
+    var typewriter = false
+    var smartPunctuation = true
+    var serif = false
+
+    var dictionary: [String: Bool] {
+        ["focus": focus, "typewriter": typewriter, "smartPunctuation": smartPunctuation, "serif": serif]
     }
 }
 

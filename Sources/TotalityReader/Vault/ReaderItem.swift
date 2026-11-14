@@ -21,6 +21,9 @@ public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
     /// A doc converted for the writing editor keeps its old self here until the person says the new
     /// version looks right.
     public var keptOriginalID: UUID? = nil
+    /// The length a doc is meant to reach, in words. It's sealed with the doc, so it follows it to every
+    /// device, and only its owner can read it.
+    public var wordTarget: Int? = nil
 
     public var displayTitle: String {
         title.isEmpty ? "Untitled" : title

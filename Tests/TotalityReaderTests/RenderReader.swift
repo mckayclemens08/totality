@@ -77,6 +77,19 @@ import TotalityUI
             }
             .padding(.top, Space.s4)
             try write(writing, name: "writing-states-\(label).png", to: directory)
+            var counts = WritingStats()
+            counts.words = 8_412
+            counts.section = 1_306
+            counts.selection = 48
+            let goals = WritingGoals(dailyTarget: 750, day: "2026-11-13", written: 412)
+            let tools = VStack(alignment: .leading, spacing: Space.s4) {
+                WritingFindBar(controller: WritingEditorController(), onClose: {})
+                WritingCountsLine(stats: counts, docTarget: 80_000, goals: goals)
+                WritingOutline(headings: [], onJump: { _ in }, onFold: { _ in })
+                    .frame(height: 260)
+            }
+            .padding(.top, Space.s4)
+            try write(tools, name: "writing-tools-\(label).png", to: directory)
         }
     }
 }

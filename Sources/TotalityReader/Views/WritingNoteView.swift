@@ -1,5 +1,8 @@
 import SwiftUI
 import TotalityUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// A doc open for writing: its title, the writing page, and the format bar. Opens and saves through the
 /// same path the Reader always has, and converts an older doc to Markdown the first time it opens.
@@ -27,7 +30,29 @@ struct NoteEditor: View {
     @State private var keptOriginal: UUID?
     @State private var linkAddress = ""
     @State private var chapter: String?
+    @State private var docTarget: Int?
+    @State private var showsFind = false
+    @State private var showsOutline = false
+    @State private var showsSettings = false
+    @State private var goals = WritingGoals.load()
+    @AppStorage("reader.writing.focus") private var focus = false
+    @AppStorage("reader.writing.typewriter") private var typewriter = false
+    @AppStorage("reader.writing.smartPunctuation") private var smartPunctuation = true
+    @AppStorage("reader.writing.serif") private var serif = false
     @Environment(\.openURL) private var openURL
+
+    private var settings: Binding<WritingSettings> {
+        Binding(
+            get: { WritingSettings(focus: focus, typewriter: typewriter, smartPunctuation: smartPunctuation, serif: serif) },
+            set: {
+                focus = $0.focus
+                typewriter = $0.typewriter
+                smartPunctuation = $0.smartPunctuation
+                serif = $0.serif
+                editor.apply($0)
+            }
+        )
+    }
 
     private var draft: Draft {
         Draft(title: title, revision: editor.revision)
@@ -82,8 +107,54 @@ struct NoteEditor: View {
         .onChange(of: editor.linkRequest) {
             if let address = editor.linkRequest { linkAddress = address }
         }
+        .toolbar {
+            if !readAlong, saved != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    ToolbarIcon("Outline", systemImage: "list.bullet.indent") { showsOutline.toggle() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button("Find and replace", systemImage: "magnifyingglass") { showsFind = true }
+                        Toggle("Focus mode", isOn: settings.focus)
+                        Toggle("Typewriter scrolling", isOn: settings.typewriter)
+                        Button("Writing settings and targets", systemImage: "slider.horizontal.3") { showsSettings = true }
+                    } label: {
+                        ToolbarGlyph(systemImage: "textformat").accessibilityLabel("Writing tools")
+                    }
+                }
+            }
+        }
+        .inspector(isPresented: $showsOutline) {
+            WritingOutline(
+                headings: editor.outline,
+                onJump: { heading in
+                    editor.run("jump", heading.from)
+                    #if os(iOS)
+                    if UIDevice.current.userInterfaceIdiom == .phone { showsOutline = false }
+                    #endif
+                },
+                onFold: { heading in editor.run("fold", heading.from) }
+            )
+            .presentationDetents([.medium, .large])
+            .inspectorColumnWidth(min: 220, ideal: 280, max: 360)
+        }
+        .sheet(isPresented: $showsSettings) {
+            WritingSettingsSheet(
+                settings: settings,
+                dailyTarget: Binding(get: { goals.dailyTarget }, set: { goals.dailyTarget = $0; goals.save() }),
+                docTarget: docTarget,
+                onDocTarget: { target in
+                    Task { if await model.setWordTarget(target, of: item.id) { docTarget = target } }
+                }
+            )
+        }
+        .onChange(of: editor.findRequests) { showsFind = true }
         .task {
             editor.onOpen = { url in openURL(url) }
+            editor.onWordsWritten = { words in
+                goals.add(words)
+                goals.save()
+            }
             await editor.start()
             await reload()
             await model.prepareListening(to: item.id)
@@ -124,6 +195,9 @@ struct NoteEditor: View {
                 .foregroundStyle(theme.textPrimary.color)
                 .padding(.horizontal, Space.s4)
                 .padding(.top, Space.s4)
+            if showsFind {
+                WritingFindBar(controller: editor) { showsFind = false }
+            }
             if let keptOriginal {
                 ConversionNotice(
                     onConfirm: {
@@ -144,7 +218,11 @@ struct NoteEditor: View {
                 }
         }
         .safeAreaInset(edge: .bottom) {
-            WritingFormatBar(controller: editor)
+            VStack(spacing: Space.s1) {
+                WritingCountsLine(stats: editor.stats, docTarget: docTarget, goals: goals)
+                WritingFormatBar(controller: editor)
+            }
+            .background(theme.bg.color)
         }
     }
 
@@ -152,8 +230,9 @@ struct NoteEditor: View {
         do {
             // The navigation value can be out of date, so only its ID is trusted.
             let opened = try await model.loadMarkdown(item.id)
-            editor.load(opened.text)
+            editor.load(opened.text, settings: settings.wrappedValue)
             title = opened.item.title
+            docTarget = opened.item.wordTarget
             keptOriginal = opened.item.keptOriginalID
             saved = Draft(title: opened.item.title, revision: editor.revision)
             version = opened.item.updatedAt
@@ -216,8 +295,9 @@ struct ConversionNotice: View {
     }
 }
 
-/// Headings, emphasis, lists, quotes and links, always within reach. On the Mac the same commands have
-/// shortcuts: Command-B, Command-I, Command-K, Command-Option-1 to 3, and Command-Shift-7 and 8.
+/// Headings, emphasis, lists, quotes, links and undo, always within reach: on iPhone it rides above the
+/// keyboard. With a keyboard the same commands have shortcuts: Command-B, I and K, Command-Option-0 to 3,
+/// Command-Shift-7, 8 and X, Command-Z and Command-Shift-Z, and Command-F and G for find.
 struct WritingFormatBar: View {
     let controller: WritingEditorController
 
@@ -235,6 +315,11 @@ struct WritingFormatBar: View {
                 iconButton("checklist", label: "Checklist", isOn: format.list == "task") { controller.run("task") }
                 iconButton("text.quote", label: "Quote", isOn: format.quote) { controller.run("quote") }
                 iconButton("link", label: "Link", isOn: !format.link.isEmpty) { controller.linkRequest = format.link }
+                iconButton("arrow.uturn.backward", label: "Undo", isOn: false) { controller.run("undo") }
+                iconButton("arrow.uturn.forward", label: "Redo", isOn: false) { controller.run("redo") }
+                #if os(iOS)
+                iconButton("keyboard.chevron.compact.down", label: "Hide keyboard", isOn: false) { controller.run("blur") }
+                #endif
             }
             .padding(.horizontal, Space.s3)
             .padding(.vertical, Space.s2)
