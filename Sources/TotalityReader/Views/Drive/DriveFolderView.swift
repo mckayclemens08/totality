@@ -116,7 +116,9 @@ struct DriveFolderView: View {
                 DriveEntryRow(entry: entry)
             }
         } else {
-            DriveEntryRow(entry: entry)
+            NavigationLink(value: ReaderRoute.driveFile(DriveFileRoute(location: location, entry: entry))) {
+                DriveEntryRow(entry: entry)
+            }
         }
     }
 }

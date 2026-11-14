@@ -42,6 +42,15 @@ enum ContentSetup {
             .map { GoogleAccounts(signIn: $0) }
     }
 
+    /// Opened Drive files, sealed. In Caches, so they stay out of backups and the system may clear them
+    /// when space runs low: they come back from Google on the next open.
+    private static func driveCache() throws -> FileBlobStore {
+        try FileBlobStore(directory: FileManager.default
+            .url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("Totality", isDirectory: true)
+            .appendingPathComponent("GoogleDrive", isDirectory: true))
+    }
+
     static func keyRing() throws -> ContentKeyRing {
         let stores = try stores()
         return ContentKeyRing(keys: KeychainKeyStore(), areas: [
@@ -79,9 +88,12 @@ enum ContentSetup {
         let devices = SystemCalendarSource()
         let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
         let reader = ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices()))
-        let drive = GoogleDrive(accounts: googleAccounts(), store: stores.googleDrive, rootKey: rootKey)
+        let drive = GoogleDrive(
+            accounts: googleAccounts(), store: stores.googleDrive,
+            cache: try driveCache(), rootKey: rootKey
+        )
         if drive.isAvailable {
-            let model = DriveModel(drive: drive)
+            let model = DriveModel(drive: drive, vault: readerVault)
             model.attach(to: reader.refresher)
             reader.drive = model
         }

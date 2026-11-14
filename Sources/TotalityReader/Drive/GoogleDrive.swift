@@ -56,15 +56,22 @@ public actor GoogleDrive {
     private let accounts: GoogleAccounts?
     private let api: DriveAPI?
     private let store: any BlobStore
-    private let rootKey: ContentRootKey
-    private let now: @Sendable () -> Date
-    private var isClosed = false
+    /// Where opened files are kept, apart from the rest because it's only a cache: it isn't carried
+    /// through a key move, and anything in it this key can't open is cleared away.
+    let cache: (any BlobStore)?
+    let rootKey: ContentRootKey
+    let now: @Sendable () -> Date
+    private(set) var isClosed = false
 
     /// `accounts` is nil when this build has no Google sign-in.
-    public init(accounts: GoogleAccounts?, store: any BlobStore, rootKey: ContentRootKey, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(
+        accounts: GoogleAccounts?, store: any BlobStore, cache: (any BlobStore)? = nil, rootKey: ContentRootKey,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.accounts = accounts
         api = accounts.map { DriveAPI(signIn: $0.signIn) }
         self.store = store
+        self.cache = cache
         self.rootKey = rootKey
         self.now = now
     }
@@ -236,21 +243,31 @@ public actor GoogleDrive {
         return found
     }
 
+    /// Whether a folder, as `"account/folderID"`, is a linked one or inside one.
+    func reachableFolder(_ key: String) throws -> Bool {
+        reachable(in: try loadState()).contains(key)
+    }
+
     /// Drops every kept listing that's no longer inside a linked folder, like after an unlink.
     func prune() throws {
         var state = try loadState()
         let kept = reachable(in: state)
         let gone = state.listings.filter { !kept.contains($0.key) }
-        guard !gone.isEmpty else { return }
+        let goneFiles = state.files.filter { !kept.contains($0.value.folderKey) }
+        guard !gone.isEmpty || !goneFiles.isEmpty else { return }
         for (key, id) in gone {
             try store.delete(Self.name(id))
             state.listings[key] = nil
+        }
+        for (key, file) in goneFiles {
+            try cache?.delete(Self.fileName(file.blob))
+            state.files[key] = nil
         }
         try saveState(state)
     }
 
     /// Only an account that's connected and allows Drive gets a token.
-    private func reader(_ address: String) async throws -> (DriveAPI, String) {
+    func reader(_ address: String) async throws -> (DriveAPI, String) {
         guard let accounts, let api else { throw DriveProblem.unexpected }
         guard !isClosed else { throw ReaderError.closed }
         do {
@@ -272,6 +289,8 @@ public actor GoogleDrive {
         var links: [DriveLink] = []
         /// Each kept listing's blob, by `"account/folderID"`.
         var listings: [String: UUID] = [:]
+        /// Files kept on the device after they were opened, by `"account/fileID"`.
+        var files: [String: CachedFile] = [:]
 
         init() {}
 
@@ -279,6 +298,7 @@ public actor GoogleDrive {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             links = try values.decode([DriveLink].self, forKey: .links)
             listings = try values.decodeIfPresent([String: UUID].self, forKey: .listings) ?? [:]
+            files = try values.decodeIfPresent([String: CachedFile].self, forKey: .files) ?? [:]
         }
     }
 
