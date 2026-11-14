@@ -1,0 +1,132 @@
+/* The writing page. Every colour, size and space is a variable that Swift fills from the design
+   tokens (Sources/TotalityUI/Tokens.swift), so nothing here is a brand decision. */
+html {
+  font: -apple-system-body;
+  -webkit-text-size-adjust: 100%;
+  background: var(--tl-bg);
+  color: var(--tl-text);
+  color-scheme: light;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+#editor {
+  max-width: var(--tl-width);
+  margin: 0 auto;
+  padding: 0 var(--tl-gutter) var(--tl-end-space);
+}
+.cm-editor {
+  font-family: -apple-system, system-ui, sans-serif;
+  font-size: 1.0625em;
+  background: transparent;
+}
+.tl-serif .cm-editor {
+  font-family: ui-serif, "New York", Georgia, serif;
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-scroller {
+  font-family: inherit;
+  line-height: 1.6;
+  overflow: visible;
+}
+.cm-content {
+  padding: var(--tl-s2) 0;
+  caret-color: var(--tl-accent);
+}
+.cm-line {
+  padding: 0;
+}
+.cm-placeholder {
+  color: var(--tl-text3);
+}
+.cm-cursor {
+  border-left-color: var(--tl-accent);
+  border-left-width: 2px;
+}
+.cm-selectionBackground,
+.cm-focused .cm-selectionBackground,
+::selection {
+  background: var(--tl-highlight) !important;
+}
+
+/* Headings carry weight more than size, as everywhere in Totality. */
+.cm-tl-h1, .cm-tl-h2, .cm-tl-h3, .cm-tl-h4, .cm-tl-h5, .cm-tl-h6 {
+  font-weight: 700;
+  line-height: 1.3;
+}
+.cm-tl-h1 { font-size: 1.75em; padding-top: var(--tl-s4) !important; }
+.cm-tl-h2 { font-size: 1.4em; padding-top: var(--tl-s3) !important; }
+.cm-tl-h3 { font-size: 1.2em; padding-top: var(--tl-s2) !important; }
+.cm-tl-h4 { font-size: 1.05em; }
+.cm-tl-h5, .cm-tl-h6 { font-size: 1em; color: var(--tl-text2); }
+
+.cm-tl-strong { font-weight: 700; }
+.cm-tl-em { font-style: italic; }
+.cm-tl-strike { text-decoration: line-through; }
+.cm-tl-sup { vertical-align: super; font-size: 0.8em; }
+.cm-tl-sub { vertical-align: sub; font-size: 0.8em; }
+.cm-tl-link { color: var(--tl-accent); text-decoration: underline; text-underline-offset: 0.15em; }
+.cm-tl-code, .cm-tl-mono {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.9em;
+}
+.cm-tl-code {
+  background: var(--tl-sunken);
+  border-radius: var(--tl-radius-sm);
+  padding: 0 var(--tl-s1);
+}
+.cm-tl-symbol { color: var(--tl-text2); }
+.cm-tl-done { color: var(--tl-text2); text-decoration: line-through; }
+
+/* A quote and a code block sit in the surface, never behind a line. */
+.cm-tl-quote {
+  background: var(--tl-sunken);
+  padding-left: var(--tl-s4) !important;
+  padding-right: var(--tl-s3) !important;
+  color: var(--tl-text2);
+}
+.cm-tl-codeblock {
+  background: var(--tl-sunken);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.9em;
+  padding-left: var(--tl-s3) !important;
+}
+.cm-tl-table {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.9em;
+}
+.cm-tl-item {
+  padding-left: 1.25em !important;
+  text-indent: -1.25em;
+}
+.cm-tl-bullet {
+  display: inline-block;
+  color: var(--tl-text2);
+  min-width: 1.25em;
+  text-indent: 0;
+}
+.cm-tl-task {
+  accent-color: var(--tl-accent);
+  width: 1em;
+  height: 1em;
+  margin: 0 var(--tl-s2) 0 0;
+  vertical-align: -0.12em;
+}
+.cm-tl-rule {
+  display: inline-block;
+  width: 100%;
+  height: var(--tl-hairline);
+  vertical-align: middle;
+  background: var(--tl-shadow-dark);
+}
+.cm-tl-image {
+  display: inline-block;
+  background: var(--tl-sunken);
+  color: var(--tl-text2);
+  border-radius: var(--tl-radius-sm);
+  padding: 0 var(--tl-s2);
+  font-size: 0.9em;
+}

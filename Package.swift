@@ -28,7 +28,7 @@ let package = Package(
         .target(name: "TotalityReader", dependencies: [
             "TotalityCore", "TotalityUI",
             .product(name: "FluidAudio", package: "FluidAudio"),
-        ]),
+        ], resources: [.copy("Resources/Editor")]),
         .target(name: "TotalityCalendar", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityWeb", dependencies: ["TotalityCore", "TotalityUI"], resources: [.copy("Resources/blocklist.json")]),
         .target(name: "TotalityMail", dependencies: ["TotalityCore", "TotalityUI"]),

@@ -198,7 +198,7 @@ public actor ReaderVault {
     public func createNote(title: String = "", folder: UUID? = nil) throws -> ReaderItem {
         let now = Date()
         let item = ReaderItem(
-            id: UUID(), kind: .note, title: title, collection: nil, mime: "text/plain",
+            id: UUID(), kind: .note, title: title, collection: nil, mime: MarkdownText.mime,
             byteCount: 0, createdAt: now, updatedAt: now, listenPosition: 0, folderID: folder
         )
         try writeBody(Data(), id: item.id)
@@ -231,9 +231,51 @@ public actor ReaderVault {
         return .keptAsCopy(try saveNote(copy.id, title: copy.title, body: body, mime: mime))
     }
 
-    public func doc(_ id: UUID) throws -> DocText {
-        let text = String(decoding: try body(of: id), as: UTF8.self)
-        return try item(id).mime == ReadableText.markdownMime ? DocText(markdown: text) : DocText(plain: text)
+    /// A note's text for the writing editor. A doc from before the editor is converted to Markdown first,
+    /// once, and its old self is kept beside it as a read-only file until the person confirms.
+    public func markdown(of id: UUID) throws -> (item: ReaderItem, text: String) {
+        var current = try item(id)
+        guard current.kind == .note else { throw ReaderError.notANote }
+        let data = try body(of: id)
+        let old = String(decoding: data, as: UTF8.self)
+        if current.mime == MarkdownText.mime { return (current, old) }
+        let doc = current.mime == ReadableText.markdownMime ? DocText(markdown: old) : DocText(plain: old)
+        let converted = MarkdownText.markdown(from: doc)
+        if !old.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            current.keptOriginalID = try keepOriginal(of: current, body: data).id
+        }
+        // Tidying up isn't an edit, so the time stays. Two devices converting the same doc write the same
+        // words under the same time, and sync sees nothing to keep a copy of.
+        current.mime = MarkdownText.mime
+        current.byteCount = converted.utf8.count
+        try writeBody(Data(converted.utf8), id: id)
+        try writeMeta(current)
+        return (current, converted)
+    }
+
+    /// The ID comes from the doc's, so a second conversion on another device lands on the same copy.
+    private func keepOriginal(of note: ReaderItem, body: Data) throws -> ReaderItem {
+        let id = rootKey.derivedID(from: "reader-original:\(note.id.uuidString.lowercased())")
+        try store.delete(deletionName(id))
+        let now = Date()
+        let original = ReaderItem(
+            id: id, kind: .file, title: "\(note.displayTitle) (before the new editor)", collection: nil,
+            mime: note.mime == ReadableText.markdownMime ? ReadableText.markdownMime : "text/plain",
+            byteCount: body.count, createdAt: now, updatedAt: now, listenPosition: 0, folderID: note.folderID
+        )
+        try writeBody(body, id: id)
+        try writeMeta(original)
+        return original
+    }
+
+    /// The person says the converted doc looks right, so its old self goes to Recently Deleted, where it
+    /// can still be brought back for a while.
+    public func confirmConversion(_ id: UUID) throws {
+        var current = try item(id)
+        guard let original = current.keptOriginalID else { return }
+        if (try? item(original)) != nil { try delete(original) }
+        current.keptOriginalID = nil
+        try writeMeta(current)
     }
 
     public func importFile(_ data: Data, filename: String, folder: UUID? = nil) throws -> ReaderItem {

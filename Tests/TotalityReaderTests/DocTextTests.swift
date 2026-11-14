@@ -174,30 +174,4 @@ import Testing
         #expect(doc.paragraphs[1].text == "Title")
         #expect(doc.paragraphs.count == 3)
     }
-
-    @Test("A doc saves with its formatting and reads back, and a plain note still opens")
-    func vaultRoundTrip() async throws {
-        let vault = try newVault()
-        let note = try await vault.createNote(title: "Trip")
-        try await vault.saveNote(note.id, title: "Trip", body: "# plain")
-        #expect(try await vault.doc(note.id).paragraphs[0].style == .body)
-        try await vault.saveNote(note.id, title: "Trip", body: trip.markdown, mime: "text/markdown")
-        #expect(try await vault.doc(note.id) == trip)
-        #expect(try await vault.text(of: note.id).contains("**") == false)
-        #expect(try await vault.search("forecast").count == 1)
-        #expect(try await vault.search("https").isEmpty)
-    }
-
-    @Test("A kept copy keeps its formatting")
-    func keptCopies() async throws {
-        let vault = try newVault()
-        let note = try await vault.createNote(title: "Trip")
-        try await vault.delete(note.id)
-        let result = try await vault.saveNote(note.id, title: "Trip", body: trip.markdown, mime: "text/markdown", basedOn: note.updatedAt)
-        guard case .keptAsCopy(let copy) = result else {
-            Issue.record("Expected a copy")
-            return
-        }
-        #expect(try await vault.doc(copy.id) == trip)
-    }
 }
