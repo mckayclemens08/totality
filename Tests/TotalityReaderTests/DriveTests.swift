@@ -37,6 +37,7 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
         #expect(url.host == "www.googleapis.com")
         let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
         lock.withLock { asked.append(components) }
+        if status == 0 { return (Data("<html>".utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!) }
         if status != 200 { return answer(status, errorBody) }
         let query = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { $1 })
         #expect(components.path == "/drive/v3/files")
@@ -232,5 +233,143 @@ func makeDrive(
         // User 2 linking their own folder doesn't bring user 1's back.
         try await user2.link(DriveEntry(id: "1mine", name: "Mine", mime: DriveEntry.folderMime), account: driveOwner)
         #expect(try await user2.links().map(\.name) == ["Mine"])
+    }
+}
+
+@Suite struct DriveBrowseTests {
+    private func linked(_ fake: FakeDrive, store: MemoryBlobStore = MemoryBlobStore()) async throws -> DriveSetup {
+        fake.children["1notes"] = [
+            driveFolder("1week1", "Week 1"),
+            driveFile("1essay", "Essay.md", mime: "text/markdown", size: 2_400),
+            driveFile("1doc", "Lecture notes", mime: DriveEntry.googleDocMime),
+        ]
+        fake.children["1week1"] = [driveFile("1reading", "Reading.pdf", mime: "application/pdf", size: 81_000)]
+        let setup = try makeDrive(fake, store: store)
+        try await setup.drive.link(DriveEntry(id: "1notes", name: "School notes", mime: DriveEntry.folderMime), account: driveOwner)
+        return setup
+    }
+
+    @Test func aLinkedFolderListsEverythingInsideAndKeepsIt() async throws {
+        let fake = FakeDrive()
+        let setup = try await linked(fake)
+        #expect(try await setup.drive.kept("1notes", account: driveOwner) == nil)
+        let listing = try await setup.drive.refresh("1notes", account: driveOwner)
+        #expect(listing.entries.map(\.name) == ["Week 1", "Essay.md", "Lecture notes"])
+        #expect(listing.entries[1].size == 2_400)
+        #expect(listing.entries[1].version == "7")
+        // Kept sealed, so the folder opens at once next time, even offline.
+        fake.status = 500
+        let reopened = GoogleDrive(accounts: setup.accounts, store: setup.store, rootKey: setup.rootKey)
+        #expect(try await reopened.kept("1notes", account: driveOwner)?.entries.count == 3)
+        for name in try setup.store.names() {
+            let blob = try #require(try setup.store.read(name))
+            #expect(blob.range(of: Data("Essay".utf8)) == nil)
+        }
+    }
+
+    @Test func onlyFoldersInsideALinkedOneCanBeRead() async throws {
+        let fake = FakeDrive()
+        fake.children["1private"] = [driveFile("1tax", "Taxes.pdf", mime: "application/pdf")]
+        let setup = try await linked(fake)
+        // Not linked and not inside a linked folder: refused without asking Google.
+        await #expect(throws: DriveProblem.notFound) { try await setup.drive.refresh("1private", account: driveOwner) }
+        #expect(fake.listings.isEmpty)
+        // A subfolder becomes readable once its linked parent has been listed.
+        await #expect(throws: DriveProblem.notFound) { try await setup.drive.refresh("1week1", account: driveOwner) }
+        try await setup.drive.refresh("1notes", account: driveOwner)
+        #expect(try await setup.drive.refresh("1week1", account: driveOwner).entries.map(\.name) == ["Reading.pdf"])
+    }
+
+    @Test func unlinkingDropsEverythingKeptUnderIt() async throws {
+        let fake = FakeDrive()
+        let store = MemoryBlobStore()
+        let setup = try await linked(fake, store: store)
+        try await setup.drive.refresh("1notes", account: driveOwner)
+        try await setup.drive.refresh("1week1", account: driveOwner)
+        #expect(try store.names().count == 3)
+        let link = try #require(try await setup.drive.links().first)
+        try await setup.drive.unlink(link)
+        // Only the state blob is left, and nothing inside can be read any more.
+        #expect(try store.names().count == 1)
+        #expect(try await setup.drive.kept("1week1", account: driveOwner) == nil)
+        await #expect(throws: DriveProblem.notFound) { try await setup.drive.refresh("1week1", account: driveOwner) }
+    }
+
+    @Test func refreshingEverythingReadsLinkedAndOpenedFolders() async throws {
+        let fake = FakeDrive()
+        let setup = try await linked(fake)
+        try await setup.drive.refresh("1notes", account: driveOwner)
+        try await setup.drive.refresh("1week1", account: driveOwner)
+        fake.children["1week1"] = [driveFile("1reading2", "Reading, week 2.pdf", mime: "application/pdf")]
+        let result = await setup.drive.refreshAll()
+        #expect(result.problems.isEmpty)
+        #expect(try await setup.drive.kept("1week1", account: driveOwner)?.entries.map(\.name) == ["Reading, week 2.pdf"])
+    }
+
+    @Test func aProblemKeepsWhatWasThereAndSaysSo() async throws {
+        let fake = FakeDrive()
+        let setup = try await linked(fake)
+        try await setup.drive.refresh("1notes", account: driveOwner)
+        fake.status = 404
+        let result = await setup.drive.refreshAll()
+        #expect(result.problems == ["\(driveOwner)/1notes": .notFound])
+        #expect(try await setup.drive.kept("1notes", account: driveOwner)?.entries.count == 3)
+    }
+
+    @Test func anAccountDisconnectedElsewhereLeavesNothingBehind() async throws {
+        let fake = FakeDrive()
+        let store = MemoryBlobStore()
+        let setup = try await linked(fake, store: store)
+        try await setup.drive.refresh("1notes", account: driveOwner)
+        try setup.accounts.forget(driveOwner)
+        _ = await setup.drive.refreshAll()
+        #expect(try store.names().count == 1)
+        try setup.accounts.keep(address: driveOwner, refreshToken: "1//again", granted: [DriveAPI.scope])
+        #expect(try await setup.drive.links().isEmpty)
+    }
+
+    @MainActor @Test func theQuietRefreshAsksGoogleOnlyEveryFewMinutes() async throws {
+        let fake = FakeDrive()
+        let setup = try await linked(fake)
+        let model = DriveModel(drive: setup.drive)
+        await model.load()
+        #expect(await model.refreshAll(force: false) == .done)
+        let asked = fake.listings.count
+        #expect(asked > 0)
+        #expect(await model.refreshAll(force: false) == .done)
+        #expect(fake.listings.count == asked)
+        // A pull always asks.
+        #expect(await model.refreshAll(force: true) == .done)
+        #expect(fake.listings.count > asked)
+    }
+
+    @MainActor @Test func aFolderShowsWhatWasKeptThenWhatsFresh() async throws {
+        let fake = FakeDrive()
+        let setup = try await linked(fake)
+        let model = DriveModel(drive: setup.drive)
+        await model.open("1notes", account: driveOwner)
+        #expect(model.listing("1notes", account: driveOwner)?.entries.count == 3)
+        fake.status = 0
+        await model.refresh("1notes", account: driveOwner)
+        #expect(model.listing("1notes", account: driveOwner)?.entries.count == 3)
+        #expect(model.problem("1notes", account: driveOwner) == .unexpected)
+    }
+}
+
+@Suite struct DriveBrowseTwoUserTests {
+    @Test("User 2 never sees user 1's kept Drive listings")
+    func user2SeesNoListings() async throws {
+        let fake = FakeDrive()
+        fake.children["1diary"] = [driveFile("1entry", "Entry.md", mime: "text/markdown")]
+        let user1 = try makeDrive(fake)
+        try await user1.drive.link(DriveEntry(id: "1diary", name: "Private diary", mime: DriveEntry.folderMime), account: driveOwner)
+        try await user1.drive.refresh("1diary", account: driveOwner)
+
+        let user2 = GoogleDrive(accounts: user1.accounts, store: user1.store, rootKey: try .generate())
+        #expect(try await user2.kept("1diary", account: driveOwner) == nil)
+        // User 1's folder isn't linked for user 2, so it can't be read through user 2's Reader at all.
+        let before = fake.listings.count
+        await #expect(throws: DriveProblem.notFound) { try await user2.refresh("1diary", account: driveOwner) }
+        #expect(fake.listings.count == before)
     }
 }

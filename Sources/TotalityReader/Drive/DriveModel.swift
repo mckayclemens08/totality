@@ -24,6 +24,12 @@ public final class DriveModel {
     public private(set) var isConnecting = false
     /// A problem to show on the Drive screens, cleared when it's dismissed or the next try starts.
     public var problem: String?
+    /// What's shown of each folder, by `"account/folderID"`: kept first, then fresh from Google.
+    public private(set) var listings: [String: DriveListing] = [:]
+    /// Folders that couldn't be read last time, by `"account/folderID"`.
+    public private(set) var folderProblems: [String: DriveProblem] = [:]
+    /// Accounts with linked folders that no longer allow Drive.
+    public private(set) var needsAllowing: Set<String> = []
 
     let drive: GoogleDrive
 
@@ -84,6 +90,81 @@ public final class DriveModel {
         return nil
     }
 
+    // MARK: Browsing
+
+    public func listing(_ folderID: String, account: String) -> DriveListing? {
+        listings[GoogleDrive.key(account, folderID)]
+    }
+
+    public func problem(_ folderID: String, account: String) -> DriveProblem? {
+        folderProblems[GoogleDrive.key(account, folderID)]
+    }
+
+    /// What was kept shows at once, then Google is asked.
+    public func open(_ folderID: String, account: String) async {
+        let key = GoogleDrive.key(account, folderID)
+        if listings[key] == nil, let kept = try? await drive.kept(folderID, account: account) { listings[key] = kept }
+        await refresh(folderID, account: account)
+    }
+
+    public func refresh(_ folderID: String, account: String) async {
+        let key = GoogleDrive.key(account, folderID)
+        do {
+            listings[key] = try await drive.refresh(folderID, account: account)
+            folderProblems[key] = nil
+        } catch is CancellationError {
+        } catch {
+            folderProblems[key] = DriveProblem.from(error)
+        }
+    }
+
+    /// How often the quiet refresh asks Google, which the Reader's refresher runs every minute.
+    static let quietInterval: TimeInterval = 5 * 60
+    @ObservationIgnored private var running: Task<RefreshOutcome, Never>?
+    @ObservationIgnored private var lastRefreshed: Date?
+
+    /// The Reader's quiet refresh and pull-to-refresh, as steps of its `Refresher`. A pull always asks
+    /// Google; the quiet one only every few minutes, so Drive isn't asked every minute.
+    public func attach(to refresher: Refresher) {
+        refresher.add("google drive", limit: .seconds(60), onlyWhenPulled: true) { [weak self] in
+            await self?.refreshAll(force: true) ?? .done
+        }
+        refresher.add("google drive quietly", limit: .seconds(60)) { [weak self] in
+            await self?.refreshAll(force: false) ?? .done
+        }
+    }
+
+    /// A run already going is joined, not repeated.
+    func refreshAll(force: Bool) async -> RefreshOutcome {
+        if let running { return await running.value }
+        if !force, let lastRefreshed, Date().timeIntervalSince(lastRefreshed) < Self.quietInterval { return .done }
+        let task = Task { await self.readAll() }
+        running = task
+        let outcome = await task.value
+        running = nil
+        lastRefreshed = Date()
+        return outcome
+    }
+
+    private func readAll() async -> RefreshOutcome {
+        let result = await drive.refreshAll()
+        await load()
+        folderProblems = result.problems
+        needsAllowing = result.needsAllowing
+        var fresh: [String: DriveListing] = [:]
+        for key in listings.keys {
+            let parts = key.split(separator: "/", maxSplits: 1).map(String.init)
+            if parts.count == 2, let kept = try? await drive.kept(parts[1], account: parts[0]) { fresh[key] = kept }
+        }
+        listings = fresh
+        let problems = Set(result.problems.values)
+        if problems.isEmpty { return .done }
+        if problems == [.offline] { return .offline }
+        // A folder gone from Drive shows on its own row, and a passing problem only once it lasts.
+        let lasting = problems.subtracting([.notFound]).first { !$0.isPassing } ?? problems.first { $0 != .notFound }
+        return lasting.map { .failed($0.message) } ?? .done
+    }
+
     // MARK: Choosing
 
     public func folders(in place: DrivePlace, account: String) async throws -> [DriveEntry] {
@@ -118,5 +199,7 @@ public final class DriveModel {
         await drive.close()
         links = []
         accounts = []
+        listings = [:]
+        folderProblems = [:]
     }
 }
