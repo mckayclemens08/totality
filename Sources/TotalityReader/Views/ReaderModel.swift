@@ -26,6 +26,8 @@ public final class ReaderModel {
     public var notice: String?
 
     public let listen: ListenController
+    /// Linked Google Drive folders (issue 102), or nil when this build has no Google sign-in.
+    public var drive: DriveModel?
     private let vault: ReaderVault
     /// The latest item's text and its sentences, made ahead so Listen starts sooner.
     private var prepared: (id: UUID, split: Task<Result<(String, ListenScript), any Error>, Never>)?
@@ -86,6 +88,7 @@ public final class ReaderModel {
         listen.stop()
         forgetPrepared()
         await vault.close()
+        await drive?.close()
     }
 
     public func load() async {

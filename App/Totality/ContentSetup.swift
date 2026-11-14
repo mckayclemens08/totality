@@ -20,7 +20,7 @@ enum ContentSetup {
 
     private static func stores() throws -> (
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
-        googleCalendar: FileBlobStore
+        googleCalendar: FileBlobStore, googleDrive: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -30,7 +30,9 @@ enum ContentSetup {
             try FileBlobStore(directory: base.appendingPathComponent("Mail", isDirectory: true)),
             try FileBlobStore(directory: base.appendingPathComponent("Photos", isDirectory: true)),
             // Apart from the Calendar's own, because this never syncs.
-            try FileBlobStore(directory: base.appendingPathComponent("GoogleCalendar", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("GoogleCalendar", isDirectory: true)),
+            // The Reader's linked Drive folders. Never synced: each device reads Google itself.
+            try FileBlobStore(directory: base.appendingPathComponent("GoogleDrive", isDirectory: true))
         )
     }
 
@@ -49,6 +51,7 @@ enum ContentSetup {
             SealedArea(store: stores.mail, purposes: MailVault.sealedPurposes),
             SealedArea(files: stores.photos, purposes: PhotoLibrary.sealedPurposes, chunked: PhotoLibrary.chunkedPurposes),
             SealedArea(store: stores.googleCalendar, purposes: GoogleCalendars.sealedPurposes),
+            SealedArea(store: stores.googleDrive, purposes: GoogleDrive.sealedPurposes),
         ])
     }
 
@@ -75,6 +78,9 @@ enum ContentSetup {
         let webVault = WebVault(store: stores.web, rootKey: rootKey)
         let devices = SystemCalendarSource()
         let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
+        let reader = ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices()))
+        let drive = GoogleDrive(accounts: googleAccounts(), store: stores.googleDrive, rootKey: rootKey)
+        if drive.isAvailable { reader.drive = DriveModel(drive: drive) }
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
@@ -87,7 +93,7 @@ enum ContentSetup {
             MessagesRefresher(refresh: { await refresh(.messages) }),
         ])
         return (
-            ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices())),
+            reader,
             CalendarModel(
                 vault: calendarVault,
                 devices: devices, reminders: SystemReminders(),

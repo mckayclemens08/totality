@@ -19,6 +19,7 @@ struct ReaderFolderView: View {
     @State private var name = ""
     @State private var moving: ReaderItem?
     @State private var deleting: ReaderItem?
+    @State private var linkingDrive = false
 
     private var theme: Theme { .current }
     private var current: ReaderItem? { folder.flatMap { id in model.library.folders.first { $0.id == id } } }
@@ -67,6 +68,9 @@ struct ReaderFolderView: View {
                 }
             } message: { _ in
                 Text("Everything inside stays in Recently Deleted for 30 days.")
+            }
+            .sheet(isPresented: $linkingDrive) {
+                if let drive = model.drive { DriveLinkSheet(model: drive) }
             }
             .sheet(item: $moving) { entry in
                 ReaderMoveSheet(entry: entry, library: model.library) { destination in
@@ -128,6 +132,9 @@ struct ReaderFolderView: View {
                     namingFolder = true
                 }
                 Button("Import files", systemImage: "square.and.arrow.down") { importing = true }
+                if model.drive?.isAvailable == true {
+                    Button("Google Drive folders", systemImage: "link") { linkingDrive = true }
+                }
             } label: {
                 ToolbarGlyph(systemImage: "plus").accessibilityLabel("Add")
             }
