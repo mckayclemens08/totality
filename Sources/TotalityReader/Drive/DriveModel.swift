@@ -30,6 +30,8 @@ public final class DriveModel {
     public private(set) var folderProblems: [String: DriveProblem] = [:]
     /// Accounts with linked folders that no longer allow Drive.
     public private(set) var needsAllowing: Set<String> = []
+    /// Linked folders and the files opened from them, newest first, for the Reader's home tile.
+    public private(set) var recent: [DriveRecent] = []
 
     let drive: GoogleDrive
     /// Where an opened file is held, so the Reader's viewers and Listen can read it.
@@ -77,7 +79,7 @@ public final class DriveModel {
 
     /// The ID a Drive file opens under in the Reader. The same file gets the same one, so Listen picks up
     /// where it was in this run. It's never stored.
-    static func readerID(account: String, fileID: String) -> UUID {
+    nonisolated static func readerID(account: String, fileID: String) -> UUID {
         UUID(derivedFrom: "totality.reader.drive.file.\(GoogleDrive.key(account, fileID))")
     }
 
@@ -88,6 +90,7 @@ public final class DriveModel {
         let file = try await drive.file(entry.id, in: folderID, account: account, limit: cacheLimit)
         let item = try await hold(file)
         await readCacheSize()
+        await loadRecent()
         return (item, file)
     }
 
@@ -106,6 +109,35 @@ public final class DriveModel {
         } catch {
             problem = "Your linked Drive folders couldn't be read on this device."
         }
+        await loadRecent()
+    }
+
+    /// Reads what the home tile shows. A problem reads as nothing, so the tile never shows stale entries.
+    public func loadRecent() async {
+        recent = (try? await drive.recent()) ?? []
+    }
+
+    /// The ID the home tile and Listen know a recent entry by. A file's is the one it opens under.
+    public nonisolated static func shelfID(_ recent: DriveRecent) -> UUID {
+        recent.isFolder
+            ? UUID(derivedFrom: "totality.reader.drive.folder.\(recent.key)")
+            : readerID(account: recent.account, fileID: recent.id)
+    }
+
+    /// Where a tile entry opens: a linked folder, or a file where its folder lists it now.
+    public enum ShelfTarget: Equatable {
+        case folder(account: String, folderID: String, name: String)
+        case file(account: String, folderID: String, entry: DriveEntry)
+    }
+
+    public func target(of recent: DriveRecent) async -> ShelfTarget? {
+        if recent.isFolder {
+            let links = (try? await drive.links()) ?? []
+            guard let link = links.first(where: { $0.account == recent.account && $0.folderID == recent.id }) else { return nil }
+            return .folder(account: link.account, folderID: link.folderID, name: link.name)
+        }
+        guard let found = try? await drive.whereIs(recent.id, account: recent.account) else { return nil }
+        return .file(account: recent.account, folderID: found.folderID, entry: found.entry)
     }
 
     public func links(for account: String) -> [DriveLink] {
@@ -163,6 +195,7 @@ public final class DriveModel {
     /// What was kept shows at once, then Google is asked.
     public func open(_ folderID: String, account: String) async {
         let key = GoogleDrive.key(account, folderID)
+        if (try? await drive.noteOpenedFolder(folderID, account: account)) != nil { await loadRecent() }
         if listings[key] == nil, let kept = try? await drive.kept(folderID, account: account) { listings[key] = kept }
         await refresh(folderID, account: account)
     }
@@ -265,6 +298,7 @@ public final class DriveModel {
         defer { self.owner = .some(owner) }
         guard let before = self.owner, before != owner else { return }
         await forgetOpened()
+        if owner != nil { await loadRecent() }
     }
 
     /// Goes up whenever opened files are dropped, so a screen showing one lets it go too.
@@ -275,6 +309,7 @@ public final class DriveModel {
         await vault?.releaseHeld()
         listings = [:]
         folderProblems = [:]
+        recent = []
     }
 
     // MARK: Editing and importing (step 4)
@@ -341,7 +376,7 @@ public final class DriveModel {
     }
 
     /// The name without a document extension, so "Essay.md" becomes "Essay" but "Report v1.2" stays.
-    static func title(of name: String) -> String {
+    nonisolated static func title(of name: String) -> String {
         let ext = (name as NSString).pathExtension.lowercased()
         let base = (name as NSString).deletingPathExtension
         return ["md", "markdown", "txt", "docx"].contains(ext) && !base.isEmpty ? base : name
@@ -398,5 +433,6 @@ public final class DriveModel {
         accounts = []
         listings = [:]
         folderProblems = [:]
+        recent = []
     }
 }

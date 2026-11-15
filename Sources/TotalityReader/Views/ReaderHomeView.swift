@@ -86,6 +86,11 @@ public struct ReaderHomeView: View {
         .task(id: model.requestedItem) {
             guard let id = model.requestedItem else { return }
             model.requestedItem = nil
+            // A linked Drive folder, or a file opened from one, on the home tile.
+            if let route = await model.openDriveShelfEntry(id) {
+                if let route { path = [route] } else { model.notice = DriveProblem.notFound.message }
+                return
+            }
             if let item = try? await model.currentItem(id) {
                 path = [.item(item)]
             } else {

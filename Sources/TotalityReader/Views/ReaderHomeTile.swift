@@ -1,7 +1,8 @@
 import SwiftUI
 import TotalityUI
 
-/// The Reader's big home tile: a shelf, with what's being read or heard at the front.
+/// The Reader's big home tile: a shelf, with what's being read or heard at the front. Linked Google Drive
+/// folders and files opened from them sit on it too, by when they were last opened.
 public struct ReaderHomeTile: View {
     private static let shelfSize: [BigTileSize: Int] = [.medium: 0, .large: 3, .square: 3]
 
@@ -16,17 +17,17 @@ public struct ReaderHomeTile: View {
         self.onOpen = onOpen
     }
 
-    private func open(_ item: ReaderItem) {
-        model.requestedItem = item.id
+    private func open(_ entry: ShelfEntry) {
+        model.requestedItem = entry.id
         onOpen()
     }
 
-    private var front: ReaderItem? {
+    private var front: ShelfEntry? {
         model.frontOfShelf
     }
 
-    private var shelf: [ReaderItem] {
-        Array(model.library.lastOpened.filter { $0.id != front?.id }.prefix(Self.shelfSize[size] ?? 0))
+    private var shelf: [ShelfEntry] {
+        Array(model.shelf.filter { $0.id != front?.id }.prefix(Self.shelfSize[size] ?? 0))
     }
 
     public var body: some View {
@@ -34,9 +35,9 @@ public struct ReaderHomeTile: View {
             if let front { frontBook(front) }
             if !shelf.isEmpty {
                 HStack(alignment: .top, spacing: Space.s3) {
-                    ForEach(shelf) { item in
-                        SmallBook(item: item)
-                            .tileLink(item.displayTitle) { open(item) }
+                    ForEach(shelf) { entry in
+                        SmallBook(entry: entry)
+                            .tileLink(entry.title) { open(entry) }
                     }
                 }
             }
@@ -52,7 +53,7 @@ public struct ReaderHomeTile: View {
         }
     }
 
-    private func frontBook(_ item: ReaderItem) -> some View {
+    private func frontBook(_ item: ShelfEntry) -> some View {
         let theme = Theme.current
         let isPlaying = model.listen.current?.id == item.id
         return VStack(spacing: Space.s2) {
@@ -64,7 +65,7 @@ public struct ReaderHomeTile: View {
                         .font(Typeface.caption)
                         .foregroundStyle(theme.accent.color)
                 }
-                Text(item.displayTitle)
+                Text(item.title)
                     .font(size == .medium ? Typeface.headline : Typeface.title)
                     .foregroundStyle(theme.textPrimary.color)
                     .lineLimit(size == .medium ? 1 : 2)
@@ -78,17 +79,17 @@ public struct ReaderHomeTile: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .tileLink(item.displayTitle) { open(item) }
+        .tileLink(item.title) { open(item) }
     }
 }
 
 private struct SmallBook: View {
-    let item: ReaderItem
+    let entry: ShelfEntry
 
     var body: some View {
         VStack(spacing: Space.s1) {
-            BookIcon(systemImage: item.systemImage, size: Space.s5)
-            Text(item.displayTitle)
+            BookIcon(systemImage: entry.systemImage, size: Space.s5)
+            Text(entry.title)
                 .font(Typeface.micro)
                 .foregroundStyle(Theme.current.textSecondary.color)
                 .lineLimit(2)

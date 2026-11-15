@@ -203,6 +203,7 @@ Spec: issue #102 (owner agreed 2026-11-13). Full Drive access is the owner's nam
 - Import (step 4) makes a Totality copy, which uses Totality storage: a Google Doc, Word file or Markdown file becomes a doc to write in (Word keeps its headings and paragraphs, not its layout), and anything else imports sealed like any file, up to 49 MB. Drive isn't touched.
 - Disconnect (step 4) revokes the token at Google, which ends that account for every module, so the sheet names the others first. It removes the account's links, listings and downloaded files from the device, and closes any Drive file on screen. Unlinking and any change of who's signed in close open Drive files too.
 - Everything from Drive is labelled "Stored in Google Drive, not end-to-end encrypted" (rule 5).
+- The Reader's home tile shows linked folders and Drive files opened in the Reader beside library items, by when each was last opened. `DriveRecent` keeps only the Drive ID, account, title, Drive's MIME type and the opened date, sealed in the Drive state with the content key, for the latest 20 files. A folder never opened counts from when it was linked. Only connected accounts show, and only files a linked folder still lists. Unlinking drops that folder's files, and disconnecting drops all of the account's entries. A tap opens the file from the folder that lists it now, as the folder screen would.
 
 ## Home page
 

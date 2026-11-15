@@ -87,6 +87,7 @@ extension GoogleDrive {
         try? await accounts?.disconnect(address)
         var state = try loadState()
         state.links.removeAll { $0.account == address }
+        state.recent.removeAll { $0.account == address }
         try saveState(state)
         try prune()
     }
