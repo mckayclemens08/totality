@@ -160,13 +160,38 @@ private struct DriveTextEditor: View {
     }
 
     var body: some View {
-        let theme = Theme.current
         NavigationStack {
-            Group {
+            page
+                .toolbar { toolbar }
+                .confirmationDialog("This file changed in Google Drive", isPresented: $conflict, titleVisibility: .visible) {
+                    Button("Keep Both") { Task { await keepBoth() } }
+                    Button("Use Mine", role: .destructive) { Task { await save(overwrite: true) } }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Someone changed it after you opened it. Keep Both saves your version as a new file beside it. Use Mine replaces Drive's version with yours, and Drive keeps the old one in its version history.")
+                }
+                .alert("Not saved", isPresented: failureShown) {
+                    Button("OK", role: .cancel) { failure = nil }
+                } message: {
+                    Text(failure ?? "")
+                }
+        }
+        .tint(Theme.current.accent.color)
+        .interactiveDismissDisabled(hasChanges)
+        .task {
+            await editor.start()
+            editor.load(String(decoding: file.data, as: UTF8.self))
+            loadedRevision = editor.revision
+        }
+    }
+
+    private var page: some View {
+        let theme = Theme.current
+        return Group {
                 if case .failed(let reason) = editor.phase {
                     ReaderMessage(systemImage: "exclamationmark.triangle", title: "The editor didn't open", detail: reason)
                 } else {
-                    WritingEditorView(controller: editor)
+                    WritingEditorView(controller: editor, webView: editor.webView)
                         .overlay {
                             if editor.phase == .starting { ProgressView() }
                         }
@@ -186,38 +211,19 @@ private struct DriveTextEditor: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    if isSaving {
-                        ProgressView()
-                    } else {
-                        Button("Save") { Task { await save(overwrite: false) } }
-                            .disabled(!hasChanges)
-                    }
-                }
-            }
-            .confirmationDialog("This file changed in Google Drive", isPresented: $conflict, titleVisibility: .visible) {
-                Button("Keep Both") { Task { await keepBoth() } }
-                Button("Use Mine", role: .destructive) { Task { await save(overwrite: true) } }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Someone changed it after you opened it. Keep Both saves your version as a new file beside it. Use Mine replaces Drive's version with yours, and Drive keeps the old one in its version history.")
-            }
-            .alert("Not saved", isPresented: failureShown) {
-                Button("OK", role: .cancel) { failure = nil }
-            } message: {
-                Text(failure ?? "")
-            }
+    }
+
+    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { dismiss() }
         }
-        .tint(theme.accent.color)
-        .interactiveDismissDisabled(hasChanges)
-        .task {
-            await editor.start()
-            editor.load(String(decoding: file.data, as: UTF8.self))
-            loadedRevision = editor.revision
+        ToolbarItem(placement: .confirmationAction) {
+            if isSaving {
+                ProgressView()
+            } else {
+                Button("Save") { Task { await save(overwrite: false) } }
+                    .disabled(!hasChanges)
+            }
         }
     }
 
