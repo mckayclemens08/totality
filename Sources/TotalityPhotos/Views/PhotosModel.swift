@@ -206,6 +206,7 @@ public final class PhotosModel {
                 isOffline = !listing.isCurrent
             }
             usage = try? await library.usage()
+            StorageActivity.didChange()
         }
         waitingCount = items.filter(\.isWaiting).count
     }
@@ -348,6 +349,7 @@ public final class PhotosModel {
             thumbnails[item.id] = nil
             waitingCount = items.filter(\.isWaiting).count
             usage = try? await library.usage()
+            StorageActivity.didChange()
         } catch {
             notice = Self.problem(error, doing: "delete that photo")
         }

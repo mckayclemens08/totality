@@ -689,3 +689,13 @@ and numbering dropped.
 The home tile is `TasksHomeTile`. Its tick boxes, its titles, the next deadline and its + are `tileLink`s,
 so they work on the tile itself. Home search finds tasks by title, notes, checklist items and tags, including
 done ones, and its `itemID` is the task's UUID, which opens the task in its list, expanded.
+
+## Storage in settings
+
+Agreed with the owner on 2026-11-15, in issue 125. Settings has a Storage section showing how full the account's server space is.
+
+- Two bars: the sealed blob store (Photos, Reader files and anything else in `server/blobs`), and the Totality mailbox. Each reads like "4.2 GB of 20 GB". The numbers come from `GET /blobs/usage` and the mail list's `used` and `limit`, so the server doesn't change.
+- Under the bars is each module's share (Photos, Reader, Mail), which the device works out from what it already holds, and it's marked as this device's count. The server can't split it, because blobs are sealed and unlabelled.
+- From 80% full a bar turns the accent colour with a note, and from 95% the danger colour.
+- `StorageModel` lives in `TotalityCore` and the view in `TotalityUI`. The app hands it the readers, so Account never imports Photos or Mail.
+- Keeping it current: `AppRefresh` runs it as an extra step after the modules (at launch, on coming back, every 60 seconds), any upload or delete posts `StorageActivity.changed`, and the open page asks every 10 seconds. A single failure keeps what's showing, and only one that lasts is shown. Offline shows the last value read and when it was read, which is kept per account so another account never sees it.

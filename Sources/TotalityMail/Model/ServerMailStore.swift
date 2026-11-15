@@ -649,6 +649,7 @@ public actor ServerMailStore: MailStore {
             throw MailStoreError.unavailable
         }
         try await vault.erase(messages)
+        StorageActivity.didChange()
         for (attachment, source) in attachmentSources where messages.contains(source) { attachmentSources[attachment] = nil }
     }
 
@@ -733,6 +734,7 @@ public actor ServerMailStore: MailStore {
                 try await server.keep(id: id, sealed: try sentKey.seal(opened, account: mailboxID, message: id))
                 try await vault.keep(stored)
                 keptCopy = true
+                StorageActivity.didChange()
             } catch is MailServerError {
                 // Kept here and marked, so the next open tries the server again instead of pruning it.
                 try await vault.keepUnkept(stored)

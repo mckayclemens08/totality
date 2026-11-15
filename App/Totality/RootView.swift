@@ -31,6 +31,8 @@ struct RootView: View {
     @State private var photosWiring = PhotosWiring()
     /// Counts each change of who Photos is for, so an older one that finishes late is ignored.
     @State private var photosTurn = 0
+    /// Whichever Photos is current, for settings' storage bars.
+    @State private var currentPhotos = CurrentPhotos()
     /// Each module's refresher, which `AppRefresh` reaches through the registry.
     @State private var refreshers = ModuleRefreshers()
     @State private var registry: ModuleRegistry?
@@ -52,6 +54,12 @@ struct RootView: View {
         _contentKeys = State(initialValue: keys)
         let account = AccountSetup.makeModel(content: keys)
         _account = State(initialValue: account)
+        let current = CurrentPhotos()
+        _currentPhotos = State(initialValue: current)
+        if let storage = StorageSetup.makeModel(photos: { current.model }) {
+            account?.storage = storage
+            AppRefresh.shared.extras["storage"] = { await storage.refresh() }
+        }
         let wiring = MailWiring()
         // A mailbox's key can never be replaced, so it's published only from a device whose key is the
         // signed-in account's and has joined the key backup.
@@ -160,7 +168,10 @@ struct RootView: View {
                 await refreshAhead()
             }
         }
-        .onChange(of: ObjectIdentifier(photos), initial: true) { refreshers[.photos] = photos.refresher }
+        .onChange(of: ObjectIdentifier(photos), initial: true) {
+            refreshers[.photos] = photos.refresher
+            currentPhotos.model = photos
+        }
         .onChange(of: defaultHomeStyle) { chosenHomeStyle = nil }
         .onChange(of: showingAccount) {
             if !showingAccount {

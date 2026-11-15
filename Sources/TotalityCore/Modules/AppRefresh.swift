@@ -23,6 +23,9 @@ public final class AppRefresh {
 
     /// The modules to refresh. Nil until content opens, and again while the key moves.
     public var registry: ModuleRegistry?
+    /// Things kept fresh on the same beat that aren't modules, like settings' storage bars. They run after
+    /// the modules, which may have just stored or removed something.
+    public var extras: [String: @MainActor () async -> Void] = [:]
     private var running: Task<Void, Never>?
     private static let log = Logger(subsystem: "app.totality.client", category: "refresh")
 
@@ -36,6 +39,7 @@ public final class AppRefresh {
             return
         }
         let refreshers = registry?.refreshers ?? []
+        let extras = extras.sorted { $0.key < $1.key }.map(\.value)
         let task = Task { @MainActor in
             for refresher in refreshers {
                 guard !Task.isCancelled else { return }
@@ -45,6 +49,10 @@ public final class AppRefresh {
                 let milliseconds = Int(took.seconds * 1000 + took.attoseconds / 1_000_000_000_000_000)
                 let module = refresher.module.rawValue
                 Self.log.notice("\(module, privacy: .public) took \(milliseconds, privacy: .public) ms")
+            }
+            for extra in extras {
+                guard !Task.isCancelled else { return }
+                await extra()
             }
         }
         running = task
