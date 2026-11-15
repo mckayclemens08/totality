@@ -25,6 +25,8 @@ final class WritingEditorController: NSObject {
     var linkRequest: String?
     private(set) var stats = WritingStats()
     private(set) var outline: [WritingHeading] = []
+    private(set) var labels: [WritingLabel] = []
+    private(set) var style = WritingStyle.apa
     private(set) var matches = WritingMatches()
     /// Goes up each time Command-F is pressed in the page.
     private(set) var findRequests = 0
@@ -37,7 +39,8 @@ final class WritingEditorController: NSObject {
     /// Where links the page asks to open go. They've already been checked.
     @ObservationIgnored var onOpen: ((URL) -> Void)?
 
-    @ObservationIgnored private(set) var webView: WKWebView?
+    /// Observed, so the view on screen picks the page up when it's made after the view is.
+    private(set) var webView: WKWebView?
     @ObservationIgnored private var latestText = ""
     @ObservationIgnored private var pageRevision = 0
     @ObservationIgnored private var typedRevision = 0
@@ -90,14 +93,17 @@ final class WritingEditorController: NSObject {
     }
 
     /// Puts a doc in the page, replacing what's there.
-    func load(_ text: String, placeholder: String = "Start writing", settings: WritingSettings = WritingSettings()) {
+    func load(
+        _ text: String, placeholder: String = "Start writing", settings: WritingSettings = WritingSettings(),
+        library: Data = Data("[]".utf8)
+    ) {
         latestText = text
         hasText = true
         pageRevision = 0
         typedRevision = 0
         countedWords = nil
         self.settings = settings
-        options = ["placeholder": placeholder, "settings": settings.dictionary]
+        options = ["placeholder": placeholder, "settings": settings.dictionary, "library": Self.items(library)]
         revision += 1
         sendLoad()
     }
@@ -137,6 +143,18 @@ final class WritingEditorController: NSObject {
         guard let webView, pageReady else { return nil }
         let arguments: [String: Any] = ["name": command, "argument": argument ?? NSNull()]
         return try? await webView.callAsyncJavaScript("return window.totality.command(name, argument)", arguments: arguments, in: nil, contentWorld: .page)
+    }
+
+    /// The person's references, as CSL JSON, for citations and the bibliography.
+    func useLibrary(_ library: Data) {
+        let items = Self.items(library)
+        options["library"] = items
+        run("library", items)
+    }
+
+    /// Only a JSON list goes to the page, so a damaged library can't become anything else there.
+    private static func items(_ library: Data) -> [Any] {
+        (try? JSONSerialization.jsonObject(with: library)) as? [Any] ?? []
     }
 
     func apply(_ settings: WritingSettings) {
@@ -193,8 +211,10 @@ final class WritingEditorController: NSObject {
             if let before = countedWords, counts.words > before { onWordsWritten?(counts.words - before) }
             countedWords = counts.words
             if counts != stats { stats = counts }
-        case .outline(let headings):
-            outline = headings
+        case .outline(let headings, let labels, let style):
+            if headings != outline { outline = headings }
+            if labels != self.labels { self.labels = labels }
+            if style != self.style { self.style = style }
         case .find:
             findRequests += 1
         case .matches(let found):
@@ -261,6 +281,8 @@ final class WritingWebView: WKWebView {}
 
 struct WritingEditorView: UIViewRepresentable {
     let controller: WritingEditorController
+    /// Passed in, not read from the controller, so SwiftUI updates this view when the page arrives.
+    let webView: WKWebView?
 
     func makeUIView(context: Context) -> UIView {
         let container = UIView()
@@ -276,7 +298,7 @@ struct WritingEditorView: UIViewRepresentable {
     /// The web view belongs to the controller, so it lives as long as the doc is open, not as long as
     /// SwiftUI keeps this view.
     private func attach(to container: UIView) {
-        guard let webView = controller.webView, webView.superview !== container else { return }
+        guard let webView, webView.superview !== container else { return }
         webView.removeFromSuperview()
         webView.frame = container.bounds
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -297,6 +319,8 @@ final class WritingWebView: WKWebView {
 
 struct WritingEditorView: NSViewRepresentable {
     let controller: WritingEditorController
+    /// Passed in, not read from the controller, so SwiftUI updates this view when the page arrives.
+    let webView: WKWebView?
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
@@ -309,7 +333,7 @@ struct WritingEditorView: NSViewRepresentable {
     }
 
     private func attach(to container: NSView) {
-        guard let webView = controller.webView, webView.superview !== container else { return }
+        guard let webView, webView.superview !== container else { return }
         webView.removeFromSuperview()
         webView.frame = container.bounds
         webView.autoresizingMask = [.width, .height]

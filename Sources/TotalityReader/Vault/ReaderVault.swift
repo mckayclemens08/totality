@@ -298,6 +298,10 @@ public actor ReaderVault {
 
     public func importFile(_ data: Data, filename: String, folder: UUID? = nil) throws -> ReaderItem {
         guard data.count <= Self.maxImportBytes else { throw ReaderError.tooLarge }
+        // A .bib or CSL JSON file becomes a reference library, stored as CSL JSON whatever it came as.
+        if let library = References.library(from: data, filename: filename) {
+            return try importLibrary(library, title: (filename as NSString).deletingPathExtension, folder: folder)
+        }
         let now = Date()
         let mime = ReadableText.mime(forFilename: filename)
         // A book's own title beats its filename. One that can't be read still gets stored.
@@ -310,6 +314,32 @@ public actor ReaderVault {
         try writeBody(data, id: item.id)
         try writeMeta(item)
         return item
+    }
+
+    private func importLibrary(_ library: Data, title: String, folder: UUID?) throws -> ReaderItem {
+        let now = Date()
+        let item = ReaderItem(
+            id: UUID(), kind: .file, title: title, collection: nil, mime: References.mime,
+            byteCount: library.count, createdAt: now, updatedAt: now, listenPosition: 0, folderID: folder
+        )
+        try writeBody(library, id: item.id)
+        try writeMeta(item)
+        return item
+    }
+
+    /// Every reference library's items as one CSL JSON array, for citing. When two libraries share a
+    /// key, the newer library wins, so re-importing an updated export takes effect.
+    public func referenceLibrary() throws -> Data {
+        var seen = Set<String>()
+        var merged: [[String: Any]] = []
+        for item in try list().items where item.mime == References.mime {
+            guard let body = try? body(of: item.id), let items = References.cslItems(body) else { continue }
+            for entry in items {
+                guard let id = entry["id"] as? String, seen.insert(id).inserted, merged.count < References.maxItems else { continue }
+                merged.append(entry)
+            }
+        }
+        return try JSONSerialization.data(withJSONObject: merged, options: [.sortedKeys])
     }
 
     public func body(of id: UUID) throws -> Data {

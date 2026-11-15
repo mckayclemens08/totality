@@ -14,7 +14,13 @@ import WebKit
 
     @Test("The bundle has no way to reach the network or keep anything")
     func bundleHasNoNetworkCode() throws {
-        let script = try #require(WritingPage.resources()).script
+        var script = try #require(WritingPage.resources()).script
+        // citeproc-js, used unmodified, carries a fallback for browsers with no DOMParser that reads a
+        // style from a data: URL. WebKit has DOMParser, so it never runs, and the page's policy would
+        // block it if it did. That one fallback is allowed. Any other request isn't.
+        let fallback = /typeof XMLHttpRequest<"u"\)\{var (\w+)=new XMLHttpRequest;return \w+\|\|\(\w+="text\/xml"\),\1\.open\("GET","data:"/
+        #expect(script.matches(of: fallback).count == 1)
+        script.replace(fallback, with: "")
         for api in ["fetch(", "XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon", "localStorage", "indexedDB", "document.cookie"] {
             #expect(!script.contains(api), "\(api)")
         }

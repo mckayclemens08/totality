@@ -28,8 +28,13 @@ public enum MarkdownText {
             paragraph = []
         }
 
-        for raw in lines(markdown) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
+        let all = lines(markdown)
+        let labels = labelText(all)
+        // Front matter holds settings like the citation style, not words to read.
+        var skip = 0
+        if all.first == "---", let close = all.dropFirst().firstIndex(where: { $0 == "---" || $0 == "..." }) { skip = close + 1 }
+        for raw in all.dropFirst(skip) {
+            let line = withReferences(raw.trimmingCharacters(in: .whitespaces), labels: labels)
             if let open = fence {
                 if line.hasPrefix(open) {
                     blocks.append(.code(code.joined(separator: "\n")))
@@ -83,6 +88,49 @@ public enum MarkdownText {
         endParagraph()
         if fence != nil, !code.isEmpty { blocks.append(.code(code.joined(separator: "\n"))) }
         return blocks
+    }
+
+    /// How each cross-reference label reads aloud: a section by its heading, a figure or table by number.
+    static func labelText(_ lines: [String]) -> [String: String] {
+        var found: [String: String] = [:]
+        var counts = ["fig": 0, "tbl": 0]
+        var fence = false
+        for line in lines {
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") || line.trimmingCharacters(in: .whitespaces).hasPrefix("~~~") { fence.toggle() }
+            guard !fence, line.contains("{#"), let match = line.firstMatch(of: /\{#((sec|fig|tbl):[\w:.\-]+)[^}]*\}/) else { continue }
+            let id = String(match.1)
+            guard found[id] == nil else { continue }
+            switch match.2 {
+            case "sec":
+                let heading = line.replacing(/\s*\{#[^}]*\}/, with: "").replacing(/^#{1,6}\s+/, with: "")
+                found[id] = inline(heading)
+            case "fig":
+                counts["fig", default: 0] += 1
+                found[id] = "Figure \(counts["fig"] ?? 0)"
+            default:
+                counts["tbl", default: 0] += 1
+                found[id] = "Table \(counts["tbl"] ?? 0)"
+            }
+        }
+        return found
+    }
+
+    /// Labels go, bracketed citations go, and cross-references read as what they point at. A narrative
+    /// citation keeps its key, without the `@`.
+    static func withReferences(_ line: String, labels: [String: String]) -> String {
+        // Most lines have neither, and Swift's regexes are slow enough on long lines to matter for search.
+        guard line.contains("@") || line.contains("{#") else { return line }
+        return line
+            .replacing(/\s*\{#[\w:.\-]+[^}\n]*\}/, with: "")
+            .replacing(/\[[^\[\]\n]*?-?@[\w][^\[\]\n]*\](?![(\[])/) { match in
+                let keys = String(match.0).matches(of: /@((?:sec|fig|tbl):[\w:.\-]*\w)/).map { labels[String($0.1)] ?? String($0.1) }
+                return keys.isEmpty ? "" : keys.joined(separator: ", ")
+            }
+            .replacing(/(^|[^\w@])@((?:sec|fig|tbl):[\w:.\-]*\w)/) { match in
+                String(match.1) + (labels[String(match.2)] ?? String(match.2))
+            }
+            .replacing(/(^|[\s(])@(\w[\w:.#$%&\-+?<>~\/]*\w|\w)/) { match in String(match.1) + String(match.2) }
+            .replacing(/\ +([.,;:])/) { String($0.1) }
     }
 
     /// What Listen speaks and search looks through: the words without the symbols, a block per line.

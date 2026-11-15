@@ -170,3 +170,55 @@ body {
   font-size: 0.8em;
   vertical-align: middle;
 }
+
+/* Scholarly writing. Notes, citations and cross-references read as they will print, and show their
+   Markdown on the line being edited. */
+.cm-tl-noteref {
+  color: var(--tl-accent);
+  font-size: 0.75em;
+  vertical-align: super;
+  line-height: 0;
+  padding: 0 1px;
+}
+.cm-tl-notedef {
+  font-size: 0.9em;
+  color: var(--tl-text2);
+}
+.cm-tl-inlinenote {
+  color: var(--tl-text2);
+  font-size: 0.9em;
+}
+.cm-tl-cite,
+.cm-tl-xref {
+  color: var(--tl-text);
+}
+.cm-tl-xref {
+  color: var(--tl-accent);
+}
+.cm-tl-cite-src,
+.cm-tl-xref-src {
+  color: var(--tl-accent);
+}
+.cm-tl-frontmatter {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.8em;
+  color: var(--tl-text2);
+  background: var(--tl-sunken);
+  padding-left: var(--tl-s3) !important;
+}
+.cm-tl-bibliography {
+  margin-top: var(--tl-s4);
+  padding-top: var(--tl-s4);
+  color: var(--tl-text);
+  user-select: text;
+}
+.cm-tl-bibliography-title {
+  font-weight: 700;
+  font-size: 1.2em;
+  margin-bottom: var(--tl-s2);
+}
+.cm-tl-bibliography-entry {
+  padding-left: 2em;
+  text-indent: -2em;
+  margin-bottom: var(--tl-s2);
+}

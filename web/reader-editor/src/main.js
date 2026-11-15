@@ -9,7 +9,16 @@ import { markdown, markdownLanguage, markdownKeymap } from "@codemirror/lang-mar
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { Strikethrough, Subscript, Superscript, Table, TaskList } from "@lezer/markdown";
-import { livePreview } from "./livePreview.js";
+import { livePreview, setCitationText, refreshCitations } from "./livePreview.js";
+import { scholarlySyntax, scholarlyIndex, bibliography, setBibliography, footnotes, labels } from "./scholarly.js";
+import { styles, styleOf, styleChange, citedKeys, cleanItems } from "./cite.js";
+import { citeprocEngine } from "./citeproc.js";
+import apaStyle from "../csl/apa.csl";
+import mlaStyle from "../csl/modern-language-association.csl";
+import chicagoStyle from "../csl/chicago-author-date.csl";
+import locale from "../csl/locales-en-US.xml";
+
+const cslSources = { styles: { apa: apaStyle, mla: mlaStyle, chicago: chicagoStyle }, locale };
 import { toggleWrap, setHeading, toggleList, toggleQuote, setLink, formatState } from "./commands.js";
 import {
   outline, stats, folding, toggleSection, revealing, focusMode, typewriter, smartPunctuation,
@@ -50,6 +59,9 @@ const punctuation = new Compartment();
 let settings = { focus: false, typewriter: false, smartPunctuation: true, serif: false };
 let countTimer = null;
 let lastOutline = "";
+let library = new Map();
+let engine = citeprocEngine(library, cslSources);
+let lastBibliography = "";
 let view;
 let revision = 0;
 let sendTimer = null;
@@ -67,11 +79,51 @@ function sendCounts() {
   if (!view) return;
   const headings = outline(view.state.doc);
   post({ type: "stats", stats: stats(view.state, headings) });
-  const shape = JSON.stringify(headings.map((h) => [h.level, h.text, h.from]));
+  const text = view.state.doc.toString();
+  const targets = [...labels(text).values()].map(({ id, kind, number, caption }) => ({ id, kind, number, caption }));
+  const style = styleOf(text);
+  const shape = JSON.stringify([headings.map((h) => [h.level, h.text, h.from]), targets, style]);
   if (shape !== lastOutline) {
     lastOutline = shape;
-    post({ type: "outline", headings: headings.map(({ level, text, from }) => ({ level, text, from })) });
+    post({ type: "outline", headings: headings.map(({ level, text, from }) => ({ level, text, from })), labels: targets, style });
   }
+  updateBibliography(text);
+}
+
+/// Redraws the bibliography under the doc when what's cited, the library or the style changes.
+function updateBibliography(text) {
+  const style = styleOf(text);
+  const entries = engine.bibliography(citedKeys(text), style);
+  const shape = JSON.stringify([style, entries]);
+  if (shape === lastBibliography) return;
+  lastBibliography = shape;
+  view.dispatch({ effects: setBibliography.of({ heading: styles[style].heading, entries }) });
+}
+
+function useLibrary(items) {
+  library = cleanItems(items);
+  engine = citeprocEngine(library, cslSources);
+  setCitationText((keys, locatorText, narrative) => engine.citation(keys, locatorText, narrative, styleOf(view.state.doc.toString())));
+  lastBibliography = "";
+  if (view) {
+    view.dispatch({ effects: refreshCitations.of(null) });
+    updateBibliography(view.state.doc.toString());
+  }
+  return library.size;
+}
+
+/// The next footnote label: one more than the highest number used.
+function nextNote(state) {
+  const { order, defined } = footnotes(state.doc.toString());
+  let highest = 0;
+  for (const label of [...order.keys(), ...defined.keys()]) {
+    if (/^\d+$/.test(label)) highest = Math.max(highest, Number(label));
+  }
+  return String(highest + 1);
+}
+
+function slug(text) {
+  return text.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 40) || "item";
 }
 
 function scheduleCounts() {
@@ -135,7 +187,9 @@ function create(text, options) {
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
       editable.of(EditorView.editable.of(!options.readOnly)),
-      markdown({ base: markdownLanguage, extensions: [Strikethrough, Subscript, Superscript, Table, TaskList] }),
+      markdown({ base: markdownLanguage, extensions: [Strikethrough, Subscript, Superscript, Table, TaskList, scholarlySyntax] }),
+      scholarlyIndex,
+      bibliography,
       syntaxHighlighting(highlight),
       pageTheme,
       livePreview,
@@ -228,6 +282,73 @@ const tools = {
     return true;
   },
   fold: (pos) => toggleSection(view, Number(pos) || 0),
+  /// A numbered note: the marker where the cursor is, and its text at the end of the doc.
+  footnote: () => {
+    const state = view.state;
+    const label = nextNote(state);
+    const at = state.selection.main.head;
+    const text = state.doc.toString();
+    const lastLine = state.doc.line(state.doc.lines).text;
+    const gap = text.length === 0 ? "" : /^\[\^[^\]]+\]:/.test(lastLine) ? "\n" : text.endsWith("\n") ? "\n" : "\n\n";
+    const note = `${gap}[^${label}]: `;
+    const marker = `[^${label}]`;
+    view.dispatch({
+      changes: [{ from: at, insert: marker }, { from: state.doc.length, insert: note }],
+      selection: { anchor: state.doc.length + marker.length + note.length },
+      scrollIntoView: true,
+      userEvent: "input.footnote",
+    });
+    view.focus();
+    return label;
+  },
+  /// Adds a key to the citation the cursor is in, or starts a new one.
+  cite: (key) => {
+    if (typeof key !== "string" || !/^[\p{L}\p{N}_][\p{L}\p{N}_:.#$%&\-+?<>~/]*$/u.test(key)) return false;
+    const state = view.state;
+    const at = state.selection.main.head;
+    const line = state.doc.lineAt(at);
+    const before = state.sliceDoc(line.from, at);
+    const open = before.lastIndexOf("[");
+    const close = state.sliceDoc(at, line.to).indexOf("]");
+    const inside = open >= 0 && close >= 0 && /@/.test(state.sliceDoc(line.from + open, at + close)) && !before.slice(open).includes("]");
+    const change = inside ? { from: at + close, insert: `; @${key}` } : { from: at, to: state.selection.main.to, insert: `[@${key}]` };
+    view.dispatch({ changes: change, selection: { anchor: change.from + change.insert.length + (inside ? 1 : 0) }, userEvent: "input.cite" });
+    view.focus();
+    return true;
+  },
+  /// A cross-reference to a labelled section, figure or table.
+  crossref: (id) => {
+    if (typeof id !== "string" || !/^(?:sec|fig|tbl):[\p{L}\p{N}_:.\-]+$/u.test(id)) return false;
+    const range = view.state.selection.main;
+    const insert = `@${id}`;
+    view.dispatch({ changes: { from: range.from, to: range.to, insert }, selection: { anchor: range.from + insert.length }, userEvent: "input.cite" });
+    view.focus();
+    return true;
+  },
+  /// Gives the heading or figure at a position a label, unless it has one. Returns the label.
+  label: (pos) => {
+    const state = view.state;
+    const line = state.doc.lineAt(Math.max(0, Math.min(Number(pos) || 0, state.doc.length)));
+    const existing = /\{#((?:sec|fig|tbl):[^\s}]+)/u.exec(line.text);
+    if (existing) return existing[1];
+    const heading = /^#{1,6}\s+(.*)$/.exec(line.text);
+    const figure = /!\[([^\]]*)\]\([^)]*\)/.exec(line.text);
+    if (!heading && !figure) return "";
+    const kind = heading ? "sec" : "fig";
+    const taken = labels(state.doc.toString());
+    const base = `${kind}:${slug(heading ? heading[1] : figure[1])}`;
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+    const at = heading ? line.to : line.from + figure.index + figure[0].length;
+    view.dispatch({ changes: { from: at, insert: heading ? ` {#${id}}` : `{#${id}}` }, userEvent: "input.label" });
+    return id;
+  },
+  library: (items) => useLibrary(items),
+  style: (name) => {
+    if (!Object.prototype.hasOwnProperty.call(styles, name)) return false;
+    view.dispatch({ changes: styleChange(view.state.doc.toString(), name), userEvent: "input.style" });
+    return true;
+  },
   settings: (next) => {
     if (next && typeof next === "object") {
       for (const key of Object.keys(settings)) {
@@ -247,6 +368,7 @@ window.totality = Object.freeze({
     lastOutline = "";
     create(typeof text === "string" ? text : "", options || {});
     tools.settings(options && options.settings);
+    useLibrary(options && options.library);
     sendFormat();
     sendCounts();
   },

@@ -38,6 +38,19 @@ and serif or sans are settings on the device (`reader.writing.*`). A doc's word 
 sealed in its details, and setting it leaves the date alone. The daily goal counts words added on this
 device, in any doc, and keeps only a date and two numbers in the device's settings, never any words.
 
+Scholarly writing (issue 104, step 3) uses Pandoc's own syntax, so the same file exports the same
+anywhere: `[^1]` footnotes, `[@key, p. 4]`, `[-@key]` and `@key` citations, `{#sec:…}`, `{#fig:…}` and
+`{#tbl:…}` labels with `@sec:…` cross-references (pandoc-crossref's form), and `csl:` in front matter
+naming the style. The page draws these as numbers, citations and a bibliography after the last line, but
+never rewrites the text, and the bibliography is never part of it. A `.bib` or CSL JSON file imports as a
+reference library: a sealed `file` item with the mime `application/vnd.citationstyles.csl+json`, stored as
+CSL JSON whatever it came as. BibTeX is converted on the device. `ReaderVault.referenceLibrary` merges
+every library for citing, the newer one winning a shared key, and only a JSON list of items reaches the
+page, where entries are set as text. The styles are APA, MLA and Chicago author-date, formatted on the
+page by citeproc-js (CPAL 1.0, unmodified) from the official CSL styles (CC BY-SA 3.0), with a plain
+fallback for a key the library lacks. Reader settings credit both under Acknowledgements. Listen and search skip front matter, labels and bracketed citations, and
+read a cross-reference as what it points at.
+
 A doc from before the writing editor (the older Markdown subset that `DocText` reads, or a plain note)
 converts once, the first time it opens. Its date stays, because tidying up isn't an edit. Its old body is
 kept beside it as a read-only `file` item, "(before the new editor)", whose ID derives from the doc's and

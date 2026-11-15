@@ -37,6 +37,7 @@ public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
         case (_, "application/pdf"): "PDF"
         case (_, ReadableText.epubMime): "EPUB"
         case (_, ReadableText.wordMime): "Word"
+        case (_, References.mime): "References"
         default: "File"
         }
     }
