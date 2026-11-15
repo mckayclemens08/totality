@@ -13,6 +13,7 @@ npm test
 npm run build
 mkdir -p "$out"
 cp dist/editor.js "$out/editor.js"
+cp dist/book.js "$out/book.js"
 cp src/editor.css "$out/editor.css"
 # The page is put inline in one document by Swift, so it must never close its own script tag.
 if grep -q '</script' "$out/editor.js"; then

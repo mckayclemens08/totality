@@ -42,8 +42,10 @@ struct ReadAlongView: View {
         .task(id: text) {
             let text = text
             let headings = headings
+            // The script Listen speaks, so what's marked is what's said, skipped parts and all.
+            let script = await model.readAlongScript(of: item.id)
             // Cutting a long book into sentences takes seconds, so it stays off the main thread.
-            page = await Task.detached { ReadAlongPage(text: text, headings: headings) }.value
+            page = await Task.detached { ReadAlongPage(text: text, headings: headings, script: script) }.value
         }
     }
 

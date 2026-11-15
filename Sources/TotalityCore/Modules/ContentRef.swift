@@ -24,6 +24,9 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     /// The Reader's linked Google Drive folders and the Drive files opened from them, as one sealed record
     /// per person. Listings, downloaded files and Google sign-ins stay on each device.
     case readerDrive = "reader_drive"
+    /// Where the person stopped in each Reader file, as one sealed record per person, so a file opens there on
+    /// every device. Which items, and where in them, stay inside the seal.
+    case readerPlaces = "reader_places"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {

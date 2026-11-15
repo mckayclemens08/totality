@@ -36,6 +36,7 @@ jobs:
       - run: npm run build
       - run: cmp dist/editor.js ../../Sources/TotalityReader/Resources/Editor/editor.js
       - run: cmp src/editor.css ../../Sources/TotalityReader/Resources/Editor/editor.css
+      - run: cmp dist/book.js ../../Sources/TotalityReader/Resources/Editor/book.js
   gateway-tests:
     runs-on: ubuntu-latest
     defaults:

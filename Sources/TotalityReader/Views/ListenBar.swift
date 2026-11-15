@@ -4,8 +4,11 @@ import TotalityUI
 /// The Listen transport. Speech is generated on this device, so text never leaves it to be read.
 struct ListenBar: View {
     let listen: ListenController
+    /// Called when Read headings changes, so what's playing can be read again the new way.
+    var onReadHeadings: () -> Void = {}
 
     @AppStorage(ReaderItemView.readAlongKey) private var readAlong = false
+    @AppStorage(ListenSkips.readHeadingsKey) private var readHeadings = false
 
     var body: some View {
         let theme = Theme.current
@@ -76,15 +79,20 @@ struct ListenBar: View {
 
     private var speedMenu: some View {
         Menu {
-            ForEach(ListenController.speeds, id: \.self) { speed in
-                Button(Self.label(forSpeed: speed)) { listen.setSpeed(speed) }
+            Section("Speed") {
+                ForEach(ListenController.speeds, id: \.self) { speed in
+                    Button(Self.label(forSpeed: speed)) { listen.setSpeed(speed) }
+                }
             }
+            // Off, chapter and section titles are left out, with a short pause in their place.
+            Toggle("Read headings", isOn: $readHeadings)
         } label: {
             Text(Self.label(forSpeed: listen.speed)).font(Typeface.callout).modifier(TapTarget())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .accessibilityLabel("Speed")
+        .accessibilityLabel("Speed and headings")
+        .onChange(of: readHeadings) { onReadHeadings() }
     }
 
     /// The voice's own word comes first. Before there's a track, the bar says what it's waiting for.

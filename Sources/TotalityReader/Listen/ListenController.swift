@@ -54,6 +54,9 @@ public final class ListenController {
 
     private let engine: any SpeechEngine
     private var restartOnResume = false
+    /// The silence where a heading or running head was skipped, before the next sentence starts.
+    private var gap: Task<Void, Never>?
+    static let skippedPause = Duration.milliseconds(450)
 
     public init(engine: any SpeechEngine) {
         self.engine = engine
@@ -119,6 +122,12 @@ public final class ListenController {
     public func togglePause() {
         guard current != nil else { return }
         if !isPaused {
+            // Paused in the gap where something was skipped: play starts the sentence.
+            if gap != nil {
+                gap?.cancel()
+                gap = nil
+                restartOnResume = true
+            }
             engine.pause()
             isPaused = true
         } else if restartOnResume {
@@ -146,6 +155,8 @@ public final class ListenController {
     }
 
     public func stop() {
+        gap?.cancel()
+        gap = nil
         engine.stop()
         engine.prepare(nil)
         reportPosition()
@@ -162,6 +173,8 @@ public final class ListenController {
         queue.removeAll { $0.id == id }
         if opening?.id == id { opening = nil }
         guard current?.id == id else { return }
+        gap?.cancel()
+        gap = nil
         engine.stop()
         engine.prepare(nil)
         current = nil
@@ -178,6 +191,8 @@ public final class ListenController {
     }
 
     private func speakCurrent() {
+        gap?.cancel()
+        gap = nil
         guard let track = current else { return }
         isPaused = false
         restartOnResume = false
@@ -198,7 +213,18 @@ public final class ListenController {
         guard let track = current else { return }
         if sentence + 1 < track.script.sentences.count {
             sentence += 1
-            speakCurrent()
+            guard track.script.sentences[sentence].pauseBefore else {
+                speakCurrent()
+                return
+            }
+            // A heading or running head was skipped here, so a short silence takes its place.
+            spoken = 0
+            reportPosition()
+            gap = Task { [weak self] in
+                try? await Task.sleep(for: Self.skippedPause)
+                guard !Task.isCancelled, let self, self.gap != nil else { return }
+                self.speakCurrent()
+            }
             return
         }
         // Finished, so the next listen starts from the top.

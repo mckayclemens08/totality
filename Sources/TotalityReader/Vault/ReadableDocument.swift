@@ -9,6 +9,13 @@ public struct ReadableDocument: Sendable, Equatable {
 
     public struct Section: Sendable, Equatable {
         public var blocks: [Block]
+        /// The file in the book this came from, for showing it on the book's own pages.
+        public var source: String?
+
+        public init(blocks: [Block], source: String? = nil) {
+            self.blocks = blocks
+            self.source = source
+        }
 
         /// The first heading, which is what a chapter list shows.
         public var title: String? {
@@ -271,9 +278,17 @@ private final class WordParser: NSObject, XMLParserDelegate {
     }
 }
 
+/// What an EPUB's package file says: its title, its chapters in reading order, and the type of every file
+/// it lists, by the file's full name in the archive.
+struct EPUBPackage: Sendable {
+    let title: String?
+    /// Each chapter's full name in the archive, in reading order, once each.
+    let spine: [String]
+    let types: [String: String]
+}
+
 enum BookReader {
-    static func epub(_ data: Data) throws -> (title: String?, document: ReadableDocument) {
-        var archive = try ZipArchive(data)
+    static func package(_ archive: inout ZipArchive) throws -> EPUBPackage {
         guard let containerData = try archive.read("META-INF/container.xml") else { throw ReaderError.notReadable }
         let container = ContainerParser()
         SafeXML.parse(containerData, with: container)
@@ -282,15 +297,29 @@ enum BookReader {
         }
         let package = PackageParser()
         SafeXML.parse(packageData, with: package)
-        var sections: [ReadableDocument.Section] = []
+        var types: [String: String] = [:]
+        for entry in package.manifest.values {
+            types[resolve(entry.href, from: packagePath)] = entry.type
+        }
+        var spine: [String] = []
         var seen = Set<String>()
         for id in package.spine {
             guard let entry = package.manifest[id], entry.type.contains("html") else { continue }
             let path = resolve(entry.href, from: packagePath)
-            guard seen.insert(path).inserted, let chapter = try archive.read(path) else { continue }
+            if seen.insert(path).inserted { spine.append(path) }
+        }
+        return EPUBPackage(title: package.title, spine: spine, types: types)
+    }
+
+    static func epub(_ data: Data) throws -> (title: String?, document: ReadableDocument) {
+        var archive = try ZipArchive(data)
+        let package = try package(&archive)
+        var sections: [ReadableDocument.Section] = []
+        for path in package.spine {
+            guard let chapter = try archive.read(path) else { continue }
             let parser = ChapterParser()
             SafeXML.parse(chapter, with: parser)
-            if !parser.blocks.isEmpty { sections.append(.init(blocks: parser.blocks)) }
+            if !parser.blocks.isEmpty { sections.append(.init(blocks: parser.blocks, source: path)) }
         }
         guard !sections.isEmpty else { throw ReaderError.notReadable }
         return (package.title, ReadableDocument(sections: sections))

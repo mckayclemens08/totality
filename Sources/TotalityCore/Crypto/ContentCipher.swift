@@ -44,6 +44,9 @@ public enum KeyPurpose: String, Sendable, Hashable {
     /// A Drive file kept on the device after it was opened (issue 102). Its own purpose, so a cached file
     /// can't pass for a listing, or for anything of the Reader's own.
     case googleDriveFile = "google-drive-file"
+    /// Where the person stopped in each Reader file, as one synced record, and the places not yet sent to it.
+    /// Its own purpose, so a place record can't pass for an item or for Drive's record.
+    case readerPlaces = "reader-places"
     /// A Reader doc's earlier versions and their list, kept on the device only. Its own purpose, so an old
     /// version can't pass for the doc itself.
     case docVersion = "doc-version"

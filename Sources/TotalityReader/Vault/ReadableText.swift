@@ -19,6 +19,8 @@ enum ReadableText {
         if mime == References.mime { return References.readableText(data) }
         if mime == MarkdownText.mime { return MarkdownText.plainText(String(decoding: data, as: UTF8.self)) }
         if mime == markdownMime { return DocText(markdown: String(decoding: data, as: UTF8.self)).plainText }
+        // A web page's words, never its markup.
+        if HTMLText.mimes.contains(mime) { return HTMLText.read(data).document.plainText }
         guard mime.hasPrefix("text/") else { throw ReaderError.notReadable }
         guard let text = String(data: data, encoding: .utf8) else { throw ReaderError.notReadable }
         return text
@@ -41,6 +43,8 @@ enum ReadableText {
             return try BookReader.epub(data).document
         case wordMime:
             return try BookReader.word(data)
+        case let mime? where HTMLText.mimes.contains(mime):
+            return HTMLText.read(data).document
         default:
             let blocks = try extract(data, mime: mime)
                 .split(whereSeparator: \.isNewline)
