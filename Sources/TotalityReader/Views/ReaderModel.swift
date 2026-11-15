@@ -240,6 +240,40 @@ public final class ReaderModel {
         try await vault.backlinks(to: id)
     }
 
+    /// A doc's Markdown for export. An older doc is converted in memory only, never saved, since an
+    /// export shouldn't change anything.
+    public func markdownForExport(_ id: UUID) async -> String? {
+        guard let item = try? await vault.item(id), item.kind == .note, let data = try? await vault.body(of: id) else { return nil }
+        let text = String(decoding: data, as: UTF8.self)
+        if item.mime == MarkdownText.mime { return text }
+        return MarkdownText.markdown(from: item.mime == ReadableText.markdownMime ? DocText(markdown: text) : DocText(plain: text))
+    }
+
+    /// The images a doc's figures point to, by the address each was written with. An image comes from a
+    /// Reader file of that name (the doc's own folder first) or from the address itself; export never
+    /// fetches one from the internet, and an address it can't find is left as its caption.
+    public func exportImages(for document: ExportDocument, near folder: UUID?) async -> [String: ExportImage] {
+        var found: [String: ExportImage] = [:]
+        let files = items.filter { $0.kind == .file && ($0.mime ?? "").hasPrefix("image/") }
+        func key(_ name: String) -> String {
+            let lowered = name.lowercased()
+            return (lowered as NSString).deletingPathExtension
+        }
+        for source in document.imageSources.prefix(200) {
+            if let inline = ExportImage.inline(source) {
+                found[source] = ExportImage(data: inline)
+                continue
+            }
+            guard let name = ExportImage.filename(source).map(key), !name.isEmpty else { continue }
+            let matches = files.filter { key($0.title) == name }
+            guard let file = matches.first(where: { $0.folderID == folder }) ?? matches.max(by: { $0.updatedAt < $1.updatedAt }),
+                  let data = try? await vault.body(of: file.id)
+            else { continue }
+            found[source] = ExportImage(data: data)
+        }
+        return found
+    }
+
     // MARK: Versions
 
     public func versions(of id: UUID) async throws -> [DocVersion] {

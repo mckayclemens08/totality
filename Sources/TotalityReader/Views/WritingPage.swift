@@ -45,7 +45,17 @@ enum WritingPage {
         ]
         let colourLines = colours.map { "--tl-\($0.0):\(css($0.1))" }
         let sizeLines = sizes.map { "--tl-\($0.0):\(Int($0.1))px" }
-        return ":root{" + (colourLines + sizeLines).joined(separator: ";") + "}"
+        // The type scale, shared with export.
+        let number = { (value: CGFloat) in String(format: "%g", Double(value)) }
+        var typeLines = [
+            "--tl-body-scale:\(number(WritingType.bodyScale))", "--tl-line:\(number(WritingType.lineHeight))",
+            "--tl-heading-line:\(number(WritingType.headingLineHeight))",
+        ]
+        for (index, scale) in WritingType.headingScales.enumerated() {
+            typeLines.append("--tl-h\(index + 1):\(number(scale))")
+            typeLines.append("--tl-h\(index + 1)-space:\(Int(WritingType.headingSpace[index]))px")
+        }
+        return ":root{" + (colourLines + sizeLines + typeLines).joined(separator: ";") + "}"
     }
 
     private static func css(_ token: ColorToken) -> String {

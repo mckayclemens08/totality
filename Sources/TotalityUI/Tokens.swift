@@ -55,6 +55,21 @@ public struct Theme: Sendable, Equatable {
     )
 }
 
+/// The writing page's type. The editor's stylesheet and a printed export read the same numbers, so an
+/// exported doc looks like the page it was written on.
+public enum WritingType {
+    /// Body text, as a multiple of the system's body size.
+    public static let bodyScale: CGFloat = 1.0625
+    public static let lineHeight: CGFloat = 1.6
+    public static let headingLineHeight: CGFloat = 1.3
+    /// Headings 1 to 6, as multiples of body text.
+    public static let headingScales: [CGFloat] = [1.75, 1.4, 1.2, 1.05, 1, 1]
+    /// Space above headings 1 to 6.
+    public static let headingSpace: [CGFloat] = [Space.s4, Space.s3, Space.s2, 0, 0, 0]
+    /// Body text on paper, in points, where the page's own size would print too large.
+    public static let printSize: CGFloat = 11
+}
+
 public enum Radius {
     public static let sm: CGFloat = 10
     public static let md: CGFloat = 18

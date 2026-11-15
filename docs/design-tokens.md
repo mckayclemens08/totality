@@ -89,6 +89,23 @@ now would be a brand decision made by the wrong person.
 **Every size scales with Dynamic Type.** Fixed-size text is a review failure. Hierarchy is carried by
 weight more than by size — on low-contrast neumorphic surfaces, weight reads better than scale.
 
+### Writing type
+
+`WritingType` sets the Reader's writing page, and a doc exported as a PDF in the Doc layout uses the
+same numbers, so the printout matches the page. The editor's stylesheet gets them as `--tl-*` variables.
+
+| Token | Value | Use |
+|---|---|---|
+| `bodyScale` | 1.0625 × body | the page's body text |
+| `lineHeight` | 1.6 | body lines |
+| `headingLineHeight` | 1.3 | heading lines |
+| `headingScales` | 1.75, 1.4, 1.2, 1.05, 1, 1 | headings 1 to 6, as multiples of body text |
+| `headingSpace` | s4, s3, s2, 0, 0, 0 | space above headings 1 to 6 |
+| `printSize` | 11 pt | body text on paper |
+
+The essay, manuscript and thesis layouts follow their style guides instead: 12 point Times, double
+spaced, with headings at the body's size.
+
 ## Motion
 
 | Token | Duration | Curve | Use |

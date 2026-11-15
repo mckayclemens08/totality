@@ -11,6 +11,7 @@ import { tags } from "@lezer/highlight";
 import { Strikethrough, Subscript, Superscript, Table, TaskList } from "@lezer/markdown";
 import { livePreview, setCitationText, refreshCitations, setWikiDocs } from "./livePreview.js";
 import { wikiSyntax, wikiInsert, docSet, titleKey } from "./wiki.js";
+import { exportModel } from "./exportModel.js";
 import { scholarlySyntax, scholarlyIndex, bibliography, setBibliography, footnotes, labels } from "./scholarly.js";
 import { styles, styleOf, styleChange, citedKeys, cleanItems } from "./cite.js";
 import { citeprocEngine } from "./citeproc.js";
@@ -49,7 +50,7 @@ const highlight = HighlightStyle.define([
 // through its theme instead.
 const pageTheme = EditorView.theme({
   "&": { backgroundColor: "transparent" },
-  ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.6", overflow: "visible" },
+  ".cm-scroller": { fontFamily: "inherit", lineHeight: "var(--tl-line)", overflow: "visible" },
   ".cm-content": { fontFamily: "inherit" },
 });
 
@@ -378,6 +379,15 @@ const tools = {
     view.dispatch({ changes: { from: range.from, to: range.to, insert }, selection: { anchor: range.from + insert.length }, userEvent: "input.link" });
     view.focus();
     return true;
+  },
+  /// The doc, or the text given (several chapters joined), read for export as plain data.
+  exportDoc: (given) => {
+    const text = typeof given === "string" ? given : view.state.doc.toString();
+    const style = styleOf(text);
+    return exportModel(text, {
+      citation: (keys, locatorText, narrative) => engine.citation(keys, locatorText, narrative, style),
+      bibliography: () => ({ heading: styles[style].heading, entries: engine.bibliography(citedKeys(text), style) }),
+    });
   },
   /// Jumps to a heading by its words, for a link that named one.
   goToHeading: (text) => jumpToHeading(text),

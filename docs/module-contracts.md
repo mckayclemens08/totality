@@ -68,6 +68,18 @@ are all kept; further back, one an hour for a day, one a day for 30 days and one
 100. Restoring puts a version's words back under the current title, after keeping what was there as a
 version. Versions stay while the doc is in Recently Deleted and go when it's deleted for good.
 
+A doc exports to PDF or Word (.docx), on the device, in one of four layouts: Doc, Essay (MLA or APA),
+Manuscript and Thesis. The writing page reads the doc into plain data (`exportModel.js`), with
+citations, cross-references, wiki links and note numbers already worked out, and Swift checks that
+data strictly (`ExportDocument`) before laying it out. The PDF is drawn with CoreText, the same on
+iPhone and Mac: the Doc layout takes its fonts and spacing from the `WritingType` tokens the page uses,
+and the others follow their style guides (Times 12, double spaced, 1 inch margins, 1.5 inches on a
+thesis's binding side). Words stay real text, links stay links, and notes come at the end. The Word file
+has real footnotes and a page-number field. Images come only from the person's own Reader files or from
+a `data:` address in the doc, decoded and re-encoded so none of the original file's details go along;
+export never fetches anything from the internet. A folder's docs can export together as chapters. The
+exported file isn't sealed, and the sheet says so.
+
 A doc from before the writing editor (the older Markdown subset that `DocText` reads, or a plain note)
 converts once, the first time it opens. Its date stays, because tidying up isn't an edit. Its old body is
 kept beside it as a read-only `file` item, "(before the new editor)", whose ID derives from the doc's and
