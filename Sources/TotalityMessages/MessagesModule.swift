@@ -15,7 +15,8 @@ public enum MessagesModule {
         guard let account else { return MessagesModel(account: { nil }, connector: nil) }
         return MessagesModel(
             account: account, connector: connector, unavailableReason: connector == nil ? unavailableReason : nil,
-            recoverySecret: recoverySecret
+            recoverySecret: recoverySecret,
+            peopleFile: { try? MessagesStorePaths(account: $0).cache.appendingPathComponent("people.json") }
         )
     }
 }

@@ -17,6 +17,8 @@ enum AccountSetup {
     /// What locks Messages' key backup: derived from the content key, and only once that key is the
     /// account's backed-up one, which the recovery key restores. Never from the password.
     private(set) static var messagesRecovery: (@Sendable (String) async -> String?)?
+    /// Other people's public profiles, which Messages reaches through the `ModuleRegistry`.
+    private(set) static var profiles: (any ProfileDirectory)?
 
     static func makeModel(content: any ContentKeyAccess) -> AccountModel? {
         guard let config = AccountConfig.fromBundle() else { return nil }
@@ -30,6 +32,7 @@ enum AccountSetup {
         matrixPass = { try await service.matrixPass() }
         accountID = { await service.signedInAccountID() }
         photoRows = { service.photoRows(for: $0) }
+        profiles = service
         messagesRecovery = { account in
             let joined = (try? await content.joinedBackup()) != nil
             let owner = try? await content.keyOwner()

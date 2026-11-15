@@ -125,6 +125,7 @@ struct RootView: View {
                 await photosWiring.disconnect()
                 photos = PhotosModel(library: nil)
                 registry = nil
+                messages.people.directory = nil
                 AppRefresh.shared.registry = nil
                 syncAreas = []
                 contentProblem = nil
@@ -360,6 +361,7 @@ struct RootView: View {
             mail.receiver = content.registry.receiver(for: .mail)
             mail.onSentToReader = { Task { await reader?.load() } }
             registry = content.registry
+            messages.people.directory = content.registry.profiles
             AppRefresh.shared.registry = content.registry
             syncAreas = content.areas
             refreshRecoveryLabels()

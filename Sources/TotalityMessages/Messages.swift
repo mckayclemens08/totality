@@ -18,13 +18,17 @@ public struct ChatSummary: Identifiable, Sendable, Equatable {
     public let isGroup: Bool
     /// Where a group's photo is kept on the server. Group photos aren't end-to-end encrypted.
     public let photo: String?
+    /// The Matrix ID of the one other person in a joined chat, for their public profile. Never set on a
+    /// request: looking them up would only tell the directory the request was seen.
+    public let otherPerson: String?
 
     public init(
         id: String, title: String, isRequest: Bool = false, from: String? = nil,
         lastMessage: String? = nil, lastActivity: Date? = nil, unread: Int = 0, isGroup: Bool = false,
-        photo: String? = nil
+        photo: String? = nil, otherPerson: String? = nil
     ) {
         self.id = id
+        self.otherPerson = otherPerson
         self.isGroup = isGroup
         self.photo = photo
         self.title = title

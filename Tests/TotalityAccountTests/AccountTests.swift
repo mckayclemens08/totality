@@ -73,9 +73,11 @@ actor FakeAccountService: AccountService {
     var pageError: AccountError?
     private(set) var pagePublished = false
     private(set) var pageChanges: [Bool] = []
-    var others: [String: Profile] = [:]
+    var others: [String: PublicProfile] = [:]
     func failPage(_ error: AccountError?) { pageError = error }
-    func addOther(_ profile: Profile) { others[profile.username] = profile }
+    func addOther(_ profile: Profile) {
+        others[profile.username] = PublicProfile(username: profile.username, displayName: profile.displayName, bio: profile.bio, photo: nil)
+    }
     func webPageIsPublished() async throws -> Bool {
         if let pageError { throw pageError }
         return pagePublished
@@ -85,7 +87,7 @@ actor FakeAccountService: AccountService {
         pageChanges.append(published)
         pagePublished = published
     }
-    func lookUpProfile(_ username: Username) async throws -> Profile? {
+    func lookUpProfile(_ username: Username) async throws -> PublicProfile? {
         if let profileError { throw profileError }
         return others[username.value]
     }
@@ -606,4 +608,21 @@ enum Picture {
         #expect(ProfilePhoto.prepare(Data("<svg onload=alert(1)>".utf8)) == nil)
         #expect(ProfilePhoto.prepare(Data()) == nil)
     }
+}
+
+// MARK: Other people's photos
+
+@Test func onlyAPhotoInItsOwnersFolderIsFetched() {
+    let owner = UUID(uuidString: "8B3C1F0E-2D4A-4C6B-9E8F-0A1B2C3D4E5F")!
+    let other = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+    let file = "6f1c2b3a-9d8e-4f70-a1b2-c3d4e5f60718.jpg"
+    #expect(AvatarKey.isOwned("8b3c1f0e-2d4a-4c6b-9e8f-0a1b2c3d4e5f/\(file)", by: owner))
+    // Someone else's folder, a path out of the folder, another name or type, or an extra folder.
+    #expect(!AvatarKey.isOwned("\(other.uuidString.lowercased())/\(file)", by: owner))
+    #expect(!AvatarKey.isOwned("8b3c1f0e-2d4a-4c6b-9e8f-0a1b2c3d4e5f/../\(other.uuidString.lowercased())/\(file)", by: owner))
+    #expect(!AvatarKey.isOwned("8b3c1f0e-2d4a-4c6b-9e8f-0a1b2c3d4e5f/photo.jpg", by: owner))
+    #expect(!AvatarKey.isOwned("8b3c1f0e-2d4a-4c6b-9e8f-0a1b2c3d4e5f/6f1c2b3a-9d8e-4f70-a1b2-c3d4e5f60718.svg", by: owner))
+    #expect(!AvatarKey.isOwned("8b3c1f0e-2d4a-4c6b-9e8f-0a1b2c3d4e5f/x/\(file)", by: owner))
+    #expect(!AvatarKey.isOwned("https://example.com/\(file)", by: owner))
+    #expect(!AvatarKey.isOwned("", by: owner))
 }

@@ -981,3 +981,247 @@ private final class LockedSecret: @unchecked Sendable {
     #expect(asked.value == test)
     #expect(service.secretsSeen == [nil])
 }
+
+// MARK: Other people's profiles
+
+private final class FakeDirectory: ProfileDirectory, @unchecked Sendable {
+    private let lock = NSLock()
+    private var profiles: [String: PublicProfile]
+    private var asked: [String] = []
+    var offline = false
+
+    init(_ profiles: [PublicProfile]) {
+        self.profiles = Dictionary(uniqueKeysWithValues: profiles.map { ($0.username, $0) })
+    }
+
+    private var queries: [[String]] = []
+    private var downloaded: [String] = []
+
+    /// Every handle asked for, in order.
+    var lookups: [String] { lock.withLock { asked } }
+    /// Each query's handles.
+    var batches: [[String]] { lock.withLock { queries } }
+    /// Photo file names that had to be downloaded, because the device didn't have them.
+    var downloads: [String] { lock.withLock { downloaded } }
+    func change(_ profile: PublicProfile) { lock.withLock { profiles[profile.username] = profile } }
+
+    func profiles(of usernames: [String], photos: [String: Data]) async throws -> [String: PublicProfile] {
+        try lock.withLock {
+            asked += usernames
+            queries.append(usernames)
+            if offline { throw URLError(.notConnectedToInternet) }
+            var found: [String: PublicProfile] = [:]
+            for name in usernames {
+                guard let profile = profiles[name] else { continue }
+                var photo: Data?
+                if let key = profile.photoKey {
+                    photo = photos[key]
+                    if photo == nil { downloaded.append(key); photo = profile.photo }
+                }
+                found[name] = PublicProfile(
+                    username: name, displayName: profile.displayName, bio: profile.bio, photo: photo, photoKey: profile.photoKey
+                )
+            }
+            return found
+        }
+    }
+}
+
+private final class Clock: @unchecked Sendable {
+    var now = Date(timeIntervalSince1970: 1_800_000_000)
+}
+
+private let ana = PublicProfile(username: "ana_ruiz", displayName: "Ana Ruiz", bio: "Climbs on Saturdays.", photo: nil)
+
+@Test func onlyTotalityHandlesAreLookedUp() {
+    #expect(MessagesPeople.handle(of: "@ana_ruiz:usetotality.com") == "ana_ruiz")
+    #expect(MessagesPeople.handle(of: "@ana_ruiz:matrix.org") == nil)
+    #expect(MessagesPeople.handle(of: "@ana_ruiz:evil.usetotality.com") == nil)
+    #expect(MessagesPeople.handle(of: "@ana_ruiz:usetotality.com.evil.net") == nil)
+    #expect(MessagesPeople.handle(of: "@Ana_Ruiz:usetotality.com") == nil)
+    #expect(MessagesPeople.handle(of: "@a:usetotality.com") == nil)
+    #expect(MessagesPeople.handle(of: "ana_ruiz") == nil)
+}
+
+@MainActor
+@Test func aProfileIsKeptForADayThenFetchedAgain() async {
+    let clock = Clock()
+    let directory = FakeDirectory([ana])
+    let people = MessagesPeople(now: { clock.now })
+    people.directory = directory
+    await people.want(matrixIDs: ["@ana_ruiz:usetotality.com", "@stranger:matrix.org"])
+    #expect(people.name(ofMatrixID: "@ana_ruiz:usetotality.com") == "Ana Ruiz")
+    #expect(people.name(ofMatrixID: "@stranger:matrix.org") == "stranger")
+    #expect(directory.lookups == ["ana_ruiz"])
+
+    clock.now += 60 * 60
+    await people.want(matrixIDs: ["@ana_ruiz:usetotality.com"])
+    #expect(directory.lookups.count == 1)
+
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: nil, photo: nil))
+    clock.now += MessagesPeople.freshFor
+    await people.want(matrixIDs: ["@ana_ruiz:usetotality.com"])
+    #expect(directory.lookups.count == 2)
+    #expect(people.name(ofMatrixID: "@ana_ruiz:usetotality.com") == "Ana R.")
+}
+
+@MainActor
+@Test func aPullFetchesEveryoneAgain() async {
+    let directory = FakeDirectory([ana])
+    let people = MessagesPeople()
+    people.directory = directory
+    await people.want(matrixIDs: ["@ana_ruiz:usetotality.com"])
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: nil, photo: nil))
+    await people.refresh()
+    #expect(directory.lookups == ["ana_ruiz", "ana_ruiz"])
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.name == "Ana R.")
+}
+
+@MainActor
+@Test func offlineKeepsWhatWasSavedAndOtherwiseSaysSo() async {
+    let clock = Clock()
+    let directory = FakeDirectory([ana])
+    let people = MessagesPeople(now: { clock.now })
+    people.directory = directory
+    await people.want(matrixIDs: ["@ana_ruiz:usetotality.com"])
+    directory.offline = true
+    clock.now += MessagesPeople.freshFor * 3
+    await people.refresh()
+    #expect(people.phase(of: "ana_ruiz") == .found(ana))
+    await people.want(matrixIDs: ["@mckay_test:usetotality.com"])
+    guard case .failed = people.phase(of: "mckay_test") else {
+        Issue.record("An unknown person offline should say it didn't load")
+        return
+    }
+    directory.offline = false
+    await people.reload("mckay_test")
+    #expect(people.phase(of: "mckay_test") == .missing)
+}
+
+@MainActor
+@Test func noOneIsKnownBeforeTheyreFetched() {
+    let people = MessagesPeople()
+    #expect(people.phase(of: "ana_ruiz") == .loading)
+    #expect(people.name(ofMatrixID: "@ana_ruiz:usetotality.com") == "ana_ruiz")
+}
+
+@MainActor
+@Test func savedProfilesComeBackForTheSameAccountOnly() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appendingPathComponent("people.json")
+
+    let first = MessagesPeople()
+    first.directory = FakeDirectory([ana])
+    first.open(file: file)
+    await first.want(matrixIDs: ["@ana_ruiz:usetotality.com"])
+    first.close()
+    #expect(first.profile(ofMatrixID: "@ana_ruiz:usetotality.com") == nil)
+
+    let again = MessagesPeople()
+    again.open(file: file)
+    #expect(again.profile(ofMatrixID: "@ana_ruiz:usetotality.com") == ana)
+    again.open(file: folder.appendingPathComponent("someone-else.json"))
+    #expect(again.profile(ofMatrixID: "@ana_ruiz:usetotality.com") == nil)
+}
+
+@MainActor
+@Test func aTamperedSaveDropsItsBadPhotoAndBadHandles() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appendingPathComponent("people.json")
+    let fetched = Date()
+    let saved: [String: MessagesPeople.Entry] = [
+        "ana_ruiz": .init(profile: PublicProfile(username: "ana_ruiz", displayName: "Ana Ruiz", bio: nil, photo: Data("<svg/>".utf8)), fetched: fetched),
+        "../escape": .init(profile: nil, fetched: fetched),
+        "mckay_test": .init(profile: PublicProfile(username: "someone_else", displayName: "Not them", bio: nil, photo: nil), fetched: fetched),
+    ]
+    try JSONEncoder().encode(saved).write(to: file)
+    let people = MessagesPeople()
+    people.open(file: file)
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.photo == nil)
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.name == "Ana Ruiz")
+    #expect(people.phase(of: "mckay_test") == .loading)
+    #expect(people.entries.count == 1)
+}
+
+@MainActor
+@Test func theChatListAsksForTheOtherPersonButNeverARequestsSender() async {
+    let directory = FakeDirectory([ana])
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [
+        ChatSummary(id: "!ana", title: "ana_ruiz", lastActivity: jan1, otherPerson: "@ana_ruiz:usetotality.com"),
+        ChatSummary(id: "!req", title: "mckay_test", isRequest: true, from: "@mckay_test:usetotality.com"),
+    ])
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    model.people.directory = directory
+    await model.connect()
+    for _ in 0..<50 where model.people.profile(ofMatrixID: "@ana_ruiz:usetotality.com") == nil {
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(model.people.name(ofMatrixID: "@ana_ruiz:usetotality.com") == "Ana Ruiz")
+    #expect(directory.lookups == ["ana_ruiz"])
+    #expect(model.filtered("Ana R").map(\.id) == ["!ana"])
+}
+
+@MainActor
+@Test func everyoneIsRefreshedInOneQuery() async {
+    let directory = FakeDirectory([ana, PublicProfile(username: "mckay_test", displayName: nil, bio: nil, photo: nil)])
+    let people = MessagesPeople()
+    people.directory = directory
+    await people.want(matrixIDs: ["@ana_ruiz:usetotality.com", "@mckay_test:usetotality.com", "@ghost_user:usetotality.com"])
+    await people.refresh()
+    #expect(directory.batches == [["ana_ruiz", "ghost_user", "mckay_test"], ["ana_ruiz", "ghost_user", "mckay_test"]])
+    #expect(people.phase(of: "ghost_user") == .missing)
+}
+
+@MainActor
+@Test func aPhotoIsDownloadedAgainOnlyWhenItsNameChanges() async {
+    let first = Data("first photo".utf8)
+    let second = Data("second photo".utf8)
+    let directory = FakeDirectory([
+        PublicProfile(username: "ana_ruiz", displayName: "Ana Ruiz", bio: nil, photo: first, photoKey: "a/1.jpg"),
+    ])
+    let people = MessagesPeople()
+    people.directory = directory
+    await people.want(matrixIDs: ["@ana_ruiz:usetotality.com"])
+    await people.refresh()
+    #expect(directory.downloads == ["a/1.jpg"])
+
+    // A new name or bio shows on the next refresh, with the same photo kept.
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: "New bio", photo: first, photoKey: "a/1.jpg"))
+    await people.refresh()
+    #expect(directory.downloads == ["a/1.jpg"])
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.name == "Ana R.")
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.bio == "New bio")
+
+    // A new photo gets a new name, so it's fetched.
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: nil, photo: second, photoKey: "a/2.jpg"))
+    await people.refresh()
+    #expect(directory.downloads == ["a/1.jpg", "a/2.jpg"])
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.photo == second)
+
+    // A removed photo goes to initials.
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: nil, photo: nil))
+    await people.refresh()
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.photo == nil)
+}
+
+@MainActor
+@Test func messagesRefresherKeepsProfilesInStep() async {
+    let directory = FakeDirectory([ana])
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [
+        ChatSummary(id: "!ana", title: "ana_ruiz", lastActivity: jan1, otherPerson: "@ana_ruiz:usetotality.com"),
+    ])
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    model.people.directory = directory
+    await model.connect()
+    for _ in 0..<50 where model.people.profile(ofMatrixID: "@ana_ruiz:usetotality.com") == nil {
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: nil, photo: nil))
+    // What AppRefresh runs at launch, on coming back and every minute.
+    await model.refresher.refresh()
+    #expect(model.people.name(ofMatrixID: "@ana_ruiz:usetotality.com") == "Ana R.")
+}

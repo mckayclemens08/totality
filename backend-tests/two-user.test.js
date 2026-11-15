@@ -199,6 +199,36 @@ describe('contact requests', () => {
                              'redeem_invite', 'request_contact'])
   })
 
+  // Issue 118: Messages shows the other person's photo and name, read the way the app reads them.
+  test('user 2 sees what user 1 made public on their profile, and nothing else', async () => {
+    const [u1, u2] = await trio()
+    const photo = `${u1.id}/6f1c2b3a-9d8e-4f70-a1b2-c3d4e5f60718.jpg`
+    await as(db, u1, (q) => q(`update public.profiles set display_name = 'Ana Ruiz', bio = 'Climbs on Saturdays.',
+                                avatar_key = $2 where id = $1`, [u1.id, photo]))
+    const secret = await addObject(db, u1)
+    const lookUp = (u) => as(db, u, (q) => q(
+      'select id, handle, display_name, bio, avatar_key from public.profiles where handle = $1', [u1.handle]))
+
+    const [row] = await lookUp(u2)
+    assert.deepEqual(row, { id: u1.id, handle: u1.handle, display_name: 'Ana Ruiz', bio: 'Climbs on Saturdays.', avatar_key: photo })
+    assert.equal(await canSee(u2, secret.id), false)
+    // User 2 can't change it, or point it at a file of their own.
+    await as(db, u2, (q) => q(`update public.profiles set display_name = 'Forged' where id = $1`, [u1.id]))
+    assert.equal((await lookUp(u2))[0].display_name, 'Ana Ruiz')
+
+    // Once user 1 makes it contacts-only, user 2, who isn't one, sees no profile at all.
+    await as(db, u1, (q) => q(`update public.profiles set visibility = 'contacts' where id = $1`, [u1.id]))
+    assert.equal((await lookUp(u2)).length, 0)
+    await connect(u1, u2)
+    assert.equal((await lookUp(u2)).length, 1)
+    await as(db, u1, (q) => q(`update public.profiles set visibility = 'private' where id = $1`, [u1.id]))
+    assert.equal((await lookUp(u2)).length, 0)
+
+    // A removed photo comes back as no photo, and the app shows initials.
+    await as(db, u1, (q) => q(`update public.profiles set visibility = 'public', avatar_key = null where id = $1`, [u1.id]))
+    assert.equal((await lookUp(u2))[0].avatar_key, null)
+  })
+
   test('a blocked user cannot see public content or the profile', async () => {
     const [u1, u2, u3] = await trio()
     const o = await addObject(db, u1, { visibility: 'public', key_ref: 'plain:' })

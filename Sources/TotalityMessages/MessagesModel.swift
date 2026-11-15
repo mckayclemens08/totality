@@ -29,6 +29,8 @@ public final class MessagesModel {
     /// The secret that locks the key backup, from the recovery key. Nil until it's on this device.
     /// Asked for the account Messages is connected as, so it's never one person's secret for another.
     private let recoverySecret: @Sendable (_ account: String) async -> String?
+    /// Where an account's saved profiles go. Nil keeps them in memory only.
+    private let peopleFile: @Sendable (_ account: String) -> URL?
 
     private let account: @Sendable () async -> String?
     private let connector: MessagesConnector?
@@ -41,9 +43,11 @@ public final class MessagesModel {
         account: @escaping @Sendable () async -> String?,
         connector: MessagesConnector?,
         unavailableReason: String? = nil,
-        recoverySecret: @escaping @Sendable (_ account: String) async -> String? = { _ in nil }
+        recoverySecret: @escaping @Sendable (_ account: String) async -> String? = { _ in nil },
+        peopleFile: @escaping @Sendable (_ account: String) -> URL? = { _ in nil }
     ) {
         self.recoverySecret = recoverySecret
+        self.peopleFile = peopleFile
         self.account = account
         self.connector = connector
         self.unavailableReason = unavailableReason
@@ -54,7 +58,15 @@ public final class MessagesModel {
             if case .failed(let message) = self.phase { return .failed(message) }
             return .done
         }
+        // Profiles are kept for a day; a pull fetches everyone again.
+        refresher.add("people") { [weak self] in
+            await self?.people.refresh()
+            return .done
+        }
     }
+
+    /// The public profiles of the people in your chats.
+    public let people = MessagesPeople()
 
     /// Keeps the chat list fresh. The app runs it before Messages opens, and a pull runs it too.
     public let refresher = Refresher()
@@ -86,6 +98,7 @@ public final class MessagesModel {
             let service = try await connector(current)
             guard mine == generation else { return await service.stop() }
             self.service = service
+            people.open(file: peopleFile(current))
             service.observeConnection { [weak self] state in
                 Task { @MainActor in
                     guard let self, mine == self.generation else { return }
@@ -130,6 +143,7 @@ public final class MessagesModel {
         chats = []
         requests = []
         connection = .connecting
+        people.close()
         if let service {
             self.service = nil
             await service.stop()
@@ -310,13 +324,17 @@ public final class MessagesModel {
         let query = query.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return chats }
         return chats.filter {
-            $0.title.localizedCaseInsensitiveContains(query) || ($0.lastMessage?.localizedCaseInsensitiveContains(query) ?? false)
+            $0.title.localizedCaseInsensitiveContains(query)
+                || ($0.otherPerson.map { people.name(ofMatrixID: $0).localizedCaseInsensitiveContains(query) } ?? false)
+                || ($0.lastMessage?.localizedCaseInsensitiveContains(query) ?? false)
         }
     }
 
     private func show(_ all: [ChatSummary]) {
         requests = all.filter(\.isRequest).sorted(by: ChatSummary.newestFirst)
         chats = all.filter { !$0.isRequest }.sorted(by: ChatSummary.newestFirst)
+        let others = chats.compactMap(\.otherPerson)
+        if !others.isEmpty { Task { await people.want(matrixIDs: others) } }
     }
 
     private func act(_ work: (any MessagesService) async throws -> Void) async {

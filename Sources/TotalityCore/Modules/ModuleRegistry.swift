@@ -37,8 +37,11 @@ public enum ModuleRegistryError: Error, Equatable {
 public struct ModuleRegistry: Sendable {
     private let byKind: [ContentKind: any ContentHandler]
     private let handlers: [any ContentHandler]
+    /// Public profiles, which Account looks up. Account isn't a content module, so it has its own slot.
+    public let profiles: (any ProfileDirectory)?
 
-    public init(handlers: [any ContentHandler]) throws {
+    public init(handlers: [any ContentHandler], profiles: (any ProfileDirectory)? = nil) throws {
+        self.profiles = profiles
         var modules = Set<ModuleID>()
         var byKind: [ContentKind: any ContentHandler] = [:]
         for handler in handlers {

@@ -101,19 +101,13 @@ struct ProfileQRCode: View {
     }
 }
 
-/// Someone else's profile, opened from their link. It shows only what their profile makes public.
+/// Someone else's profile, opened from their link. It shows only what their profile makes public, and
+/// their photo only as this device rebuilt it.
 public struct OtherProfileView: View {
-    private enum State: Equatable {
-        case loading
-        case found(Profile)
-        case missing
-        case failed
-    }
-
     private let model: AccountModel
     private let username: String
     private let onDone: () -> Void
-    @SwiftUI.State private var state = State.loading
+    @SwiftUI.State private var phase = PersonProfileView.Phase.loading
 
     public init(model: AccountModel, username: String, onDone: @escaping () -> Void) {
         self.model = model
@@ -125,23 +119,7 @@ public struct OtherProfileView: View {
         let theme = Theme.current
         NavigationStack {
             ScrollView {
-                VStack(spacing: Space.s5) {
-                    switch state {
-                    case .loading:
-                        ProgressView().frame(maxWidth: .infinity)
-                    case .found(let profile):
-                        ProfileHeader(profile: profile)
-                    case .missing:
-                        AccountDetail(text: "There's no profile for @\(username) that you can see.")
-                    case .failed:
-                        AccountDetail(text: isSignedIn ? "That profile didn't load." : "Sign in to see profiles on Totality.")
-                        if isSignedIn {
-                            Button("Try again") { Task { await load() } }
-                                .font(Typeface.callout)
-                        }
-                    }
-                }
-                .padding(Space.s5)
+                PersonProfileView(username: username, phase: phase, onRetry: isSignedIn ? { Task { await load() } } : nil)
             }
             .background(theme.bg.color)
             .navigationTitle("@\(username)")
@@ -164,14 +142,14 @@ public struct OtherProfileView: View {
 
     private func load() async {
         guard isSignedIn else {
-            state = .failed
+            phase = .failed("Sign in to see profiles on Totality.")
             return
         }
-        state = .loading
+        phase = .loading
         do {
-            state = try await model.lookUp(username).map(State.found) ?? .missing
+            phase = try await model.lookUp(username).map(PersonProfileView.Phase.found) ?? .missing
         } catch {
-            state = .failed
+            phase = .failed("That profile didn't load.")
         }
     }
 }
