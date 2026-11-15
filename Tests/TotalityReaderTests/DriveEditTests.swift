@@ -138,7 +138,7 @@ private func open(_ id: String, _ setup: DriveSetup) async throws -> DriveOpened
         #expect(item.mime == "application/pdf")
     }
 
-    @Test func wordHeadingsAndParagraphsBecomeMarkdown() {
+    @MainActor @Test func wordHeadingsAndParagraphsBecomeMarkdown() {
         let document = ReadableDocument(sections: [ReadableDocument.Section(blocks: [
             .init(text: "Results", isHeading: true),
             .init(text: "Yield rose by 12% *after* watering."),
