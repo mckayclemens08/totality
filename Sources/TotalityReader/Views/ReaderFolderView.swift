@@ -188,7 +188,7 @@ struct ReaderFolderView: View {
     }
 
     private var isEmptyLibrary: Bool {
-        folder == nil && (model.drive?.links.isEmpty ?? true) && model.items.isEmpty && model.library.folders.isEmpty && model.trash.isEmpty && model.unreadable == 0
+        folder == nil && (model.drive.map { $0.links.isEmpty && $0.elsewhere.isEmpty } ?? true) && model.items.isEmpty && model.library.folders.isEmpty && model.trash.isEmpty && model.unreadable == 0
     }
 
     private var breadcrumbs: some View {

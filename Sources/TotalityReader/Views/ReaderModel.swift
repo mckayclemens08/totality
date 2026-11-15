@@ -108,7 +108,8 @@ public final class ReaderModel {
             try? await vault.emptyOldTrash()
             let listing = try await vault.list()
             library = ReaderLibrary(items: listing.items, folders: listing.folders, opened: listing.opened)
-            await drive?.loadRecent()
+            // Links and opened files can arrive from another device with the library.
+            await drive?.load()
             if let id = prepared?.id, !listing.items.contains(where: { $0.id == id }) { forgetPrepared(id) }
             trash = try await vault.trashed()
             unreadable = listing.unreadable

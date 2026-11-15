@@ -120,7 +120,9 @@ enum ContentSetup {
                 downloads: try base().appendingPathComponent("Downloads", isDirectory: true),
                 receiver: registry.receiver(for: .web)
             ),
-            [readerVault, calendarVault, webVault],
+            // The Drive record syncs whether or not this build can sign in to Google, so links made on
+            // another device aren't lost here.
+            [readerVault, calendarVault, webVault, drive],
             registry,
             MailContent(rootKey: rootKey, store: stores.mail),
             PhotosContent(rootKey: rootKey, store: stores.photos)

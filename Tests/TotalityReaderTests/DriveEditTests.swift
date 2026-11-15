@@ -171,7 +171,8 @@ private func open(_ id: String, _ setup: DriveSetup) async throws -> DriveOpened
         #expect(fake.revoked == 1)
         #expect(try setup.accounts.connection(driveOwner) == nil)
         #expect(try cache.names().isEmpty)
-        #expect(try setup.store.names().count == 1)
+        // The device's state and the shared record, which now holds only the disconnection.
+        #expect(try setup.store.names().count == 2)
         #expect(try await setup.drive.links().isEmpty)
     }
 

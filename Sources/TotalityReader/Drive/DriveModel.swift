@@ -16,10 +16,13 @@ public final class DriveModel {
     public nonisolated static let explanation =
         "Linked folders stay in Google Drive. Google can read them, so they aren't end-to-end encrypted. "
         + "Totality asks Google for your whole Drive but shows only the folders you link. This device talks to Google "
-        + "directly, and Totality's server never sees your files, their names, or your Google sign-in."
+        + "directly, and Totality's server never sees your files or your Google sign-in. Which folders you linked "
+        + "syncs to your other devices end-to-end encrypted, so the server can't read their names."
 
     public private(set) var accounts: [DriveAccount] = []
     public private(set) var links: [DriveLink] = []
+    /// Folders linked on another device, for a Google account not connected on this one.
+    public private(set) var elsewhere: [DriveLink] = []
     /// True while Google's page is open or its answer is being checked.
     public private(set) var isConnecting = false
     /// A problem to show on the Drive screens, cleared when it's dismissed or the next try starts.
@@ -106,10 +109,22 @@ public final class DriveModel {
         accounts = await drive.connections()
         do {
             links = try await drive.links()
+            let here = Set(links.map(\.id))
+            elsewhere = try await drive.allLinks().filter { !here.contains($0.id) }
         } catch {
             problem = "Your linked Drive folders couldn't be read on this device."
         }
         await loadRecent()
+    }
+
+    /// Sends what was opened lately into the synced record, as the app goes to the background.
+    public func publishOpened() async {
+        try? await drive.publishHeld()
+    }
+
+    /// True for a Google account that isn't connected on this device. Its folders show "Connect to see".
+    public func needsConnecting(_ account: String) -> Bool {
+        !accounts.contains { $0.address == account }
     }
 
     /// Reads what the home tile shows. A problem reads as nothing, so the tile never shows stale entries.
@@ -132,7 +147,8 @@ public final class DriveModel {
 
     public func target(of recent: DriveRecent) async -> ShelfTarget? {
         if recent.isFolder {
-            let links = (try? await drive.links()) ?? []
+            // Linked on another device too, so a tap can offer to connect.
+            let links = (try? await drive.allLinks()) ?? []
             guard let link = links.first(where: { $0.account == recent.account && $0.folderID == recent.id }) else { return nil }
             return .folder(account: link.account, folderID: link.folderID, name: link.name)
         }
@@ -231,7 +247,7 @@ public final class DriveModel {
     func refreshAll(force: Bool) async -> RefreshOutcome {
         if let running { return await running.value }
         if !force, let lastRefreshed, Date().timeIntervalSince(lastRefreshed) < Self.quietInterval { return .done }
-        let task = Task { await self.readAll() }
+        let task = Task { await self.readAll(onlyChanged: !force) }
         running = task
         let outcome = await task.value
         running = nil
@@ -239,8 +255,17 @@ public final class DriveModel {
         return outcome
     }
 
-    private func readAll() async -> RefreshOutcome {
-        let result = await drive.refreshAll()
+    /// Goes up for a file whenever a newer version of it was downloaded, by `"account/fileID"`, so a screen
+    /// showing it opens the new one.
+    public private(set) var fileUpdates: [String: Int] = [:]
+
+    /// A pull reads every folder. The quiet refresh asks Drive what changed and reads only that, then
+    /// downloads again any kept file that changed, so it's current before it's opened.
+    private func readAll(onlyChanged: Bool) async -> RefreshOutcome {
+        let result = await drive.refreshAll(onlyChanged: onlyChanged)
+        let updated = await drive.refreshKeptFiles(limit: cacheLimit)
+        for key in updated { fileUpdates[key, default: 0] += 1 }
+        if !updated.isEmpty { await readCacheSize() }
         await load()
         folderProblems = result.problems
         needsAllowing = result.needsAllowing
@@ -430,6 +455,7 @@ public final class DriveModel {
     public func close() async {
         await drive.close()
         links = []
+        elsewhere = []
         accounts = []
         listings = [:]
         folderProblems = [:]

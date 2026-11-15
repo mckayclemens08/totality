@@ -50,13 +50,14 @@ extension GoogleDrive {
     }
 
     /// Every linked folder, and the files opened from them, newest first. A folder never opened counts
-    /// from when it was linked. Only connected accounts, and only files still inside a linked folder.
+    /// from when it was linked. Files only of connected accounts, and only while a linked folder lists them.
     public func recent() throws -> [DriveRecent] {
         guard !isClosed else { throw ReaderError.closed }
         let state = try loadState()
         let connected = Set(connections().map(\.address))
         let opened = Dictionary(state.recent.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
-        let folders = state.links.filter { connected.contains($0.account) }.map { link in
+        // Folders of accounts not connected here still show, as "Connect to see".
+        let folders = state.links.map { link in
             opened[Self.key(link.account, link.folderID)].map { DriveRecent(id: link.folderID, account: link.account, title: link.name, mime: DriveEntry.folderMime, openedAt: $0.openedAt) }
                 ?? DriveRecent(id: link.folderID, account: link.account, title: link.name, mime: DriveEntry.folderMime, openedAt: link.linkedAt)
         }
@@ -71,10 +72,10 @@ extension GoogleDrive {
         return listedFiles(in: try loadState())[Self.key(account, fileID)]
     }
 
-    /// Every file in a kept listing inside a linked folder, by `"account/fileID"`.
-    private func listedFiles(in state: State) -> [String: (folderID: String, entry: DriveEntry)] {
+    /// Every file in a kept listing inside a linked folder, or inside `roots`, by `"account/fileID"`.
+    func listedFiles(in state: State, under roots: [String]? = nil) -> [String: (folderID: String, entry: DriveEntry)] {
         var found: [String: (folderID: String, entry: DriveEntry)] = [:]
-        for key in reachable(in: state) {
+        for key in reachable(in: state, from: roots) {
             guard let id = state.listings[key], let plain = try? open(id),
                   let listing = try? JSONDecoder().decode(DriveListing.self, from: plain),
                   Self.key(listing.account, listing.folderID) == key
@@ -86,10 +87,11 @@ extension GoogleDrive {
         return found
     }
 
-    /// What `prune` keeps: linked folders, and files still listed inside one.
+    /// What `prune` keeps: folders only while they're linked. Files stay even when this device hasn't
+    /// listed their folder yet, because the record is shared and another device may have; the tile shows
+    /// only those listed here. Unlinking and disconnecting remove files themselves.
     func prunedRecent(_ state: State) -> [DriveRecent] {
         let linked = Set(state.links.map { Self.key($0.account, $0.folderID) })
-        let listed = Set(listedFiles(in: state).keys)
-        return state.recent.filter { $0.isFolder ? linked.contains($0.key) : listed.contains($0.key) }
+        return state.recent.filter { !$0.isFolder || linked.contains($0.key) }
     }
 }
