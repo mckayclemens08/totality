@@ -43,6 +43,7 @@ struct NoteEditor: View {
     @State private var showsDocLink = false
     @State private var showsBacklinks = false
     @State private var showsVersions = false
+    @State private var showsExport = false
     /// The title a followed link named when no doc has it, while the person decides whether to make it.
     @State private var missingLink: String?
     @AppStorage("reader.writing.focus") private var focus = false
@@ -136,6 +137,7 @@ struct NoteEditor: View {
                     Menu {
                         Button("Find and replace", systemImage: "magnifyingglass") { showsFind = true }
                         Button("Linked from", systemImage: "link") { showsBacklinks = true }
+                        Button("Export", systemImage: "square.and.arrow.up") { showsExport = true }
                         Button("Version history", systemImage: "clock.arrow.circlepath") {
                             // What's on the page is saved first, so the newest version is what's there now.
                             Task {
@@ -200,6 +202,20 @@ struct NoteEditor: View {
         }
         .sheet(isPresented: $showsDocLink) {
             DocLinkPicker(docs: model.items.filter { $0.id != item.id }) { title in editor.run("wikilink", title) }
+        }
+        .sheet(isPresented: $showsExport) {
+            ExportSheet(
+                item: item, model: model,
+                read: { text in
+                    guard let reply = await editor.call("exportDoc", text) else { return nil }
+                    return ExportDocument(page: reply, title: title)
+                },
+                currentText: {
+                    await editor.flush()
+                    await save()
+                    return editor.text
+                }
+            )
         }
         .sheet(isPresented: $showsBacklinks) {
             BacklinksSheet(item: item, model: model)

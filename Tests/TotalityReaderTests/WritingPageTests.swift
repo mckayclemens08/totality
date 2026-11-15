@@ -56,6 +56,9 @@ import WebKit
         #expect(variables.contains("--tl-text:#15181d"))
         #expect(variables.contains("--tl-accent:#1f5fbf"))
         #expect(variables.contains("--tl-s4:16px"))
+        #expect(variables.contains("--tl-line:1.6"))
+        #expect(variables.contains("--tl-h1:1.75"))
+        #expect(variables.contains("--tl-h1-space:16px"))
     }
 
     @Test("Every load is blocked by the rule list")

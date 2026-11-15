@@ -18,7 +18,7 @@ body {
 }
 .cm-editor {
   font-family: -apple-system, system-ui, sans-serif;
-  font-size: 1.0625em;
+  font-size: calc(var(--tl-body-scale) * 1em);
   background: transparent;
 }
 .tl-serif .cm-editor {
@@ -29,7 +29,7 @@ body {
 }
 .cm-scroller {
   font-family: inherit;
-  line-height: 1.6;
+  line-height: var(--tl-line);
   overflow: visible;
 }
 .cm-content {
@@ -53,15 +53,17 @@ body {
 }
 
 /* Headings carry weight more than size, as everywhere in Totality. */
+/* The type scale comes from WritingType in the design tokens, which export reads too. */
 .cm-tl-h1, .cm-tl-h2, .cm-tl-h3, .cm-tl-h4, .cm-tl-h5, .cm-tl-h6 {
   font-weight: 700;
-  line-height: 1.3;
+  line-height: var(--tl-heading-line);
 }
-.cm-tl-h1 { font-size: 1.75em; padding-top: var(--tl-s4) !important; }
-.cm-tl-h2 { font-size: 1.4em; padding-top: var(--tl-s3) !important; }
-.cm-tl-h3 { font-size: 1.2em; padding-top: var(--tl-s2) !important; }
-.cm-tl-h4 { font-size: 1.05em; }
-.cm-tl-h5, .cm-tl-h6 { font-size: 1em; color: var(--tl-text2); }
+.cm-tl-h1 { font-size: calc(var(--tl-h1) * 1em); padding-top: var(--tl-h1-space) !important; }
+.cm-tl-h2 { font-size: calc(var(--tl-h2) * 1em); padding-top: var(--tl-h2-space) !important; }
+.cm-tl-h3 { font-size: calc(var(--tl-h3) * 1em); padding-top: var(--tl-h3-space) !important; }
+.cm-tl-h4 { font-size: calc(var(--tl-h4) * 1em); }
+.cm-tl-h5 { font-size: calc(var(--tl-h5) * 1em); color: var(--tl-text2); }
+.cm-tl-h6 { font-size: calc(var(--tl-h6) * 1em); color: var(--tl-text2); }
 
 .cm-tl-strong { font-weight: 700; }
 .cm-tl-em { font-style: italic; }
