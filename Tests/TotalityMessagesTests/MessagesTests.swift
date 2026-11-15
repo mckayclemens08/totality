@@ -94,10 +94,13 @@ private final class FakeService: MessagesService, @unchecked Sendable {
     }
 
     private(set) var secretsSeen: [String?] = []
+    /// Another device already backed this account's message keys up.
+    var backupElsewhere = false
 
     func settleKeys(recoverySecret: String?) async -> MessageKeys {
         lock.withLock { secretsSeen.append(recoverySecret) }
-        return recoverySecret == nil ? .needsRecoveryKey : .backedUp
+        if recoverySecret != nil { return .backedUp }
+        return backupElsewhere ? .canRestore : .needsRecoveryKey
     }
 
     func stop() async { lock.withLock { stopped = true } }
@@ -919,4 +922,42 @@ private final class LockedSecret: @unchecked Sendable {
         get { lock.withLock { stored } }
         set { lock.withLock { stored = newValue } }
     }
+}
+
+// MARK: Messages that won't open
+
+@Test func yourOwnLockedMessageSaysItCameFromAnEarlierInstall() {
+    #expect(LockedMessage.placeholder(isOwn: true) == "Can't be opened on this device")
+    #expect(LockedMessage.note(isOwn: true).contains("earlier install of Totality"))
+    #expect(!LockedMessage.note(isOwn: true).contains("sender's device"))
+}
+
+@Test func someoneElsesLockedMessageStillWaitsForTheirDevice() {
+    #expect(LockedMessage.placeholder(isOwn: false) == "Waiting for this message's key")
+    #expect(LockedMessage.note(isOwn: false) == "It will open once the sender's device shares the key, usually when they're next online.")
+}
+
+@Test func restoreIsOfferedOnlyForYourOwnMessagesAndOnlyWhenABackupExists() {
+    #expect(LockedMessage.offersRestore(isOwn: true, keys: .canRestore))
+    #expect(!LockedMessage.offersRestore(isOwn: false, keys: .canRestore))
+    for keys in [MessageKeys.checking, .backedUp, .needsRecoveryKey, .doesntOpen, .failed("x")] {
+        #expect(!LockedMessage.offersRestore(isOwn: true, keys: keys))
+    }
+    #expect(LockedMessage.restoreLabel == "Restore with your recovery key")
+    #expect(MessageKeys.canRestore.summary?.contains("recovery key") == true)
+}
+
+@MainActor
+@Test func aBackupFromAnotherDeviceIsOfferedForRestoreUntilTheRecoveryKeyIsHere() async {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [])
+    service.backupElsewhere = true
+    let secret = LockedSecret()
+    let model = MessagesModel(account: { mckay }, connector: { _ in service }, recoverySecret: { secret.value })
+    await model.connect()
+    #expect(model.keys == .canRestore)
+    secret.value = "from-the-content-key"
+    await model.settleKeys()
+    #expect(model.keys == .backedUp)
+    // The secret goes only to the service, and only once the recovery key put it on this device.
+    #expect(service.secretsSeen == [nil, "from-the-content-key"])
 }

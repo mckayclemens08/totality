@@ -309,6 +309,8 @@ public enum MessageKeys: Equatable, Sendable {
     case backedUp
     /// This device doesn't have the account's recovery key yet, so it can't back up or be verified.
     case needsRecoveryKey
+    /// History is backed up from another device, and entering the recovery key here restores it.
+    case canRestore
     /// A backup exists, but this account's recovery key doesn't open it.
     case doesntOpen
     case failed(String)
@@ -319,10 +321,35 @@ public enum MessageKeys: Equatable, Sendable {
         case .checking: nil
         case .backedUp: "Your message history is backed up with your recovery key, and this device is verified."
         case .needsRecoveryKey: "Set up your recovery key to back up your message history and verify this device. Messages works without it, but a new phone won't get your history."
+        case .canRestore: "Your message history is backed up. Enter your recovery key to restore it on this device."
         case .doesntOpen: "Your message history backup didn't open with your recovery key. New messages still work, but older ones may not open on this device."
         case .failed(let reason): reason
         }
     }
+}
+
+/// What a message that won't open says, which depends on who sent it. Someone else's message usually
+/// opens once their device shares its key. One of your own from an earlier install of Totality only
+/// opens if its key reached the backup; if that install never had one, the key went with it.
+public enum LockedMessage {
+    /// Shown in place of the text.
+    public static func placeholder(isOwn: Bool) -> String {
+        isOwn ? "Can't be opened on this device" : "Waiting for this message's key"
+    }
+
+    /// Shown under it.
+    public static func note(isOwn: Bool) -> String {
+        isOwn
+            ? "Sent from an earlier install of Totality. Its key stayed on that install, so this device can't open it."
+            : "It will open once the sender's device shares the key, usually when they're next online."
+    }
+
+    /// Restoring only helps your own messages, and only once a backup exists to restore from.
+    public static func offersRestore(isOwn: Bool, keys: MessageKeys) -> Bool {
+        isOwn && keys == .canRestore
+    }
+
+    public static let restoreLabel = "Restore with your recovery key"
 }
 
 /// Opens a connection for an account. Throws `notSignedIn` when there's no Totality sign-in.

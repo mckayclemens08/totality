@@ -46,7 +46,7 @@ public struct MessagesHomeView: View {
                 .toolbarBackground(theme.bg.color, for: .navigationBar)
                 #endif
                 .navigationDestination(item: $opened) { id in
-                    ChatScreen(messages: model, chatID: id)
+                    ChatScreen(messages: model, chatID: id, onOpenAccount: onOpenAccount)
                 }
         }
         .tint(theme.accent.color)
@@ -140,6 +140,9 @@ public struct MessagesHomeView: View {
                         Banner(text: summary)
                         if model.keys == .needsRecoveryKey, let onOpenAccount {
                             Button("Set up your recovery key", action: onOpenAccount)
+                                .font(Typeface.callout)
+                        } else if model.keys == .canRestore, let onOpenAccount {
+                            Button(LockedMessage.restoreLabel, action: onOpenAccount)
                                 .font(Typeface.callout)
                         }
                     }

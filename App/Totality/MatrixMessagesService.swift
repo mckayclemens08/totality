@@ -158,13 +158,13 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         switch latest {
         case .none, .remoteInvite: (nil, nil)
         case .remote(let timestamp, _, let isOwn, _, let content):
-            (preview(content).map { isOwn ? "You: \($0)" : $0 }, date(timestamp))
+            (preview(content, isOwn: isOwn).map { isOwn ? "You: \($0)" : $0 }, date(timestamp))
         case .local(let timestamp, _, _, let content, _):
             (preview(content).map { "You: \($0)" }, date(timestamp))
         }
     }
 
-    static func preview(_ content: TimelineItemContent) -> String? {
+    static func preview(_ content: TimelineItemContent, isOwn: Bool = false) -> String? {
         guard case .msgLike(let like) = content else { return nil }
         switch like.kind {
         case .message(let message):
@@ -176,7 +176,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             case .location: return "Location"
             default: return message.body
             }
-        case .unableToDecrypt: return "Waiting for this message's key"
+        case .unableToDecrypt: return LockedMessage.placeholder(isOwn: isOwn)
         case .redacted: return "Message deleted"
         case .sticker: return "Sticker"
         default: return nil
@@ -254,7 +254,15 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             state = encryption.recoveryState()
         }
         guard let secret else {
-            return state == .enabled && encryption.verificationState() == .verified ? .backedUp : .needsRecoveryKey
+            switch state {
+            case .enabled:
+                return encryption.verificationState() == .verified ? .backedUp : .canRestore
+            case .incomplete:
+                // Another device backed history up; the recovery key opens it here.
+                return .canRestore
+            case .disabled, .unknown:
+                return .needsRecoveryKey
+            }
         }
         do {
             switch state {
@@ -552,7 +560,7 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
         switch like.kind {
         case .unableToDecrypt:
             decrypted = false
-            body = "Waiting for this message's key"
+            body = LockedMessage.placeholder(isOwn: event.isOwn)
         case .redacted:
             kind = .deleted
             body = "Message deleted"
