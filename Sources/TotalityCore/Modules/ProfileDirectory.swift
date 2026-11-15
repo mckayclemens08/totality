@@ -11,12 +11,16 @@ public struct PublicProfile: Codable, Equatable, Sendable {
     public let bio: String?
     /// A small square JPEG made on this device by `SafeAvatar`.
     public let photo: Data?
+    /// The photo's file name on the server. Each new photo gets a new one, so an unchanged name means the
+    /// photo on this device is still theirs and needn't be downloaded again.
+    public let photoKey: String?
 
-    public init(username: String, displayName: String?, bio: String?, photo: Data?) {
+    public init(username: String, displayName: String?, bio: String?, photo: Data?, photoKey: String? = nil) {
         self.username = username
         self.displayName = displayName
         self.bio = bio
         self.photo = photo
+        self.photoKey = photoKey
     }
 
     /// What to call them: their chosen name, or their handle.
@@ -36,8 +40,17 @@ public struct PublicProfile: Codable, Equatable, Sendable {
 /// Looks up public profiles by handle. Account provides it and the app hands it over through the
 /// `ModuleRegistry`, so Messages can show people without importing Account.
 public protocol ProfileDirectory: Sendable {
-    /// Nil when there's no profile this account can see. Throws when the directory couldn't be asked.
-    func profile(of username: String) async throws -> PublicProfile?
+    /// Everyone asked for, in one lookup, by handle. A handle missing from the answer has no profile this
+    /// account can see. `photos` holds the rebuilt photos already on this device by file name, so a photo
+    /// whose name hasn't changed is reused rather than downloaded. Throws when the directory couldn't be asked.
+    func profiles(of usernames: [String], photos: [String: Data]) async throws -> [String: PublicProfile]
+}
+
+extension ProfileDirectory {
+    /// One person. Nil when there's no profile this account can see.
+    public func profile(of username: String) async throws -> PublicProfile? {
+        try await profiles(of: [username], photos: [:])[username]
+    }
 }
 
 /// Makes another person's profile photo safe to show. The `avatars` bucket only checks the type a file

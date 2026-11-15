@@ -195,24 +195,49 @@ public struct SupabaseAccountService: AccountService {
     }
 
     public func lookUpProfile(_ username: Username) async throws -> PublicProfile? {
-        let row: OtherProfileRow? = try await mapErrors {
-            let rows: [OtherProfileRow] = try await client.from("profiles")
-                .select("id, handle, display_name, bio, avatar_key")
-                .eq("handle", value: username.value)
-                .execute()
-                .value
-            return rows.first
-        }
-        guard let row else { return nil }
-        var photo: Data?
-        // Only a file in the profile owner's own folder, named the way this app names it, is fetched.
-        if let key = row.avatar_key, AvatarKey.isOwned(key, by: row.id), let url = try? photoURL(key) {
-            photo = await AvatarDownload.fetch(url)
-        }
-        return PublicProfile(username: row.handle, displayName: row.display_name, bio: row.bio, photo: photo)
+        try await otherProfiles([username], photos: [:])[username.value]
     }
 
-    private struct OtherProfileRow: Decodable {
+    /// Several people's profiles in one query, so keeping a chat list's faces fresh costs one request.
+    /// A photo is downloaded only when its file name isn't among `photos`, which are already rebuilt here.
+    func otherProfiles(_ usernames: [Username], photos known: [String: Data]) async throws -> [String: PublicProfile] {
+        let handles = Array(Set(usernames.map(\.value))).sorted()
+        guard !handles.isEmpty else { return [:] }
+        var rows: [OtherProfileRow] = []
+        // A long list goes in parts, so the query stays a sensible length.
+        for start in stride(from: 0, to: handles.count, by: 100) {
+            let part = Array(handles[start..<min(start + 100, handles.count)])
+            rows += try await mapErrors {
+                try await client.from("profiles")
+                    .select("id, handle, display_name, bio, avatar_key")
+                    .in("handle", values: part)
+                    .execute()
+                    .value as [OtherProfileRow]
+            }
+        }
+        return await withTaskGroup(of: PublicProfile?.self) { group in
+            for row in rows where handles.contains(row.handle) {
+                group.addTask {
+                    // Only a file in the profile owner's own folder, named the way this app names it, is used.
+                    guard let key = row.avatar_key, AvatarKey.isOwned(key, by: row.id) else {
+                        return PublicProfile(username: row.handle, displayName: row.display_name, bio: row.bio, photo: nil)
+                    }
+                    var photo = known[key]
+                    if photo == nil, let url = try? photoURL(key) { photo = await AvatarDownload.fetch(url) }
+                    // A failed download keeps no name, so the next refresh tries again.
+                    return PublicProfile(
+                        username: row.handle, displayName: row.display_name, bio: row.bio, photo: photo,
+                        photoKey: photo == nil ? nil : key
+                    )
+                }
+            }
+            var found: [String: PublicProfile] = [:]
+            for await case let profile? in group { found[profile.username] = profile }
+            return found
+        }
+    }
+
+    private struct OtherProfileRow: Decodable, Sendable {
         let id: UUID
         let handle: String
         let display_name: String?
@@ -325,9 +350,8 @@ public struct SupabaseAccountService: AccountService {
 }
 
 extension SupabaseAccountService: ProfileDirectory {
-    public func profile(of username: String) async throws -> PublicProfile? {
-        guard let name = Username(username) else { return nil }
-        return try await lookUpProfile(name)
+    public func profiles(of usernames: [String], photos: [String: Data]) async throws -> [String: PublicProfile] {
+        try await otherProfiles(usernames.compactMap { Username($0) }, photos: photos)
     }
 }
 

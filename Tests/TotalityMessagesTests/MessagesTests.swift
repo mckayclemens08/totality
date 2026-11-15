@@ -994,14 +994,35 @@ private final class FakeDirectory: ProfileDirectory, @unchecked Sendable {
         self.profiles = Dictionary(uniqueKeysWithValues: profiles.map { ($0.username, $0) })
     }
 
+    private var queries: [[String]] = []
+    private var downloaded: [String] = []
+
+    /// Every handle asked for, in order.
     var lookups: [String] { lock.withLock { asked } }
+    /// Each query's handles.
+    var batches: [[String]] { lock.withLock { queries } }
+    /// Photo file names that had to be downloaded, because the device didn't have them.
+    var downloads: [String] { lock.withLock { downloaded } }
     func change(_ profile: PublicProfile) { lock.withLock { profiles[profile.username] = profile } }
 
-    func profile(of username: String) async throws -> PublicProfile? {
+    func profiles(of usernames: [String], photos: [String: Data]) async throws -> [String: PublicProfile] {
         try lock.withLock {
-            asked.append(username)
+            asked += usernames
+            queries.append(usernames)
             if offline { throw URLError(.notConnectedToInternet) }
-            return profiles[username]
+            var found: [String: PublicProfile] = [:]
+            for name in usernames {
+                guard let profile = profiles[name] else { continue }
+                var photo: Data?
+                if let key = profile.photoKey {
+                    photo = photos[key]
+                    if photo == nil { downloaded.append(key); photo = profile.photo }
+                }
+                found[name] = PublicProfile(
+                    username: name, displayName: profile.displayName, bio: profile.bio, photo: photo, photoKey: profile.photoKey
+                )
+            }
+            return found
         }
     }
 }
@@ -1142,4 +1163,65 @@ private let ana = PublicProfile(username: "ana_ruiz", displayName: "Ana Ruiz", b
     #expect(model.people.name(ofMatrixID: "@ana_ruiz:usetotality.com") == "Ana Ruiz")
     #expect(directory.lookups == ["ana_ruiz"])
     #expect(model.filtered("Ana R").map(\.id) == ["!ana"])
+}
+
+@MainActor
+@Test func everyoneIsRefreshedInOneQuery() async {
+    let directory = FakeDirectory([ana, PublicProfile(username: "mckay_test", displayName: nil, bio: nil, photo: nil)])
+    let people = MessagesPeople()
+    people.directory = directory
+    await people.want(matrixIDs: ["@ana_ruiz:usetotality.com", "@mckay_test:usetotality.com", "@ghost_user:usetotality.com"])
+    await people.refresh()
+    #expect(directory.batches == [["ana_ruiz", "ghost_user", "mckay_test"], ["ana_ruiz", "ghost_user", "mckay_test"]])
+    #expect(people.phase(of: "ghost_user") == .missing)
+}
+
+@MainActor
+@Test func aPhotoIsDownloadedAgainOnlyWhenItsNameChanges() async {
+    let first = Data("first photo".utf8)
+    let second = Data("second photo".utf8)
+    let directory = FakeDirectory([
+        PublicProfile(username: "ana_ruiz", displayName: "Ana Ruiz", bio: nil, photo: first, photoKey: "a/1.jpg"),
+    ])
+    let people = MessagesPeople()
+    people.directory = directory
+    await people.want(matrixIDs: ["@ana_ruiz:usetotality.com"])
+    await people.refresh()
+    #expect(directory.downloads == ["a/1.jpg"])
+
+    // A new name or bio shows on the next refresh, with the same photo kept.
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: "New bio", photo: first, photoKey: "a/1.jpg"))
+    await people.refresh()
+    #expect(directory.downloads == ["a/1.jpg"])
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.name == "Ana R.")
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.bio == "New bio")
+
+    // A new photo gets a new name, so it's fetched.
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: nil, photo: second, photoKey: "a/2.jpg"))
+    await people.refresh()
+    #expect(directory.downloads == ["a/1.jpg", "a/2.jpg"])
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.photo == second)
+
+    // A removed photo goes to initials.
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: nil, photo: nil))
+    await people.refresh()
+    #expect(people.profile(ofMatrixID: "@ana_ruiz:usetotality.com")?.photo == nil)
+}
+
+@MainActor
+@Test func messagesRefresherKeepsProfilesInStep() async {
+    let directory = FakeDirectory([ana])
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [
+        ChatSummary(id: "!ana", title: "ana_ruiz", lastActivity: jan1, otherPerson: "@ana_ruiz:usetotality.com"),
+    ])
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    model.people.directory = directory
+    await model.connect()
+    for _ in 0..<50 where model.people.profile(ofMatrixID: "@ana_ruiz:usetotality.com") == nil {
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    directory.change(PublicProfile(username: "ana_ruiz", displayName: "Ana R.", bio: nil, photo: nil))
+    // What AppRefresh runs at launch, on coming back and every minute.
+    await model.refresher.refresh()
+    #expect(model.people.name(ofMatrixID: "@ana_ruiz:usetotality.com") == "Ana R.")
 }

@@ -3,8 +3,10 @@ import Observation
 import TotalityCore
 import TotalityUI
 
-/// The public profiles of the people in your chats: name, bio and a photo rebuilt on this device. Each is
-/// kept for a day, on this device only, and fetched again on pull-to-refresh. Everything here is public,
+/// The public profiles of the people in your chats: name, bio and a photo rebuilt on this device. They're
+/// fetched again in one query whenever Messages' refresher runs (launch, coming back, every minute while
+/// open, and a pull), so a changed photo or name shows soon. A saved copy younger than a day is enough to
+/// show a new chat without asking, and offline the saved copy shows however old it is. Everything here is public,
 /// so the file isn't sealed, but it lives in the account's own cache folder and goes when that does.
 @MainActor
 @Observable
@@ -63,7 +65,7 @@ public final class MessagesPeople {
         await fetch(stale)
     }
 
-    /// Fetches everyone again, for pull-to-refresh.
+    /// Fetches everyone again in one query, for Messages' refresher.
     public func refresh() async {
         await fetch(Set(entries.keys).union(failed))
     }
@@ -80,24 +82,25 @@ public final class MessagesPeople {
         fetching.formUnion(todo)
         defer { fetching.subtract(todo) }
         let file = self.file
-        await withTaskGroup(of: (String, Result<PublicProfile?, Error>).self) { group in
+        // Photos already here, by file name: one whose name hasn't changed isn't downloaded again.
+        var photos: [String: Data] = [:]
+        for case let profile? in entries.values.map(\.profile) {
+            if let key = profile.photoKey, let photo = profile.photo { photos[key] = photo }
+        }
+        do {
+            let found = try await directory.profiles(of: todo.sorted(), photos: photos)
+            // A sign-out or account change while this was out drops what came back.
+            guard self.file == file else { return }
+            let fetched = now()
             for handle in todo {
-                group.addTask {
-                    do { return (handle, .success(try await directory.profile(of: handle))) } catch { return (handle, .failure(error)) }
-                }
+                entries[handle] = Entry(profile: found[handle].flatMap { $0.username == handle ? $0 : nil }, fetched: fetched)
+                failed.remove(handle)
             }
-            for await (handle, result) in group {
-                // A sign-out or account change while this was out drops what came back.
-                guard self.file == file else { continue }
-                switch result {
-                case .success(let profile):
-                    entries[handle] = Entry(profile: profile, fetched: now())
-                    failed.remove(handle)
-                case .failure:
-                    // Offline keeps whatever was saved before, however old.
-                    if entries[handle] == nil { failed.insert(handle) }
-                }
-            }
+        } catch {
+            guard self.file == file else { return }
+            // Offline keeps whatever was saved before, however old.
+            for handle in todo where entries[handle] == nil { failed.insert(handle) }
+            return
         }
         save()
     }
@@ -116,7 +119,9 @@ public final class MessagesPeople {
             guard MessagesUsername.normalized(handle) == handle, entry.profile.map({ $0.username == handle }) ?? true else { continue }
             let photo = entry.profile?.photo.flatMap(SafeAvatar.prepare)
             entries[handle] = Entry(
-                profile: entry.profile.map { PublicProfile(username: $0.username, displayName: $0.displayName, bio: $0.bio, photo: photo) },
+                profile: entry.profile.map {
+                    PublicProfile(username: $0.username, displayName: $0.displayName, bio: $0.bio, photo: photo, photoKey: photo == nil ? nil : $0.photoKey)
+                },
                 fetched: entry.fetched
             )
         }
