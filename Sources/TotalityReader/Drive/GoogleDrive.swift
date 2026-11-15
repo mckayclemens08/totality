@@ -229,7 +229,7 @@ public actor GoogleDrive {
     static let mostRefreshed = 40
 
     /// Every folder that can be read: the linked ones, and the folders found inside them in what's kept.
-    private func reachable(in state: State) -> Set<String> {
+    func reachable(in state: State) -> Set<String> {
         var found = Set<String>()
         var waiting = state.links.map { Self.key($0.account, $0.folderID) }
         while let next = waiting.popLast() {
@@ -248,13 +248,16 @@ public actor GoogleDrive {
         reachable(in: try loadState()).contains(key)
     }
 
-    /// Drops every kept listing that's no longer inside a linked folder, like after an unlink.
+    /// Drops every kept listing that's no longer inside a linked folder, like after an unlink, and what
+    /// the home tile remembered from it.
     func prune() throws {
         var state = try loadState()
         let kept = reachable(in: state)
         let gone = state.listings.filter { !kept.contains($0.key) }
         let goneFiles = state.files.filter { !kept.contains($0.value.folderKey) }
-        guard !gone.isEmpty || !goneFiles.isEmpty else { return }
+        let recent = prunedRecent(state)
+        guard !gone.isEmpty || !goneFiles.isEmpty || recent != state.recent else { return }
+        state.recent = recent
         for (key, id) in gone {
             try store.delete(Self.name(id))
             state.listings[key] = nil
@@ -291,6 +294,8 @@ public actor GoogleDrive {
         var listings: [String: UUID] = [:]
         /// Files kept on the device after they were opened, by `"account/fileID"`.
         var files: [String: CachedFile] = [:]
+        /// Opened files and linked folders, newest first, for the home tile.
+        var recent: [DriveRecent] = []
 
         init() {}
 
@@ -299,6 +304,7 @@ public actor GoogleDrive {
             links = try values.decode([DriveLink].self, forKey: .links)
             listings = try values.decodeIfPresent([String: UUID].self, forKey: .listings) ?? [:]
             files = try values.decodeIfPresent([String: CachedFile].self, forKey: .files) ?? [:]
+            recent = try values.decodeIfPresent([DriveRecent].self, forKey: .recent) ?? []
         }
     }
 

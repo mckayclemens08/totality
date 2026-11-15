@@ -59,32 +59,38 @@ public final class ReaderModel {
         library.items
     }
 
-    /// For the home tile: what's playing, then what was opened last. Nil until the library opens, so a
-    /// tile can't claim it's empty while it's loading.
+    /// For the home tile: what's playing, then what was opened last, from the library or Google Drive.
+    /// Nil until the library opens, so a tile can't claim it's empty while it's loading.
     public var glance: ModuleGlance? {
         guard phase == .ready else { return nil }
-        guard !items.isEmpty else { return ModuleGlance(lines: ["Nothing saved yet"], isQuiet: true) }
+        let shelf = shelf
+        guard !shelf.isEmpty else { return ModuleGlance(lines: ["Nothing saved yet"], isQuiet: true) }
         let playing = listen.current
-        let recent = glanceTitles(leaving: playing?.id).map(\.displayTitle)
-        let count = items.count == 1 ? "1 item" : "\(items.count) items"
+        let recent = glanceTitles(in: shelf, leaving: playing?.id).map(\.title)
+        let count = switch items.count {
+        case 0: "In Google Drive"
+        case 1: "1 item"
+        default: "\(items.count) items"
+        }
         return ModuleGlance(lines: (playing.map { ["Listening to \($0.title)"] } ?? []) + recent + [count])
     }
 
-    private func glanceTitles(leaving playing: UUID?) -> [ReaderItem] {
-        Array(library.lastOpened.filter { $0.id != playing }.prefix(Self.glanceTitles))
+    private func glanceTitles(in shelf: [ShelfEntry], leaving playing: UUID?) -> [ShelfEntry] {
+        Array(shelf.filter { $0.id != playing }.prefix(Self.glanceTitles))
     }
 
-    /// The item behind a line of the glance. The last line counts items, so it opens nothing.
+    /// The entry behind a line of the glance. The last line counts items, so it opens nothing.
     public func glanceItem(at line: Int) -> UUID? {
         let playing = listen.current?.id
-        let ids = (playing.map { [$0] } ?? []) + glanceTitles(leaving: playing).map(\.id)
+        let ids = (playing.map { [$0] } ?? []) + glanceTitles(in: shelf, leaving: playing).map(\.id)
         return ids.indices.contains(line) ? ids[line] : nil
     }
 
     /// What the home tile puts first: what's playing, or else what was opened last.
-    public var frontOfShelf: ReaderItem? {
+    public var frontOfShelf: ShelfEntry? {
+        let shelf = shelf
         let playing = listen.current?.id
-        return items.first { $0.id == playing } ?? library.lastOpened.first
+        return shelf.first { $0.id == playing } ?? items.first { $0.id == playing }.map(ShelfEntry.item) ?? shelf.first
     }
 
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
@@ -102,6 +108,7 @@ public final class ReaderModel {
             try? await vault.emptyOldTrash()
             let listing = try await vault.list()
             library = ReaderLibrary(items: listing.items, folders: listing.folders, opened: listing.opened)
+            await drive?.loadRecent()
             if let id = prepared?.id, !listing.items.contains(where: { $0.id == id }) { forgetPrepared(id) }
             trash = try await vault.trashed()
             unreadable = listing.unreadable

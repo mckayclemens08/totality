@@ -72,6 +72,7 @@ extension GoogleDrive {
         let folderKey = Self.key(account, folderID)
 
         if let kept = try keptFile(key, matching: entry) {
+            try noteOpened(entry, account: account)
             return DriveOpenedFile(
                 entry: entry, account: account, folderID: folderID, data: kept, mime: kind.opensAs,
                 version: entry.version, modifiedAt: entry.modifiedAt
@@ -84,6 +85,7 @@ extension GoogleDrive {
         // Unlinked while it downloaded: shown this once, but not kept.
         if try reachableFolder(folderKey) {
             try keep(data, as: key, entry: entry, mime: kind.opensAs, folderKey: folderKey, limit: limit)
+            try noteOpened(entry, account: account)
         }
         return DriveOpenedFile(
             entry: entry, account: account, folderID: folderID, data: data, mime: kind.opensAs,
