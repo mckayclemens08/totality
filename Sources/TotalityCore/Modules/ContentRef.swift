@@ -21,6 +21,9 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     case mailOutside = "mail_outside"
     /// A photo album: its name, sealed. Which photos are in it is in each photo's sealed details.
     case photoAlbum = "photo_album"
+    /// The Reader's linked Google Drive folders and the Drive files opened from them, as one sealed record
+    /// per person. Listings, downloaded files and Google sign-ins stay on each device.
+    case readerDrive = "reader_drive"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {

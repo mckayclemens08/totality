@@ -1,6 +1,16 @@
 import Foundation
 import TotalityCore
 
+/// What changed in one account's Drive since it was last asked.
+struct DriveChanges: Equatable, Sendable {
+    /// Every file and folder that changed, was moved, or was removed.
+    var touched: Set<String> = []
+    /// The folders the changed ones are in now.
+    var parents: Set<String> = []
+    /// Where to read from next time.
+    var next: String
+}
+
 /// Why Google Drive couldn't be reached or used, in words the Reader can show.
 public enum DriveProblem: Error, Equatable, Sendable {
     /// No connection to the internet.
@@ -161,6 +171,67 @@ struct DriveAPI: Sendable {
             pages += 1
         } while page != nil && found.count < Self.mostEntries && pages < 20
         return Array(found.prefix(Self.mostEntries))
+    }
+
+    // MARK: Changes
+
+    /// Where an account's list of changes starts now. Only changes after this are read next time.
+    func startPageToken(accessToken: String) async throws -> String {
+        let answer: StartToken = try await get(Self.url("changes/startPageToken", [
+            URLQueryItem(name: "supportsAllDrives", value: "true"),
+        ]), accessToken: accessToken)
+        guard Self.isID(answer.startPageToken) else { throw DriveProblem.unexpected }
+        return answer.startPageToken
+    }
+
+    /// What changed in an account's Drive since `token`: the files and folders, the folders they're in
+    /// now, and where to read from next time. Nil when there's too much to read this way, so the caller
+    /// reads its folders whole instead.
+    func changes(since token: String, accessToken: String) async throws -> DriveChanges? {
+        guard Self.isID(token) else { throw DriveProblem.unexpected }
+        var changes = DriveChanges(next: token)
+        var page = token
+        for _ in 0..<Self.mostChangePages {
+            let answer: ChangeList = try await get(Self.url("changes", [
+                URLQueryItem(name: "pageToken", value: page),
+                URLQueryItem(name: "fields", value: "nextPageToken,newStartPageToken,changes(fileId,removed,file(parents,trashed))"),
+                URLQueryItem(name: "pageSize", value: String(Self.pageSize)),
+                URLQueryItem(name: "includeRemoved", value: "true"),
+                URLQueryItem(name: "supportsAllDrives", value: "true"),
+                URLQueryItem(name: "includeItemsFromAllDrives", value: "true"),
+            ]), accessToken: accessToken)
+            for change in answer.changes ?? [] {
+                guard let id = change.fileId, Self.isID(id) else { continue }
+                changes.touched.insert(id)
+                if change.removed != true, let parents = change.file?.parents {
+                    changes.parents.formUnion(parents.filter(Self.isID))
+                }
+            }
+            if let next = answer.newStartPageToken {
+                guard Self.isID(next) else { throw DriveProblem.unexpected }
+                changes.next = next
+                return changes
+            }
+            guard let next = answer.nextPageToken, Self.isID(next) else { throw DriveProblem.unexpected }
+            page = next
+        }
+        return nil
+    }
+
+    private static let mostChangePages = 10
+
+    private struct StartToken: Decodable { let startPageToken: String }
+
+    private struct ChangeList: Decodable {
+        struct Change: Decodable {
+            struct Parents: Decodable { let parents: [String]? }
+            let fileId: String?
+            let removed: Bool?
+            let file: Parents?
+        }
+        let changes: [Change]?
+        let nextPageToken: String?
+        let newStartPageToken: String?
     }
 
     /// One file or folder's details, for checking a link is still there and what it's called now.

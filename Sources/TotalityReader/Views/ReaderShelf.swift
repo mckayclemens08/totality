@@ -4,34 +4,36 @@ import Foundation
 /// from one (issue 102). Each goes by when it was last opened, whichever it is.
 public enum ShelfEntry: Identifiable, Equatable {
     case item(ReaderItem)
-    case drive(DriveRecent)
+    /// `needsConnecting` for a folder linked on another device, with an account not connected here.
+    case drive(DriveRecent, needsConnecting: Bool = false)
 
     /// What a tap asks the Reader for. A Drive file's is the ID it opens under, so Listen matches it.
     public var id: UUID {
         switch self {
         case .item(let item): item.id
-        case .drive(let recent): DriveModel.shelfID(recent)
+        case .drive(let recent, _): DriveModel.shelfID(recent)
         }
     }
 
     public var title: String {
         switch self {
         case .item(let item): item.displayTitle
-        case .drive(let recent): recent.isFolder ? recent.title : DriveModel.title(of: recent.title)
+        case .drive(let recent, _): recent.isFolder ? recent.title : DriveModel.title(of: recent.title)
         }
     }
 
     var systemImage: String {
         switch self {
         case .item(let item): item.systemImage
-        case .drive(let recent): recent.isFolder ? "folder" : Self.entry(recent).systemImage
+        case .drive(let recent, _): recent.isFolder ? "folder" : Self.entry(recent).systemImage
         }
     }
 
     var typeName: String {
         switch self {
         case .item(let item): item.typeName
-        case .drive(let recent): recent.isFolder ? "Google Drive folder" : "\(Self.entry(recent).typeName) in Google Drive"
+        case .drive(_, true): "Connect to see"
+        case .drive(let recent, false): recent.isFolder ? "Google Drive folder" : "\(Self.entry(recent).typeName) in Google Drive"
         }
     }
 
@@ -47,7 +49,9 @@ extension ReaderModel {
     /// The library and Drive together, last opened first.
     public var shelf: [ShelfEntry] {
         let items = library.lastOpened.prefix(Self.shelfDepth).map { (entry: ShelfEntry.item($0), at: library.date(of: $0, sortedBy: .opened)) }
-        let fromDrive = (drive?.recent ?? []).prefix(Self.shelfDepth).map { (entry: ShelfEntry.drive($0), at: $0.openedAt) }
+        let fromDrive = (drive?.recent ?? []).prefix(Self.shelfDepth).map { recent in
+            (entry: ShelfEntry.drive(recent, needsConnecting: drive?.needsConnecting(recent.account) ?? false), at: recent.openedAt)
+        }
         return (items + fromDrive).sorted { $0.at > $1.at }.map(\.entry)
     }
 

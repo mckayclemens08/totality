@@ -32,6 +32,10 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
     private(set) var created: [(name: String, parent: String, body: Data)] = []
     private(set) var asked: [URLComponents] = []
     private(set) var revoked = 0
+    /// Drive's list of changes, oldest first: what changed, the folder it's in now, and whether it went.
+    private(set) var changeLog: [(id: String, parent: String?, removed: Bool)] = []
+    /// True when Drive no longer has the starting points it gave out.
+    var forgetsChangeTokens = false
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let url = try #require(request.url)
@@ -47,6 +51,18 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
         if status == 0 { return (Data("<html>".utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!) }
         if status != 200 { return answer(status, errorBody) }
         let query = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { $1 })
+        if components.path == "/drive/v3/changes/startPageToken" {
+            return lock.withLock { answer(200, ["startPageToken": String(changeLog.count + 1)]) }
+        }
+        if components.path == "/drive/v3/changes" {
+            guard !forgetsChangeTokens, let start = query["pageToken"].flatMap(Int.init) else { return answer(404, errorBody) }
+            return lock.withLock {
+                let changes: [[String: Any]] = changeLog.dropFirst(max(0, start - 1)).map { change in
+                    change.removed ? ["fileId": change.id, "removed": true] : ["fileId": change.id, "removed": false, "file": ["parents": change.parent.map { [$0] } ?? []]]
+                }
+                return answer(200, ["changes": changes, "newStartPageToken": String(changeLog.count + 1)])
+            }
+        }
         let filePrefix = "/drive/v3/files/", uploadPrefix = "/upload/drive/v3/files"
         if components.path.hasPrefix(uploadPrefix + "/"), request.httpMethod == "PATCH" {
             let id = String(components.path.dropFirst(uploadPrefix.count + 1))
@@ -71,6 +87,7 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
             lock.withLock {
                 created.append((name, parent, body))
                 children[parent, default: []].append(file)
+                changeLog.append((file["id"] as! String, parent, false))
             }
             return answer(200, file)
         }
@@ -112,6 +129,26 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
     }
 
     var listings: [URLComponents] { lock.withLock { asked }.filter { $0.path == "/drive/v3/files" } }
+    /// The folders listed, by ID, in order. A second page of the same listing doesn't count again.
+    var listedFolders: [String] {
+        listings.filter { $0.queryItems?.contains { $0.name == "pageToken" } != true }.compactMap { $0.queryItems?.first { $0.name == "q" }?.value?.split(separator: "'").first.map(String.init) }
+    }
+
+    /// A file added to a folder elsewhere, which Drive's changes then say.
+    func add(_ file: [String: Any], to parent: String) {
+        lock.withLock {
+            children[parent, default: []].append(file)
+            changeLog.append((file["id"] as! String, parent, false))
+        }
+    }
+
+    /// A file deleted elsewhere.
+    func remove(_ id: String) {
+        lock.withLock {
+            for parent in children.keys { children[parent]?.removeAll { $0["id"] as? String == id } }
+            changeLog.append((id, nil, true))
+        }
+    }
     var savedFiles: [String: Data] { lock.withLock { saved } }
     var createdFiles: [(name: String, parent: String, body: Data)] { lock.withLock { created } }
 
@@ -130,6 +167,7 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
             file["modifiedTime"] = "2026-11-13T0\(min(version, 9)):00:00Z"
             if let size { file["size"] = String(size) }
             children[parent]?[index] = file
+            changeLog.append((id, parent, false))
             return file
         }
         return nil
@@ -369,11 +407,12 @@ final class Clock: @unchecked Sendable {
         let setup = try await linked(fake, store: store)
         try await setup.drive.refresh("1notes", account: driveOwner)
         try await setup.drive.refresh("1week1", account: driveOwner)
-        #expect(try store.names().count == 3)
+        // The device's state, the shared record, and two listings.
+        #expect(try store.names().count == 4)
         let link = try #require(try await setup.drive.links().first)
         try await setup.drive.unlink(link)
-        // Only the state blob is left, and nothing inside can be read any more.
-        #expect(try store.names().count == 1)
+        // Only the two state blobs are left, and nothing inside can be read any more.
+        #expect(try store.names().count == 2)
         #expect(try await setup.drive.kept("1week1", account: driveOwner) == nil)
         await #expect(throws: DriveProblem.notFound) { try await setup.drive.refresh("1week1", account: driveOwner) }
     }
@@ -406,7 +445,7 @@ final class Clock: @unchecked Sendable {
         try await setup.drive.refresh("1notes", account: driveOwner)
         try setup.accounts.forget(driveOwner)
         _ = await setup.drive.refreshAll()
-        #expect(try store.names().count == 1)
+        #expect(try store.names().count == 2)
         try setup.accounts.keep(address: driveOwner, refreshToken: "1//again", granted: [DriveAPI.scope])
         #expect(try await setup.drive.links().isEmpty)
     }

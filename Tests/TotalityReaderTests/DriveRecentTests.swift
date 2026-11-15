@@ -118,6 +118,7 @@ private let start = Date(timeIntervalSince1970: 1_794_000_000)
         try await shelf.setup.drive.unlink(try #require(try await shelf.setup.drive.links().first))
         #expect(try await shelf.setup.drive.recent().isEmpty)
         // And not just hidden: linking it again starts with nothing opened.
+        shelf.clock.set(start + 2 * day)
         try await shelf.setup.drive.link(DriveEntry(id: "1notes", name: "School notes", mime: DriveEntry.folderMime), account: driveOwner)
         try await shelf.setup.drive.refresh("1notes", account: driveOwner)
         try await shelf.setup.drive.refresh("1bio", account: driveOwner)

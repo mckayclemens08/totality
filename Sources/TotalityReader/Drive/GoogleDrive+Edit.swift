@@ -86,8 +86,11 @@ extension GoogleDrive {
         let address = address.lowercased()
         try? await accounts?.disconnect(address)
         var state = try loadState()
+        state.forgotten[address] = now()
         state.links.removeAll { $0.account == address }
         state.recent.removeAll { $0.account == address }
+        state.seen.remove(address)
+        state.changeTokens[address] = nil
         try saveState(state)
         try prune()
     }

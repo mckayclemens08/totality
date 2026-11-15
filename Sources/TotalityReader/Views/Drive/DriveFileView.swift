@@ -93,6 +93,11 @@ struct DriveFileView: View {
             Text(notice ?? "")
         }
         .task(id: route) { await open() }
+        .onChange(of: model.drive?.fileUpdates[GoogleDrive.key(route.location.account, route.entry.id)]) {
+            // A newer version came in the background. The open editor keeps what's being typed.
+            guard !editing else { return }
+            Task { await open() }
+        }
         .onChange(of: model.drive?.openedGeneration) {
             // Whoever's here changed, or the folder was unlinked: what this showed goes too.
             editing = false

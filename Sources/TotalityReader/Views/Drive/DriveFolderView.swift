@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 import TotalityCore
 import TotalityUI
@@ -59,16 +60,30 @@ struct DriveFolderView: View {
     private var listing: DriveListing? { drive.listing(location.folderID, account: location.account) }
     private var problem: DriveProblem? { drive.problem(location.folderID, account: location.account) }
 
+    private var needsConnecting: Bool { drive.needsConnecting(location.account) }
+
     var body: some View {
         content
             .background(theme.bg.color)
             .navigationTitle(location.name)
             .refreshable { await drive.refresh(location.folderID, account: location.account) }
-            .task { await drive.open(location.folderID, account: location.account) }
+            .task(id: needsConnecting) {
+                guard !needsConnecting else { return }
+                await drive.open(location.folderID, account: location.account)
+            }
     }
 
     @ViewBuilder private var content: some View {
-        if let listing {
+        if needsConnecting {
+            VStack(spacing: Space.s4) {
+                ReaderMessage(
+                    systemImage: "person.crop.circle.badge.questionmark", title: "Connect to see",
+                    detail: "This folder was linked on another device, with \(location.account). Connect that Google account on this one to see it. Your Google sign-in never leaves the device it's on."
+                )
+                DriveConnectButton(account: location.account, drive: drive)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let listing {
             List {
                 header
                 if let problem {
@@ -173,6 +188,56 @@ struct DriveLinksSection: View {
             }
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+        }
+        ForEach(drive.elsewhere) { link in
+            NavigationLink(value: ReaderRoute.drive(DriveLocation(account: link.account, folderID: link.folderID, name: link.name))) {
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    DriveLinkRow(link: link)
+                    Text("Connect to see")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
+                }
+            }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+}
+
+/// Starts the usual Google sign-in for one account, for folders linked on another device.
+struct DriveConnectButton: View {
+    let account: String
+    let drive: DriveModel
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+
+    var body: some View {
+        VStack(spacing: Space.s2) {
+            Button {
+                Task { await connect() }
+            } label: {
+                if drive.isConnecting {
+                    ProgressView()
+                } else {
+                    Text("Connect \(account)")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.current.accent.color)
+            .disabled(drive.isConnecting)
+            if let problem = drive.problem {
+                Text(problem)
+                    .font(Typeface.caption)
+                    .foregroundStyle(Theme.current.danger.color)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.horizontal, Space.s4)
+    }
+
+    private func connect() async {
+        let session = webAuthenticationSession
+        _ = await drive.connect(account) { page, scheme in
+            try await session.authenticate(using: page, callbackURLScheme: scheme, preferredBrowserSession: .shared)
         }
     }
 }

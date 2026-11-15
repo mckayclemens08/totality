@@ -111,7 +111,8 @@ extension GoogleDrive {
         return plain
     }
 
-    func keep(_ data: Data, as key: String, entry: DriveEntry, mime: String, folderKey: String, limit: Int) throws {
+    /// `opened` keeps when it was last opened, for a refresh that isn't an open.
+    func keep(_ data: Data, as key: String, entry: DriveEntry, mime: String, folderKey: String, limit: Int, opened: Date? = nil) throws {
         guard let cache else { return }
         var state = try loadState()
         if let old = state.files[key] {
@@ -128,9 +129,10 @@ extension GoogleDrive {
         try cache.write(try ContentCipher.seal(data, key: fileKey(blob), objectID: blob), as: Self.fileName(blob))
         state.files[key] = CachedFile(
             blob: blob, folderKey: folderKey, version: entry.version, modifiedAt: entry.modifiedAt,
-            mime: mime, bytes: data.count, openedAt: now()
+            mime: mime, bytes: data.count, openedAt: opened ?? now()
         )
-        try saveState(Self.evicting(state, to: limit, keeping: key, cache: cache))
+        // A refresh never pushes out something opened more recently: it goes first itself, if anything does.
+        try saveState(Self.evicting(state, to: limit, keeping: opened == nil ? key : nil, cache: cache))
     }
 
     /// Drops the least recently opened files until what's kept fits. The one just opened stays.
@@ -147,6 +149,39 @@ extension GoogleDrive {
 
     private func fileKey(_ blob: UUID) -> ObjectKey {
         rootKey.objectKey(for: blob, purpose: .googleDriveFile)
+    }
+
+    // MARK: Keeping opened files current
+
+    /// The most kept files one refresh downloads again, so a big change can't keep the phone busy.
+    static let mostRefreshedFiles = 10
+
+    /// Downloads again every kept file whose folder now lists a newer version, Google Docs included, so
+    /// what opens is current without waiting. It stays inside `limit`, oldest-opened going first. Returns
+    /// the files that changed, by `"account/fileID"`.
+    public func refreshKeptFiles(limit: Int) async -> Set<String> {
+        guard !isClosed, let state = try? loadState() else { return [] }
+        let listed = listedFiles(in: state)
+        var updated = Set<String>()
+        let stale = state.files.sorted { $0.value.openedAt > $1.value.openedAt }.compactMap { key, cached -> (String, String, DriveEntry)? in
+            guard let found = listed[key], found.entry.version != cached.version || found.entry.modifiedAt != cached.modifiedAt else { return nil }
+            return (key, found.folderID, found.entry)
+        }
+        for (key, folderID, entry) in stale.prefix(Self.mostRefreshedFiles) {
+            let parts = key.split(separator: "/", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let kind = Self.readerMime(for: entry) else { continue }
+            if let size = entry.size, size > Self.mostFileBytes { continue }
+            guard let (api, token) = try? await reader(parts[0]),
+                  let data = try? await api.download(entry, exportingAs: kind.export, accessToken: token),
+                  data.count <= Self.mostFileBytes
+            else { continue }
+            // Kept the way opening keeps it, without counting as an open.
+            let folderKey = Self.key(parts[0], folderID)
+            guard (try? reachableFolder(folderKey)) == true else { continue }
+            guard (try? keep(data, as: key, entry: entry, mime: kind.opensAs, folderKey: folderKey, limit: limit, opened: state.files[key]?.openedAt)) != nil else { continue }
+            updated.insert(key)
+        }
+        return updated
     }
 
     // MARK: The cache as a whole
