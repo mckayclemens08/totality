@@ -390,8 +390,12 @@ Agreed with the owner on 2026-10-30. The account page becomes the signed-in pers
 - Everything on a profile is public and unencrypted, and the edit screen says so. It lives in Supabase, per proposal §4's public directory.
 - The handle is the username. The profile row is made the first time it's needed, so nobody picks a handle twice.
 - Photos are rebuilt on the device as a 512-pixel square JPEG, which drops location, time, and camera details. Files go to the public `avatars` bucket under the owner's folder, and each change gets a new name.
-- Followers, posts, and viewing other people's profiles are not here. Follows and posts wait for Phase 2, and viewing others waits for search.
-- Before showing other people's photos: treat `avatars` as hostile input. The bucket's JPEG rule checks the declared type, not the bytes, and a client can skip the device's rebuild.
+- Followers and posts are not here. They wait for Phase 2.
+- Other people's profiles open from a profile link and, since issue 118 (owner, 2026-11-15), from Messages: the chat list and chat header show the other person's photo and name, the header opens their profile, and in a group tapping someone opens theirs. The profile shows photo, name, `@handle` and bio, with Message and Copy handle. Nothing new is stored on the server.
+- Account provides the lookup as `ProfileDirectory` in `TotalityCore`, and the app hands it to Messages through `ModuleRegistry.profiles`. The profile view is `PersonProfileView` in `TotalityUI`, so neither module imports the other.
+- Only people on `usetotality.com` are looked up, by the handle in their Matrix ID. A request's sender isn't looked up, so the request can't be seen to have been opened.
+- Messages keeps the profiles it fetched for a day, in the account's own cache folder, and a pull fetches them again. Offline keeps the saved copy, however old.
+- Other people's photos are hostile input. The bucket's JPEG rule checks the declared type, not the bytes, and a client can skip the device's rebuild. So the device fetches a photo only from the owner's own folder under the app's naming pattern, stops at 2 MB, checks the bytes really are a JPEG or PNG, refuses a canvas over 4096 pixels a side, decodes only a small copy, and re-encodes a 256-pixel square JPEG. Anything else shows initials.
 - Before adding profile visibility controls: a photo stays readable by anyone holding its URL, so a block or a move to private has to change the file's name.
 
 ## Sealed blob store

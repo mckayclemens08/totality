@@ -45,8 +45,9 @@ public protocol AccountService: Sendable {
     func webPageIsPublished() async throws -> Bool
     /// Puts the page up from the profile as the server reads it, or takes it down.
     func setWebPage(published: Bool) async throws
-    /// Someone else's profile, if they have one this account is allowed to see.
-    func lookUpProfile(_ username: Username) async throws -> Profile?
+    /// Someone else's profile, if they have one this account is allowed to see. Its photo has been
+    /// checked and rebuilt on this device, never shown as the server's file.
+    func lookUpProfile(_ username: Username) async throws -> PublicProfile?
 }
 
 public enum SignOutResult: Equatable, Sendable {
@@ -193,15 +194,30 @@ public struct SupabaseAccountService: AccountService {
         }
     }
 
-    public func lookUpProfile(_ username: Username) async throws -> Profile? {
-        try await mapErrors {
-            let rows: [ProfileRow] = try await client.from("profiles")
-                .select("handle, display_name, bio, avatar_key")
+    public func lookUpProfile(_ username: Username) async throws -> PublicProfile? {
+        let row: OtherProfileRow? = try await mapErrors {
+            let rows: [OtherProfileRow] = try await client.from("profiles")
+                .select("id, handle, display_name, bio, avatar_key")
                 .eq("handle", value: username.value)
                 .execute()
                 .value
-            return try rows.first.map(profile(from:))
+            return rows.first
         }
+        guard let row else { return nil }
+        var photo: Data?
+        // Only a file in the profile owner's own folder, named the way this app names it, is fetched.
+        if let key = row.avatar_key, AvatarKey.isOwned(key, by: row.id), let url = try? photoURL(key) {
+            photo = await AvatarDownload.fetch(url)
+        }
+        return PublicProfile(username: row.handle, displayName: row.display_name, bio: row.bio, photo: photo)
+    }
+
+    private struct OtherProfileRow: Decodable {
+        let id: UUID
+        let handle: String
+        let display_name: String?
+        let bio: String?
+        let avatar_key: String?
     }
 
     /// The profile server answers with whether the page is up. It takes the username from the sign-in.
@@ -305,5 +321,44 @@ public struct SupabaseAccountService: AccountService {
         default:
             return .failed
         }
+    }
+}
+
+extension SupabaseAccountService: ProfileDirectory {
+    public func profile(of username: String) async throws -> PublicProfile? {
+        guard let name = Username(username) else { return nil }
+        return try await lookUpProfile(name)
+    }
+}
+
+/// Where someone's photo may be: in their own folder, under a name this app gives it. Anything else in
+/// the column is ignored, so a crafted value can't point the device at another file or path.
+enum AvatarKey {
+    static func isOwned(_ key: String, by owner: UUID) -> Bool {
+        let parts = key.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[0] == owner.uuidString.lowercased() else { return false }
+        return parts[1].wholeMatch(of: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg/) != nil
+    }
+}
+
+/// Downloads another person's photo with a size cap, then hands the bytes to `SafeAvatar`.
+enum AvatarDownload {
+    static func fetch(_ url: URL, session: URLSession = .shared) async -> Data? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        guard let (bytes, response) = try? await session.bytes(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              response.expectedContentLength <= Int64(SafeAvatar.maximumBytes)
+        else { return nil }
+        var data = Data()
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count > SafeAvatar.maximumBytes { return nil }
+            }
+        } catch {
+            return nil
+        }
+        return SafeAvatar.prepare(data)
     }
 }

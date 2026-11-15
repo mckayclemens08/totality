@@ -194,7 +194,7 @@ public final class AccountModel {
     }
 
     /// Someone else's public profile, or nil if there isn't one this account can see.
-    public func lookUp(_ username: String) async throws -> Profile? {
+    public func lookUp(_ username: String) async throws -> PublicProfile? {
         guard let name = Username(username) else { return nil }
         return try await service.lookUpProfile(name)
     }

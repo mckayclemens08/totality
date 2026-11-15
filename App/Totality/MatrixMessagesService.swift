@@ -147,7 +147,8 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             // the server, and so whoever invited you, that the request was looked at.
             return ChatSummary(
                 id: info.id, title: title, lastMessage: text, lastActivity: time, unread: unread,
-                isGroup: !info.isDirect, photo: info.isDirect ? nil : info.avatarUrl
+                isGroup: !info.isDirect, photo: info.isDirect ? nil : info.avatarUrl,
+                otherPerson: info.isDirect ? info.heroes.first?.userId : nil
             )
         default:
             return nil

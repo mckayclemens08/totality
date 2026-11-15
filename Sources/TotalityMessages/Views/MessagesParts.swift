@@ -61,7 +61,8 @@ struct Banner: View {
     }
 }
 
-/// The person's first letter, standing in for a photo until profiles reach Messages.
+/// A first letter in place of a photo, for groups without one and for requests, whose sender's profile
+/// isn't looked up so the request can't be seen to have been looked at.
 struct Initial: View {
     let name: String
 

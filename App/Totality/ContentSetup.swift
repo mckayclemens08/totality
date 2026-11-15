@@ -110,7 +110,7 @@ enum ContentSetup {
             MailModule(refresh: mailRefresh),
             PhotosModule(refresh: { await refresh(.photos) }),
             MessagesRefresher(refresh: { await refresh(.messages) }),
-        ])
+        ], profiles: AccountSetup.profiles)
         return (
             reader,
             CalendarModel(

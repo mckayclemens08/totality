@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// Opens a conversation and shows it, or says why it couldn't open.
@@ -57,6 +58,8 @@ struct ChatView: View {
     @State private var atBottom = true
     /// The chat has been shown at its newest message once, after it first loaded.
     @State private var startedAtBottom = false
+    /// Whose profile is open, by Matrix ID.
+    @State private var showingPerson: ShownPerson?
 
     var body: some View {
         let theme = Theme.current
@@ -82,6 +85,10 @@ struct ChatView: View {
                                 message: message,
                                 model: model,
                                 showsSender: !message.isOwn && (index == 0 || model.messages[index - 1].sender != message.sender),
+                                senderName: messages.people.name(ofMatrixID: message.sender),
+                                senderPhoto: model.isGroup ? messages.people.profile(ofMatrixID: message.sender)?.photo : nil,
+                                onOpenSender: model.isGroup && MessagesPeople.handle(of: message.sender) != nil
+                                    ? { showingPerson = ShownPerson(id: message.sender) } : nil,
                                 showsSeen: message.seen && model.messages[(index + 1)...].allSatisfy { !$0.isOwn || !$0.seen },
                                 onRetry: { Task { await model.retry(message) } },
                                 onOpenPhoto: { if message.isVideo { playing = message } else { viewing = message } },
@@ -142,11 +149,32 @@ struct ChatView: View {
             composer
         }
         .background(theme.bg.color)
-        .navigationTitle(model.title)
+        .navigationTitle(chatTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task { await model.start() }
+        .task(id: Set(model.messages.lazy.filter { !$0.isOwn }.map(\.sender))) {
+            // Group members' names and photos; the one other person in a chat is fetched by the list.
+            guard model.isGroup else { return }
+            await messages.people.want(matrixIDs: Array(Set(model.messages.lazy.filter { !$0.isOwn }.map(\.sender))))
+        }
+        .sheet(item: $showingPerson) { shown in
+            PersonSheet(
+                matrixID: shown.id, people: messages.people,
+                // From the header it's this chat; from a group it's a chat with just them.
+                onMessage: shown.id == model.otherPerson && !model.isGroup
+                    ? { showingPerson = nil }
+                    : {
+                        showingPerson = nil
+                        Task {
+                            if let chat = await messages.startChat(with: MessagesUsername.display(shown.id)) {
+                                messages.requestedChat = chat
+                            }
+                        }
+                    }
+            )
+        }
         .photosPicker(isPresented: $showingPhotos, selection: $pickedPhoto, matching: .any(of: [.images, .videos]), preferredItemEncoding: .compatible)
         .onChange(of: pickedPhoto) {
             guard let item = pickedPhoto else { return }
@@ -237,7 +265,28 @@ struct ChatView: View {
         }
     }
 
+    /// A chat with one person goes by their profile's name once it's known.
+    private var chatTitle: String {
+        guard !model.isGroup, let person = model.otherPerson else { return model.title }
+        return messages.people.profile(ofMatrixID: person)?.name ?? model.title
+    }
+
     @ToolbarContentBuilder private var chatMenu: some ToolbarContent {
+        if !model.isGroup, let person = model.otherPerson, MessagesPeople.handle(of: person) != nil {
+            ToolbarItem(placement: .principal) {
+                Button { showingPerson = ShownPerson(id: person) } label: {
+                    HStack(spacing: Space.s2) {
+                        PersonFace(photo: messages.people.profile(ofMatrixID: person)?.photo, name: chatTitle, diameter: Space.s6)
+                        Text(chatTitle)
+                            .font(Typeface.headline)
+                            .foregroundStyle(Theme.current.textPrimary.color)
+                            .lineLimit(1)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(chatTitle), view profile")
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 Picker("Disappearing messages", selection: Binding(
@@ -459,6 +508,12 @@ struct Bubble: View {
     let message: ChatMessage
     let model: ChatModel
     let showsSender: Bool
+    /// The sender's profile name, or their handle.
+    var senderName: String = ""
+    /// Shown beside a group member's name once their profile has a photo.
+    var senderPhoto: Data? = nil
+    /// Opens the sender's profile, in groups.
+    var onOpenSender: (() -> Void)? = nil
     let showsSeen: Bool
     let onRetry: () -> Void
     let onOpenPhoto: () -> Void
@@ -472,9 +527,22 @@ struct Bubble: View {
         let theme = Theme.current
         VStack(alignment: message.isOwn ? .trailing : .leading, spacing: Space.s1) {
             if showsSender {
-                Text(MessagesUsername.display(message.sender))
-                    .font(Typeface.micro)
-                    .foregroundStyle(theme.textSecondary.color)
+                let name = senderName.isEmpty ? MessagesUsername.display(message.sender) : senderName
+                let label = HStack(spacing: Space.s1) {
+                    if onOpenSender != nil {
+                        PersonFace(photo: senderPhoto, name: name, diameter: Space.s5)
+                    }
+                    Text(name)
+                        .font(Typeface.micro)
+                        .foregroundStyle(theme.textSecondary.color)
+                }
+                if let onOpenSender {
+                    Button(action: onOpenSender) { label }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(name), view profile")
+                } else {
+                    label
+                }
             }
             VStack(alignment: .leading, spacing: Space.s2) {
                 if let reply = message.replyTo {
@@ -736,5 +804,30 @@ enum ChatScroll {
     /// Only a message that's on the server and opened can take a reaction.
     static func canHeart(_ message: ChatMessage) -> Bool {
         message.state == .sent && message.decrypted && message.kind != .deleted && message.canReply
+    }
+}
+
+/// Whose profile is shown from a chat, by Matrix ID.
+struct ShownPerson: Identifiable, Equatable {
+    let id: String
+}
+
+/// Someone's public profile over a chat, fetched if it isn't saved or is more than a day old.
+struct PersonSheet: View {
+    let matrixID: String
+    let people: MessagesPeople
+    let onMessage: () -> Void
+
+    var body: some View {
+        let username = MessagesPeople.handle(of: matrixID) ?? MessagesUsername.display(matrixID)
+        ScrollView {
+            PersonProfileView(
+                username: username, phase: people.phase(of: username), onMessage: onMessage,
+                onRetry: { Task { await people.reload(username) } }
+            )
+        }
+        .background(Theme.current.bg.color)
+        .presentationDetents([.medium, .large])
+        .task { await people.want(matrixIDs: [matrixID]) }
     }
 }

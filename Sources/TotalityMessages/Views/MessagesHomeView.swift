@@ -223,11 +223,16 @@ private struct ChatRow: View {
     var body: some View {
         let theme = Theme.current
         let unread = chat.unread > 0
+        let title = self.title
         HStack(spacing: Space.s3) {
-            GroupAvatar(title: chat.title, location: chat.photo, messages: messages)
+            if let person = chat.otherPerson {
+                PersonFace(photo: messages.people.profile(ofMatrixID: person)?.photo, name: title)
+            } else {
+                GroupAvatar(title: chat.title, location: chat.photo, messages: messages)
+            }
             VStack(alignment: .leading, spacing: Space.s1) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(chat.title)
+                    Text(title)
                         .font(unread ? Typeface.headline : Typeface.body)
                         .foregroundStyle(theme.textPrimary.color)
                         .lineLimit(1)
@@ -256,7 +261,12 @@ private struct ChatRow: View {
         .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(unread ? "Unread, \(chat.title)" : chat.title)
+        .accessibilityLabel(unread ? "Unread, \(title)" : title)
+    }
+
+    /// A chat with one person goes by their profile's name once it's known.
+    private var title: String {
+        chat.otherPerson.flatMap { messages.people.profile(ofMatrixID: $0)?.name } ?? chat.title
     }
 }
 
