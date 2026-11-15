@@ -19,7 +19,7 @@ import WebKit
         #expect(outline == .outline([
             WritingHeading(level: 1, text: "Chapter One: The Harbour", from: 0),
             WritingHeading(level: 2, text: "The crossing", from: 120),
-        ]))
+        ], labels: [], style: .apa))
         #expect(WritingMessage.parse(["type": "find"]) == .find)
         #expect(WritingMessage.parse(["type": "matches", "count": 3, "current": 7]) == .matches(WritingMatches(count: 3, current: 3)))
     }

@@ -41,7 +41,7 @@ export function outline(doc, limit = 2000) {
     }
     const heading = headingLine.exec(line.text);
     if (heading) {
-      const text = heading[2].replace(/\\(.)/g, "$1").replace(/[*_`~]+/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+      const text = heading[2].replace(/\s*\{#[^}]*\}\s*$/, "").replace(/\\(.)/g, "$1").replace(/[*_`~]+/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
       headings.push({ level: heading[1].length, text: text.slice(0, 200), from: line.from, line: number });
     }
   }

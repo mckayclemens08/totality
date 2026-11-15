@@ -23,6 +23,9 @@ struct WritingFindBar: View {
                     TextField("Find in doc", text: $query)
                         .focused($queryFocused)
                         .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
                         .submitLabel(.search)
                         .onSubmit { step("findNext") }
                     Text(Self.position(controller.matches, hasQuery: !query.isEmpty))
@@ -38,6 +41,9 @@ struct WritingFindBar: View {
                 HStack(spacing: Space.s2) {
                     TextField("Replace with", text: $replacement)
                         .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
                         .raisedField()
                     Button("Replace") { step("replace") }
                         .disabled(controller.matches.count == 0)
@@ -185,6 +191,7 @@ struct WritingCountsLine: View {
 struct WritingSettingsSheet: View {
     @Binding var settings: WritingSettings
     @Binding var dailyTarget: Int
+    var style: Binding<WritingStyle>? = nil
     let docTarget: Int?
     let onDocTarget: (Int?) -> Void
 
@@ -205,6 +212,15 @@ struct WritingSettingsSheet: View {
                 } footer: {
                     Text("Focus mode fades everything but the paragraph you're writing. Typewriter scrolling keeps that line in the middle of the screen.")
                 }
+                if let style {
+                    Section {
+                        Picker("Citation style", selection: style) {
+                            ForEach(WritingStyle.allCases) { Text($0.name).tag($0) }
+                        }
+                    } footer: {
+                        Text("Citations and the bibliography follow this style. It's saved in the doc's front matter as csl, which Pandoc reads too.")
+                    }
+                }
                 Section {
                     TextField("Words for this doc", text: $docTargetText)
                         #if os(iOS)
@@ -216,6 +232,14 @@ struct WritingSettingsSheet: View {
                     Text("Targets")
                 } footer: {
                     Text("The doc's target is sealed with the doc. The daily goal counts words you add on this device, in any doc.")
+                }
+                Section("Acknowledgements") {
+                    ForEach(WritingCredits.all, id: \.name) { credit in
+                        VStack(alignment: .leading, spacing: Space.s1) {
+                            Text(credit.name).font(Typeface.body)
+                            Text(credit.detail).font(Typeface.caption).foregroundStyle(Theme.current.textSecondary.color)
+                        }
+                    }
                 }
             }
             .navigationTitle("Writing")
@@ -239,4 +263,18 @@ struct WritingSettingsSheet: View {
         let target = Int(digits).flatMap { $0 > 0 ? $0 : nil }
         if target != docTarget { onDocTarget(target) }
     }
+}
+
+/// What the writing page is built on, credited as each licence asks.
+enum WritingCredits {
+    struct Credit {
+        let name: String
+        let detail: String
+    }
+
+    static let all = [
+        Credit(name: "citeproc-js", detail: "By Frank Bennett. Formats citations and bibliographies. Used unmodified under the Common Public Attribution License 1.0."),
+        Credit(name: "Citation Style Language", detail: "The APA, MLA and Chicago author-date styles and the US English locale, by the CSL project and each style's authors, under CC BY-SA 3.0."),
+        Credit(name: "CodeMirror", detail: "By Marijn Haverbeke and others. The editor itself, under the MIT License."),
+    ]
 }

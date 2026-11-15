@@ -16,6 +16,7 @@ enum ReadableText {
             return document.string ?? ""
         }
         if mime == epubMime || mime == wordMime { return try document(data, mime: mime).plainText }
+        if mime == References.mime { return References.readableText(data) }
         if mime == MarkdownText.mime { return MarkdownText.plainText(String(decoding: data, as: UTF8.self)) }
         if mime == markdownMime { return DocText(markdown: String(decoding: data, as: UTF8.self)).plainText }
         guard mime.hasPrefix("text/") else { throw ReaderError.notReadable }

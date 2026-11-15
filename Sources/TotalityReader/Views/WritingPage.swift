@@ -106,7 +106,8 @@ enum WritingMessage: Equatable {
     case link(String)
     case open(URL)
     case stats(WritingStats)
-    case outline([WritingHeading])
+    /// The headings, the labels a cross-reference can point at, and the doc's citation style.
+    case outline([WritingHeading], labels: [WritingLabel], style: WritingStyle)
     /// Command-F: the person wants the find bar.
     case find
     case matches(WritingMatches)
@@ -143,7 +144,11 @@ enum WritingMessage: Equatable {
             return .stats(WritingStats(stats))
         case "outline":
             guard let headings = message["headings"] as? [[String: Any]] else { return nil }
-            return .outline(headings.prefix(WritingHeading.limit).compactMap(WritingHeading.init))
+            let labels = (message["labels"] as? [[String: Any]] ?? []).prefix(WritingHeading.limit).compactMap(WritingLabel.init)
+            return .outline(
+                headings.prefix(WritingHeading.limit).compactMap(WritingHeading.init), labels: Array(labels),
+                style: WritingStyle(rawValue: message["style"] as? String ?? "") ?? .apa
+            )
         case "find":
             return .find
         case "matches":
@@ -217,6 +222,56 @@ struct WritingHeading: Equatable, Identifiable {
         self.level = level
         self.text = text
         self.from = from
+    }
+}
+
+/// A labelled section, figure or table a cross-reference can point at.
+struct WritingLabel: Equatable, Identifiable {
+    let id: String
+    let kind: String
+    let number: Int
+    let caption: String
+
+    init?(_ values: [String: Any]) {
+        guard let id = values["id"] as? String, id.count <= 200,
+              id.wholeMatch(of: /(sec|fig|tbl):[\w:.\-]+/) != nil,
+              let kind = values["kind"] as? String, ["sec", "fig", "tbl"].contains(kind), id.hasPrefix(kind + ":")
+        else { return nil }
+        self.id = id
+        self.kind = kind
+        number = max(0, values["number"] as? Int ?? 0)
+        caption = String((values["caption"] as? String ?? "").prefix(200))
+    }
+
+    init(id: String, kind: String, number: Int, caption: String) {
+        self.id = id
+        self.kind = kind
+        self.number = number
+        self.caption = caption
+    }
+
+    /// How the picker names it: "Figure 2: Turnover by district type".
+    var title: String {
+        switch kind {
+        case "fig": "Figure \(number)" + (caption.isEmpty ? "" : ": \(caption)")
+        case "tbl": "Table \(number)" + (caption.isEmpty ? "" : ": \(caption)")
+        default: caption.isEmpty ? id : caption
+        }
+    }
+}
+
+/// The citation styles bundled with the editor. A doc names one in its front matter.
+enum WritingStyle: String, CaseIterable, Identifiable {
+    case apa, mla, chicago
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .apa: "APA"
+        case .mla: "MLA"
+        case .chicago: "Chicago"
+        }
     }
 }
 

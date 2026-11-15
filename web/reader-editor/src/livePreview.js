@@ -3,6 +3,19 @@
 // cleanly and nothing is hidden from the person editing it.
 import { Decoration, ViewPlugin, WidgetType } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
+import { StateEffect } from "@codemirror/state";
+import {
+  scholarlyIndex, citationKeys, isCrossRef, crossRefText, plainCitation, locator, NoteMarker, ChipWidget,
+} from "./scholarly.js";
+
+/// How citations read on the page. Swift's library and the style engine replace the plain form.
+let citationText = (keys, locatorText, narrative) => plainCitation(keys, locatorText, new Map());
+
+/// Sets how citations read, and redraws them.
+export const refreshCitations = StateEffect.define();
+export function setCitationText(render) {
+  citationText = render;
+}
 
 class BulletWidget extends WidgetType {
   eq() {
@@ -118,6 +131,8 @@ function decorate(view, focused) {
     }
   };
 
+  const index = state.field(scholarlyIndex, false) || { notes: { order: new Map() }, labels: new Map() };
+
   for (const { from, to } of view.visibleRanges) {
     syntaxTree(state).iterate({
       from,
@@ -220,6 +235,50 @@ function decorate(view, focused) {
           lineClass(node.from, node.to, "cm-tl-codeblock");
           return false;
         }
+        if (name === "FrontMatter") {
+          lineClass(node.from, node.to, "cm-tl-frontmatter");
+          return false;
+        }
+        if (name === "FootnoteRef") {
+          const text = state.sliceDoc(node.from, node.to);
+          const label = text.slice(2, -1);
+          const lineStart = state.doc.lineAt(node.from).from;
+          const isDefinition = node.from === lineStart && state.sliceDoc(node.to, node.to + 1) === ":";
+          const number = index.notes.order.get(label);
+          if (isDefinition) {
+            lineClass(node.from, node.from, "cm-tl-notedef");
+            if (!isActive(node.from)) {
+              const end = state.sliceDoc(node.to + 1, node.to + 2) === " " ? node.to + 2 : node.to + 1;
+              found.push(Decoration.replace({ widget: new NoteMarker(number ? `${number}.` : `${label}.`) }).range(node.from, end));
+            }
+          } else if (!isActive(node.from)) {
+            found.push(Decoration.replace({ widget: new NoteMarker(number ? String(number) : "?") }).range(node.from, node.to));
+          }
+          return false;
+        }
+        if (name === "InlineNote") {
+          found.push(mark("cm-tl-inlinenote").range(node.from, node.to));
+          return false;
+        }
+        if (name === "Citation" || name === "NarrativeCitation") {
+          const text = state.sliceDoc(node.from, node.to);
+          const keys = name === "Citation" ? citationKeys(text) : [{ key: text.slice(1), suppressAuthor: false }];
+          const cross = keys.length > 0 && keys.every(({ key }) => isCrossRef(key));
+          if (isActive(node.from)) {
+            found.push(mark(cross ? "cm-tl-xref-src" : "cm-tl-cite-src").range(node.from, node.to));
+          } else {
+            const shown = cross
+              ? keys.map(({ key }) => crossRefText(key, index.labels)).join(", ")
+              : citationText(keys, name === "Citation" ? locator(text) : "", name === "NarrativeCitation");
+            found.push(Decoration.replace({ widget: new ChipWidget(shown, cross ? "cm-tl-xref" : "cm-tl-cite") }).range(node.from, node.to));
+          }
+          return false;
+        }
+        if (name === "Attribute") {
+          if (isActive(node.from)) found.push(mark("cm-tl-symbol").range(node.from, node.to));
+          else found.push(hide.range(state.sliceDoc(node.from - 1, node.from) === " " ? node.from - 1 : node.from, node.to));
+          return false;
+        }
         if (name === "Table") {
           lineClass(node.from, node.to, "cm-tl-table");
           return false;
@@ -236,7 +295,8 @@ export const livePreview = ViewPlugin.fromClass(
       this.decorations = decorate(view, view.hasFocus);
     }
     update(update) {
-      if (update.docChanged || update.viewportChanged || update.selectionSet || update.focusChanged ||
+      const refreshed = update.transactions.some((tr) => tr.effects.some((effect) => effect.is(refreshCitations)));
+      if (refreshed || update.docChanged || update.viewportChanged || update.selectionSet || update.focusChanged ||
           syntaxTree(update.startState) !== syntaxTree(update.state)) {
         this.decorations = decorate(update.view, update.view.hasFocus);
       }

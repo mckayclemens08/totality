@@ -35,6 +35,9 @@ struct NoteEditor: View {
     @State private var showsOutline = false
     @State private var showsSettings = false
     @State private var goals = WritingGoals.load()
+    @State private var references: [References.Summary] = []
+    @State private var showsCite = false
+    @State private var showsCrossRef = false
     @AppStorage("reader.writing.focus") private var focus = false
     @AppStorage("reader.writing.typewriter") private var typewriter = false
     @AppStorage("reader.writing.smartPunctuation") private var smartPunctuation = true
@@ -142,13 +145,34 @@ struct NoteEditor: View {
             WritingSettingsSheet(
                 settings: settings,
                 dailyTarget: Binding(get: { goals.dailyTarget }, set: { goals.dailyTarget = $0; goals.save() }),
+                style: Binding(get: { editor.style }, set: { editor.run("style", $0.rawValue) }),
                 docTarget: docTarget,
                 onDocTarget: { target in
                     Task { if await model.setWordTarget(target, of: item.id) { docTarget = target } }
                 }
             )
         }
+        .sheet(isPresented: $showsCite) {
+            CitationPicker(references: references) { reference in editor.run("cite", reference.id) }
+        }
+        .sheet(isPresented: $showsCrossRef) {
+            CrossReferencePicker(
+                labels: editor.labels, headings: editor.outline,
+                onPick: { id in editor.run("crossref", id) },
+                onLabel: { heading in
+                    Task {
+                        if let id = await editor.call("label", heading.from) as? String, !id.isEmpty {
+                            editor.run("crossref", id)
+                        }
+                    }
+                }
+            )
+        }
         .onChange(of: editor.findRequests) { showsFind = true }
+        // A reference library imported or changed while the doc is open is picked up straight away.
+        .onChange(of: model.items.filter { $0.mime == References.mime }.map(\.updatedAt)) {
+            Task { await loadReferences(sendToPage: true) }
+        }
         .task {
             editor.onOpen = { url in openURL(url) }
             editor.onWordsWritten = { words in
@@ -208,7 +232,7 @@ struct NoteEditor: View {
                     onShowOriginal: { model.requestedItem = keptOriginal }
                 )
             }
-            WritingEditorView(controller: editor)
+            WritingEditorView(controller: editor, webView: editor.webView)
                 .overlay {
                     if saved == nil || editor.phase == .starting {
                         ProgressView()
@@ -220,7 +244,7 @@ struct NoteEditor: View {
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Space.s1) {
                 WritingCountsLine(stats: editor.stats, docTarget: docTarget, goals: goals)
-                WritingFormatBar(controller: editor)
+                WritingFormatBar(controller: editor, onCite: { showsCite = true }, onCrossRef: { showsCrossRef = true })
             }
             .background(theme.bg.color)
         }
@@ -230,7 +254,8 @@ struct NoteEditor: View {
         do {
             // The navigation value can be out of date, so only its ID is trusted.
             let opened = try await model.loadMarkdown(item.id)
-            editor.load(opened.text, settings: settings.wrappedValue)
+            let library = await loadReferences(sendToPage: false)
+            editor.load(opened.text, settings: settings.wrappedValue, library: library)
             title = opened.item.title
             docTarget = opened.item.wordTarget
             keptOriginal = opened.item.keptOriginalID
@@ -239,6 +264,15 @@ struct NoteEditor: View {
         } catch {
             failed = true
         }
+    }
+
+    /// Reads every reference library. The page gets them too when it's already showing the doc.
+    @discardableResult
+    private func loadReferences(sendToPage: Bool) async -> Data {
+        let library = await model.referenceLibrary()
+        references = References.summaries(library)
+        if sendToPage { editor.useLibrary(library) }
+        return library
     }
 
     /// One at a time, because a second save sent from the same version would look like a conflict.
@@ -300,6 +334,8 @@ struct ConversionNotice: View {
 /// Command-Shift-7, 8 and X, Command-Z and Command-Shift-Z, and Command-F and G for find.
 struct WritingFormatBar: View {
     let controller: WritingEditorController
+    var onCite: () -> Void = {}
+    var onCrossRef: () -> Void = {}
 
     var body: some View {
         let format = controller.format
@@ -315,6 +351,9 @@ struct WritingFormatBar: View {
                 iconButton("checklist", label: "Checklist", isOn: format.list == "task") { controller.run("task") }
                 iconButton("text.quote", label: "Quote", isOn: format.quote) { controller.run("quote") }
                 iconButton("link", label: "Link", isOn: !format.link.isEmpty) { controller.linkRequest = format.link }
+                iconButton("textformat.superscript", label: "Footnote", isOn: false) { controller.run("footnote") }
+                iconButton("quote.opening", label: "Cite", isOn: false, action: onCite)
+                iconButton("arrow.turn.down.right", label: "Cross-reference", isOn: false, action: onCrossRef)
                 iconButton("arrow.uturn.backward", label: "Undo", isOn: false) { controller.run("undo") }
                 iconButton("arrow.uturn.forward", label: "Redo", isOn: false) { controller.run("redo") }
                 #if os(iOS)

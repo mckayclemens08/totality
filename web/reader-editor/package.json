@@ -5,7 +5,7 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --minify --format=iife --target=safari17 --legal-comments=eof --outfile=dist/editor.js",
+    "build": "esbuild src/main.js --bundle --minify --format=iife --target=safari17 --legal-comments=eof --loader:.csl=text --loader:.xml=text --outfile=dist/editor.js",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {
@@ -17,6 +17,7 @@
     "@codemirror/view": "6.43.15",
     "@lezer/highlight": "1.2.5",
     "@lezer/markdown": "1.8.1",
+    "citeproc": "2.4.63",
     "esbuild": "0.28.2"
   }
 }

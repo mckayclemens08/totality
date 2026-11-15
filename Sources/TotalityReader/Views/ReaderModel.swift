@@ -201,6 +201,11 @@ public final class ReaderModel {
         return opened
     }
 
+    /// Every reference library merged, as CSL JSON. An empty list when there's none or it won't open.
+    public func referenceLibrary() async -> Data {
+        (try? await vault.referenceLibrary()) ?? Data("[]".utf8)
+    }
+
     public func setWordTarget(_ target: Int?, of id: UUID) async -> Bool {
         do {
             try await vault.setWordTarget(target, of: id)
