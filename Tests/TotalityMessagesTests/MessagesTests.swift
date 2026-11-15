@@ -93,6 +93,16 @@ private final class FakeService: MessagesService, @unchecked Sendable {
         update { $0.removeAll { $0.id == chat } }
     }
 
+    private(set) var secretsSeen: [String?] = []
+    /// Another device already backed this account's message keys up.
+    var backupElsewhere = false
+
+    func settleKeys(recoverySecret: String?) async -> MessageKeys {
+        lock.withLock { secretsSeen.append(recoverySecret) }
+        if recoverySecret != nil { return .backedUp }
+        return backupElsewhere ? .canRestore : .needsRecoveryKey
+    }
+
     func stop() async { lock.withLock { stopped = true } }
 
     private func record(_ action: String) { lock.withLock { actions.append(action) } }
@@ -875,4 +885,99 @@ private func on(_ setting: Disappearing) -> DisappearingState {
     let message = ChatMessage(id: "$a", sender: "@ana:x", body: "See you at six", isOwn: false, time: jan1)
     await chat.toggleReaction(QuickReactions.heart, on: message)
     #expect(channel.reactions == ["❤️@$a"])
+}
+
+// MARK: Key backup under the recovery key
+
+@Test func theBackupSecretComesFromTheContentKeyAlone() throws {
+    let key = try ContentRootKey(bytes: Data(repeating: 7, count: 32))
+    let same = try ContentRootKey(bytes: Data(repeating: 7, count: 32))
+    let other = try ContentRootKey(bytes: Data(repeating: 8, count: 32))
+    #expect(key.matrixRecoverySecret() == same.matrixRecoverySecret())
+    #expect(key.matrixRecoverySecret() != other.matrixRecoverySecret())
+    #expect(key.matrixRecoverySecret() != Data(repeating: 7, count: 32).base64EncodedString())
+    #expect(Data(base64Encoded: key.matrixRecoverySecret())?.count == 32)
+}
+
+@MainActor
+@Test func messagesSaysWhenTheRecoveryKeyIsMissingAndWhenItsBackedUp() async {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [])
+    let secret = LockedSecret()
+    let model = MessagesModel(account: { mckay }, connector: { _ in service }, recoverySecret: { account in account == mckay ? secret.value : nil })
+    await model.connect()
+    #expect(model.keys == .needsRecoveryKey)
+    #expect(model.keys.summary?.contains("recovery key") == true)
+    secret.value = "from-the-content-key"
+    await model.settleKeys()
+    #expect(model.keys == .backedUp)
+    #expect(service.secretsSeen == [nil, "from-the-content-key"])
+    await model.disconnect()
+    #expect(model.keys == .checking)
+}
+
+private final class LockedSecret: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: String?
+    var value: String? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+}
+
+// MARK: Messages that won't open
+
+@Test func yourOwnLockedMessageSaysItCameFromAnEarlierInstall() {
+    #expect(LockedMessage.placeholder(isOwn: true) == "Can't be opened on this device")
+    #expect(LockedMessage.note(isOwn: true).contains("earlier install of Totality"))
+    #expect(!LockedMessage.note(isOwn: true).contains("sender's device"))
+}
+
+@Test func someoneElsesLockedMessageStillWaitsForTheirDevice() {
+    #expect(LockedMessage.placeholder(isOwn: false) == "Waiting for this message's key")
+    #expect(LockedMessage.note(isOwn: false) == "It will open once the sender's device shares the key, usually when they're next online.")
+}
+
+@Test func restoreIsOfferedOnlyForYourOwnMessagesAndOnlyWhenABackupExists() {
+    #expect(LockedMessage.offersRestore(isOwn: true, keys: .canRestore))
+    #expect(!LockedMessage.offersRestore(isOwn: false, keys: .canRestore))
+    for keys in [MessageKeys.checking, .backedUp, .needsRecoveryKey, .doesntOpen, .failed("x")] {
+        #expect(!LockedMessage.offersRestore(isOwn: true, keys: keys))
+    }
+    #expect(LockedMessage.restoreLabel == "Restore with your recovery key")
+    #expect(MessageKeys.canRestore.summary?.contains("recovery key") == true)
+}
+
+@MainActor
+@Test func aBackupFromAnotherDeviceIsOfferedForRestoreUntilTheRecoveryKeyIsHere() async {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [])
+    service.backupElsewhere = true
+    let secret = LockedSecret()
+    let model = MessagesModel(account: { mckay }, connector: { _ in service }, recoverySecret: { account in account == mckay ? secret.value : nil })
+    await model.connect()
+    #expect(model.keys == .canRestore)
+    secret.value = "from-the-content-key"
+    await model.settleKeys()
+    #expect(model.keys == .backedUp)
+    // The secret goes only to the service, and only once the recovery key put it on this device.
+    #expect(service.secretsSeen == [nil, "from-the-content-key"])
+}
+
+@Test func theBackupSecretIsOnlyForTheAccountThatOwnsThisDevicesKey() {
+    #expect(RecoverySecretRule.allows(keyOwner: mckay, account: mckay, joinedBackup: true))
+    #expect(!RecoverySecretRule.allows(keyOwner: mckay, account: test, joinedBackup: true))
+    #expect(!RecoverySecretRule.allows(keyOwner: nil, account: mckay, joinedBackup: true))
+    #expect(!RecoverySecretRule.allows(keyOwner: mckay, account: mckay, joinedBackup: false))
+}
+
+@MainActor
+@Test func messagesAsksForTheSecretOfTheAccountItsConnectedAs() async {
+    let service = FakeService(account: test, user: "mckay_test", chats: [])
+    let asked = LockedSecret()
+    let model = MessagesModel(account: { test }, connector: { _ in service }, recoverySecret: { account in
+        asked.value = account
+        return nil
+    })
+    await model.connect()
+    #expect(asked.value == test)
+    #expect(service.secretsSeen == [nil])
 }

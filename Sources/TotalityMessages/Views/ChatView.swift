@@ -6,6 +6,8 @@ import TotalityUI
 struct ChatScreen: View {
     let messages: MessagesModel
     let chatID: String
+    /// Opens Account, where the recovery key is entered.
+    var onOpenAccount: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var chat: ChatModel?
     @State private var problem: String?
@@ -13,7 +15,7 @@ struct ChatScreen: View {
     var body: some View {
         Group {
             if let chat {
-                ChatView(model: chat, messages: messages) { dismiss() }
+                ChatView(model: chat, messages: messages, onOpenAccount: onOpenAccount) { dismiss() }
             } else if let problem {
                 MessagesStateView(systemImage: "exclamationmark.bubble", title: "This chat couldn't open", detail: problem)
             } else {
@@ -36,6 +38,7 @@ struct ChatScreen: View {
 struct ChatView: View {
     @Bindable var model: ChatModel
     let messages: MessagesModel
+    var onOpenAccount: (() -> Void)? = nil
     /// Goes back to the list, after leaving the chat or blocking the person in it.
     let onGone: () -> Void
     @FocusState private var writing: Bool
@@ -86,7 +89,9 @@ struct ChatView: View {
                                     model.replyingTo = message
                                     writing = true
                                 },
-                                onDelete: { deleting = message }
+                                onDelete: { deleting = message },
+                                keys: messages.keys,
+                                onRestore: onOpenAccount
                             )
                             .id(message.id)
                         }
@@ -459,6 +464,9 @@ struct Bubble: View {
     let onOpenPhoto: () -> Void
     let onReply: () -> Void
     let onDelete: () -> Void
+    /// Whether this account's message keys are backed up here, which decides what a locked message offers.
+    var keys: MessageKeys = .checking
+    var onRestore: (() -> Void)? = nil
 
     var body: some View {
         let theme = Theme.current
@@ -478,9 +486,16 @@ struct Bubble: View {
             .onTapGesture(count: 2) { heart() }
             .accessibilityAction(named: "Heart") { heart() }
             if !message.decrypted {
-                Text("It will open once the sender's device shares the key, usually when they're next online.")
+                Text(LockedMessage.note(isOwn: message.isOwn))
                     .font(Typeface.micro)
                     .foregroundStyle(theme.textTertiary.color)
+                    .multilineTextAlignment(message.isOwn ? .trailing : .leading)
+                if LockedMessage.offersRestore(isOwn: message.isOwn, keys: keys), let onRestore {
+                    Button(LockedMessage.restoreLabel, action: onRestore)
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.accent.color)
+                        .buttonStyle(.plain)
+                }
             }
             if !message.reactions.isEmpty {
                 Reactions(reactions: message.reactions) { key in
@@ -509,7 +524,7 @@ struct Bubble: View {
                 .padding(.vertical, Space.s2)
                 .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
         case .text:
-            Text(message.body)
+            Text(message.decrypted ? message.body : LockedMessage.placeholder(isOwn: message.isOwn))
                 .font(message.decrypted ? Typeface.body : Typeface.caption)
                 .italic(!message.decrypted)
                 .foregroundStyle(message.decrypted ? theme.textPrimary.color : theme.textSecondary.color)

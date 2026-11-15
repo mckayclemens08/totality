@@ -18,9 +18,12 @@ public struct MessagesHomeView: View {
     @State private var showingBlocked = false
     @AppStorage(MessagesPreferences.shareReadAndTypingKey) private var shareReadAndTyping = true
 
-    public init(model: MessagesModel, onClose: (() -> Void)? = nil) {
+    private let onOpenAccount: (() -> Void)?
+
+    public init(model: MessagesModel, onClose: (() -> Void)? = nil, onOpenAccount: (() -> Void)? = nil) {
         self.model = model
         self.onClose = onClose
+        self.onOpenAccount = onOpenAccount
     }
 
     /// Opens a chat the home tile or search asked for.
@@ -43,7 +46,7 @@ public struct MessagesHomeView: View {
                 .toolbarBackground(theme.bg.color, for: .navigationBar)
                 #endif
                 .navigationDestination(item: $opened) { id in
-                    ChatScreen(messages: model, chatID: id)
+                    ChatScreen(messages: model, chatID: id, onOpenAccount: onOpenAccount)
                 }
         }
         .tint(theme.accent.color)
@@ -132,6 +135,18 @@ public struct MessagesHomeView: View {
                 if let notice = model.notice {
                     Banner(text: notice)
                 }
+                if model.keys != .backedUp, let summary = model.keys.summary {
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Banner(text: summary)
+                        if model.keys == .needsRecoveryKey, let onOpenAccount {
+                            Button("Set up your recovery key", action: onOpenAccount)
+                                .font(Typeface.callout)
+                        } else if model.keys == .canRestore, let onOpenAccount {
+                            Button(LockedMessage.restoreLabel, action: onOpenAccount)
+                                .font(Typeface.callout)
+                        }
+                    }
+                }
                 SearchBox("Search", text: $query)
                 if !model.requests.isEmpty && query.isEmpty {
                     SectionTitle("Requests")
@@ -180,6 +195,11 @@ public struct MessagesHomeView: View {
                         Button("New group", systemImage: "person.3") { makingGroup = true }
                         Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
                         Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
+                        if model.keys == .backedUp {
+                            Section {
+                                Label("History backed up, this device verified", systemImage: "checkmark.shield")
+                            }
+                        }
                     } label: {
                         ToolbarGlyph(systemImage: "ellipsis")
                     }

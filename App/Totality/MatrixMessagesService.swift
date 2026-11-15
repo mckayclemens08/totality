@@ -44,6 +44,10 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
                 .homeserverUrl(url: homeserver)
                 .sqliteStore(config: SqliteStoreBuilder(dataPath: paths.data.path, cachePath: paths.cache.path).key(key: storeKey))
                 .slidingSyncVersionBuilder(versionBuilder: .native)
+                // This device gets its own cross-signing on first sign-in, and older messages are fetched
+                // from the backup when one can't be opened.
+                .autoEnableCrossSigning(autoEnableCrossSigning: true)
+                .backupDownloadStrategy(backupDownloadStrategy: .afterDecryptionFailure)
                 .build()
             if let saved = try keys.load(secrets.sessionName), let session = try? JSONDecoder().decode(StoredSession.self, from: saved) {
                 try await client.restoreSession(session: session.sdk)
@@ -154,13 +158,13 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         switch latest {
         case .none, .remoteInvite: (nil, nil)
         case .remote(let timestamp, _, let isOwn, _, let content):
-            (preview(content).map { isOwn ? "You: \($0)" : $0 }, date(timestamp))
+            (preview(content, isOwn: isOwn).map { isOwn ? "You: \($0)" : $0 }, date(timestamp))
         case .local(let timestamp, _, _, let content, _):
             (preview(content).map { "You: \($0)" }, date(timestamp))
         }
     }
 
-    static func preview(_ content: TimelineItemContent) -> String? {
+    static func preview(_ content: TimelineItemContent, isOwn: Bool = false) -> String? {
         guard case .msgLike(let like) = content else { return nil }
         switch like.kind {
         case .message(let message):
@@ -172,7 +176,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             case .location: return "Location"
             default: return message.body
             }
-        case .unableToDecrypt: return "Waiting for this message's key"
+        case .unableToDecrypt: return LockedMessage.placeholder(isOwn: isOwn)
         case .redacted: return "Message deleted"
         case .sticker: return "Sticker"
         default: return nil
@@ -238,6 +242,49 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
     private func room(_ id: String) throws -> Room {
         guard let room = try client.getRoom(roomId: id) else { throw MessagesError.failed("That chat isn't on this device yet.") }
         return room
+    }
+
+    // MARK: Key backup and this device's verification
+
+    func settleKeys(recoverySecret secret: String?) async -> MessageKeys {
+        let encryption = client.encryption()
+        var state = encryption.recoveryState()
+        for _ in 0..<50 where state == .unknown {
+            try? await Task.sleep(for: .milliseconds(200))
+            state = encryption.recoveryState()
+        }
+        guard let secret else {
+            switch state {
+            case .enabled:
+                return encryption.verificationState() == .verified ? .backedUp : .canRestore
+            case .incomplete:
+                // Another device backed history up; the recovery key opens it here.
+                return .canRestore
+            case .disabled, .unknown:
+                return .needsRecoveryKey
+            }
+        }
+        do {
+            switch state {
+            case .enabled:
+                break
+            case .disabled:
+                // The first device with the recovery key: sets up secret storage and the backup under it.
+                _ = try await encryption.enableRecovery(waitForBackupsToUpload: false, passphrase: secret, progressListener: RecoveryProgress())
+            case .incomplete:
+                // Another device set it up: opening it brings the keys here and verifies this device.
+                do {
+                    try await encryption.recover(recoveryKey: secret)
+                } catch {
+                    return .doesntOpen
+                }
+            case .unknown:
+                return .failed("Messages couldn't check its key backup. It'll try again next time.")
+            }
+        } catch {
+            return .failed("Messages couldn't set up its key backup. It'll try again next time.")
+        }
+        return .backedUp
     }
 
     // MARK: Starting and opening chats
@@ -513,7 +560,7 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
         switch like.kind {
         case .unableToDecrypt:
             decrypted = false
-            body = "Waiting for this message's key"
+            body = LockedMessage.placeholder(isOwn: event.isOwn)
         case .redacted:
             kind = .deleted
             body = "Message deleted"
@@ -778,3 +825,7 @@ private final class SyncStateListener: SyncServiceStateObserver {
     func onUpdate(state: SyncServiceState) { handle(state) }
 }
 #endif
+
+private final class RecoveryProgress: EnableRecoveryProgressListener {
+    func onUpdate(status: EnableRecoveryProgress) {}
+}
