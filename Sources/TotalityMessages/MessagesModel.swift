@@ -27,7 +27,8 @@ public final class MessagesModel {
     public var notice: String?
     public private(set) var keys: MessageKeys = .checking
     /// The secret that locks the key backup, from the recovery key. Nil until it's on this device.
-    private let recoverySecret: @Sendable () async -> String?
+    /// Asked for the account Messages is connected as, so it's never one person's secret for another.
+    private let recoverySecret: @Sendable (_ account: String) async -> String?
 
     private let account: @Sendable () async -> String?
     private let connector: MessagesConnector?
@@ -40,7 +41,7 @@ public final class MessagesModel {
         account: @escaping @Sendable () async -> String?,
         connector: MessagesConnector?,
         unavailableReason: String? = nil,
-        recoverySecret: @escaping @Sendable () async -> String? = { nil }
+        recoverySecret: @escaping @Sendable (_ account: String) async -> String? = { _ in nil }
     ) {
         self.recoverySecret = recoverySecret
         self.account = account
@@ -111,7 +112,7 @@ public final class MessagesModel {
         guard let service, phase == .ready else { return }
         let mine = generation
         if keys != .backedUp { keys = .checking }
-        let result = await service.settleKeys(recoverySecret: await recoverySecret())
+        let result = await service.settleKeys(recoverySecret: await recoverySecret(service.account))
         if mine == generation { keys = result }
     }
 

@@ -16,7 +16,7 @@ enum AccountSetup {
     private(set) static var photoRows: ((String) -> SupabasePhotoRows)?
     /// What locks Messages' key backup: derived from the content key, and only once that key is the
     /// account's backed-up one, which the recovery key restores. Never from the password.
-    private(set) static var messagesRecovery: (@Sendable () async -> String?)?
+    private(set) static var messagesRecovery: (@Sendable (String) async -> String?)?
 
     static func makeModel(content: any ContentKeyAccess) -> AccountModel? {
         guard let config = AccountConfig.fromBundle() else { return nil }
@@ -30,8 +30,11 @@ enum AccountSetup {
         matrixPass = { try await service.matrixPass() }
         accountID = { await service.signedInAccountID() }
         photoRows = { service.photoRows(for: $0) }
-        messagesRecovery = {
-            guard (try? await content.joinedBackup()) != nil, let key = try? await content.rootKey() else { return nil }
+        messagesRecovery = { account in
+            let joined = (try? await content.joinedBackup()) != nil
+            let owner = try? await content.keyOwner()
+            guard RecoverySecretRule.allows(keyOwner: owner, account: account, joinedBackup: joined),
+                  let key = try? await content.rootKey() else { return nil }
             return key.matrixRecoverySecret()
         }
         return AccountModel(
@@ -47,9 +50,9 @@ enum AccountSetup {
         if let pass = matrixPass {
             connector = { account in try await MatrixMessagesService.connect(account: account, pass: pass) }
         }
-        let recovery: @Sendable () async -> String? = {
+        let recovery: @Sendable (String) async -> String? = { account in
             let secret = await MainActor.run { AccountSetup.messagesRecovery }
-            return await secret?()
+            return await secret?(account)
         }
         return MessagesModule.makeModel(account: accountID, connector: connector, recoverySecret: recovery)
         #else

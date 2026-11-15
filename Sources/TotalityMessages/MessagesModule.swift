@@ -10,7 +10,7 @@ public enum MessagesModule {
         account: (@Sendable () async -> String?)?,
         connector: MessagesConnector?,
         unavailableReason: String? = nil,
-        recoverySecret: @escaping @Sendable () async -> String? = { nil }
+        recoverySecret: @escaping @Sendable (_ account: String) async -> String? = { _ in nil }
     ) -> MessagesModel {
         guard let account else { return MessagesModel(account: { nil }, connector: nil) }
         return MessagesModel(

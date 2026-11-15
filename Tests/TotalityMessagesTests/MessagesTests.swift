@@ -903,7 +903,7 @@ private func on(_ setting: Disappearing) -> DisappearingState {
 @Test func messagesSaysWhenTheRecoveryKeyIsMissingAndWhenItsBackedUp() async {
     let service = FakeService(account: mckay, user: "mckay_clemens", chats: [])
     let secret = LockedSecret()
-    let model = MessagesModel(account: { mckay }, connector: { _ in service }, recoverySecret: { secret.value })
+    let model = MessagesModel(account: { mckay }, connector: { _ in service }, recoverySecret: { account in account == mckay ? secret.value : nil })
     await model.connect()
     #expect(model.keys == .needsRecoveryKey)
     #expect(model.keys.summary?.contains("recovery key") == true)
@@ -952,7 +952,7 @@ private final class LockedSecret: @unchecked Sendable {
     let service = FakeService(account: mckay, user: "mckay_clemens", chats: [])
     service.backupElsewhere = true
     let secret = LockedSecret()
-    let model = MessagesModel(account: { mckay }, connector: { _ in service }, recoverySecret: { secret.value })
+    let model = MessagesModel(account: { mckay }, connector: { _ in service }, recoverySecret: { account in account == mckay ? secret.value : nil })
     await model.connect()
     #expect(model.keys == .canRestore)
     secret.value = "from-the-content-key"
@@ -960,4 +960,24 @@ private final class LockedSecret: @unchecked Sendable {
     #expect(model.keys == .backedUp)
     // The secret goes only to the service, and only once the recovery key put it on this device.
     #expect(service.secretsSeen == [nil, "from-the-content-key"])
+}
+
+@Test func theBackupSecretIsOnlyForTheAccountThatOwnsThisDevicesKey() {
+    #expect(RecoverySecretRule.allows(keyOwner: mckay, account: mckay, joinedBackup: true))
+    #expect(!RecoverySecretRule.allows(keyOwner: mckay, account: test, joinedBackup: true))
+    #expect(!RecoverySecretRule.allows(keyOwner: nil, account: mckay, joinedBackup: true))
+    #expect(!RecoverySecretRule.allows(keyOwner: mckay, account: mckay, joinedBackup: false))
+}
+
+@MainActor
+@Test func messagesAsksForTheSecretOfTheAccountItsConnectedAs() async {
+    let service = FakeService(account: test, user: "mckay_test", chats: [])
+    let asked = LockedSecret()
+    let model = MessagesModel(account: { test }, connector: { _ in service }, recoverySecret: { account in
+        asked.value = account
+        return nil
+    })
+    await model.connect()
+    #expect(asked.value == test)
+    #expect(service.secretsSeen == [nil])
 }

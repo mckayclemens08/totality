@@ -328,6 +328,16 @@ public enum MessageKeys: Equatable, Sendable {
     }
 }
 
+/// When this device may hand Messages the secret that locks an account's key backup: only for the
+/// account that owns this device's content key, and only once that key is in the account's backup, so
+/// the recovery key can bring it back on a new device. Anything else would lock one person's history
+/// with another person's key, or with a key nothing can restore.
+public enum RecoverySecretRule {
+    public static func allows(keyOwner: String?, account: String, joinedBackup: Bool) -> Bool {
+        joinedBackup && keyOwner == account
+    }
+}
+
 /// What a message that won't open says, which depends on who sent it. Someone else's message usually
 /// opens once their device shares its key. One of your own from an earlier install of Totality only
 /// opens if its key reached the backup; if that install never had one, the key went with it.
