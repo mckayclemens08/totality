@@ -237,6 +237,7 @@ function create(text, options) {
           sendFormat();
           scheduleCounts();
         }
+        if (update.selectionSet) schedulePlace();
       }),
       EditorView.domEventHandlers({
         // A link opens with Command on the Mac. A plain click edits it, as in any editor.
@@ -298,6 +299,18 @@ const tools = {
   closeFind: () => find.closeSearchPanel(view),
   // Puts the keyboard away on iPhone.
   blur: () => view.contentDOM.blur(),
+  /// Puts the cursor and the scroll back where the person left them, without bringing up the keyboard.
+  restore: (place) => {
+    if (!place || typeof place !== "object") return false;
+    const at = Math.max(0, Math.min(Number(place.cursor) || 0, view.state.doc.length));
+    view.dispatch({ selection: { anchor: at } });
+    const share = Math.max(0, Math.min(1, Number(place.scroll) || 0));
+    requestAnimationFrame(() => {
+      const page = pageScroller();
+      page.scrollTop = share * Math.max(0, page.scrollHeight - (window.innerHeight || 0));
+    });
+    return true;
+  },
   jump: (pos) => {
     const at = Math.max(0, Math.min(Number(pos) || 0, view.state.doc.length));
     view.dispatch({
@@ -406,6 +419,26 @@ const tools = {
     return settings;
   },
 };
+
+function pageScroller() {
+  return document.scrollingElement || document.documentElement;
+}
+
+/// Where the person is, sent a moment after they stop moving, so it isn't sent on every keystroke.
+let placeTimer = null;
+const PLACE_PAUSE = 1500;
+function schedulePlace() {
+  clearTimeout(placeTimer);
+  placeTimer = setTimeout(sendPlace, PLACE_PAUSE);
+}
+function sendPlace() {
+  placeTimer = null;
+  if (!view) return;
+  const page = pageScroller();
+  const room = Math.max(1, page.scrollHeight - (window.innerHeight || 0));
+  post({ type: "place", cursor: view.state.selection.main.head, scroll: Math.max(0, Math.min(1, page.scrollTop / room)) });
+}
+window.addEventListener("scroll", schedulePlace, { passive: true });
 
 window.totality = Object.freeze({
   /// Replaces the page's doc. `revision` restarts, because Swift only compares within one load.

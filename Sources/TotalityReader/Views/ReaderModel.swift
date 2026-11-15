@@ -32,9 +32,11 @@ public final class ReaderModel {
     public let listen: ListenController
     /// Linked Google Drive folders (issue 102), or nil when this build has no Google sign-in.
     public var drive: DriveModel?
+    /// Where the person stopped in each file, synced as one sealed record (issue 117).
+    public var places: ReadingPlaceBook?
     private let vault: ReaderVault
     /// The latest item's text and its sentences, made ahead so Listen starts sooner.
-    private var prepared: (id: UUID, split: Task<Result<(String, ListenScript), any Error>, Never>)?
+    private var prepared: (id: UUID, readHeadings: Bool, split: Task<Result<(String, ListenScript), any Error>, Never>)?
 
     public init(vault: ReaderVault, listen: ListenController) {
         self.vault = vault
@@ -111,7 +113,12 @@ public final class ReaderModel {
             // Links and opened files can arrive from another device with the library.
             await drive?.load()
             if let id = prepared?.id, !listing.items.contains(where: { $0.id == id }) { forgetPrepared(id) }
+            let wasTrashed = Set(trash.map(\.item.id))
             trash = try await vault.trashed()
+            // Only what this device saw leave the trash for good loses its place. An item that simply
+            // hasn't arrived here yet keeps its place from another device.
+            let kept = Set(listing.items.map(\.id)).union(trash.map(\.item.id))
+            await forgetPlaces(wasTrashed.subtracting(kept))
             unreadable = listing.unreadable
             phase = .ready
         } catch {
@@ -175,10 +182,13 @@ public final class ReaderModel {
 
     public func deleteForever(_ item: ReaderItem) async {
         await change("\(item.displayTitle) couldn't be deleted.") { try await $0.deleteForever(item.id) }
+        await forgetPlaces([item.id])
     }
 
     public func emptyTrash() async {
+        let gone = Set(trash.map(\.item.id))
         await change("Recently Deleted couldn't be emptied.") { try await $0.emptyTrash() }
+        await forgetPlaces(gone)
     }
 
     private func change(_ failure: String, _ work: (ReaderVault) async throws -> Void) async {
@@ -438,6 +448,23 @@ public final class ReaderModel {
         }
     }
 
+    /// Read headings changed, so what's playing is read again from where it is, the new way.
+    public func readHeadingsChanged() async {
+        // Paused, it carries on the old way until it's played again, rather than starting to speak.
+        guard let current = listen.current, !listen.isPaused, current.script.sentences.indices.contains(listen.sentence) else { return }
+        let offset = current.script.sentences[listen.sentence].offset
+        guard let script = await readAlongScript(of: current.id), script.fingerprint != current.script.fingerprint,
+              let track = ListenTrack(id: current.id, title: current.title, script: script, startOffset: offset)
+        else { return }
+        listen.play(track)
+    }
+
+    /// What Listen reads in an item, for following along on its page. It's the same script Listen speaks,
+    /// so the highlight and the voice can't drift apart.
+    public func readAlongScript(of id: UUID) async -> ListenScript? {
+        try? await script(for: id).get()
+    }
+
     /// For an item that's open, where Listen is likely next: the voice loads, and the text is read and
     /// split now rather than after the button is pressed. Only the latest item is kept.
     public func prepareListening(to id: UUID) async {
@@ -470,12 +497,18 @@ public final class ReaderModel {
     /// Splitting a long book takes about a second on a phone, so it happens away from the main thread,
     /// and once per version of the text. Nil when the item has nothing to split.
     private func script(for id: UUID) async -> Result<ListenScript?, any Error> {
-        if prepared?.id != id {
+        let readHeadings = UserDefaults.standard.bool(forKey: ListenSkips.readHeadingsKey)
+        if prepared?.id != id || prepared?.readHeadings != readHeadings {
             let vault = self.vault
-            prepared = (id, Task {
+            prepared = (id, readHeadings, Task {
                 do {
                     let text = try await vault.text(of: id)
-                    let script = await Task.detached(priority: .userInitiated) { ListenScript(text: text) }.value
+                    let mime = try await vault.item(id).mime
+                    let data = try await vault.body(of: id)
+                    // Headings and page furniture are found from the file, and left out of what's read.
+                    let script = await Task.detached(priority: .userInitiated) {
+                        ListenScript(text: text, skipping: ListenSkips.ranges(text: text, data: data, mime: mime, readHeadings: readHeadings))
+                    }.value
                     return .success((text, script))
                 } catch {
                     return .failure(error)
@@ -509,4 +542,33 @@ public final class ReaderModel {
 public struct LinkedHeading: Equatable, Sendable {
     public let id: UUID
     public let heading: String
+}
+
+// MARK: Reading places
+
+extension ReaderModel {
+    /// Where to open an item: where the person stopped, or Listen's place when Read along is on and Listen
+    /// got further.
+    public func opening(of item: ReaderItem) async -> ReadingPlaces.Opening? {
+        let readAlong = UserDefaults.standard.bool(forKey: ReaderItemView.readAlongKey)
+        let listen = item.listenPosition > 0 ? item.listenPosition : nil
+        guard let places else { return readAlong ? listen.map(ReadingPlaces.Opening.listen) : nil }
+        return await places.all().opening(item.id, listenOffset: listen, readAlong: readAlong, readingOffset: nil)
+    }
+
+    /// Keeps where the person is. `listen` is the same place in Listen's text, when it's known.
+    public func remember(_ spot: ReadingPlace.Spot, listen: Int? = nil, for id: UUID) {
+        guard let places else { return }
+        Task { try? await places.remember(spot, listen: listen, for: id) }
+    }
+
+    /// Sends held places into the synced record, as the app goes to the background.
+    public func publishPlaces() async {
+        try? await places?.publish()
+    }
+
+    private func forgetPlaces(_ ids: Set<UUID>) async {
+        guard let places, !ids.isEmpty else { return }
+        try? await places.forget(ids)
+    }
 }

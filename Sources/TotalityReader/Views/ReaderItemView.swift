@@ -2,7 +2,7 @@ import PDFKit
 import SwiftUI
 import TotalityUI
 
-/// Opens one item: an editor for docs, real pages for PDFs, reading text for everything else.
+/// Opens one item: an editor for docs, real pages for PDFs, EPUBs and web pages, reading text for the rest.
 struct ReaderItemView: View {
     /// Holds only whether it's on, and it stays with the device.
     static let readAlongKey = "reader.readAlong"
@@ -17,6 +17,10 @@ struct ReaderItemView: View {
     let model: ReaderModel
 
     @AppStorage(Self.readAlongKey) private var readAlong = false
+    @AppStorage(BookPage.plainTextKey) private var plainText = false
+    @AppStorage(BookPage.scrollKey) private var scrolls = false
+
+    private var isBook: Bool { item.kind == .file && BookPage.opens(item.mime) }
 
     var body: some View {
         let along = Self.appliesReadAlong(isOn: readAlong, listen: model.listen)
@@ -25,6 +29,8 @@ struct ReaderItemView: View {
                 NoteEditor(item: item, model: model, readAlong: along)
             } else if item.mime == "application/pdf" {
                 PDFReader(item: item, model: model, readAlong: along)
+            } else if isBook, !plainText {
+                BookPagesReader(item: item, model: model, readAlong: along)
             } else {
                 FileReader(item: item, model: model, readAlong: along)
             }
@@ -41,6 +47,17 @@ struct ReaderItemView: View {
             ToolbarItem(placement: .primaryAction) {
                 ToolbarIcon("Add to Listen queue", systemImage: "text.badge.plus") {
                     Task { await model.addToQueue(item.id) }
+                }
+            }
+            if isBook {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Toggle("Plain text", isOn: $plainText)
+                        Toggle("Scroll instead of pages", isOn: $scrolls)
+                            .disabled(plainText)
+                    } label: {
+                        ToolbarGlyph(systemImage: "textformat").accessibilityLabel("Reading options")
+                    }
                 }
             }
         }
@@ -162,6 +179,8 @@ private struct PDFReader: View {
     @State private var problem: String?
     @State private var along: PDFAlong?
     @State private var isFollowing = true
+    /// The page to open at, where the person stopped.
+    @State private var startPage: Int?
 
     /// What Listen reads, and where it falls on the pages.
     private struct PDFAlong: Sendable {
@@ -192,7 +211,10 @@ private struct PDFReader: View {
         let theme = Theme.current
         Group {
             if let document {
-                PDFPages(document: document, follow: follow)
+                PDFPages(document: document, follow: follow, startPage: startPage) { page in
+                    let listen = along?.map.pages.first { $0.index == page }?.start
+                    model.remember(.pdf(page: page), listen: listen, for: item.id)
+                }
                     .overlay(alignment: .bottom) {
                         if readAlong, along?.script.sentences.isEmpty == true {
                             Text("This PDF has no text to follow.")
@@ -217,10 +239,10 @@ private struct PDFReader: View {
         .navigationTitle(item.displayTitle)
         // The file may still be loading when this first runs, so it runs again once the data is here.
         .task(id: readAlong && data != nil) {
-            guard readAlong, along == nil, let data, let text = try? await model.text(of: item.id) else { return }
-            // Both take a while in a long file, so neither holds up the pages.
+            guard readAlong, along == nil, let data, let script = await model.readAlongScript(of: item.id) else { return }
+            // It takes a while in a long file, so it doesn't hold up the pages.
             along = await Task.detached {
-                PDFAlong(script: ListenScript(text: text), map: ReadableText.pageMap(data))
+                PDFAlong(script: script, map: ReadableText.pageMap(data))
             }.value
         }
         .task {
@@ -233,6 +255,7 @@ private struct PDFReader: View {
                 if opened.isLocked {
                     problem = ReaderError.passwordProtected.message
                 } else {
+                    startPage = await openingPage(data: data, pages: opened.pageCount)
                     document = opened
                     self.data = data
                     // Listen is likely next, and a long book takes seconds to split. The pages show first.
@@ -244,6 +267,23 @@ private struct PDFReader: View {
                 problem = "It may have been damaged, or it may belong to another key."
             }
         }
+    }
+}
+
+extension PDFReader {
+    /// The page where the person stopped, or the one Listen is on when Read along is on and it got further.
+    fileprivate func openingPage(data: Data, pages: Int) async -> Int? {
+        let page: Int?
+        switch await model.opening(of: item) {
+        case .spot(.pdf(let saved)):
+            page = saved
+        case .listen(let offset):
+            let map = await Task.detached { ReadableText.pageMap(data) }.value
+            page = map.pages.last { $0.start <= offset }?.index
+        default:
+            page = nil
+        }
+        return page.flatMap { (1..<pages).contains($0) ? $0 : nil }
     }
 }
 
@@ -264,6 +304,31 @@ private final class PDFLinks: NSObject, @preconcurrency PDFViewDelegate {
     private var shown: ReadAlongHighlight?
     private var sentence: [PDFSelection] = []
     private let scrollWatch = ScrollWatch()
+    var onPage: ((Int) -> Void)?
+    // Only set on the main actor; read once more as the coordinator goes.
+    nonisolated(unsafe) private var watched: NSObjectProtocol?
+    private var startedAt: Int??
+
+    /// Opens at `start` once, then says whenever the page changes.
+    func place(_ view: PDFView, start: Int?) {
+        if startedAt == nil {
+            startedAt = .some(start)
+            if let start, let page = view.document?.page(at: start) {
+                DispatchQueue.main.async { view.go(to: page) }
+            }
+        }
+        guard watched == nil else { return }
+        watched = NotificationCenter.default.addObserver(forName: .PDFViewPageChanged, object: view, queue: .main) { [weak self, weak view] _ in
+            MainActor.assumeIsolated {
+                guard let view, let page = view.currentPage, let document = view.document else { return }
+                self?.onPage?(document.index(for: page))
+            }
+        }
+    }
+
+    deinit {
+        if let watched { NotificationCenter.default.removeObserver(watched) }
+    }
 
     func pdfViewWillClick(onLink sender: PDFView, with url: URL) {
         if DocText.isOpenable(url) { open?(url) }
@@ -321,6 +386,8 @@ private final class PDFLinks: NSObject, @preconcurrency PDFViewDelegate {
 private struct PDFPages: UIViewRepresentable {
     let document: PDFDocument
     let follow: PDFFollow?
+    let startPage: Int?
+    let onPage: (Int) -> Void
 
     func makeCoordinator() -> PDFLinks { PDFLinks() }
 
@@ -341,6 +408,8 @@ private struct PDFPages: UIViewRepresentable {
     func updateUIView(_ view: PDFView, context: Context) {
         context.coordinator.open = context.environment.openURL
         if view.document !== document { view.document = document }
+        context.coordinator.onPage = onPage
+        context.coordinator.place(view, start: startPage)
         context.coordinator.update(view, follow: follow)
     }
 }
@@ -360,6 +429,8 @@ extension PDFLinks: UIGestureRecognizerDelegate {
 private struct PDFPages: NSViewRepresentable {
     let document: PDFDocument
     let follow: PDFFollow?
+    let startPage: Int?
+    let onPage: (Int) -> Void
 
     func makeCoordinator() -> PDFLinks { PDFLinks() }
 
@@ -379,6 +450,8 @@ private struct PDFPages: NSViewRepresentable {
     func updateNSView(_ view: PDFView, context: Context) {
         context.coordinator.open = context.environment.openURL
         if view.document !== document { view.document = document }
+        context.coordinator.onPage = onPage
+        context.coordinator.place(view, start: startPage)
         context.coordinator.update(view, follow: follow)
     }
 

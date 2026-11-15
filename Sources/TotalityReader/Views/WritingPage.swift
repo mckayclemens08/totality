@@ -58,7 +58,7 @@ enum WritingPage {
         return ":root{" + (colourLines + sizeLines + typeLines).joined(separator: ";") + "}"
     }
 
-    private static func css(_ token: ColorToken) -> String {
+    static func css(_ token: ColorToken) -> String {
         let hex = String(token.hex, radix: 16)
         let padded = String(repeating: "0", count: max(0, 6 - hex.count)) + hex
         return token.opacity < 1 ? "#\(padded)\(String(format: "%02x", Int((token.opacity * 255).rounded())))" : "#\(padded)"
@@ -123,6 +123,8 @@ enum WritingMessage: Equatable {
     case matches(WritingMatches)
     /// A wiki link was followed to another doc, by its title, and maybe a heading in it.
     case wiki(target: String, heading: String)
+    /// Where the person is: the cursor's place in the text, and how far down the page, from 0 to 1.
+    case place(cursor: Int, scroll: Double)
 
     /// A doc can be as large as an imported file, and no larger.
     static let maxText = ReaderVault.maxImportBytes
@@ -173,6 +175,11 @@ enum WritingMessage: Equatable {
                   !target.contains(where: { "[]|#\n".contains($0) }), !heading.contains(where: { "[]|\n".contains($0) })
             else { return nil }
             return .wiki(target: target.trimmingCharacters(in: .whitespaces), heading: heading.trimmingCharacters(in: .whitespaces))
+        case "place":
+            guard let cursor = message["cursor"] as? Int, (0...maxText).contains(cursor),
+                  let scroll = (message["scroll"] as? NSNumber)?.doubleValue, scroll.isFinite, (0...1).contains(scroll)
+            else { return nil }
+            return .place(cursor: cursor, scroll: scroll)
         default:
             return nil
         }
@@ -331,10 +338,17 @@ final class WritingRules {
 
     private let store: WKContentRuleListStore?
     private var closed: WKContentRuleList?
+    private let identifier: String
+    private let rules: String
 
-    init(directory: URL = FileManager.default.temporaryDirectory.appendingPathComponent("WritingRules", isDirectory: true)) {
+    init(
+        directory: URL = FileManager.default.temporaryDirectory.appendingPathComponent("WritingRules", isDirectory: true),
+        identifier: String = "closed", rules: String = WritingPage.closedRules
+    ) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         store = WKContentRuleListStore(url: directory)
+        self.identifier = identifier
+        self.rules = rules
     }
 
     /// No list means no page.
@@ -342,7 +356,7 @@ final class WritingRules {
         if let closed { return closed }
         guard let store else { return nil }
         closed = await withCheckedContinuation { (done: CheckedContinuation<WKContentRuleList?, Never>) in
-            store.compileContentRuleList(forIdentifier: "closed", encodedContentRuleList: WritingPage.closedRules) { list, _ in
+            store.compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: rules) { list, _ in
                 done.resume(returning: list)
             }
         }

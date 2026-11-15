@@ -1,11 +1,11 @@
 {
   "name": "totality-reader-editor",
   "private": true,
-  "description": "The Reader's writing page. Built by scripts/build-reader-editor.sh into Sources/TotalityReader/Resources/Editor.",
+  "description": "The Reader's writing page and book pages. Built by scripts/build-reader-editor.sh into Sources/TotalityReader/Resources/Editor.",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --minify --format=iife --target=safari17 --legal-comments=eof --loader:.csl=text --loader:.xml=text --outfile=dist/editor.js",
+    "build": "esbuild src/main.js --bundle --minify --format=iife --target=safari17 --legal-comments=eof --loader:.csl=text --loader:.xml=text --outfile=dist/editor.js && esbuild src/book.js --bundle --minify --format=iife --target=safari17 --outfile=dist/book.js",
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {

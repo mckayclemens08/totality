@@ -64,7 +64,7 @@ public struct ReaderHomeView: View {
             }
             .tint(Theme.current.accent.color)
             if model.listen.isActive {
-                ListenBar(listen: model.listen)
+                ListenBar(listen: model.listen) { Task { await model.readHeadingsChanged() } }
                     .padding(Space.s3)
                     .background(Theme.current.bg.color)
             }

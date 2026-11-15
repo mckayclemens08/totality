@@ -8,6 +8,9 @@ public struct ListenScript: Sendable, Equatable {
         public let offset: Int
         /// The sentence as the document has it. `text` tidies this up to be spoken.
         let raw: String
+        /// Something was skipped just before it, a heading or a page's running head, so a short pause
+        /// stands in for it.
+        public internal(set) var pauseBefore = false
 
         var rawLength: Int {
             raw.utf16.count
@@ -48,8 +51,11 @@ public struct ListenScript: Sendable, Equatable {
         "nov", "dec",
     ]
 
-    public init(text: String) {
-        let flowing = Self.unwrapped(text)
+    /// `skipping` is parts of the text that aren't read: headings, and a PDF's running heads, feet and
+    /// page numbers. They're blanked out before the text is cut up, so every offset still points into
+    /// `text`, and the highlight stays on the words being spoken.
+    public init(text: String, skipping: [Range<Int>] = []) {
+        let flowing = Self.unwrapped(Self.blanked(text, skipping))
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = flowing
         var ranges: [Range<String.Index>] = []
@@ -61,9 +67,40 @@ public struct ListenScript: Sendable, Equatable {
             }
             return true
         }
-        self.sentences = ranges.flatMap { Self.pieces(of: flowing, in: $0) }
+        var sentences = ranges.flatMap { Self.pieces(of: flowing, in: $0) }
+        let skipped = skipping.filter { !$0.isEmpty }.sorted { $0.lowerBound < $1.lowerBound }
+        if !skipped.isEmpty {
+            var next = 0
+            for index in sentences.indices {
+                let start = index > 0 ? sentences[index - 1].offset + sentences[index - 1].rawLength : 0
+                while next < skipped.count, skipped[next].upperBound <= start { next += 1 }
+                sentences[index].pauseBefore = next < skipped.count && skipped[next].lowerBound < sentences[index].offset
+                    && skipped[next].lowerBound >= (index > 0 ? start : 0)
+            }
+        }
+        self.sentences = sentences
         self.length = text.utf16.count
-        self.fingerprint = text.hashValue
+        var hasher = Hasher()
+        hasher.combine(text)
+        for range in skipped {
+            hasher.combine(range.lowerBound)
+            hasher.combine(range.upperBound)
+        }
+        self.fingerprint = hasher.finalize()
+    }
+
+    /// The text with the skipped parts turned into line breaks, one for each UTF-16 unit, so it's the
+    /// same length and every offset still means the same place.
+    static func blanked(_ text: String, _ skipping: [Range<Int>]) -> String {
+        guard !skipping.isEmpty else { return text }
+        var units = Array(text.utf16)
+        let newline = "\n".utf16.first!
+        for range in skipping {
+            let lower = max(0, min(units.count, range.lowerBound))
+            let upper = max(lower, min(units.count, range.upperBound))
+            for index in lower..<upper { units[index] = newline }
+        }
+        return String(decoding: units, as: UTF16.self)
     }
 
     /// PDFs break lines wherever the page ran out, and the tokenizer takes each break for the end of a
@@ -145,6 +182,8 @@ public struct ListenScript: Sendable, Equatable {
     private static func carriesOn(_ text: Substring) -> Bool {
         let words = text.split(whereSeparator: \.isWhitespace)
         guard let word = words.last, word.hasSuffix(".") else { return false }
+        // A short line in capitals, like "CHAPTER I.", is a heading, and its "I." is a numeral.
+        if words.count > 1, words.count <= 6, text.contains(where: \.isLetter), !text.contains(where: \.isLowercase) { return false }
         let bare = word.dropLast().drop { !$0.isLetter && !$0.isNumber }
         if bare.count == 1, bare.first?.isUppercase == true { return true }
         if words.count == 1, !bare.isEmpty, bare.allSatisfy(\.isNumber) { return true }

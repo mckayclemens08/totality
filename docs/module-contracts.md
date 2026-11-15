@@ -68,6 +68,36 @@ are all kept; further back, one an hour for a day, one a day for 30 days and one
 100. Restoring puts a version's words back under the current title, after keeping what was there as a
 version. Versions stay while the doc is in Recently Deleted and go when it's deleted for good.
 
+EPUBs and HTML files (`.html`, `.htm`, in the Reader or a linked Drive folder) open as their own pages,
+with their own fonts, images and layout, swiped as pages or scrolled. They show in a web view shut in
+like the writing page, with three differences. The book's own scripts are switched off
+(`allowsContentJavaScript`, and a `script-src 'none'` policy on every part). Its parts come from memory
+through `totality-book://book/`, read from the sealed file and never written to disk. Its rule list
+blocks every request except that scheme. Read along is `book.js`, in a content world of its own, which
+the book can't see or reach. It's the only thing that can message Swift. It lines up Listen's text with
+the page's text, character by character, and marks the spoken sentence with the browser's highlights,
+which change no markup. A link to the web opens in Web only after a tap. Plain text in the menu goes
+back to the reflowed view. Listen now reads an HTML file's words, not its markup (`HTMLText`).
+
+Listen leaves out a PDF's running heads, running feet and page numbers (`ListenSkips`). They're the
+lines at the top or foot of a page that repeat, numbers aside, on at least three pages and on about a
+third of them, plus any edge line that's only a page number. Headings are left out too unless Read
+headings is on (the Listen bar's menu, off by default): an EPUB's, Word file's or HTML file's heading
+blocks, a doc's Markdown headings, and the lines a PDF's own outline names on their pages. Skipped text
+is blanked to line breaks before the text is cut into sentences, so every offset still points into the
+original text and Read along marks the words being said. A short pause stands in for a skipped part.
+Every Read along view uses the same script Listen speaks (`ReaderModel.readAlongScript`).
+
+Every Reader file reopens where the person left it: a PDF's page, an EPUB or HTML file's chapter and how
+far through it, a doc's cursor and scroll (`ReadingPlaces`). When Read along is on and Listen got further,
+it opens at Listen's place instead. All of one person's places are one sealed record (`ReadingPlaceBook`,
+kind `reader_places`, key purpose `reader-places`) on `SealedRecordStore`, merged on the device with the
+newest place for each item winning. A new place is held on the device, sealed, and goes into the synced
+record only after five minutes or as the app goes to the background, so the server sees the record change
+now and then while the app is in use and never when any one file was opened. Places stay out of each
+item's sealed details, so reading never counts as an edit. A place goes when this device sees its item
+deleted for good; an item that hasn't arrived on a device yet keeps its place.
+
 A doc exports to PDF or Word (.docx), on the device, in one of four layouts: Doc, Essay (MLA or APA),
 Manuscript and Thesis. The writing page reads the doc into plain data (`exportModel.js`), with
 citations, cross-references, wiki links and note numbers already worked out, and Swift checks that

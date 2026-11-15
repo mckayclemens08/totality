@@ -256,9 +256,17 @@ struct NoteEditor: View {
                 goals.add(words)
                 goals.save()
             }
+            editor.onPlace = { cursor, scroll in
+                model.remember(.doc(scroll: scroll, cursor: cursor), for: item.id)
+            }
             await editor.start()
             // Coming back from a linked doc keeps the page as it was, with its undo history and place.
-            if saved == nil { await reload() }
+            if saved == nil {
+                if case .spot(.doc(let scroll, let cursor)) = await model.opening(of: item) {
+                    editor.startPlace = (cursor, scroll)
+                }
+                await reload()
+            }
             await model.prepareListening(to: item.id)
         }
         // Listen reads what's saved, so anything just typed has to get there first.

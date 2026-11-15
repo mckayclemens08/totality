@@ -88,6 +88,9 @@ enum ContentSetup {
         let devices = SystemCalendarSource()
         let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
         let reader = ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices()))
+        // Beside the Reader's items, under its own key purpose, and sealed the same way.
+        let places = ReadingPlaceBook(store: stores.reader, rootKey: rootKey)
+        reader.places = places
         let drive = GoogleDrive(
             accounts: googleAccounts(), store: stores.googleDrive,
             cache: try driveCache(), rootKey: rootKey
@@ -122,7 +125,7 @@ enum ContentSetup {
             ),
             // The Drive record syncs whether or not this build can sign in to Google, so links made on
             // another device aren't lost here.
-            [readerVault, calendarVault, webVault, drive],
+            [readerVault, calendarVault, webVault, drive, places],
             registry,
             MailContent(rootKey: rootKey, store: stores.mail),
             PhotosContent(rootKey: rootKey, store: stores.photos)

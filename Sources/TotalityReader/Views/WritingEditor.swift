@@ -40,6 +40,10 @@ final class WritingEditorController: NSObject {
     @ObservationIgnored var onOpen: ((URL) -> Void)?
     /// Where a followed wiki link goes: the title it names and the heading, if any.
     @ObservationIgnored var onWikiLink: ((String, String) -> Void)?
+    /// Where the person is: the cursor's place in the text, and how far down, from 0 to 1.
+    @ObservationIgnored var onPlace: ((Int, Double) -> Void)?
+    /// Where to put the cursor and the scroll once the doc is on the page, the first time only.
+    @ObservationIgnored var startPlace: (cursor: Int, scroll: Double)?
 
     /// Observed, so the view on screen picks the page up when it's made after the view is.
     private(set) var webView: WKWebView?
@@ -119,6 +123,10 @@ final class WritingEditorController: NSObject {
                     in: nil, contentWorld: .page
                 )
                 phase = .ready
+                if let place = startPlace {
+                    startPlace = nil
+                    _ = await call("restore", ["cursor": place.cursor, "scroll": place.scroll])
+                }
             } catch {
                 phase = .failed("The doc couldn't be put on the page.")
             }
@@ -230,6 +238,8 @@ final class WritingEditorController: NSObject {
             matches = found
         case .wiki(let target, let heading):
             onWikiLink?(target, heading)
+        case .place(let cursor, let scroll):
+            onPlace?(cursor, scroll)
         }
     }
 

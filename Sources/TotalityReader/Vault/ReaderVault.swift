@@ -62,6 +62,7 @@ public actor ReaderVault {
     public static let sealedPurposes: [String: KeyPurpose] = [
         ".meta": .metadata, ".body": .content, ".meta.trash": .metadata, ".body.trash": .content,
         ".opened": .metadata, ".versions": .docVersion, ".version": .docVersion,
+        ReadingPlaceBook.syncedSuffix: .readerPlaces, ReadingPlaceBook.heldSuffix: .readerPlaces,
     ]
     /// How long anything deleted, here or on another device, stays recoverable.
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60

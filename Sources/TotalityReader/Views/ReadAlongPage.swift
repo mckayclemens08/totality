@@ -90,8 +90,9 @@ public struct ReadAlongPage: Equatable, Sendable {
     public let paragraphs: [Paragraph]
 
     /// `text` must be what Listen reads, so empty lines stay in the count and only leave the page.
-    public init(text: String, headings: Set<String> = []) {
-        script = ListenScript(text: text)
+    public init(text: String, headings: Set<String> = [], script: ListenScript? = nil) {
+        // A script for other words would mark the wrong places, so it's only used when it fits.
+        self.script = script.flatMap { $0.length == text.utf16.count ? $0 : nil } ?? ListenScript(text: text)
         var offset = 0
         var paragraphs: [Paragraph] = []
         for line in text.components(separatedBy: "\n") {
