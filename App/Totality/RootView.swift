@@ -167,6 +167,8 @@ struct RootView: View {
                 }
             case .background:
                 AppRefresh.shared.scheduleBackground()
+                // Drive files opened lately wait to sync, so the server can't time each open.
+                Task { await reader?.drive?.publishOpened() }
             default:
                 break
             }

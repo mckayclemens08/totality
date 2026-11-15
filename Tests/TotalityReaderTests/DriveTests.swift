@@ -214,6 +214,7 @@ final class Clock: @unchecked Sendable {
     private let lock = NSLock()
     private var seconds: TimeInterval = 1_794_000_000
     func tick() -> Date { lock.withLock { seconds += 1; return Date(timeIntervalSince1970: seconds) } }
+    func advance(by interval: TimeInterval) { lock.withLock { seconds += interval } }
 }
 
 @Suite struct DriveConnectTests {

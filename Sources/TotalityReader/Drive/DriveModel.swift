@@ -117,6 +117,11 @@ public final class DriveModel {
         await loadRecent()
     }
 
+    /// Sends what was opened lately into the synced record, as the app goes to the background.
+    public func publishOpened() async {
+        try? await drive.publishHeld()
+    }
+
     /// True for a Google account that isn't connected on this device. Its folders show "Connect to see".
     public func needsConnecting(_ account: String) -> Bool {
         !accounts.contains { $0.address == account }

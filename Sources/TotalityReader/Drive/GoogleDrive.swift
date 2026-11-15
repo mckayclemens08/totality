@@ -64,7 +64,7 @@ public actor GoogleDrive {
     let now: @Sendable () -> Date
     private(set) var isClosed = false
     /// A conflict's merge, written when sync stores the other side's copy.
-    var pendingMerge: PendingMerge?
+    var pendingMerge: SealedRecordStore<DriveShared>.Pending?
 
     /// `accounts` is nil when this build has no Google sign-in.
     public init(
@@ -219,6 +219,7 @@ public actor GoogleDrive {
     /// yet, or when Drive has lost it, it reads them all.
     public func refreshAll(onlyChanged: Bool = false) async -> DriveRefresh {
         var result = DriveRefresh()
+        try? publishHeld(force: false)
         guard !isClosed, var state = try? loadState() else { return result }
         let connections = connections()
         let allowed = Set(connections.filter(\.allowsDrive).map(\.address))
@@ -331,6 +332,20 @@ public actor GoogleDrive {
         try saveState(state)
     }
 
+    /// How long opens wait before they go into the shared record, at most.
+    static let holdOpens: TimeInterval = 5 * 60
+
+    /// Sends opens that are waiting into the shared record, for when the app goes to the background, or
+    /// once the oldest has waited `holdOpens`.
+    public func publishHeld(force: Bool = true) throws {
+        guard !isClosed else { return }
+        var state = try loadState()
+        guard let since = state.heldSince else { return }
+        guard force || now().timeIntervalSince(since) >= Self.holdOpens else { return }
+        state.publishNow = true
+        try saveState(state)
+    }
+
     /// The most folders one quiet refresh reads, so a big tree can't keep the phone busy.
     static let mostRefreshed = 40
 
@@ -427,6 +442,10 @@ public actor GoogleDrive {
         var seen: Set<String> = []
         /// The shared record as it was read, so a save knows what was removed.
         var base: DriveShared?
+        /// Since when opens have waited to go into the shared record.
+        var heldSince: Date?
+        /// Set to send held opens now, as the app goes to the background.
+        var publishNow = false
 
         init() {}
     }
@@ -437,6 +456,9 @@ public actor GoogleDrive {
         var files: [String: CachedFile] = [:]
         var changeTokens: [String: String] = [:]
         var seen: Set<String> = []
+        /// Opens not yet in the shared record, so the server can't tell when each one happened.
+        var heldRecent: [DriveRecent] = []
+        var heldSince: Date?
         /// From before links synced. Moved into the shared record on the first save.
         var links: [DriveLink]?
         var recent: [DriveRecent]?
@@ -449,6 +471,8 @@ public actor GoogleDrive {
             files = try values.decodeIfPresent([String: CachedFile].self, forKey: .files) ?? [:]
             changeTokens = try values.decodeIfPresent([String: String].self, forKey: .changeTokens) ?? [:]
             seen = try values.decodeIfPresent(Set<String>.self, forKey: .seen) ?? []
+            heldRecent = try values.decodeIfPresent([DriveRecent].self, forKey: .heldRecent) ?? []
+            heldSince = try values.decodeIfPresent(Date.self, forKey: .heldSince)
             links = try values.decodeIfPresent([DriveLink].self, forKey: .links)
             recent = try values.decodeIfPresent([DriveRecent].self, forKey: .recent)
         }
@@ -469,7 +493,9 @@ public actor GoogleDrive {
         }
         var state = State()
         state.links = shared.links
-        state.recent = shared.recent
+        state.recent = DriveShared(links: shared.links, recent: shared.recent + local.heldRecent, removed: shared.removed, forgotten: shared.forgotten)
+            .normalized().recent
+        state.heldSince = local.heldSince
         state.forgotten = shared.forgotten
         state.listings = local.listings
         state.files = local.files
@@ -486,11 +512,19 @@ public actor GoogleDrive {
         local.files = state.files
         local.changeTokens = state.changeTokens
         local.seen = state.seen
-        let before = state.base ?? DriveShared()
+        let before = (state.base ?? DriveShared()).normalized()
         var next = DriveShared(links: state.links, recent: state.recent, removed: before.removed, forgotten: state.forgotten)
         next = before.changed(to: next, at: now())
-        // Written only when it changed, so a save of this device's own part doesn't send the record again.
-        if state.base == nil ? (next != DriveShared()) : (next != before.normalized()) {
+        // Opening something only adds to what was opened. That waits, so what reaches the server says
+        // nothing about when each file was opened. Linking, unlinking and disconnecting go at once.
+        let onlyOpened = state.base != nil && next.links == before.links && next.removed == before.removed
+            && next.forgotten == before.forgotten
+        let due = state.publishNow || state.heldSince.map { now().timeIntervalSince($0) >= Self.holdOpens } == true
+        if onlyOpened, !due {
+            local.heldRecent = next.recent.filter { !before.recent.contains($0) }
+            local.heldSince = local.heldRecent.isEmpty ? nil : (state.heldSince ?? now())
+        } else if state.base == nil ? (next != DriveShared()) : (next != before) {
+            // Written only when it changed, so a save of this device's own part doesn't send it again.
             try writeShared(next)
         }
         try seal(JSONEncoder().encode(local), id: Self.linksID)

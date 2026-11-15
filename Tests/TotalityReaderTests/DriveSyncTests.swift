@@ -23,6 +23,7 @@ private struct Devices {
     let fake: FakeDrive
     let phone: DriveSetup
     let mac: DriveSetup
+    let clock: Clock
 
     init(macConnected: Bool = true) throws {
         fake = FakeDrive()
@@ -30,6 +31,7 @@ private struct Devices {
         let key = try ContentRootKey.generate()
         // One clock for both, so which came first means the same on each.
         let clock = Clock()
+        self.clock = clock
         func device(_ setup: DriveSetup) -> DriveSetup {
             let drive = GoogleDrive(accounts: setup.accounts, store: setup.store, cache: setup.cache, rootKey: key, now: { clock.tick() })
             return DriveSetup(drive: drive, accounts: setup.accounts, store: setup.store, rootKey: key, cache: setup.cache)
@@ -66,6 +68,8 @@ private func list(_ drive: GoogleDrive) async throws {
         try await devices.phone.drive.link(schoolNotes, account: driveOwner)
         try await list(devices.phone.drive)
         _ = try await devices.phone.drive.file("1lab", in: "1bio", account: driveOwner, limit: DriveCacheLimit.standard)
+        // The phone goes to the background, which sends what was opened.
+        try await devices.phone.drive.publishHeld()
         try await carry(devices.phone.drive, to: devices.mac.drive)
         #expect(try await devices.mac.drive.links().map(\.name) == ["School notes"])
         // The Mac reads Drive itself. Once it has, the lab report is on its tile too.
@@ -73,6 +77,41 @@ private func list(_ drive: GoogleDrive) async throws {
         #expect(try await devices.mac.drive.recent().map(\.id) == ["1lab", "1notes"])
         // Only the record travelled: no listings, and nothing downloaded on the Mac.
         #expect(try devices.mac.cache.names().isEmpty)
+    }
+
+    @Test func opensWaitBeforeTheySync() async throws {
+        let devices = try Devices()
+        let phone = devices.phone.drive
+        try await phone.link(schoolNotes, account: driveOwner)
+        try await list(phone)
+        let id = try #require(try await phone.sealedObjectIDs().first)
+        let linked = try await phone.sealedHash(of: id)
+        _ = try await phone.file("1lab", in: "1bio", account: driveOwner, limit: DriveCacheLimit.standard)
+        // Shown here at once, but not yet in what syncs, so the server can't tell when it was opened.
+        #expect(try await phone.recent().first?.id == "1lab")
+        #expect(try await phone.sealedHash(of: id) == linked)
+        _ = await phone.refreshAll(onlyChanged: true)
+        #expect(try await phone.sealedHash(of: id) == linked)
+        // Once the first open has waited a few minutes, the quiet refresh sends them all.
+        devices.clock.advance(by: GoogleDrive.holdOpens)
+        _ = await phone.refreshAll(onlyChanged: true)
+        #expect(try await phone.sealedHash(of: id) != linked)
+        try await carry(phone, to: devices.mac.drive)
+        try await list(devices.mac.drive)
+        #expect(try await devices.mac.drive.recent().map(\.id) == ["1lab", "1notes"])
+    }
+
+    @Test func linkingDoesntWait() async throws {
+        let devices = try Devices()
+        try await devices.phone.drive.link(schoolNotes, account: driveOwner)
+        try await list(devices.phone.drive)
+        _ = try await devices.phone.drive.file("1lab", in: "1bio", account: driveOwner, limit: DriveCacheLimit.standard)
+        // A link goes straight away, and takes the waiting open with it.
+        try await devices.phone.drive.link(art, account: driveOwner)
+        try await carry(devices.phone.drive, to: devices.mac.drive)
+        try await list(devices.mac.drive)
+        #expect(try await devices.mac.drive.allLinks().count == 2)
+        #expect(try await devices.mac.drive.recent().contains { $0.id == "1lab" })
     }
 
     @Test func theRecordIsSealedAndOnePerPerson() async throws {
@@ -124,6 +163,8 @@ private func list(_ drive: GoogleDrive) async throws {
         try await devices.phone.drive.link(schoolNotes, account: driveOwner)
         try await list(devices.phone.drive)
         _ = try await devices.phone.drive.file("1lab", in: "1bio", account: driveOwner, limit: DriveCacheLimit.standard)
+        // The phone goes to the background, which sends what was opened.
+        try await devices.phone.drive.publishHeld()
         try await carry(devices.phone.drive, to: devices.mac.drive)
         try await devices.phone.drive.disconnect(driveOwner)
         // The Mac still had its copy and changed it meanwhile.
@@ -139,6 +180,8 @@ private func list(_ drive: GoogleDrive) async throws {
         try await devices.phone.drive.link(schoolNotes, account: driveOwner)
         try await list(devices.phone.drive)
         _ = try await devices.phone.drive.file("1lab", in: "1bio", account: driveOwner, limit: DriveCacheLimit.standard)
+        // The phone goes to the background, which sends what was opened.
+        try await devices.phone.drive.publishHeld()
         try await carry(devices.phone.drive, to: devices.mac.drive)
         #expect(try await devices.mac.drive.links().isEmpty)
         #expect(try await devices.mac.drive.allLinks().map(\.folderID) == ["1notes"])

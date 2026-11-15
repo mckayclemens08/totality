@@ -5,7 +5,7 @@ import TotalityCore
 /// from them. It's one record per person, sealed with the content key and synced like the Reader's own
 /// items. Folder names, file titles and Google addresses stay inside the seal. Listings, downloaded
 /// files, Drive's change tokens and the Google sign-in never leave the device.
-struct DriveShared: Codable, Equatable, Sendable {
+struct DriveShared: MergedRecord {
     var links: [DriveLink] = []
     var recent: [DriveRecent] = []
     /// When a link or an opened entry was removed, by `"account/id"`, so an older copy on another device
@@ -88,80 +88,45 @@ struct DriveShared: Codable, Equatable, Sendable {
 extension GoogleDrive {
     static let sharedSuffix = ".gdsync"
 
-    static func sharedName(_ id: UUID) -> String { id.uuidString.lowercased() + sharedSuffix }
-
-    /// Every copy of the shared record here. There's one, except briefly after a key move, when a
-    /// device that hasn't synced yet starts its own; they're read together, so nothing is lost.
-    func sharedIDs() throws -> [UUID] {
-        try store.names().filter { $0.hasSuffix(Self.sharedSuffix) }.compactMap {
-            UUID(uuidString: String($0.dropLast(Self.sharedSuffix.count)))
-        }.sorted { $0.uuidString < $1.uuidString }
+    /// Where the shared record lives. The label gives its ID with the key, and must never change.
+    var shared: SealedRecordStore<DriveShared> {
+        SealedRecordStore(store: store, rootKey: rootKey, kind: .readerDrive, label: "reader-drive-shared", suffix: Self.sharedSuffix, purpose: .googleDrive)
     }
 
-    /// The ID it's written under. The same on every device with this key, and nobody else can work it out,
-    /// so two people's records never meet on the server.
-    func sharedID() throws -> UUID {
-        try sharedIDs().first ?? rootKey.derivedID(from: "reader-drive-shared")
-    }
-
-    /// Nil when there's none yet. One this key can't open belongs to someone else, and is left out.
+    /// Nil when there's none yet.
     func loadShared() throws -> DriveShared? {
-        let copies = try sharedIDs().compactMap { id in try store.read(Self.sharedName(id)).flatMap { try? openShared($0, id: id) } }
-        guard let first = copies.first else { return nil }
-        return copies.dropFirst().reduce(first.normalized(), DriveShared.merged)
+        try shared.load()?.normalized()
     }
 
-    func writeShared(_ shared: DriveShared) throws {
+    func writeShared(_ value: DriveShared) throws {
         guard !isClosed else { throw ReaderError.closed }
-        let id = try sharedID()
-        try store.write(try sealShared(shared, id: id), as: Self.sharedName(id))
-    }
-
-    func sealShared(_ shared: DriveShared, id: UUID) throws -> Data {
-        try ContentCipher.seal(JSONEncoder().encode(shared), key: rootKey.objectKey(for: id, purpose: .googleDrive), objectID: id)
-    }
-
-    func openShared(_ sealed: Data, id: UUID) throws -> DriveShared {
-        try JSONDecoder().decode(DriveShared.self, from: ContentCipher.open(sealed, key: rootKey.objectKey(for: id, purpose: .googleDrive), objectID: id))
+        try shared.write(value)
     }
 }
 
-/// The shared record, as sync reaches it. It travels as its own kind with everything in the sealed
-/// details, so the server holds one opaque row per person.
+/// The shared record, as sync reaches it. Everything goes through `SealedRecordStore`.
 extension GoogleDrive: SyncArea {
     public nonisolated var kinds: Set<ContentKind> { [.readerDrive] }
 
     public func sealedObjectIDs() throws -> [UUID] {
-        try sharedIDs()
+        try shared.ids()
     }
 
     public func sealedHash(of id: UUID) throws -> String? {
-        try sealedObject(id)?.hash
+        try shared.object(id)?.hash
     }
 
     public func sealedObject(_ id: UUID) throws -> SealedObject? {
-        try store.read(Self.sharedName(id)).map { SealedObject(id: id, kind: .readerDrive, meta: $0, body: nil) }
+        try shared.object(id)
     }
 
     public func verifiedObject(_ id: UUID) throws -> SealedObject? {
-        guard let object = try sealedObject(id) else { return nil }
-        _ = try openShared(object.meta, id: id)
-        return object
+        try shared.verified(id)
     }
 
-    /// Only a record that opens under this key is taken, because a server can send anything. One that
-    /// settled a conflict is written as the merge of both sides, which the next sync sends back up.
     public func store(_ object: SealedObject, ifLocalHash expected: String?) throws {
         guard !isClosed else { throw ReaderError.closed }
-        guard object.kind == .readerDrive else { throw CryptoError.authenticationFailed }
-        guard try sealedHash(of: object.id) == expected else { throw SyncError.changedLocally }
-        let incoming = try openShared(object.meta, id: object.id)
-        if let pending = pendingMerge, pending.id == object.id, pending.remoteHash == object.hash {
-            pendingMerge = nil
-            try store.write(try sealShared(DriveShared.merged(pending.merged, incoming), id: object.id), as: Self.sharedName(object.id))
-        } else {
-            try store.write(object.meta, as: Self.sharedName(object.id))
-        }
+        try shared.take(object, ifLocalHash: expected, pending: &pendingMerge)
         try prune()
     }
 
@@ -173,19 +138,11 @@ extension GoogleDrive: SyncArea {
 
     public func clearDeletion(_ id: UUID) throws {}
 
-    /// Both sides are kept: links and opened files from either, minus what either removed. Sync takes the
-    /// other side's copy, and this device writes the merge in its place, which goes back up next time.
+    /// Links and opened files from either side, minus what either removed.
     public func resolveConflict(local: SealedObject, remote: SealedObject) throws -> ConflictResolution {
-        let merged = DriveShared.merged(try openShared(local.meta, id: local.id), try openShared(remote.meta, id: remote.id))
-        pendingMerge = PendingMerge(id: remote.id, remoteHash: remote.hash, merged: merged)
+        pendingMerge = try shared.conflict(local: local, remote: remote)
         return .keepRemote
     }
 
     public func emptyOldTrash() throws {}
-}
-
-struct PendingMerge: Sendable {
-    let id: UUID
-    let remoteHash: String
-    let merged: DriveShared
 }
