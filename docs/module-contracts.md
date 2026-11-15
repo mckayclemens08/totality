@@ -51,6 +51,23 @@ page by citeproc-js (CPAL 1.0, unmodified) from the official CSL styles (CC BY-S
 fallback for a key the library lacks. Reader settings credit both under Acknowledgements. Listen and search skip front matter, labels and bracketed citations, and
 read a cross-reference as what it points at.
 
+Docs link to each other with wiki links in Pandoc's `wikilinks_title_after_pipe` form: `[[Title]]`,
+`[[Title|words]]`, `[[Title#Heading]]` and `[[#Heading]]`. A link names a title, never an ID, so the
+text stays portable. Titles match whatever their case or spacing, and when two docs share one, the doc
+in the same folder wins, then the newer. The page gets the list of titles so a link to a doc that
+doesn't exist yet reads differently, and following one sends Swift only the title and heading, checked
+like any message. Following a missing link offers to make the doc. "Linked from" lists the docs whose
+links resolve to this one, read on the device from the sealed docs. Renaming a doc doesn't yet update
+links to it.
+
+Every pause of 30 seconds in writing, and closing the doc, keeps a version if the saved words changed.
+A version is sealed under its own ID with the `doc-version` key purpose, so it can never open as the doc,
+and each doc's list of versions is sealed under the doc's ID with the same purpose. They stay on the
+device: they never sync, and they're re-sealed with everything else when the key changes. The newest 20
+are all kept; further back, one an hour for a day, one a day for 30 days and one a week after, up to
+100. Restoring puts a version's words back under the current title, after keeping what was there as a
+version. Versions stay while the doc is in Recently Deleted and go when it's deleted for good.
+
 A doc from before the writing editor (the older Markdown subset that `DocText` reads, or a plain note)
 converts once, the first time it opens. Its date stays, because tidying up isn't an edit. Its old body is
 kept beside it as a read-only `file` item, "(before the new editor)", whose ID derives from the doc's and

@@ -38,6 +38,8 @@ final class WritingEditorController: NSObject {
 
     /// Where links the page asks to open go. They've already been checked.
     @ObservationIgnored var onOpen: ((URL) -> Void)?
+    /// Where a followed wiki link goes: the title it names and the heading, if any.
+    @ObservationIgnored var onWikiLink: ((String, String) -> Void)?
 
     /// Observed, so the view on screen picks the page up when it's made after the view is.
     private(set) var webView: WKWebView?
@@ -95,7 +97,7 @@ final class WritingEditorController: NSObject {
     /// Puts a doc in the page, replacing what's there.
     func load(
         _ text: String, placeholder: String = "Start writing", settings: WritingSettings = WritingSettings(),
-        library: Data = Data("[]".utf8)
+        library: Data = Data("[]".utf8), docs: [String] = []
     ) {
         latestText = text
         hasText = true
@@ -103,7 +105,7 @@ final class WritingEditorController: NSObject {
         typedRevision = 0
         countedWords = nil
         self.settings = settings
-        options = ["placeholder": placeholder, "settings": settings.dictionary, "library": Self.items(library)]
+        options = ["placeholder": placeholder, "settings": settings.dictionary, "library": Self.items(library), "docs": docs]
         revision += 1
         sendLoad()
     }
@@ -155,6 +157,13 @@ final class WritingEditorController: NSObject {
     /// Only a JSON list goes to the page, so a damaged library can't become anything else there.
     private static func items(_ library: Data) -> [Any] {
         (try? JSONSerialization.jsonObject(with: library)) as? [Any] ?? []
+    }
+
+    /// Every doc's title, so links that lead nowhere yet read differently.
+    func useDocs(_ titles: [String]) {
+        guard options["docs"] as? [String] != titles else { return }
+        options["docs"] = titles
+        run("docs", titles)
     }
 
     func apply(_ settings: WritingSettings) {
@@ -219,6 +228,8 @@ final class WritingEditorController: NSObject {
             findRequests += 1
         case .matches(let found):
             matches = found
+        case .wiki(let target, let heading):
+            onWikiLink?(target, heading)
         }
     }
 

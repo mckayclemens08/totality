@@ -111,6 +111,8 @@ enum WritingMessage: Equatable {
     /// Command-F: the person wants the find bar.
     case find
     case matches(WritingMatches)
+    /// A wiki link was followed to another doc, by its title, and maybe a heading in it.
+    case wiki(target: String, heading: String)
 
     /// A doc can be as large as an imported file, and no larger.
     static let maxText = ReaderVault.maxImportBytes
@@ -153,6 +155,14 @@ enum WritingMessage: Equatable {
             return .find
         case "matches":
             return .matches(WritingMatches(message))
+        case "wiki":
+            let heading = message["heading"] as? String ?? ""
+            guard let target = message["target"] as? String,
+                  !target.trimmingCharacters(in: .whitespaces).isEmpty,
+                  target.count <= WikiLinks.maxTitle, heading.count <= WikiLinks.maxTitle,
+                  !target.contains(where: { "[]|#\n".contains($0) }), !heading.contains(where: { "[]|\n".contains($0) })
+            else { return nil }
+            return .wiki(target: target.trimmingCharacters(in: .whitespaces), heading: heading.trimmingCharacters(in: .whitespaces))
         default:
             return nil
         }

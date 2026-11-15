@@ -92,6 +92,15 @@ public struct ReaderHomeView: View {
                 model.notice = ReaderError.notFound.message
             }
         }
+        .task(id: model.linkedItem) {
+            guard let id = model.linkedItem else { return }
+            model.linkedItem = nil
+            if let item = try? await model.currentItem(id) {
+                path.append(.item(item))
+            } else {
+                model.notice = ReaderError.notFound.message
+            }
+        }
         .task(id: model.query) {
             try? await Task.sleep(for: Self.searchPause)
             guard !Task.isCancelled else { return }

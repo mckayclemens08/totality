@@ -169,6 +169,8 @@ public enum MarkdownText {
                 protected.append(character)
             }
         }
+        // A link to another doc reads as its words, or the title it names.
+        if protected.contains("[[") { protected = WikiLinks.readable(protected) }
         var result = protected
             .replacing(/!\[([^\]]*)\]\([^)]*\)/) { String($0.1) }
             .replacing(/\[\^[^\]]+\]/, with: "")

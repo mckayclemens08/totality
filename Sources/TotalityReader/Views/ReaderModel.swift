@@ -20,6 +20,10 @@ public final class ReaderModel {
     public var query = ""
     /// An item another module asked to open. The home screen takes it from here.
     public var requestedItem: UUID?
+    /// A doc a wiki link leads to. It opens on top of the doc the link is in, so Back returns there.
+    public var linkedItem: UUID?
+    /// A heading a wiki link named, for the doc it leads to to jump to once it opens.
+    public var linkedHeading: LinkedHeading?
     /// True once this device syncs, which decides what the screen can truthfully say about recovery.
     public var isSynced = false
     /// A problem to show the person, cleared when they dismiss it.
@@ -204,6 +208,64 @@ public final class ReaderModel {
     /// Every reference library merged, as CSL JSON. An empty list when there's none or it won't open.
     public func referenceLibrary() async -> Data {
         (try? await vault.referenceLibrary()) ?? Data("[]".utf8)
+    }
+
+    // MARK: Links between docs
+
+    /// Every doc's title, for the writing page to tell a link that leads somewhere from one that doesn't.
+    public var docTitles: [String] {
+        items.filter { $0.kind == .note && !$0.title.isEmpty }.map(\.title)
+    }
+
+    /// Opens the doc a wiki link names. False when there's no such doc, so the screen can offer to make it.
+    public func followWikiLink(_ target: String, heading: String, from source: ReaderItem) -> Bool {
+        guard let found = WikiLinks.resolve(target, in: items, near: source.folderID) else { return false }
+        linkedHeading = heading.isEmpty ? nil : LinkedHeading(id: found.id, heading: heading)
+        linkedItem = found.id
+        return true
+    }
+
+    /// Makes the doc a link names, beside the doc the link is in, and opens it.
+    public func createLinkedDoc(_ title: String, from source: ReaderItem) async {
+        do {
+            let created = try await vault.createNote(title: title, folder: source.folderID)
+            await load()
+            linkedItem = created.id
+        } catch {
+            notice = "The doc couldn't be created."
+        }
+    }
+
+    public func backlinks(to id: UUID) async throws -> [WikiLinks.Backlink] {
+        try await vault.backlinks(to: id)
+    }
+
+    // MARK: Versions
+
+    public func versions(of id: UUID) async throws -> [DocVersion] {
+        try await vault.versions(of: id)
+    }
+
+    /// Failing here costs only a version, so it doesn't interrupt the person.
+    public func snapshot(_ id: UUID) async {
+        _ = try? await vault.snapshot(id)
+    }
+
+    public func versionText(_ version: DocVersion, of id: UUID) async throws -> String {
+        try await vault.versionText(version.id, of: id)
+    }
+
+    /// Returns false when the version couldn't be put back.
+    public func restoreVersion(_ version: DocVersion, of id: UUID) async -> Bool {
+        do {
+            try await vault.restoreVersion(version.id, of: id)
+            await load()
+            await search()
+            return true
+        } catch {
+            notice = "That version couldn't be restored."
+            return false
+        }
     }
 
     public func setWordTarget(_ target: Int?, of id: UUID) async -> Bool {
@@ -400,3 +462,9 @@ public final class ReaderModel {
     }
 }
 
+
+/// A heading a wiki link named, in the doc it leads to.
+public struct LinkedHeading: Equatable, Sendable {
+    public let id: UUID
+    public let heading: String
+}
