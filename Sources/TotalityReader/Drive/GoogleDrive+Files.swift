@@ -109,7 +109,7 @@ extension GoogleDrive {
         return plain
     }
 
-    private func keep(_ data: Data, as key: String, entry: DriveEntry, mime: String, folderKey: String, limit: Int) throws {
+    func keep(_ data: Data, as key: String, entry: DriveEntry, mime: String, folderKey: String, limit: Int) throws {
         guard let cache else { return }
         var state = try loadState()
         if let old = state.files[key] {

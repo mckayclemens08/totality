@@ -46,6 +46,10 @@ private struct DriveAccountsPage: View {
     @Binding var path: [DriveRoute]
     let signIn: DriveModel.SignIn
 
+    @State private var disconnecting: DriveAccount?
+    /// What else disconnecting `disconnecting` ends, found before the question is asked.
+    @State private var alsoEnds: Set<GoogleUse> = []
+
     var body: some View {
         let theme = Theme.current
         Form {
@@ -94,6 +98,12 @@ private struct DriveAccountsPage: View {
                                 }
                             }
                         }
+                        .swipeActions {
+                            Button("Disconnect", systemImage: "person.crop.circle.badge.xmark", role: .destructive) { ask(account) }
+                        }
+                        .contextMenu {
+                            Button("Disconnect", systemImage: "person.crop.circle.badge.xmark", role: .destructive) { ask(account) }
+                        }
                     }
                     Button(model.accounts.isEmpty ? "Connect Google Drive" : "Use Another Google Account") { choose(nil) }
                 }
@@ -106,10 +116,40 @@ private struct DriveAccountsPage: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.bg.color)
+        .confirmationDialog(
+            "Disconnect \(disconnecting?.address ?? "")?", isPresented: isDisconnecting, titleVisibility: .visible, presenting: disconnecting
+        ) { account in
+            Button("Disconnect", role: .destructive) {
+                Task { await model.disconnect(account.address) }
+            }
+        } message: { _ in
+            Text(Self.disconnectWording(alsoEnds: alsoEnds))
+        }
         .navigationTitle("Google Drive")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+    }
+
+    private var isDisconnecting: Binding<Bool> {
+        Binding(get: { disconnecting != nil }, set: { if !$0 { disconnecting = nil } })
+    }
+
+    private func ask(_ account: DriveAccount) {
+        Task {
+            alsoEnds = await model.alsoEnds(account.address)
+            disconnecting = account
+        }
+    }
+
+    /// Says first everything disconnecting ends, because Google takes the whole account's access back.
+    static func disconnectWording(alsoEnds: Set<GoogleUse>) -> String {
+        let others = GoogleUse.allCases.filter(alsoEnds.contains).map(\.name)
+        var text = "Totality's access to this Google account is taken back at Google, and its linked folders and downloaded files leave this device. Nothing in Google Drive changes."
+        if !others.isEmpty {
+            text += " It also ends \(ListFormatter.localizedString(byJoining: others)) in Totality for this account."
+        }
+        return text
     }
 
     private func choose(_ account: String?) {

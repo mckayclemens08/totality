@@ -89,6 +89,12 @@ public struct DriveEntry: Codable, Equatable, Hashable, Sendable, Identifiable {
     public var isGoogleDoc: Bool { mime == Self.googleDocMime }
     /// Google's own formats, like Docs, Sheets and Slides, have no file to download, only exports.
     public var isGoogleFormat: Bool { mime.hasPrefix("application/vnd.google-apps.") }
+    /// Plain text and Markdown, which the Reader can change and save back to Drive (step 4). Word
+    /// files and Google Docs only open read-only, and Import makes a copy to edit.
+    public var isEditableText: Bool {
+        guard canEdit, !isGoogleFormat else { return false }
+        return mime.hasPrefix("text/") || name.lowercased().hasSuffix(".md") || name.lowercased().hasSuffix(".txt")
+    }
 }
 
 /// Where the folder chooser is looking.
@@ -185,6 +191,56 @@ struct DriveAPI: Sendable {
         request.timeoutInterval = 120
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         return try await send(request)
+    }
+
+    static let uploadBase = URL(string: "https://www.googleapis.com/upload/drive/v3")!
+
+    /// Saves new bytes over a file, which Drive keeps as a new revision.
+    func update(_ id: String, data: Data, mime: String, accessToken: String) async throws -> DriveEntry {
+        guard Self.isID(id), Self.isMime(mime) else { throw DriveProblem.unexpected }
+        var components = URLComponents(url: Self.uploadBase.appendingPathComponent("files/\(id)"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "uploadType", value: "media"),
+            URLQueryItem(name: "supportsAllDrives", value: "true"),
+            URLQueryItem(name: "fields", value: Self.entryFields),
+        ]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "PATCH"
+        request.timeoutInterval = 120
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(mime, forHTTPHeaderField: "Content-Type")
+        request.httpBody = data
+        return try Self.entry(from: try await send(request))
+    }
+
+    /// Makes a new file in a folder, for "Keep both".
+    func create(named name: String, in parent: String, data: Data, mime: String, accessToken: String) async throws -> DriveEntry {
+        guard Self.isID(parent), Self.isMime(mime) else { throw DriveProblem.unexpected }
+        var components = URLComponents(url: Self.uploadBase.appendingPathComponent("files"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "uploadType", value: "multipart"),
+            URLQueryItem(name: "supportsAllDrives", value: "true"),
+            URLQueryItem(name: "fields", value: Self.entryFields),
+        ]
+        let boundary = "totality-" + UUID().uuidString
+        let metadata = try JSONSerialization.data(withJSONObject: ["name": name, "parents": [parent], "mimeType": mime])
+        var body = Data("--\(boundary)\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".utf8)
+        body += metadata
+        body += Data("\r\n--\(boundary)\r\nContent-Type: \(mime)\r\n\r\n".utf8)
+        body += data
+        body += Data("\r\n--\(boundary)--\r\n".utf8)
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/related; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        return try Self.entry(from: try await send(request))
+    }
+
+    private static func entry(from data: Data) throws -> DriveEntry {
+        guard let file = try? JSONDecoder().decode(File.self, from: data), let entry = file.entry else { throw DriveProblem.unexpected }
+        return entry
     }
 
     // MARK: Asking Google

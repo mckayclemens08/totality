@@ -82,16 +82,11 @@ public final class DriveModel {
     }
 
     /// Opens a file, from what's kept or from Google, and hands it to the Reader as an item held in
-    /// memory only. Drive files open read-only for now.
+    /// memory only. Text and Markdown can then be edited and saved back; everything else is read-only.
     public func openFile(_ entry: DriveEntry, in folderID: String, account: String) async throws -> (item: ReaderItem, file: DriveOpenedFile) {
-        guard let vault else { throw ReaderError.notFound }
+        guard vault != nil else { throw ReaderError.notFound }
         let file = try await drive.file(entry.id, in: folderID, account: account, limit: cacheLimit)
-        let item = ReaderItem(
-            id: Self.readerID(account: account, fileID: entry.id), kind: .file, title: file.entry.name, collection: nil,
-            mime: file.mime, byteCount: file.data.count, createdAt: file.modifiedAt ?? Date(),
-            updatedAt: file.modifiedAt ?? Date(), listenPosition: 0
-        )
-        try await vault.hold(item, body: file.data)
+        let item = try await hold(file)
         await readCacheSize()
         return (item, file)
     }
@@ -243,7 +238,7 @@ public final class DriveModel {
                 try await drive.link(folder, account: account)
             } else if let link = links.first(where: { $0.account == account && $0.folderID == folder.id }) {
                 try await drive.unlink(link)
-                await vault?.releaseHeld()
+                await forgetOpened()
             }
         } catch {
             problem = isLinked ? "\(folder.name) couldn't be linked." : "\(folder.name) couldn't be unlinked."
@@ -254,7 +249,7 @@ public final class DriveModel {
     public func unlink(_ link: DriveLink) async {
         do {
             try await drive.unlink(link)
-            await vault?.releaseHeld()
+            await forgetOpened()
         } catch {
             problem = "\(link.name) couldn't be unlinked."
         }
@@ -272,10 +267,128 @@ public final class DriveModel {
         await forgetOpened()
     }
 
+    /// Goes up whenever opened files are dropped, so a screen showing one lets it go too.
+    public private(set) var openedGeneration = 0
+
     func forgetOpened() async {
+        openedGeneration += 1
         await vault?.releaseHeld()
         listings = [:]
         folderProblems = [:]
+    }
+
+    // MARK: Editing and importing (step 4)
+
+    public enum SaveOutcome: Equatable {
+        case saved(DriveOpenedFile)
+        /// Drive's copy changed since it was opened. Nothing was sent.
+        case changedInDrive
+        case failed(String)
+    }
+
+    /// Saves text over the file in Drive, unless Drive's copy changed since it was opened. `overwrite` is
+    /// only for the person's "Use mine".
+    public func save(_ text: String, over file: DriveOpenedFile, overwrite: Bool = false) async -> SaveOutcome {
+        do {
+            switch try await drive.save(text, over: file, overwrite: overwrite, limit: cacheLimit) {
+            case .changedInDrive:
+                return .changedInDrive
+            case .saved(let saved):
+                try await hold(saved)
+                await readCacheSize()
+                return .saved(saved)
+            }
+        } catch {
+            return .failed("This wasn't saved to Google Drive. \(DriveProblem.from(error).message)")
+        }
+    }
+
+    /// "Keep both": the text goes into a new file in the same folder, and the original stays as Drive has it.
+    public func saveCopy(_ text: String, of file: DriveOpenedFile) async -> String? {
+        do {
+            let created = try await drive.saveCopy(text, of: file)
+            listings[GoogleDrive.key(file.account, file.folderID)] = try? await drive.kept(file.folderID, account: file.account)
+            return created.name
+        } catch {
+            problem = "Your copy wasn't saved to Google Drive. \(DriveProblem.from(error).message)"
+            return nil
+        }
+    }
+
+    /// Hands a file the Reader opened to the vault again, after it changed.
+    @discardableResult
+    func hold(_ file: DriveOpenedFile) async throws -> ReaderItem {
+        guard let vault else { throw ReaderError.notFound }
+        let item = ReaderItem(
+            id: Self.readerID(account: file.account, fileID: file.entry.id), kind: .file, title: file.entry.name, collection: nil,
+            mime: file.mime, byteCount: file.data.count, createdAt: file.modifiedAt ?? Date(),
+            updatedAt: file.modifiedAt ?? Date(), listenPosition: 0
+        )
+        try await vault.hold(item, body: file.data)
+        return item
+    }
+
+    /// Makes a Totality copy, which uses Totality storage. A Google Doc, a Word file, or Markdown becomes
+    /// a doc to write in. Anything else becomes a sealed file, like any import.
+    public func importToReader(_ file: DriveOpenedFile, into folder: UUID? = nil) async throws -> ReaderItem {
+        guard let vault else { throw ReaderError.notFound }
+        let title = Self.title(of: file.entry.name)
+        if let markdown = Self.markdown(of: file) {
+            let note = try await vault.createNote(title: title, folder: folder)
+            return try await vault.saveNote(note.id, title: title, body: markdown, mime: MarkdownText.mime)
+        }
+        return try await vault.importFile(file.data, filename: Self.filename(for: file), folder: folder)
+    }
+
+    /// The name without a document extension, so "Essay.md" becomes "Essay" but "Report v1.2" stays.
+    static func title(of name: String) -> String {
+        let ext = (name as NSString).pathExtension.lowercased()
+        let base = (name as NSString).deletingPathExtension
+        return ["md", "markdown", "txt", "docx"].contains(ext) && !base.isEmpty ? base : name
+    }
+
+    /// The Markdown a doc is made from, or nil for a file that's imported as it is.
+    static func markdown(of file: DriveOpenedFile) -> String? {
+        if file.mime == MarkdownText.mime { return String(decoding: file.data, as: UTF8.self) }
+        if file.entry.mime == ReadableText.wordMime, let document = try? ReadableText.document(file.data, mime: ReadableText.wordMime) {
+            return markdown(from: document)
+        }
+        return nil
+    }
+
+    /// Word's headings and paragraphs, as Markdown. Layout Word keeps beyond that doesn't come across.
+    static func markdown(from document: ReadableDocument) -> String {
+        document.sections.flatMap(\.blocks).compactMap { block in
+            let text = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return block.isHeading ? "## " + MarkdownText.escaped(text) : MarkdownText.escaped(text)
+        }.joined(separator: "\n\n")
+    }
+
+    /// The name the vault reads the kind of file from, so a Sheet exported as PDF imports as a PDF.
+    static func filename(for file: DriveOpenedFile) -> String {
+        let name = file.entry.name
+        if file.mime == "application/pdf", !name.lowercased().hasSuffix(".pdf") { return name + ".pdf" }
+        return name
+    }
+
+    // MARK: Disconnecting
+
+    public func alsoEnds(_ account: String) async -> Set<GoogleUse> {
+        await drive.alsoEnds(account)
+    }
+
+    /// Takes Totality's access back at Google for this account, everywhere in Totality, and removes its
+    /// linked folders and downloaded files here. Nothing in Google Drive changes.
+    public func disconnect(_ account: String) async {
+        do {
+            try await drive.disconnect(account)
+        } catch {
+            problem = "\(account) couldn't be fully removed from this device. Try again."
+        }
+        await forgetOpened()
+        await load()
+        await readCacheSize()
     }
 
     /// For a key move or a change of account.

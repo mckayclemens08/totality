@@ -27,6 +27,9 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
     var contents: [String: Data] = [:]
     var exports: [String: Data] = [:]
     private(set) var downloads: [URLComponents] = []
+    /// What was saved over each file, and the new files made, in order.
+    private(set) var saved: [String: Data] = [:]
+    private(set) var created: [(name: String, parent: String, body: Data)] = []
     private(set) var asked: [URLComponents] = []
     private(set) var revoked = 0
 
@@ -44,6 +47,38 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
         if status == 0 { return (Data("<html>".utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!) }
         if status != 200 { return answer(status, errorBody) }
         let query = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { $1 })
+        let filePrefix = "/drive/v3/files/", uploadPrefix = "/upload/drive/v3/files"
+        if components.path.hasPrefix(uploadPrefix + "/"), request.httpMethod == "PATCH" {
+            let id = String(components.path.dropFirst(uploadPrefix.count + 1))
+            #expect(query["uploadType"] == "media")
+            let body = request.httpBody ?? Data()
+            return lock.withLock {
+                saved[id] = body
+                contents[id] = body
+                guard let updated = bump(id, size: body.count) else { return answer(404, errorBody) }
+                return answer(200, updated)
+            }
+        }
+        if components.path == uploadPrefix, request.httpMethod == "POST" {
+            #expect(query["uploadType"] == "multipart")
+            let body = request.httpBody ?? Data()
+            let text = String(decoding: body, as: UTF8.self)
+            let json = try #require(text.range(of: "{").flatMap { start in text.range(of: "}", range: start.lowerBound..<text.endIndex).map { text[start.lowerBound...$0.lowerBound] } })
+            let metadata = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+            let name = try #require(metadata["name"] as? String)
+            let parent = try #require((metadata["parents"] as? [String])?.first)
+            let file = driveFile("1new\(created.count)", name, mime: metadata["mimeType"] as? String ?? "text/plain", size: body.count, version: "1")
+            lock.withLock {
+                created.append((name, parent, body))
+                children[parent, default: []].append(file)
+            }
+            return answer(200, file)
+        }
+        if components.path.hasPrefix(filePrefix), query["alt"] == nil, !components.path.hasSuffix("/export") {
+            let id = String(components.path.dropFirst(filePrefix.count))
+            guard let file = lock.withLock({ children.values.joined().first { $0["id"] as? String == id } }) else { return answer(404, errorBody) }
+            return answer(200, file)
+        }
         if components.path.hasSuffix("/export") {
             lock.withLock { downloads.append(components) }
             let id = components.path.dropFirst("/drive/v3/files/".count).dropLast("/export".count)
@@ -77,6 +112,28 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
     }
 
     var listings: [URLComponents] { lock.withLock { asked }.filter { $0.path == "/drive/v3/files" } }
+    var savedFiles: [String: Data] { lock.withLock { saved } }
+    var createdFiles: [(name: String, parent: String, body: Data)] { lock.withLock { created } }
+
+    /// Someone else changes a file in Drive.
+    func changeElsewhere(_ id: String) {
+        lock.withLock { _ = bump(id, size: nil) }
+    }
+
+    /// A new version, as Drive gives one after any change. Called with the lock held.
+    private func bump(_ id: String, size: Int?) -> [String: Any]? {
+        for (parent, files) in children {
+            guard let index = files.firstIndex(where: { $0["id"] as? String == id }) else { continue }
+            var file = files[index]
+            let version = Int(file["version"] as? String ?? "0")! + 1
+            file["version"] = String(version)
+            file["modifiedTime"] = "2026-11-13T0\(min(version, 9)):00:00Z"
+            if let size { file["size"] = String(size) }
+            children[parent]?[index] = file
+            return file
+        }
+        return nil
+    }
     var downloaded: [URLComponents] { lock.withLock { downloads } }
 
     private func answer(_ status: Int, _ body: [String: Any]) -> (Data, HTTPURLResponse) {

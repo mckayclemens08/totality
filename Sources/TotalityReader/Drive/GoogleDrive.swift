@@ -53,7 +53,7 @@ public actor GoogleDrive {
     public static let suffix = ".gdrive"
     public static let sealedPurposes: [String: KeyPurpose] = [suffix: .googleDrive]
 
-    private let accounts: GoogleAccounts?
+    let accounts: GoogleAccounts?
     private let api: DriveAPI?
     private let store: any BlobStore
     /// Where opened files are kept, apart from the rest because it's only a cache: it isn't carried
