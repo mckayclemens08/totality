@@ -7,6 +7,7 @@ import { StateEffect } from "@codemirror/state";
 import {
   scholarlyIndex, citationKeys, isCrossRef, crossRefText, plainCitation, locator, NoteMarker, ChipWidget,
 } from "./scholarly.js";
+import { parseWiki, titleKey, WikiWidget } from "./wiki.js";
 
 /// How citations read on the page. Swift's library and the style engine replace the plain form.
 let citationText = (keys, locatorText, narrative) => plainCitation(keys, locatorText, new Map());
@@ -15,6 +16,15 @@ let citationText = (keys, locatorText, narrative) => plainCitation(keys, locator
 export const refreshCitations = StateEffect.define();
 export function setCitationText(render) {
   citationText = render;
+}
+
+/// The docs a wiki link can reach, and what following one does. Main sets both. Redraw with
+/// `refreshCitations` after changing them.
+let knownDocs = new Set();
+let followWiki = () => {};
+export function setWikiDocs(docs, follow) {
+  knownDocs = docs;
+  if (follow) followWiki = follow;
 }
 
 class BulletWidget extends WidgetType {
@@ -271,6 +281,18 @@ function decorate(view, focused) {
               ? keys.map(({ key }) => crossRefText(key, index.labels)).join(", ")
               : citationText(keys, name === "Citation" ? locator(text) : "", name === "NarrativeCitation");
             found.push(Decoration.replace({ widget: new ChipWidget(shown, cross ? "cm-tl-xref" : "cm-tl-cite") }).range(node.from, node.to));
+          }
+          return false;
+        }
+        if (name === "WikiLink") {
+          const link = parseWiki(state.sliceDoc(node.from, node.to));
+          if (!link) return false;
+          if (isActive(node.from)) {
+            found.push(mark("cm-tl-wiki-src").range(node.from, node.to));
+          } else {
+            // A heading in this doc always exists as far as the page can tell. The jump finds it or not.
+            const exists = !link.target || knownDocs.has(titleKey(link.target));
+            found.push(Decoration.replace({ widget: new WikiWidget(link, exists, followWiki) }).range(node.from, node.to));
           }
           return false;
         }

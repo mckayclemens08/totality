@@ -61,7 +61,7 @@ public actor ReaderVault {
     /// How each kind of blob is sealed, so a key change can reach them without knowing what they are.
     public static let sealedPurposes: [String: KeyPurpose] = [
         ".meta": .metadata, ".body": .content, ".meta.trash": .metadata, ".body.trash": .content,
-        ".opened": .metadata,
+        ".opened": .metadata, ".versions": .docVersion, ".version": .docVersion,
     ]
     /// How long anything deleted, here or on another device, stays recoverable.
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
@@ -469,12 +469,18 @@ public actor ReaderVault {
     /// For when the person chooses this. It can't be undone.
     public func deleteForever(_ id: UUID) throws {
         guard !isClosed else { throw ReaderError.closed }
-        for target in try trashedTree(id) { try removeTrash(target) }
+        for target in try trashedTree(id) {
+            try removeTrash(target)
+            try removeVersions(of: target)
+        }
     }
 
     public func emptyTrash() throws {
         guard !isClosed else { throw ReaderError.closed }
-        for entry in try allTrash() { try removeTrash(entry.id) }
+        for entry in try allTrash() {
+            try removeTrash(entry.id)
+            try removeVersions(of: entry.id)
+        }
     }
 
     private func removeBlobs(_ id: UUID) throws {
@@ -577,6 +583,7 @@ extension ReaderVault: SyncArea {
                   Date().timeIntervalSince(date) > Self.trashLifetime
             else { continue }
             try removeTrash(id)
+            try removeVersions(of: id)
         }
     }
 
@@ -625,6 +632,103 @@ extension ReaderVault: SyncArea {
         )
         try writeBody(body, id: copy.id)
         try writeMeta(copy)
+    }
+
+    // MARK: Links between docs
+
+    /// The docs whose wiki links lead here, newest first. A link leads here when it names this doc's
+    /// title and no other doc with that title is a better match for it.
+    public func backlinks(to id: UUID) throws -> [WikiLinks.Backlink] {
+        let target = try item(id)
+        let key = WikiLinks.titleKey(target.title)
+        guard target.kind == .note, !key.isEmpty else { return [] }
+        let notes = try list().items.filter { $0.kind == .note }
+        return try notes.compactMap { source -> WikiLinks.Backlink? in
+            try Task.checkCancellation()
+            guard source.id != id, source.mime == MarkdownText.mime,
+                  let text = try? String(decoding: body(of: source.id), as: UTF8.self), text.contains("[[")
+            else { return nil }
+            let leadsHere = { (link: WikiLinks.Link) in
+                !link.target.isEmpty && WikiLinks.titleKey(link.target) == key
+                    && WikiLinks.resolve(link.target, in: notes, near: source.folderID)?.id == id
+            }
+            let count = WikiLinks.links(in: text).filter(leadsHere).count
+            guard count > 0 else { return nil }
+            return WikiLinks.Backlink(item: source, snippet: WikiLinks.snippet(text, where: leadsHere), count: count)
+        }
+        .sorted { $0.item.updatedAt > $1.item.updatedAt }
+    }
+
+    // MARK: Versions
+
+    private func versionsName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).versions" }
+    private func versionName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).version" }
+
+    /// A doc's earlier versions on this device, newest first.
+    public func versions(of id: UUID) throws -> [DocVersion] {
+        guard held[id] == nil, let sealed = try store.read(versionsName(id)) else { return [] }
+        let key = rootKey.objectKey(for: id, purpose: .docVersion)
+        return try JSONDecoder().decode([DocVersion].self, from: ContentCipher.open(sealed, key: key, objectID: id))
+    }
+
+    /// Keeps the doc as it's saved now, unless that's what the newest version already holds. Older
+    /// versions are thinned as new ones come. A file from outside, like Drive's, has no versions here.
+    @discardableResult
+    public func snapshot(_ id: UUID, at now: Date = Date()) throws -> DocVersion? {
+        guard !isClosed else { throw ReaderError.closed }
+        guard held[id] == nil else { return nil }
+        let note = try item(id)
+        guard note.kind == .note else { throw ReaderError.notANote }
+        let data = try body(of: id)
+        guard !data.isEmpty else { return nil }
+        // A list that won't open is left alone rather than replaced, so nothing in it is lost.
+        let existing = try versions(of: id)
+        if let latest = existing.first, (try? versionBody(latest.id)) == data { return nil }
+        let version = DocVersion(
+            id: UUID(), savedAt: now, title: note.title,
+            words: DocVersions.words(String(decoding: data, as: UTF8.self)), byteCount: data.count
+        )
+        // The text goes first, so a crash can't leave the list naming a version that isn't there.
+        let key = rootKey.objectKey(for: version.id, purpose: .docVersion)
+        try store.write(try ContentCipher.seal(data, key: key, objectID: version.id), as: versionName(version.id))
+        let kept = DocVersions.thinned([version] + existing, now: now)
+        try writeVersions(kept, of: id)
+        let keptIDs = Set(kept.map(\.id))
+        for gone in existing where !keptIDs.contains(gone.id) { try store.delete(versionName(gone.id)) }
+        return version
+    }
+
+    /// One version's text. Only a version on the doc's own list opens.
+    public func versionText(_ versionID: UUID, of id: UUID) throws -> String {
+        guard try versions(of: id).contains(where: { $0.id == versionID }) else { throw ReaderError.notFound }
+        return String(decoding: try versionBody(versionID), as: UTF8.self)
+    }
+
+    /// Puts a version's text back. What the doc held until now becomes a version first, so restoring
+    /// can itself be undone. The title stays, so links to the doc keep working.
+    @discardableResult
+    public func restoreVersion(_ versionID: UUID, of id: UUID) throws -> ReaderItem {
+        let text = try versionText(versionID, of: id)
+        let current = try item(id)
+        try snapshot(id)
+        return try saveNote(id, title: current.title, body: text, mime: MarkdownText.mime)
+    }
+
+    private func versionBody(_ versionID: UUID) throws -> Data {
+        guard let sealed = try store.read(versionName(versionID)) else { throw ReaderError.notFound }
+        return try ContentCipher.open(sealed, key: rootKey.objectKey(for: versionID, purpose: .docVersion), objectID: versionID)
+    }
+
+    private func writeVersions(_ versions: [DocVersion], of id: UUID) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        let key = rootKey.objectKey(for: id, purpose: .docVersion)
+        try store.write(try ContentCipher.seal(JSONEncoder().encode(versions), key: key, objectID: id), as: versionsName(id))
+    }
+
+    /// When a doc is gone for good, so is its history. A list that won't open still goes.
+    private func removeVersions(of id: UUID) throws {
+        for version in (try? versions(of: id)) ?? [] { try store.delete(versionName(version.id)) }
+        try store.delete(versionsName(id))
     }
 
     // MARK: Files from outside (issue 102)

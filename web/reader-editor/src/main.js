@@ -1,7 +1,7 @@
 // The Reader's writing page. Swift owns everything outside the text: it loads a doc in with `load`,
-// and runs commands with `command`. This page tells Swift only three things through its one message
-// handler: that it's ready, that the text changed (with the text), and that a link was asked for.
-// It never fetches, stores, or opens anything itself.
+// and runs commands with `command`. This page tells Swift what happened through its one message
+// handler: that it's ready, that the text changed (with the text), the counts and outline, and that a
+// link or another doc was asked for. It never fetches, stores, or opens anything itself.
 import { EditorState, Compartment } from "@codemirror/state";
 import { EditorView, keymap, drawSelection, placeholder } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from "@codemirror/commands";
@@ -9,7 +9,8 @@ import { markdown, markdownLanguage, markdownKeymap } from "@codemirror/lang-mar
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { Strikethrough, Subscript, Superscript, Table, TaskList } from "@lezer/markdown";
-import { livePreview, setCitationText, refreshCitations } from "./livePreview.js";
+import { livePreview, setCitationText, refreshCitations, setWikiDocs } from "./livePreview.js";
+import { wikiSyntax, wikiInsert, docSet, titleKey } from "./wiki.js";
 import { scholarlySyntax, scholarlyIndex, bibliography, setBibliography, footnotes, labels } from "./scholarly.js";
 import { styles, styleOf, styleChange, citedKeys, cleanItems } from "./cite.js";
 import { citeprocEngine } from "./citeproc.js";
@@ -126,6 +127,29 @@ function slug(text) {
   return text.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 40) || "item";
 }
 
+/// Follows a wiki link. A heading in this doc is a jump. Another doc is Swift's to find and open.
+function followWiki(target, heading) {
+  if (!target) {
+    jumpToHeading(heading);
+    return;
+  }
+  post({ type: "wiki", target, heading: heading || "" });
+}
+
+/// Moves to the first heading whose words match. False if there's none.
+function jumpToHeading(text) {
+  if (!view || typeof text !== "string" || !text.trim()) return false;
+  const wanted = titleKey(text);
+  const heading = outline(view.state.doc).find((h) => titleKey(h.text) === wanted);
+  if (!heading) return false;
+  return tools.jump(heading.from);
+}
+
+function useDocs(titles) {
+  setWikiDocs(docSet(titles), followWiki);
+  if (view) view.dispatch({ effects: refreshCitations.of(null) });
+}
+
 function scheduleCounts() {
   clearTimeout(countTimer);
   countTimer = setTimeout(sendCounts, COUNT_PAUSE);
@@ -187,7 +211,7 @@ function create(text, options) {
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
       editable.of(EditorView.editable.of(!options.readOnly)),
-      markdown({ base: markdownLanguage, extensions: [Strikethrough, Subscript, Superscript, Table, TaskList, scholarlySyntax] }),
+      markdown({ base: markdownLanguage, extensions: [Strikethrough, Subscript, Superscript, Table, TaskList, scholarlySyntax, wikiSyntax] }),
       scholarlyIndex,
       bibliography,
       syntaxHighlighting(highlight),
@@ -344,6 +368,19 @@ const tools = {
     return id;
   },
   library: (items) => useLibrary(items),
+  /// The titles of every doc, so a link to one that doesn't exist yet reads differently.
+  docs: (titles) => (useDocs(titles), true),
+  /// A link to another doc where the cursor is. A selection becomes what the link reads as.
+  wikilink: (title) => {
+    const range = view.state.selection.main;
+    const insert = wikiInsert(title, view.state.sliceDoc(range.from, range.to));
+    if (!insert) return false;
+    view.dispatch({ changes: { from: range.from, to: range.to, insert }, selection: { anchor: range.from + insert.length }, userEvent: "input.link" });
+    view.focus();
+    return true;
+  },
+  /// Jumps to a heading by its words, for a link that named one.
+  goToHeading: (text) => jumpToHeading(text),
   style: (name) => {
     if (!Object.prototype.hasOwnProperty.call(styles, name)) return false;
     view.dispatch({ changes: styleChange(view.state.doc.toString(), name), userEvent: "input.style" });
@@ -368,6 +405,7 @@ window.totality = Object.freeze({
     lastOutline = "";
     create(typeof text === "string" ? text : "", options || {});
     tools.settings(options && options.settings);
+    useDocs(options && options.docs);
     useLibrary(options && options.library);
     sendFormat();
     sendCounts();

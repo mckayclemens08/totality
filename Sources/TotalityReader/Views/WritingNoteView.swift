@@ -17,6 +17,8 @@ struct NoteEditor: View {
     }
 
     private static let savePause = Duration.milliseconds(600)
+    /// A longer stop in writing keeps a version, as closing the doc does.
+    private static let versionPause = Duration.seconds(30)
 
     @State private var editor = WritingEditorController()
     @State private var title = ""
@@ -38,6 +40,11 @@ struct NoteEditor: View {
     @State private var references: [References.Summary] = []
     @State private var showsCite = false
     @State private var showsCrossRef = false
+    @State private var showsDocLink = false
+    @State private var showsBacklinks = false
+    @State private var showsVersions = false
+    /// The title a followed link named when no doc has it, while the person decides whether to make it.
+    @State private var missingLink: String?
     @AppStorage("reader.writing.focus") private var focus = false
     @AppStorage("reader.writing.typewriter") private var typewriter = false
     @AppStorage("reader.writing.smartPunctuation") private var smartPunctuation = true
@@ -66,8 +73,13 @@ struct NoteEditor: View {
     }
 
     var body: some View {
+        lifecycle(sheets(chrome(content)))
+    }
+
+    /// The doc, or why it can't be shown.
+    private var content: some View {
         let theme = Theme.current
-        Group {
+        return Group {
             if failed {
                 ReaderMessage(
                     systemImage: "lock.slash",
@@ -97,6 +109,11 @@ struct NoteEditor: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.bg.color)
+    }
+
+    /// The link alert, the toolbar and the outline.
+    private func chrome(_ view: some View) -> some View {
+        view
         .alert("Link", isPresented: editingLink) {
             TextField("Web address", text: $linkAddress)
                 .autocorrectionDisabled()
@@ -118,6 +135,15 @@ struct NoteEditor: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button("Find and replace", systemImage: "magnifyingglass") { showsFind = true }
+                        Button("Linked from", systemImage: "link") { showsBacklinks = true }
+                        Button("Version history", systemImage: "clock.arrow.circlepath") {
+                            // What's on the page is saved first, so the newest version is what's there now.
+                            Task {
+                                await editor.flush()
+                                await save()
+                                showsVersions = true
+                            }
+                        }
                         Toggle("Focus mode", isOn: settings.focus)
                         Toggle("Typewriter scrolling", isOn: settings.typewriter)
                         Button("Writing settings and targets", systemImage: "slider.horizontal.3") { showsSettings = true }
@@ -141,6 +167,10 @@ struct NoteEditor: View {
             .presentationDetents([.medium, .large])
             .inspectorColumnWidth(min: 220, ideal: 280, max: 360)
         }
+    }
+
+    private func sheets(_ view: some View) -> some View {
+        view
         .sheet(isPresented: $showsSettings) {
             WritingSettingsSheet(
                 settings: settings,
@@ -168,19 +198,51 @@ struct NoteEditor: View {
                 }
             )
         }
+        .sheet(isPresented: $showsDocLink) {
+            DocLinkPicker(docs: model.items.filter { $0.id != item.id }) { title in editor.run("wikilink", title) }
+        }
+        .sheet(isPresented: $showsBacklinks) {
+            BacklinksSheet(item: item, model: model)
+        }
+        .sheet(isPresented: $showsVersions) {
+            VersionHistorySheet(item: item, model: model) { await reload() }
+        }
+        .alert(
+            "No doc called “\(missingLink ?? "")”",
+            isPresented: Binding(get: { missingLink != nil }, set: { if !$0 { missingLink = nil } })
+        ) {
+            Button("Make it") {
+                if let title = missingLink { Task { await model.createLinkedDoc(title, from: item) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A new doc with that title goes beside this one, and the link leads to it.")
+        }
+    }
+
+    /// Opening, saving, versions, and keeping up with the Reader.
+    private func lifecycle(_ view: some View) -> some View {
+        view
         .onChange(of: editor.findRequests) { showsFind = true }
+        .onChange(of: model.docTitles) { editor.useDocs(model.docTitles) }
+        // A link that named a heading jumps there once the page has read the doc's headings.
+        .onChange(of: editor.outline) { jumpToLinkedHeading() }
         // A reference library imported or changed while the doc is open is picked up straight away.
         .onChange(of: model.items.filter { $0.mime == References.mime }.map(\.updatedAt)) {
             Task { await loadReferences(sendToPage: true) }
         }
         .task {
             editor.onOpen = { url in openURL(url) }
+            editor.onWikiLink = { target, heading in
+                if !model.followWikiLink(target, heading: heading, from: item) { missingLink = target }
+            }
             editor.onWordsWritten = { words in
                 goals.add(words)
                 goals.save()
             }
             await editor.start()
-            await reload()
+            // Coming back from a linked doc keeps the page as it was, with its undo history and place.
+            if saved == nil { await reload() }
             await model.prepareListening(to: item.id)
         }
         // Listen reads what's saved, so anything just typed has to get there first.
@@ -202,10 +264,17 @@ struct NoteEditor: View {
             guard !Task.isCancelled else { return }
             await save()
         }
+        .task(id: draft) {
+            try? await Task.sleep(for: Self.versionPause)
+            guard !Task.isCancelled, saved != nil else { return }
+            await save()
+            await model.snapshot(item.id)
+        }
         .onDisappear {
             Task {
                 await editor.flush()
                 await save()
+                if saved != nil { await model.snapshot(item.id) }
             }
         }
     }
@@ -244,7 +313,10 @@ struct NoteEditor: View {
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Space.s1) {
                 WritingCountsLine(stats: editor.stats, docTarget: docTarget, goals: goals)
-                WritingFormatBar(controller: editor, onCite: { showsCite = true }, onCrossRef: { showsCrossRef = true })
+                WritingFormatBar(
+                    controller: editor, onCite: { showsCite = true }, onCrossRef: { showsCrossRef = true },
+                    onDocLink: { showsDocLink = true }
+                )
             }
             .background(theme.bg.color)
         }
@@ -255,7 +327,7 @@ struct NoteEditor: View {
             // The navigation value can be out of date, so only its ID is trusted.
             let opened = try await model.loadMarkdown(item.id)
             let library = await loadReferences(sendToPage: false)
-            editor.load(opened.text, settings: settings.wrappedValue, library: library)
+            editor.load(opened.text, settings: settings.wrappedValue, library: library, docs: model.docTitles)
             title = opened.item.title
             docTarget = opened.item.wordTarget
             keptOriginal = opened.item.keptOriginalID
@@ -264,6 +336,12 @@ struct NoteEditor: View {
         } catch {
             failed = true
         }
+    }
+
+    private func jumpToLinkedHeading() {
+        guard let linked = model.linkedHeading, linked.id == item.id, !editor.outline.isEmpty else { return }
+        model.linkedHeading = nil
+        editor.run("goToHeading", linked.heading)
     }
 
     /// Reads every reference library. The page gets them too when it's already showing the doc.
@@ -336,6 +414,7 @@ struct WritingFormatBar: View {
     let controller: WritingEditorController
     var onCite: () -> Void = {}
     var onCrossRef: () -> Void = {}
+    var onDocLink: () -> Void = {}
 
     var body: some View {
         let format = controller.format
@@ -354,6 +433,7 @@ struct WritingFormatBar: View {
                 iconButton("textformat.superscript", label: "Footnote", isOn: false) { controller.run("footnote") }
                 iconButton("quote.opening", label: "Cite", isOn: false, action: onCite)
                 iconButton("arrow.turn.down.right", label: "Cross-reference", isOn: false, action: onCrossRef)
+                iconButton("link.badge.plus", label: "Link to a doc", isOn: false, action: onDocLink)
                 iconButton("arrow.uturn.backward", label: "Undo", isOn: false) { controller.run("undo") }
                 iconButton("arrow.uturn.forward", label: "Redo", isOn: false) { controller.run("redo") }
                 #if os(iOS)

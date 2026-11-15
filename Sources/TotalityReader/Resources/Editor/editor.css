@@ -195,6 +195,19 @@ body {
 .cm-tl-xref {
   color: var(--tl-accent);
 }
+/* A link to another doc. One that doesn't exist yet is dashed, as an invitation rather than an error. */
+.cm-tl-wiki {
+  color: var(--tl-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.cm-tl-wiki-missing {
+  color: var(--tl-text2);
+  text-decoration-style: dashed;
+}
+.cm-tl-wiki-src,
 .cm-tl-cite-src,
 .cm-tl-xref-src {
   color: var(--tl-accent);

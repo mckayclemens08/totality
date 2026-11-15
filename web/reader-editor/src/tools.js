@@ -13,6 +13,9 @@ const wordPattern = /[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu;
 /// Words as a reader would count them: a link's address, a note's marker and the symbols don't count.
 export function countWords(markdown) {
   const words = markdown
+    // A link to another doc counts as the words it reads as.
+    .replace(/\[\[([^\[\]|\n]*)\|([^\[\]\n]*)\]\]/g, " $2 ")
+    .replace(/\[\[([^\[\]\n]*)\]\]/g, (_, inner) => ` ${inner.replace("#", " ")} `)
     .replace(/\]\([^)\n]*\)/g, "]")
     .replace(/\[\^[^\]\n]+\]:?/g, " ")
     .replace(/<(?:https?|mailto):[^>\s]+>/g, " ")
