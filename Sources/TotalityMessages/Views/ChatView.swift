@@ -81,26 +81,8 @@ struct ChatView: View {
                                 .padding(.top, Space.s5)
                         }
                         ForEach(Array(model.messages.enumerated()), id: \.element.id) { index, message in
-                            Bubble(
-                                message: message,
-                                model: model,
-                                showsSender: !message.isOwn && (index == 0 || model.messages[index - 1].sender != message.sender),
-                                senderName: messages.people.name(ofMatrixID: message.sender),
-                                senderPhoto: model.isGroup ? messages.people.profile(ofMatrixID: message.sender)?.photo : nil,
-                                onOpenSender: model.isGroup && MessagesPeople.handle(of: message.sender) != nil
-                                    ? { showingPerson = ShownPerson(id: message.sender) } : nil,
-                                showsSeen: message.seen && model.messages[(index + 1)...].allSatisfy { !$0.isOwn || !$0.seen },
-                                onRetry: { Task { await model.retry(message) } },
-                                onOpenPhoto: { if message.isVideo { playing = message } else { viewing = message } },
-                                onReply: {
-                                    model.replyingTo = message
-                                    writing = true
-                                },
-                                onDelete: { deleting = message },
-                                keys: messages.keys,
-                                onRestore: onOpenAccount
-                            )
-                            .id(message.id)
+                            bubble(message, at: index)
+                                .id(message.id)
                         }
                         if !model.typing.isEmpty {
                             Text(model.typing.count == 1 ? "\(model.typing[0]) is typing…" : "Several people are typing…")
@@ -154,27 +136,12 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task { await model.start() }
-        .task(id: Set(model.messages.lazy.filter { !$0.isOwn }.map(\.sender))) {
+        .task(id: otherSenders) {
             // Group members' names and photos; the one other person in a chat is fetched by the list.
             guard model.isGroup else { return }
-            await messages.people.want(matrixIDs: Array(Set(model.messages.lazy.filter { !$0.isOwn }.map(\.sender))))
+            await messages.people.want(matrixIDs: Array(otherSenders))
         }
-        .sheet(item: $showingPerson) { shown in
-            PersonSheet(
-                matrixID: shown.id, people: messages.people,
-                // From the header it's this chat; from a group it's a chat with just them.
-                onMessage: shown.id == model.otherPerson && !model.isGroup
-                    ? { showingPerson = nil }
-                    : {
-                        showingPerson = nil
-                        Task {
-                            if let chat = await messages.startChat(with: MessagesUsername.display(shown.id)) {
-                                messages.requestedChat = chat
-                            }
-                        }
-                    }
-            )
-        }
+        .sheet(item: $showingPerson) { personSheet($0) }
         .photosPicker(isPresented: $showingPhotos, selection: $pickedPhoto, matching: .any(of: [.images, .videos]), preferredItemEncoding: .compatible)
         .onChange(of: pickedPhoto) {
             guard let item = pickedPhoto else { return }
@@ -263,6 +230,48 @@ struct ChatView: View {
         } message: { _ in
             Text("It's removed from this chat on every device that still has it. Someone may already have seen it.")
         }
+    }
+
+    private func bubble(_ message: ChatMessage, at index: Int) -> some View {
+        let people = messages.people
+        let opensSender = model.isGroup && MessagesPeople.handle(of: message.sender) != nil
+        return Bubble(
+            message: message,
+            model: model,
+            showsSender: !message.isOwn && (index == 0 || model.messages[index - 1].sender != message.sender),
+            senderName: people.name(ofMatrixID: message.sender),
+            senderPhoto: model.isGroup ? people.profile(ofMatrixID: message.sender)?.photo : nil,
+            onOpenSender: opensSender ? { showingPerson = ShownPerson(id: message.sender) } : nil,
+            showsSeen: message.seen && model.messages[(index + 1)...].allSatisfy { !$0.isOwn || !$0.seen },
+            onRetry: { Task { await model.retry(message) } },
+            onOpenPhoto: { if message.isVideo { playing = message } else { viewing = message } },
+            onReply: {
+                model.replyingTo = message
+                writing = true
+            },
+            onDelete: { deleting = message },
+            keys: messages.keys,
+            onRestore: onOpenAccount
+        )
+    }
+
+    private func personSheet(_ shown: ShownPerson) -> some View {
+        // From the header it's this chat; from a group it's a chat with just them.
+        let isThisChat = shown.id == model.otherPerson && !model.isGroup
+        return PersonSheet(matrixID: shown.id, people: messages.people) {
+            showingPerson = nil
+            guard !isThisChat else { return }
+            Task {
+                if let chat = await messages.startChat(with: MessagesUsername.display(shown.id)) {
+                    messages.requestedChat = chat
+                }
+            }
+        }
+    }
+
+    /// The group members whose names and photos are needed.
+    private var otherSenders: Set<String> {
+        Set(model.messages.lazy.filter { !$0.isOwn }.map(\.sender))
     }
 
     /// A chat with one person goes by their profile's name once it's known.
