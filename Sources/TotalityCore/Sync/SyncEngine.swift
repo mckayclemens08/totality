@@ -254,6 +254,7 @@ public actor SyncEngine {
             await settle(record.id, here: area, remote: record, holdRemovals: holdRemovals, agreed: &agreed, report: &report)
         }
         for area in areas { try? await area.emptyOldTrash() }
+        if report.uploaded > 0 || report.removedThere > 0 { StorageActivity.didChange() }
         return report
     }
 

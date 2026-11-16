@@ -36,6 +36,8 @@ public final class AccountModel {
     /// Nil when this build has nothing to sync with.
     public let sync: SyncModel?
     public let syncRemote: (any SyncRemote)?
+    /// Settings' storage bars. The app sets it, since it reads what other modules hold.
+    public var storage: StorageModel?
     private let service: any AccountService
 
     public init(
