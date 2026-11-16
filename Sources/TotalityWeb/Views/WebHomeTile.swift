@@ -64,9 +64,30 @@ public struct WebHomeTile: View {
 
     // MARK: Large: search, and the open tabs
 
-    private var large: some View {
+    /// Only bookmarks to show: Search and the bookmarks sit together in the middle, with even room above
+    /// and below, so the top isn't cramped against the title and the bottom isn't left empty.
+    private func centred(_ rows: [[WebBookmark]]) -> some View {
+        VStack(spacing: Space.s6) {
+            Spacer(minLength: Space.s2)
+            WebTileSearch(model: model, onOpen: onOpen)
+                .tileControl()
+            wall(rows)
+            Spacer(minLength: Space.s2)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder private var large: some View {
         let tabs = Array(model.homeTabs.prefix(WebModel.homeTabCards))
-        return VStack(alignment: .leading, spacing: Space.s3) {
+        if tabs.isEmpty && !model.bookmarks.isEmpty {
+            centred(rows(2, of: model.homeBookmarks))
+        } else {
+            largeWithTabs(tabs)
+        }
+    }
+
+    private func largeWithTabs(_ tabs: [WebTab]) -> some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
             WebTileSearch(model: model, onOpen: onOpen)
                 .tileControl()
             ForEach(tabs) { tab in
@@ -89,10 +110,18 @@ public struct WebHomeTile: View {
 
     // MARK: Square: search, bookmarks, tabs and the latest download
 
-    private var square: some View {
+    @ViewBuilder private var square: some View {
         let grid = rows(WebModel.homeGrid / Self.perRow, of: model.homeBookmarks)
         let tabs = Array(model.homeTabs.prefix(WebModel.homeSquareTabs))
-        return VStack(alignment: .leading, spacing: Space.s3) {
+        if tabs.isEmpty && model.homeDownload == nil && !grid.isEmpty {
+            centred(grid)
+        } else {
+            squareWithTabs(grid: grid, tabs: tabs)
+        }
+    }
+
+    private func squareWithTabs(grid: [[WebBookmark]], tabs: [WebTab]) -> some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
             WebTileSearch(model: model, onOpen: onOpen)
                 .tileControl()
             if grid.isEmpty && tabs.isEmpty && model.homeDownload == nil {
@@ -257,13 +286,13 @@ private struct SiteMark: View {
         let theme = Theme.current
         VStack(spacing: Space.s1) {
             Text(bookmark.displayTitle.prefix(1).uppercased())
-                .font(size == .large ? Typeface.display : Typeface.title)
+                .font(size == .medium ? Typeface.title : Typeface.display)
                 .foregroundStyle(theme.textSecondary.color)
                 .accessibilityHidden(true)
             Text(bookmark.displayTitle)
                 .font(Typeface.micro)
                 .foregroundStyle(theme.textSecondary.color)
-                .lineLimit(size == .large ? 2 : 1)
+                .lineLimit(size == .medium ? 1 : 2)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
