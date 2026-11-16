@@ -3,9 +3,9 @@ import TotalityUI
 
 /// Messages' big home tiles, one job for each size (issue 127). Medium is a glance: faces with what's
 /// unread from each. Large lists the three most recent chats. The square is a workspace: one chat's last
-/// few messages with a reply box, and faces across the top to switch chat. Faces come from the people's
-/// public profiles, through `MessagesPeople`. Looking at the square doesn't mark anything read; a reply
-/// goes only when the person presses Send, as in the chat itself.
+/// few messages with a Reply button that opens the chat ready to write, and faces across the top to switch
+/// chat. Faces come from the people's public profiles, through `MessagesPeople`. Looking at the square
+/// doesn't mark anything read, and nothing is sent from it but a heart the person double-tapped.
 public struct MessagesHomeTile: View {
     private let model: MessagesModel
     private let size: BigTileSize
@@ -174,11 +174,13 @@ private struct MessagesDeskTile: View {
                 .tileLink("Open \(target.title)") { openChat(target.id, in: model, then: onOpen) }
                 bubbles(target)
                 Spacer(minLength: 0)
-                if let chat = model.homeChat, chat.chatID == target.id {
-                    MessagesTileReply(chat: chat)
-                        .tileControl()
-                        .layoutPriority(1)
+                // Writing happens in the chat itself: tiles never hold a text box (owner, issue 127).
+                TileButton("Reply", systemImage: "arrowshape.turn.up.left", isProminent: true) {
+                    model.requestedWriting = target.id
+                    openChat(target.id, in: model, then: onOpen)
                 }
+                .tileControl()
+                .layoutPriority(1)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -293,49 +295,5 @@ private struct MessagesTileBubble: View {
     private func heart() {
         guard ChatScroll.canHeart(message) else { return }
         Task { await chat.toggleReaction(QuickReactions.heart, on: message) }
-    }
-}
-
-/// The square's reply box. It sends only on the send button or the keyboard's Send, like the chat's.
-private struct MessagesTileReply: View {
-    @Bindable var chat: ChatModel
-
-    private var canSend: Bool {
-        !chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    var body: some View {
-        let theme = Theme.current
-        HStack(spacing: Space.s2) {
-            TextField("Reply", text: $chat.draft)
-                .font(Typeface.body)
-                .foregroundStyle(theme.textPrimary.color)
-                #if os(iOS)
-                .submitLabel(.send)
-                #endif
-                .onSubmit(send)
-            Button(action: send) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(Typeface.title)
-                    .foregroundStyle(canSend ? theme.accent.color : theme.textTertiary.color)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .accessibilityLabel("Send")
-        }
-        .raisedField()
-        .overlay(alignment: .topLeading) {
-            if let notice = chat.notice {
-                Text(notice)
-                    .font(Typeface.micro)
-                    .foregroundStyle(theme.danger.color)
-                    .offset(y: -Space.s4)
-            }
-        }
-    }
-
-    private func send() {
-        guard canSend else { return }
-        Task { await chat.send() }
     }
 }

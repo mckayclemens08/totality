@@ -2,7 +2,7 @@ import Foundation
 
 /// What each size of the Messages home tile shows (issue 127). The tile shows message text, which the
 /// owner agreed to in the issue; search still never does. Nothing is sent from the home page except a
-/// reply the person typed and pressed Send on, and a heart they double-tapped.
+/// heart the person double-tapped. Replies are written in the chat, which Reply opens.
 extension MessagesModel {
     static let homeFaceCount = 4
     static let homeRowCount = 3

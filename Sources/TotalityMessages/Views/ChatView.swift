@@ -135,7 +135,14 @@ struct ChatView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task { await model.start() }
+        .task {
+            // Reply on the home square opens the chat ready to write.
+            if messages.requestedWriting == model.chatID {
+                messages.requestedWriting = nil
+                writing = true
+            }
+            await model.start()
+        }
         .task(id: otherSenders) {
             // Group members' names and photos; the one other person in a chat is fetched by the list.
             guard model.isGroup else { return }

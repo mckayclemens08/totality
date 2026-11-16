@@ -1286,7 +1286,7 @@ func homeSquarePicks() async {
 }
 
 @MainActor
-@Test("Square: showing a chat there marks nothing read; a reply sent from it does")
+@Test("Square: showing a chat there marks nothing read and sends nothing")
 func homeSquareDoesntRead() async {
     let channel = FakeChannel()
     channel.startingMessages = (1...6).map {
@@ -1297,12 +1297,8 @@ func homeSquareDoesntRead() async {
     await settle()
     #expect(chat.messages.count == 6)
     #expect(channel.receipts.isEmpty)
-    // Typing alone sends nothing.
-    chat.draft = "On my way"
     #expect(channel.sent.isEmpty)
-    await chat.send()
-    #expect(channel.sent == ["On my way"])
-    #expect(channel.receipts.count == 1)
+    #expect(channel.typing.isEmpty)
 }
 
 @MainActor

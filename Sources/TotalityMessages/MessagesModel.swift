@@ -314,6 +314,8 @@ public final class MessagesModel {
     public internal(set) var homeChat: ChatModel?
     /// The chat picked from the square's faces row. Nil follows the newest with something unread.
     public var homePicked: String?
+    /// A chat the home square's Reply opened, to open with the keyboard up.
+    public var requestedWriting: String?
 
     /// Chats whose name, or a person's name, matches every word. Message text is never searched or
     /// shown, so search can't put a private message on screen outside its chat.
@@ -408,7 +410,7 @@ public final class ChatModel {
     private var viewedKey: String { "messages.viewedUpTo.\(channel.id)" }
 
     /// False while the chat only shows on the home tile. Seeing it there isn't reading it, so nothing
-    /// is marked read and no receipt goes until the person replies or opens the chat.
+    /// is marked read and no receipt goes until the person opens the chat.
     private var marksRead = true
 
     public func start(markingRead: Bool = true) async {
@@ -538,8 +540,6 @@ public final class ChatModel {
         do {
             notice = nil
             try await channel.send(text, replyingTo: reply?.id)
-            // A reply from the home tile reads what it answers.
-            if !marksRead { await channel.markRead(share: share) }
         } catch {
             draft = text
             replyingTo = reply
