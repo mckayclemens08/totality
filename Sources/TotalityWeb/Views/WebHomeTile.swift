@@ -66,15 +66,16 @@ public struct WebHomeTile: View {
     /// A full-width Search button, the bookmarks as raised squares (four across, up to eight), and the open
     /// tabs as one button at the bottom. The square adds the newest download under them.
     private var startPage: some View {
-        let marks = Array(model.homeBookmarks.prefix(WebModel.homeGrid))
-        return VStack(alignment: .leading, spacing: Space.s4) {
+        let marks = Array(model.homeBookmarks.prefix(size == .square ? 6 : 3))
+        return VStack(alignment: .leading, spacing: Space.s5) {
             WebTileSearch(model: model, onOpen: onOpen)
                 .tileControl()
+                .padding(.top, Space.s3)
             if marks.isEmpty {
                 emptyNote
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s3), count: Self.perRow),
-                          alignment: .leading, spacing: Space.s3) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s4), count: 3),
+                          alignment: .leading, spacing: Space.s4) {
                     ForEach(marks) { bookmark in
                         SiteSquare(bookmark: bookmark)
                             .tileLink(bookmark.displayTitle) {
@@ -203,14 +204,14 @@ private struct SiteSquare: View {
         let theme = Theme.current
         VStack(spacing: Space.s1) {
             Text(bookmark.displayTitle.prefix(1).uppercased())
-                .font(Typeface.title)
+                .font(Typeface.display)
                 .foregroundStyle(theme.textSecondary.color)
                 .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fit)
                 .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                 .accessibilityHidden(true)
             Text(bookmark.displayTitle)
-                .font(Typeface.micro)
+                .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .lineLimit(1)
         }
