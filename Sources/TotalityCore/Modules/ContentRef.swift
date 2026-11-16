@@ -27,10 +27,14 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     /// Where the person stopped in each Reader file, as one sealed record per person, so a file opens there on
     /// every device. Which items, and where in them, stay inside the seal.
     case readerPlaces = "reader_places"
+    /// One task: its title, notes, dates, checklist and tags, all sealed in the metadata (issue 123).
+    case task
+    /// One list of tasks, such as a project or an area: its name and settings, sealed (issue 123).
+    case taskList = "task_list"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {
-    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web
+    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks
 }
 
 /// Where an object's key lives, matching `content_objects.key_ref`.

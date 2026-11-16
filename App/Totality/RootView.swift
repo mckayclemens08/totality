@@ -6,6 +6,7 @@ import TotalityMail
 import TotalityMessages
 import TotalityPhotos
 import TotalityReader
+import TotalityTasks
 import TotalityUI
 import TotalityWeb
 
@@ -18,6 +19,9 @@ struct RootView: View {
     @State private var reader: ReaderModel?
     @State private var calendar: CalendarModel?
     @State private var web: WebModel?
+    @State private var tasks: TasksModel?
+    /// Quick add from the Tasks tile, over the home page.
+    @State private var quickAddingTask = false
     @State private var messages: MessagesModel
     // The real mailbox, for whoever owns this device's key. `mailWiring` holds that account's vault.
     @State private var mail: MailAccountModel
@@ -65,7 +69,7 @@ struct RootView: View {
             switch open {
             case nil:
                 HomeView(center: recentModule, glances: glances, bigTile: bigTile, lineLink: lineLink, style: homeStyle) { module in
-                    if [.reader, .calendar, .web, .mail, .photos].contains(module) { prepareContent() }
+                    if [.reader, .calendar, .web, .mail, .photos, .tasks].contains(module) { prepareContent() }
                     bringUp(module)
                 } onSearch: {
                     prepareContent()
@@ -87,6 +91,12 @@ struct RootView: View {
             case .web:
                 if let web {
                     WebHomeView(model: web) { open = nil }
+                } else {
+                    contentMessage { open = nil }
+                }
+            case .tasks:
+                if let tasks {
+                    TasksHomeView(model: tasks) { open = nil }
                 } else {
                     contentMessage { open = nil }
                 }
@@ -116,9 +126,11 @@ struct RootView: View {
                 await reader?.stopForKeyChange()
                 await calendar?.stopForKeyChange()
                 await web?.stopForKeyChange()
+                await tasks?.stopForKeyChange()
                 reader = nil
                 calendar = nil
                 web = nil
+                tasks = nil
                 await mailWiring.disconnect()
                 mail.keyChanged()
                 photosTurn += 1
@@ -209,6 +221,11 @@ struct RootView: View {
                 ) { linkedProfile = nil }
             }
         }
+        .sheet(isPresented: $quickAddingTask) {
+            if let tasks {
+                QuickAddView(model: tasks, bucket: .inbox) { quickAddingTask = false }
+            }
+        }
         .sheet(isPresented: $showingSearch) {
             if let registry {
                 SearchView(search: UniversalSearch(searchers: homeSearchers(registry)), onOpen: show) { showingSearch = false }
@@ -233,6 +250,7 @@ struct RootView: View {
         glances[.reader] = reader?.glance
         glances[.calendar] = calendar?.glance
         glances[.web] = web?.glance
+        glances[.tasks] = tasks?.glance
         glances[.mail] = mail.current.glance
         glances[.messages] = messages.glance
         glances[.photos] = photos.glance
@@ -251,6 +269,9 @@ struct RootView: View {
         case .web:
             guard let web, web.glance != nil else { return nil }
             return AnyView(WebHomeTile(model: web, size: size) { bringUp(.web) })
+        case .tasks:
+            guard let tasks, tasks.phase == .ready else { return nil }
+            return AnyView(TasksHomeTile(model: tasks, size: size, onOpen: { bringUp(.tasks) }, onQuickAdd: { quickAddingTask = true }))
         case .mail:
             guard mail.current.phase == .ready else { return nil }
             return AnyView(MailHomeTile(model: mail.current, size: size) { bringUp(.mail) })
@@ -341,13 +362,15 @@ struct RootView: View {
             reader = content.reader
             calendar = content.calendar
             web = content.web
+            tasks = content.tasks
             refreshers[.reader] = content.reader.refresher
+            refreshers[.tasks] = content.tasks.refresher
             refreshers[.calendar] = content.calendar.refresher
             refreshers[.web] = content.web.refresher
             refreshers[.messages] = messages.refresher
             // A pull also brings in the person's other devices. The app already syncs with them on
             // opening and on coming back, so the minute-by-minute refresh leaves it out.
-            for refresher in [content.reader.refresher, content.calendar.refresher, content.web.refresher] {
+            for refresher in [content.reader.refresher, content.calendar.refresher, content.web.refresher, content.tasks.refresher] {
                 refresher.add("other devices", limit: .seconds(120), onlyWhenPulled: true) { [account] in
                     guard let sync = account?.sync else { return .done }
                     await sync.syncNow()
@@ -380,6 +403,7 @@ struct RootView: View {
         prepareContent()
         await reader?.load()
         await calendar?.load()
+        await tasks?.load()
         await tellWhoIsHere()
         // So the Mail tile has something to show before Mail is opened.
         if mail.current.phase != .ready { await mail.current.refresh() }
@@ -468,6 +492,7 @@ struct RootView: View {
             await reader?.load()
             await calendar?.load()
             await web?.load()
+            await tasks?.load()
             // Marks from another device, so Mail is already up to date when it's opened.
             if mail.current.phase == .ready { await mail.current.refresh() }
         }
@@ -511,6 +536,7 @@ struct RootView: View {
             guard let id = UUID(uuidString: hit.itemID) else { return }
             mail.current.requestFromSearch(id)
         case .photos: photos.requestedItem = UUID(uuidString: hit.itemID)
+        case .tasks: tasks?.requestedTask = UUID(uuidString: hit.itemID)
         case .web:
             guard let url = URL(string: hit.itemID) else { return }
             web?.open(url)

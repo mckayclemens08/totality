@@ -53,3 +53,34 @@ extension CalendarModule: ModuleRefresher {
         await refresh()
     }
 }
+
+/// What's on each day, for another module to show beside its own things, like Tasks' Upcoming. Only titles
+/// and times leave, and only in memory.
+extension CalendarModule: AgendaProvider {
+    public func agenda(from start: Date, to end: Date) async -> [AgendaItem] {
+        guard start < end else { return [] }
+        let first = CalendarDay(start, in: display)
+        let last = CalendarDay(end.addingTimeInterval(-1), in: display)
+        var entries: [CalendarEntry] = []
+        if let vault, let events = try? await vault.list().events {
+            for event in events {
+                entries += event.occurrences(from: first, through: last, in: display).map { CalendarEntry(source: .own($0)) }
+            }
+        }
+        let chosen = Set(devices?.calendars().map(\.id) ?? []).subtracting(hidden())
+        let outside = (devices?.events(from: start, to: end, calendarIDs: chosen) ?? []) + (await google?.events(from: start, to: end) ?? [])
+        entries += outside.map { CalendarEntry(source: .device($0)) }
+        return entries.compactMap { entry in
+            guard entry.isAllDay else {
+                return AgendaItem(id: entry.id, title: entry.title, start: entry.start, end: entry.end, isAllDay: false)
+            }
+            // An all-day item keeps its dates, wherever the person is.
+            let days = entry.days(in: display)
+            guard let firstDay = days.first, let lastDay = days.last else { return nil }
+            return AgendaItem(
+                id: entry.id, title: entry.title, start: firstDay.start(in: display),
+                end: lastDay.adding(days: 1, in: display).start(in: display), isAllDay: true
+            )
+        }
+    }
+}

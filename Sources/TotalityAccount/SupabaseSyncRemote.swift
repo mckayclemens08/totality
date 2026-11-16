@@ -106,7 +106,7 @@ public struct SupabaseSyncRemote: SyncRemote, MovesBodies {
     }
 
     /// Kinds whose whole content fits in the sealed metadata, so they have no body to store.
-    static let metaOnly: Set<ContentKind> = [.event, .bookmark, .mailMarks, .mailSettings, .mailKeys, .mailOutside, .readerDrive, .readerPlaces]
+    static let metaOnly: Set<ContentKind> = [.event, .bookmark, .mailMarks, .mailSettings, .mailKeys, .mailOutside, .readerDrive, .readerPlaces, .task, .taskList]
 
     public func upload(_ object: SealedObject, expected: String?, replacingDeleted: Bool) async throws {
         if !Self.metaOnly.contains(object.kind), object.body == nil { throw AccountError.failed }
