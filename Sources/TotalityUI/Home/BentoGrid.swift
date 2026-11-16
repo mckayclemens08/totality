@@ -371,15 +371,20 @@ private struct TileButtonStyle: ButtonStyle {
     let isDragged: Bool
     let isTouched: Bool
 
-    private func depth(isPressed: Bool) -> Elevation {
+    private var depth: Elevation {
         if isEditing { return isDragged ? .raised : .subtle }
-        return isPressed ? .pressed : .raised
+        return .raised
     }
 
+    /// A press shrinks the tile a little and lets it fade a touch. Nothing sinks in: the owner doesn't
+    /// want a sunken look anywhere (issue 132).
     func makeBody(configuration: Configuration) -> some View {
+        let isPressed = (configuration.isPressed || isTouched) && !isEditing
         configuration.label
-            .neumorphic(depth(isPressed: configuration.isPressed || isTouched), in: tileShape)
-            .animation(Motion.instant, value: configuration.isPressed || isTouched)
+            .neumorphic(depth, in: tileShape)
+            .scaleEffect(isPressed ? TilePress.scale : 1)
+            .opacity(isPressed ? TilePress.opacity : 1)
+            .animation(Motion.instant, value: isPressed)
     }
 }
 

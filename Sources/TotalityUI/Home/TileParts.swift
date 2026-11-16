@@ -117,6 +117,22 @@ public struct TileButton: View {
                 .padding(.vertical, Space.s2)
                 .neumorphic(.subtle, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TilePress())
+    }
+}
+
+/// Press feedback for anything on a tile: a little smaller and a little fainter, never pressed in. The
+/// owner doesn't want a sunken look anywhere (issue 132).
+public struct TilePress: ButtonStyle {
+    static let scale: CGFloat = 0.96
+    static let opacity: Double = 0.8
+
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? Self.scale : 1)
+            .opacity(configuration.isPressed ? Self.opacity : 1)
+            .animation(Motion.instant, value: configuration.isPressed)
     }
 }

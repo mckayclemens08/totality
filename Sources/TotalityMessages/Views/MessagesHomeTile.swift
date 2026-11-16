@@ -198,7 +198,7 @@ private struct MessagesDeskTile: View {
                     chatFace(chat, in: model, count: chat.unread, diameter: Space.s6 + Space.s2)
                         .opacity(isShown ? 1 : 0.6)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(TilePress())
                 .accessibilityLabel(chat.unread > 0 ? "\(chat.title), \(chat.unread) unread" : chat.title)
                 .accessibilityAddTraits(isShown ? .isSelected : [])
                 .tileControl()
