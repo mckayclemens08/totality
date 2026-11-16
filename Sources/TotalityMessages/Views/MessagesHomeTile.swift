@@ -122,8 +122,11 @@ private struct MessagesTileRow: View {
         let theme = Theme.current
         let isUnread = chat.unread > 0
         HStack(spacing: Space.s3) {
-            chatFace(chat, in: model, diameter: Space.s6 + Space.s2)
-                .frame(width: Space.s6 + Space.s2)
+            // The name is beside the face here, so the face goes without one under it.
+            PersonFace(
+                photo: chat.otherPerson.flatMap { model.people.profile(ofMatrixID: $0)?.photo }, name: chat.title,
+                diameter: Space.s6 + Space.s2
+            )
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                     Text(chat.title)
