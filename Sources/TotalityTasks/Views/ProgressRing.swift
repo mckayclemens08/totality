@@ -85,18 +85,10 @@ struct TodayProgressView: View {
                     }
                 }
             if progress.parts.count > 1 {
-                FlowRow(spacing: Space.s3) {
-                    ForEach(Array(progress.parts.enumerated()), id: \.element.id) { index, part in
-                        HStack(spacing: Space.s1) {
-                            Circle().fill(ProgressRing.tone(index)).frame(width: Space.s2, height: Space.s2)
-                            Text(part.name)
-                                .foregroundStyle(theme.textPrimary.color)
-                            Text("\(part.done) of \(part.planned)")
-                                .monospacedDigit()
-                                .foregroundStyle(theme.textSecondary.color)
-                        }
-                        .font(Typeface.caption)
-                    }
+                // Centred on one line under the ring when it fits, wrapping when it doesn't.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Space.s3) { legend }
+                    FlowRow(spacing: Space.s3) { legend }
                 }
             }
         }
@@ -104,5 +96,20 @@ struct TodayProgressView: View {
         .animation(Motion.standard, value: progress)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(progress.spoken)
+    }
+
+    @ViewBuilder private var legend: some View {
+        let theme = Theme.current
+        ForEach(Array(progress.parts.enumerated()), id: \.element.id) { index, part in
+            HStack(spacing: Space.s1) {
+                Circle().fill(ProgressRing.tone(index)).frame(width: Space.s2, height: Space.s2)
+                Text(part.name)
+                    .foregroundStyle(theme.textPrimary.color)
+                Text("\(part.done) of \(part.planned)")
+                    .monospacedDigit()
+                    .foregroundStyle(theme.textSecondary.color)
+            }
+            .font(Typeface.caption)
+        }
     }
 }
