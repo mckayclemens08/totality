@@ -229,6 +229,23 @@ describe('contact requests', () => {
     assert.equal((await lookUp(u2))[0].avatar_key, null)
   })
 
+  // Issue 129: which modules someone took off Home is one sealed record of theirs.
+  test('one user\'s home layout never reaches another', async () => {
+    const [u1, u2] = await trio()
+    const layout = await addObject(db, u1, { kind: 'home_layout', storage_key: null })
+    await as(db, u1, (q) => q('update public.content_objects set meta_cipher = $1 where id = $2', [Buffer.from('sealed choices'), layout.id]))
+    assert.equal(await canSee(u1, layout.id), true)
+    assert.equal(await canSee(u2, layout.id), false)
+    // User 2 can't overwrite it, delete it, or claim it.
+    await as(db, u2, (q) => q('update public.content_objects set meta_cipher = $1 where id = $2', [Buffer.from('forged'), layout.id]))
+    await as(db, u2, (q) => q('delete from public.content_objects where id = $1', [layout.id]))
+    const [kept] = await as(db, u1, (q) => q('select meta_cipher from public.content_objects where id = $1', [layout.id]))
+    assert.equal(Buffer.from(kept.meta_cipher).toString(), 'sealed choices')
+    // Their own layout is theirs alone.
+    const theirs = await addObject(db, u2, { kind: 'home_layout', storage_key: null })
+    assert.equal(await canSee(u1, theirs.id), false)
+  })
+
   test('a blocked user cannot see public content or the profile', async () => {
     const [u1, u2, u3] = await trio()
     const o = await addObject(db, u1, { visibility: 'public', key_ref: 'plain:' })

@@ -12,9 +12,14 @@ public struct HomeView: View {
     @Binding private var style: HomeStyle
     private let onOpen: (ModuleID) -> Void
     private let onSearch: () -> Void
+    /// Modules taken off Home. Their data stays, and links to them still open them.
+    private let removed: Set<ModuleID>
+    private let onRemove: (ModuleID) -> Void
+    private let onRestore: (ModuleID) -> Void
     // Module names and sizes, never content.
     @AppStorage("home.layout") private var savedLayout = Data()
     @State private var isEditing = false
+    @State private var adding = false
 
     private static let topBarHeight = Space.s4 + Space.s7
 
@@ -25,9 +30,15 @@ public struct HomeView: View {
         bigTile: @escaping (ModuleID, BigTileSize) -> AnyView? = { _, _ in nil },
         lineLink: @escaping (ModuleID, Int) -> (@MainActor () -> Void)? = { _, _ in nil },
         style: Binding<HomeStyle> = .constant(.tiles),
+        removed: Set<ModuleID> = [],
+        onRemove: @escaping (ModuleID) -> Void = { _ in },
+        onRestore: @escaping (ModuleID) -> Void = { _ in },
         onOpen: @escaping (ModuleID) -> Void,
         onSearch: @escaping () -> Void = {}
     ) {
+        self.removed = removed
+        self.onRemove = onRemove
+        self.onRestore = onRestore
         self.modules = modules
         self.center = center
         self.glances = glances
@@ -39,11 +50,21 @@ public struct HomeView: View {
     }
 
     private var layout: Binding<HomeLayout> {
-        Binding {
-            HomeLayout(saved: savedLayout, modules: modules.map(\.id))
+        Binding { [removed] in
+            var layout = HomeLayout(saved: savedLayout, modules: modules.map(\.id))
+            layout.hidden = removed
+            return layout
         } set: {
             savedLayout = $0.saved
         }
+    }
+
+    private var shown: [ModuleEntry] {
+        modules.filter { !removed.contains($0.id) }
+    }
+
+    private var takenOff: [ModuleEntry] {
+        modules.filter { removed.contains($0.id) }
     }
 
     public var body: some View {
@@ -52,22 +73,39 @@ public struct HomeView: View {
             switch style {
             case .tiles:
                 GeometryReader { proxy in
+                    let width = min(proxy.size.width - Space.s4 * 2, Space.s8 * 8)
                     ScrollView {
-                        BentoGrid(
-                            layout: layout, modules: modules, glances: glances, bigTile: bigTile, lineLink: lineLink,
-                            width: min(proxy.size.width - Space.s4 * 2, Space.s8 * 8),
-                            isEditing: $isEditing, onOpen: onOpen
-                        )
+                        VStack(spacing: Space.s4) {
+                            if shown.isEmpty {
+                                EmptyHome(width: width) { adding = true }
+                            } else {
+                                BentoGrid(
+                                    layout: layout, modules: shown, glances: glances, bigTile: bigTile, lineLink: lineLink,
+                                    width: width, isEditing: $isEditing, onOpen: onOpen, onRemove: onRemove
+                                )
+                                if isEditing, !takenOff.isEmpty {
+                                    AddModuleTile(width: width) { adding = true }
+                                }
+                            }
+                        }
                         .frame(maxWidth: .infinity)
                         .padding(.top, Self.topBarHeight + Space.s4)
                         .padding(.bottom, Space.s6)
                     }
                 }
             case .flower:
-                FlowerView(modules: ModuleEntry.arranged(modules, around: center), onOpen: onOpen)
+                FlowerView(modules: ModuleEntry.arranged(shown, around: center), onOpen: onOpen)
             }
             topBar
         }
+        .sheet(isPresented: $adding) {
+            AddModulesView(modules: takenOff) { module in
+                onRestore(module)
+            } onDone: {
+                adding = false
+            }
+        }
+        .onChange(of: takenOff.isEmpty) { if takenOff.isEmpty { adding = false } }
     }
 
     /// Floats over the page, so tiles fade out under it instead of stopping at a hard edge.

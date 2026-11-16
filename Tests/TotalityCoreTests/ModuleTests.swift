@@ -115,7 +115,8 @@ struct ModuleTests {
         #expect(ContentKind.readerPlaces.rawValue == "reader_places")
         #expect(ContentKind.task.rawValue == "task")
         #expect(ContentKind.taskList.rawValue == "task_list")
-        #expect(ContentKind.allCases.count == 21)
+        #expect(ContentKind.allCases.count == 22)
+        #expect(ContentKind.homeLayout.rawValue == "home_layout")
     }
 
     @Test func contentRefSurvivesEncoding() throws {

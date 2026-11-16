@@ -59,6 +59,8 @@ public enum KeyPurpose: String, Sendable, Hashable {
     /// either for anything another module keeps.
     case task
     case taskList = "task-list"
+    /// Which modules were removed from Home. Its own purpose, so the record can't pass for anything else.
+    case homeLayout = "home-layout"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.

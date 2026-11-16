@@ -31,6 +31,9 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     case task
     /// One list of tasks, such as a project or an area: its name and settings, sealed (issue 123).
     case taskList = "task_list"
+    /// Which modules the person removed from Home, as one sealed record per person, so the choice follows
+    /// them to each device. The tiles' sizes and places stay on each device.
+    case homeLayout = "home_layout"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {

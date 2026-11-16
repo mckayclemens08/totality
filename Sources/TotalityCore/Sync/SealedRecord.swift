@@ -1,7 +1,7 @@
 import Foundation
-import TotalityCore
 
-/// A value kept as one sealed record per person and synced, like the Reader's linked Drive folders. Two
+/// A value kept as one sealed record per person and synced, like the Reader's linked Drive folders or the
+/// modules removed from Home. Two
 /// devices' copies have to come together without losing either side, so the value says how.
 public protocol MergedRecord: Codable, Equatable, Sendable {
     /// Both copies as one. It must give the same answer whichever way round, and again on its own result.
@@ -17,7 +17,7 @@ public protocol MergedRecord: Codable, Equatable, Sendable {
 /// nothing is lost, and writes go to the first.
 ///
 /// The owner passes each `SyncArea` step through to this, keeping `Pending` between `conflict` and `take`.
-struct SealedRecordStore<Value: MergedRecord>: Sendable {
+public struct SealedRecordStore<Value: MergedRecord>: Sendable {
     let store: any BlobStore
     let rootKey: ContentRootKey
     let kind: ContentKind
@@ -26,8 +26,17 @@ struct SealedRecordStore<Value: MergedRecord>: Sendable {
     let suffix: String
     let purpose: KeyPurpose
 
+    public init(store: any BlobStore, rootKey: ContentRootKey, kind: ContentKind, label: String, suffix: String, purpose: KeyPurpose) {
+        self.store = store
+        self.rootKey = rootKey
+        self.kind = kind
+        self.label = label
+        self.suffix = suffix
+        self.purpose = purpose
+    }
+
     /// A conflict's merge, written when sync stores the other side's copy.
-    struct Pending: Sendable {
+    public struct Pending: Sendable {
         let id: UUID
         let remoteHash: String
         let merged: Value
@@ -35,24 +44,24 @@ struct SealedRecordStore<Value: MergedRecord>: Sendable {
 
     func name(_ id: UUID) -> String { id.uuidString.lowercased() + suffix }
 
-    func ids() throws -> [UUID] {
+    public func ids() throws -> [UUID] {
         try store.names().filter { $0.hasSuffix(suffix) }.compactMap {
             UUID(uuidString: String($0.dropLast(suffix.count)))
         }.sorted { $0.uuidString < $1.uuidString }
     }
 
-    func id() throws -> UUID {
+    public func id() throws -> UUID {
         try ids().first ?? rootKey.derivedID(from: label)
     }
 
     /// Nil when there's none yet. A copy this key can't open belongs to someone else, and is left out.
-    func load() throws -> Value? {
+    public func load() throws -> Value? {
         let copies = try ids().compactMap { id in try store.read(name(id)).flatMap { try? open($0, id: id) } }
         guard let first = copies.first else { return nil }
         return copies.dropFirst().reduce(first, Value.merged)
     }
 
-    func write(_ value: Value) throws {
+    public func write(_ value: Value) throws {
         let id = try id()
         try store.write(try seal(value, id: id), as: name(id))
     }
@@ -67,11 +76,11 @@ struct SealedRecordStore<Value: MergedRecord>: Sendable {
 
     // MARK: Sync's steps
 
-    func object(_ id: UUID) throws -> SealedObject? {
+    public func object(_ id: UUID) throws -> SealedObject? {
         try store.read(name(id)).map { SealedObject(id: id, kind: kind, meta: $0, body: nil) }
     }
 
-    func verified(_ id: UUID) throws -> SealedObject? {
+    public func verified(_ id: UUID) throws -> SealedObject? {
         guard let object = try object(id) else { return nil }
         _ = try open(object.meta, id: id)
         return object
@@ -80,7 +89,7 @@ struct SealedRecordStore<Value: MergedRecord>: Sendable {
     /// Takes a copy from the server. Only one that opens under this key is taken, because a server can
     /// send anything; one that settled a conflict is written as the merge of both sides, which the next
     /// sync sends back up.
-    func take(_ object: SealedObject, ifLocalHash expected: String?, pending: inout Pending?) throws {
+    public func take(_ object: SealedObject, ifLocalHash expected: String?, pending: inout Pending?) throws {
         guard object.kind == kind else { throw CryptoError.authenticationFailed }
         guard try self.object(object.id)?.hash == expected else { throw SyncError.changedLocally }
         let incoming = try open(object.meta, id: object.id)
@@ -94,7 +103,7 @@ struct SealedRecordStore<Value: MergedRecord>: Sendable {
 
     /// Both sides are kept. Sync takes the other side's copy (`.keepRemote`), and `take` writes the merge
     /// in its place.
-    func conflict(local: SealedObject, remote: SealedObject) throws -> Pending {
+    public func conflict(local: SealedObject, remote: SealedObject) throws -> Pending {
         let merged = Value.merged(try open(local.meta, id: local.id), try open(remote.meta, id: remote.id))
         return Pending(id: remote.id, remoteHash: remote.hash, merged: merged)
     }

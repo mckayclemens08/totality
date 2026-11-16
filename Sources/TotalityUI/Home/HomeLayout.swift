@@ -67,6 +67,9 @@ public struct HomeLayout: Equatable, Sendable {
     /// The big square at the top. Its tile keeps its place and size, so it goes back to them when
     /// another module takes over.
     public private(set) var hero: ModuleID?
+    /// Modules removed from Home. Their tiles keep their size and place, unseen, so adding one back puts it
+    /// where it was. Not saved here: it comes from `HomeChoices`.
+    public var hidden: Set<ModuleID> = []
 
     /// A new install's home page. Modules that aren't listed join at the end as small tiles.
     public init(modules: [ModuleID]) {
@@ -119,9 +122,14 @@ public struct HomeLayout: Equatable, Sendable {
         tiles.first { $0.id == module }?.size
     }
 
+    /// The big square as it shows, which is none while its module is removed.
+    var shownHero: ModuleID? {
+        hero.flatMap { hidden.contains($0) ? nil : $0 }
+    }
+
     /// Nil for a small tile, which has room only for its lines.
     public func bigSize(of module: ModuleID) -> BigTileSize? {
-        if hero == module { return .square }
+        if shownHero == module { return .square }
         switch size(of: module) {
         case .medium: return .medium
         case .large: return .large
@@ -169,12 +177,12 @@ public struct HomeLayout: Equatable, Sendable {
     /// One place earlier or later as the grid shows it. A small tile can slide straight back into a
     /// gap, so this carries on until the tile really changes place.
     private func moved(_ module: ModuleID, by step: Int) -> HomeLayout? {
-        let order = placements.filter { $0.id != hero }.sorted { ($0.row, $0.column) < ($1.row, $1.column) }.map(\.id)
+        let order = placements.filter { $0.id != shownHero }.sorted { ($0.row, $0.column) < ($1.row, $1.column) }.map(\.id)
         guard var index = order.firstIndex(of: module) else { return nil }
         var shown = self
         var next = order.makeIterator()
         shown.tiles = tiles.map { tile in
-            guard tile.id != hero, let id = next.next() else { return tile }
+            guard tile.id != hero, !hidden.contains(tile.id), let id = next.next() else { return tile }
             return tiles.first { $0.id == id } ?? tile
         }
         let place = placement(of: module)
@@ -196,8 +204,8 @@ public struct HomeLayout: Equatable, Sendable {
     /// fits. That lets a small tile fill a gap left beside an earlier small tile.
     public var placements: [TilePlacement] {
         var grid = TileGrid()
-        var placed = hero.map { [grid.place($0, columns: Self.columns, rows: Self.heroRows)] } ?? []
-        for tile in tiles where tile.id != hero {
+        var placed = shownHero.map { [grid.place($0, columns: Self.columns, rows: Self.heroRows)] } ?? []
+        for tile in tiles where tile.id != hero && !hidden.contains(tile.id) {
             placed.append(grid.place(tile.id, columns: tile.size.columns, rows: tile.size.rows))
         }
         return placed
