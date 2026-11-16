@@ -176,8 +176,9 @@ enum PagedPDF {
                 Unmanaged<ReaderFile>.fromOpaque(info).release()
             }
         )
+        // Whether CoreGraphics calls releaseInfo when it can't make the provider isn't documented, so the
+        // retain is left in place then: a file object kept a little too long beats one freed twice.
         guard let provider = CGDataProvider(directInfo: box.toOpaque(), size: off_t(file.count), callbacks: &callbacks) else {
-            box.release()
             return nil
         }
         // Declared as a protocol so Swift calls alloc and init with the usual ownership rules.
