@@ -99,6 +99,9 @@ public struct WebHomeTile: View {
                 emptyNote
             }
             if !grid.isEmpty {
+                // With nothing under them, the bookmarks sit in the middle of the room, not under the button.
+                let alone = tabs.isEmpty && model.homeDownload == nil
+                if alone { Spacer(minLength: 0) }
                 wall(grid)
             }
             Spacer(minLength: 0)

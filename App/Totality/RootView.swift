@@ -249,7 +249,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $quickAddingTask) {
             if let tasks {
-                QuickAddView(model: tasks, bucket: .inbox) { quickAddingTask = false }
+                QuickAddView(model: tasks, bucket: .today) { quickAddingTask = false }
             }
         }
         .sheet(isPresented: $showingSearch) {

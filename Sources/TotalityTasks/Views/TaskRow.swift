@@ -353,12 +353,21 @@ struct ChipLabel: View {
 
     var body: some View {
         let theme = Theme.current
-        Label(text, systemImage: systemImage)
-            .font(Typeface.caption)
-            .foregroundStyle(isWarning ? theme.danger.color : theme.textSecondary.color)
-            .padding(.horizontal, Space.s3)
-            .padding(.vertical, Space.s2)
-            .neumorphic(.subtle, in: Capsule())
+        // An explicit row, kept to its own size: a Label inside a menu or a flow row can lose its text and
+        // stretch into a tall empty pill.
+        HStack(spacing: Space.s1) {
+            Image(systemName: systemImage)
+                .accessibilityHidden(true)
+            Text(text)
+                .lineLimit(1)
+        }
+        .font(Typeface.caption)
+        .foregroundStyle(isWarning ? theme.danger.color : theme.textSecondary.color)
+        .padding(.horizontal, Space.s3)
+        .padding(.vertical, Space.s2)
+        .fixedSize()
+        .neumorphic(.subtle, in: Capsule())
+        .contentShape(Capsule())
     }
 }
 
