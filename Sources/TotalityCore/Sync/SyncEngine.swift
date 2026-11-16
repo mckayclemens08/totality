@@ -20,10 +20,13 @@ public struct SealedFile: Sendable, Equatable {
         defer { try? handle.close() }
         var hasher = SHA256()
         var count = 0
-        while let piece = try handle.read(upToCount: 1 << 20), !piece.isEmpty {
+        // Each read is let go before the next, so a big file is never held while it's hashed.
+        while try autoreleasepool(invoking: { () throws -> Bool in
+            guard let piece = try handle.read(upToCount: 1 << 20), !piece.isEmpty else { return false }
             hasher.update(data: piece)
             count += piece.count
-        }
+            return true
+        }) {}
         self.init(url: url, count: count, digest: Data(hasher.finalize()))
     }
 }

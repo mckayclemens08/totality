@@ -33,10 +33,14 @@ public enum ChunkedCipher {
         defer { try? reader.close() }
         let writer = try Writer(to: output, plainLength: length, key: key, objectID: objectID, chunkSize: chunkSize)
         while writer.written < length {
-            guard let plain = try reader.read(upToCount: min(chunkSize, length - writer.written)), !plain.isEmpty else {
-                throw CryptoError.malformedCiphertext
+            // A file's reads are let go a piece at a time. Async code drains no pool of its own, so
+            // without this a whole file's worth would build up before any was freed.
+            try autoreleasepool {
+                guard let plain = try reader.read(upToCount: min(chunkSize, length - writer.written)), !plain.isEmpty else {
+                    throw CryptoError.malformedCiphertext
+                }
+                try writer.append(plain)
             }
-            try writer.append(plain)
             progress?(writer.written)
         }
         try writer.finish()
@@ -286,12 +290,15 @@ public enum ChunkedCipher {
             let start = index * header.chunkSize
             let count = min(header.chunkSize, plainLength - start)
             let offset = ChunkedCipher.headerCount + index * (header.chunkSize + ChunkedCipher.overhead)
+            // Copied out of its pool, so the read is let go now, not when some later pool drains.
             let sealed: Data = try lock.withLock {
-                try handle.seek(toOffset: UInt64(offset))
-                guard let data = try handle.read(upToCount: count + ChunkedCipher.overhead), data.count == count + ChunkedCipher.overhead else {
-                    throw CryptoError.malformedCiphertext
+                try autoreleasepool {
+                    try handle.seek(toOffset: UInt64(offset))
+                    guard let data = try handle.read(upToCount: count + ChunkedCipher.overhead), data.count == count + ChunkedCipher.overhead else {
+                        throw CryptoError.malformedCiphertext
+                    }
+                    return Data(data)
                 }
-                return data
             }
             let aead = Sodium().aead.xchacha20poly1305ietf
             guard let plain = aead.decrypt(

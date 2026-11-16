@@ -40,9 +40,11 @@ final class PlainFileSource: ByteSource, @unchecked Sendable {
         let upper = max(lower, min(count, range.upperBound))
         guard upper > lower else { return Data() }
         return try lock.withLock {
-            try handle.seek(toOffset: UInt64(lower))
-            guard let data = try handle.read(upToCount: upper - lower), data.count == upper - lower else { throw ReaderError.notReadable }
-            return data
+            try autoreleasepool {
+                try handle.seek(toOffset: UInt64(lower))
+                guard let data = try handle.read(upToCount: upper - lower), data.count == upper - lower else { throw ReaderError.notReadable }
+                return Data(data)
+            }
         }
     }
 }
