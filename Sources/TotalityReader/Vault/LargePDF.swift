@@ -77,7 +77,7 @@ final class LargePDF: @unchecked Sendable {
     }
 
     var pageCount: Int {
-        document.numberOfPages
+        lock.withLock { document.numberOfPages }
     }
 
     /// How big a page is in points, turned as it's meant to be shown.
@@ -94,7 +94,7 @@ final class LargePDF: @unchecked Sendable {
             guard let page = document.page(at: index + 1), pixelWidth > 0 else { return nil }
             let geometry = Self.geometry(page)
             let scale = CGFloat(pixelWidth) / geometry.size.width
-            let pixelHeight = max(1, Int((geometry.size.height * scale).rounded()))
+            let pixelHeight = Int(min(16_384, max(1, (geometry.size.height * scale).rounded())))
             guard let context = CGContext(
                 data: nil, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8, bytesPerRow: 0,
                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
@@ -136,15 +136,26 @@ final class LargePDF: @unchecked Sendable {
         }
     }
 
+    /// One page copied on its own, with the document that holds it, which the page needs kept alive.
+    struct TextPage {
+        let document: PDFDocument
+        let page: PDFPage
+    }
+
     /// The page on its own, for PDFKit to read its words and find each letter. Its space is the page's.
-    func textPage(_ index: Int) -> PDFPage? {
+    func textPage(_ index: Int) -> TextPage? {
         lock.withLock {
-            if let kept = textPages[index] { return kept.page(at: 0) }
-            guard let page = document.page(at: index + 1), let copy = Self.copy(page) else { return nil }
-            textPages[index] = copy
-            textOrder.append(index)
-            if textOrder.count > Self.textPagesKept { textPages[textOrder.removeFirst()] = nil }
-            return copy.page(at: 0)
+            let copy: PDFDocument
+            if let kept = textPages[index] {
+                copy = kept
+            } else {
+                guard let page = document.page(at: index + 1), let made = Self.copy(page) else { return nil }
+                copy = made
+                textPages[index] = copy
+                textOrder.append(index)
+                if textOrder.count > Self.textPagesKept { textPages[textOrder.removeFirst()] = nil }
+            }
+            return copy.page(at: 0).map { TextPage(document: copy, page: $0) }
         }
     }
 
@@ -177,7 +188,8 @@ final class LargePDF: @unchecked Sendable {
                       CGPDFDictionaryGetName(annotation, "Subtype", &subtype), let subtype, String(cString: subtype) == "Link",
                       CGPDFDictionaryGetDictionary(annotation, "A", &action), let action,
                       CGPDFDictionaryGetString(action, "URI", &address), let address,
-                      let text = CGPDFStringCopyTextString(address) as String?, let url = URL(string: text),
+                      let text = CGPDFStringCopyTextString(address) as String?, text.count <= DocText.maxLinkLength,
+                      let url = URL(string: text),
                       CGPDFDictionaryGetArray(annotation, "Rect", &box), let box, CGPDFArrayGetCount(box) == 4
                 else { continue }
                 var numbers = [CGPDFReal](repeating: 0, count: 4)
@@ -227,7 +239,8 @@ final class LargePDF: @unchecked Sendable {
     private static func geometry(_ page: CGPDFPage) -> (size: CGSize, transform: CGAffineTransform) {
         let box = page.getBoxRect(.cropBox)
         let turned = page.rotationAngle % 180 == 0 ? box.size : CGSize(width: box.height, height: box.width)
-        let size = CGSize(width: max(1, turned.width), height: max(1, turned.height))
+        // A box from a hostile file can be any size, so it's held to what PDF itself allows.
+        let size = CGSize(width: min(14_400, max(1, turned.width)), height: min(14_400, max(1, turned.height)))
         // At its own size it's never scaled, only turned and moved into place.
         let transform = page.getDrawingTransform(.cropBox, rect: CGRect(origin: .zero, size: size), rotate: 0, preserveAspectRatio: true)
         return (size, transform)

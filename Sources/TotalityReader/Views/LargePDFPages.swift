@@ -109,7 +109,8 @@ private struct LargePDFPage: View {
 
     private func rects(_ map: PDFPageMap, _ range: Range<Int>) -> [CGRect] {
         let here = map.pieces(of: range).filter { $0.page == index }
-        guard !here.isEmpty, let page = pdf.textPage(index) else { return [] }
+        guard !here.isEmpty, let text = pdf.textPage(index) else { return [] }
+        let page = text.page
         return here.flatMap { piece -> [CGRect] in
             guard let selection = page.selection(for: piece.range) else { return [] }
             return selection.selectionsByLine().map { pdf.viewRect($0.bounds(for: page), page: index, width: width) }
@@ -123,7 +124,8 @@ private struct LargePDFPage: View {
             if DocText.isOpenable(link.url) { openURL(link.url) }
             return
         }
-        guard let follow, let page = pdf.textPage(index) else { return }
+        guard let follow, let text = pdf.textPage(index) else { return }
+        let page = text.page
         let character = page.characterIndex(at: onPage)
         guard character != NSNotFound, let offset = follow.map.offset(page: index, character: character) else { return }
         follow.onTap(offset)

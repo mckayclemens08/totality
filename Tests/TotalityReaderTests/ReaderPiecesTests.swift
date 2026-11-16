@@ -256,7 +256,8 @@ func makeScannedPDF(pages: [String], side: Int = 900) throws -> Data {
         #expect(image.width == 300)
         #expect(image.height == 388)
         // A word's place on its own page, as Read along marks it, and back again for a tap.
-        let page = try #require(pdf.textPage(2))
+        let kept = try #require(pdf.textPage(2))
+        let page = kept.page
         let text = try #require(page.string)
         let found = (text as NSString).range(of: "Meryton")
         let selection = try #require(page.selection(for: found))
