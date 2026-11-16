@@ -45,7 +45,10 @@ public enum MarkdownText {
                 }
                 continue
             }
-            if let marker = line.firstMatch(of: /^(`{3,}|~{3,})/) {
+            // Each pattern below needs a particular first character, so a cheap look at it skips the
+            // regexes, which are slow on long lines, for the plain paragraphs that make up most docs.
+            let first = line.first
+            if first == "`" || first == "~", let marker = line.firstMatch(of: /^(`{3,}|~{3,})/) {
                 endParagraph()
                 fence = String(marker.1)
                 continue
@@ -54,29 +57,31 @@ public enum MarkdownText {
                 endParagraph()
                 continue
             }
-            if let heading = line.firstMatch(of: /^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/) {
+            if first == "#", let heading = line.firstMatch(of: /^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/) {
                 endParagraph()
                 blocks.append(.heading(level: heading.1.count, text: inline(String(heading.2))))
                 continue
             }
-            if line.wholeMatch(of: /([-*_])(?:[ \t]*\1){2,}/) != nil {
+            if first == "-" || first == "*" || first == "_", line.wholeMatch(of: /([-*_])(?:[ \t]*\1){2,}/) != nil {
                 endParagraph()
                 continue
             }
             // A table's divider row says nothing aloud. Its cells read as a list of words.
-            if line.wholeMatch(of: /\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?/) != nil, line.contains("-") {
+            if line.contains("-"), line.allSatisfy(dividerCharacters.contains),
+               line.wholeMatch(of: /\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)*\|?/) != nil {
                 continue
             }
             var content = line
             while content.hasPrefix(">") {
                 content = String(content.dropFirst()).trimmingCharacters(in: .whitespaces)
             }
-            if let item = content.firstMatch(of: /^(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/) {
+            if let lead = content.first, lead == "-" || lead == "*" || lead == "+" || lead.isNumber,
+               let item = content.firstMatch(of: /^(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/) {
                 endParagraph()
                 blocks.append(.item(inline(String(content[item.range.upperBound...]))))
                 continue
             }
-            if let note = content.firstMatch(of: /^\[\^[^\]]+\]:[ \t]*/) {
+            if content.hasPrefix("[^"), let note = content.firstMatch(of: /^\[\^[^\]]+\]:[ \t]*/) {
                 endParagraph()
                 content = String(content[note.range.upperBound...])
             }
@@ -89,6 +94,9 @@ public enum MarkdownText {
         if fence != nil, !code.isEmpty { blocks.append(.code(code.joined(separator: "\n"))) }
         return blocks
     }
+
+    /// The only characters a table's divider row can hold.
+    private static let dividerCharacters: Set<Character> = ["|", ":", "-", " ", "\t"]
 
     /// How each cross-reference label reads aloud: a section by its heading, a figure or table by number.
     static func labelText(_ lines: [String]) -> [String: String] {
@@ -154,36 +162,52 @@ public enum MarkdownText {
     /// them for symbols, and swapped back at the end.
     static func inline(_ text: String) -> String {
         var escapes: [Character] = []
-        var protected = ""
-        var iterator = Array(text).makeIterator()
-        while let character = iterator.next() {
-            if character == "\\", let next = iterator.next() {
-                if next.isASCII, next.isPunctuation || next.isSymbol {
-                    protected.append(Character(Unicode.Scalar(UInt32(0xF0000 + escapes.count))!))
-                    escapes.append(next)
+        var protected = text
+        // Most paragraphs escape nothing, and keep their text as it is.
+        if text.contains("\\") {
+            protected = ""
+            var iterator = Array(text).makeIterator()
+            while let character = iterator.next() {
+                if character == "\\", let next = iterator.next() {
+                    if next.isASCII, next.isPunctuation || next.isSymbol {
+                        protected.append(Character(Unicode.Scalar(UInt32(0xF0000 + escapes.count))!))
+                        escapes.append(next)
+                    } else {
+                        protected.append(character)
+                        protected.append(next)
+                    }
                 } else {
                     protected.append(character)
-                    protected.append(next)
                 }
-            } else {
-                protected.append(character)
             }
         }
         // A link to another doc reads as its words, or the title it names.
         if protected.contains("[[") { protected = WikiLinks.readable(protected) }
+        // Each pass needs its own symbol, and most paragraphs have none, so a quick look skips the regex.
         var result = protected
-            .replacing(/!\[([^\]]*)\]\([^)]*\)/) { String($0.1) }
-            .replacing(/\[\^[^\]]+\]/, with: "")
-            .replacing(/\[([^\]]+)\]\([^)]*\)/) { String($0.1) }
-            .replacing(/\[([^\]]+)\]\[[^\]]*\]/) { String($0.1) }
-            .replacing(/<((?:https?|mailto):[^>\s]+)>/) { String($0.1) }
-            .replacing(/`+([^`]+)`+/) { String($0.1) }
-            .replacing(/\*+|~~/, with: "")
-        result = withoutEmphasisUnderscores(result)
-        result = String(result.unicodeScalars.map { scalar -> String in
-            let index = Int(scalar.value) - 0xF0000
-            return index >= 0 && index < escapes.count ? String(escapes[index]) : String(scalar)
-        }.joined())
+        if result.contains("[") {
+            if result.contains("![") { result = result.replacing(/!\[([^\]]*)\]\([^)]*\)/) { String($0.1) } }
+            if result.contains("[^") { result = result.replacing(/\[\^[^\]]+\]/, with: "") }
+            result = result
+                .replacing(/\[([^\]]+)\]\([^)]*\)/) { String($0.1) }
+                .replacing(/\[([^\]]+)\]\[[^\]]*\]/) { String($0.1) }
+        }
+        if result.contains("<") { result = result.replacing(/<((?:https?|mailto):[^>\s]+)>/) { String($0.1) } }
+        if result.contains("`") { result = result.replacing(/`+([^`]+)`+/) { String($0.1) } }
+        if result.contains("*") || result.contains("~~") { result = result.replacing(/\*+|~~/, with: "") }
+        if result.contains("_") { result = withoutEmphasisUnderscores(result) }
+        if !escapes.isEmpty {
+            var restored = String.UnicodeScalarView()
+            for scalar in result.unicodeScalars {
+                let index = Int(scalar.value) - 0xF0000
+                if index >= 0 && index < escapes.count {
+                    restored.append(contentsOf: escapes[index].unicodeScalars)
+                } else {
+                    restored.append(scalar)
+                }
+            }
+            result = String(restored)
+        }
         return result.trimmingCharacters(in: .whitespaces)
     }
 
