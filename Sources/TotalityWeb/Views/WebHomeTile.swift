@@ -69,20 +69,20 @@ public struct WebHomeTile: View {
         return VStack(alignment: .leading, spacing: Space.s3) {
             WebTileSearch(model: model, onOpen: onOpen)
                 .tileControl()
-            if !tabs.isEmpty {
-                ForEach(tabs) { tab in
-                    TabCard(tab: tab)
-                        .tileLink("\(tab.title), open tab") {
-                            model.showFromHome(tab)
-                            onOpen()
-                        }
-                }
-            } else if !model.bookmarks.isEmpty {
+            ForEach(tabs) { tab in
+                TabCard(tab: tab)
+                    .tileLink("\(tab.title), open tab") {
+                        model.showFromHome(tab)
+                        onOpen()
+                    }
+            }
+            if tabs.isEmpty && model.bookmarks.isEmpty {
+                emptyNote
+            } else if tabs.count < WebModel.homeTabCards, !model.bookmarks.isEmpty {
+                // Room the tabs don't fill goes to the bookmarks people use most.
                 Spacer(minLength: 0)
                 wall(rows(1, of: model.homeBookmarks))
                 Spacer(minLength: 0)
-            } else {
-                emptyNote
             }
         }
     }
@@ -212,10 +212,13 @@ private struct TabCard: View {
                     .font(Typeface.callout)
                     .foregroundStyle(theme.textPrimary.color)
                     .lineLimit(1)
-                Text(address)
-                    .font(Typeface.micro)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
+                // A page with no title of its own goes by its address, which then needn't show twice.
+                if address != tab.title {
+                    Text(address)
+                        .font(Typeface.micro)
+                        .foregroundStyle(theme.textSecondary.color)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
         }
