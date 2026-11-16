@@ -26,9 +26,33 @@ public struct PhotosHomeTile: View {
 
     public var body: some View {
         Group {
-            if rows.isEmpty { front } else { wall }
+            switch model.phase {
+            case .ready:
+                if rows.isEmpty { front } else { wall }
+            case .loading:
+                status(title: "Opening your photos")
+            case .unavailable:
+                // Opening Photos says why, as the home page's other modules do.
+                Color.clear
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// While the library opens, the tile says so. No photo shows until the library is ready, so nothing
+    /// of another account's can linger here.
+    private func status(title: String) -> some View {
+        let theme = Theme.current
+        return VStack(spacing: Space.s2) {
+            ProgressView()
+                .accessibilityHidden(true)
+            Text(title)
+                .font(Typeface.callout)
+                .foregroundStyle(theme.textSecondary.color)
+                .lineLimit(2)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
     }
 
     private var wall: some View {
