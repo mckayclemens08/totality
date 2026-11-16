@@ -188,7 +188,11 @@ public final class StorageModel {
         }
         guard current != nil else { return }
         async let sealedRead = Self.attempt(sources.sealed)
-        async let mailboxRead: Result<StorageQuota, Error>? = sources.mailbox.map { await Self.attempt($0) }
+        let readMailbox = sources.mailbox
+        async let mailboxRead: Result<StorageQuota, Error>? = {
+            guard let readMailbox else { return nil }
+            return await Self.attempt(readMailbox)
+        }()
         let (sealedResult, mailboxResult) = await (sealedRead, mailboxRead)
         let found = await sources.parts()
         // The account may have changed while this was out.
