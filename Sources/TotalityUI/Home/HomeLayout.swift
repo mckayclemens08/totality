@@ -109,7 +109,10 @@ public struct HomeLayout: Equatable, Sendable {
             tiles: tiles.map { .init(module: $0.id.rawValue, size: $0.size.rawValue) },
             hero: hero?.rawValue
         )
-        return (try? JSONEncoder().encode(stored)) ?? Data()
+        // Keys in a fixed order, so the same layout always saves as the same bytes.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return (try? encoder.encode(stored)) ?? Data()
     }
 
     private mutating func fit(to modules: [ModuleID]) {
@@ -129,6 +132,7 @@ public struct HomeLayout: Equatable, Sendable {
 
     /// Nil for a small tile, which has room only for its lines.
     public func bigSize(of module: ModuleID) -> BigTileSize? {
+        if hidden.contains(module) { return nil }
         if shownHero == module { return .square }
         switch size(of: module) {
         case .medium: return .medium
