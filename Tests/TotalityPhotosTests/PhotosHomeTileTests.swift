@@ -90,13 +90,13 @@ private func grid(_ model: PhotosModel, size: TileSize, isHero: Bool = false) ->
         #expect(model.newest(8).count == 8)
     }
 
-    @Test("Never blank: opening and can't-open each have words, on the tile and in the glance")
+    @Test("Opening says so; can't-open shows no lines, as the home page's rule says")
     func statesHaveWords() async throws {
         let opening = try await library(with: trip, opened: false)
         #expect(opening.phase == .loading)
         #expect(opening.glance?.lines == ["Opening your photos"])
         let closed = PhotosModel(library: nil, unavailable: PhotosModel.signedOut)
-        #expect(closed.glance?.lines == [PhotosModel.signedOut.title])
+        #expect(closed.glance == nil)
         let empty = try await library(with: [])
         #expect(empty.glance?.lines == ["No photos yet"])
     }
@@ -133,7 +133,7 @@ import AppKit
         try write(grid(full, size: .large), name: "photos-tile-large.png", to: directory)
         try write(grid(full, size: .large, isHero: true), name: "photos-tile-square.png", to: directory)
         try write(grid(empty, size: .medium), name: "photos-tile-medium-empty.png", to: directory)
-        try write(grid(closed, size: .medium), name: "photos-tile-medium-closed.png", to: directory)
+        try write(grid(closed, size: .medium), name: "photos-tile-medium-cant-open.png", to: directory)
         let opening = try await library(with: trip, opened: false)
         try write(grid(opening, size: .medium), name: "photos-tile-medium-opening.png", to: directory)
     }

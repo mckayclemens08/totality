@@ -289,8 +289,7 @@ struct RootView: View {
         case .photos:
             // Signing out shows nothing at once, before the library is closed. Only signing out: the
             // account's phase stays loading after a launch until the Account screen is opened, and the
-            // library here already belongs to the device's owner. Otherwise the tile shows its own
-            // loading and can't-open states, so it's never blank.
+            // library here already belongs to the device's owner. While the library opens, the tile says so.
             if case .signedOut = account?.phase { return nil }
             return AnyView(PhotosHomeTile(model: photos, size: size) { bringUp(.photos) })
         default:

@@ -680,14 +680,15 @@ public final class PhotosModel {
 
     static let searchLimit = 50
 
-    /// Says so while the library opens or when it can't, so the tile is never blank.
+    /// Says so while the library opens. Photos that can't open show no lines: the home page is no place
+    /// to report a key problem, and opening Photos does that.
     public var glance: ModuleGlance? {
+        guard library != nil else { return nil }
         switch phase {
         case .ready: break
         case .loading: return ModuleGlance(lines: ["Opening your photos"], isQuiet: true)
-        case .unavailable(let title, _): return ModuleGlance(lines: [title], isQuiet: true)
+        case .unavailable: return nil
         }
-        guard library != nil else { return nil }
         let shown = items(in: .library)
         guard let newest = shown.first else { return ModuleGlance(lines: ["No photos yet"], isQuiet: true) }
         let count = shown.count == 1 ? "1 photo" : "\(shown.count) photos"

@@ -30,28 +30,22 @@ public struct PhotosHomeTile: View {
             case .ready:
                 if rows.isEmpty { front } else { wall }
             case .loading:
-                status(systemImage: nil, title: "Opening your photos")
-            case .unavailable(let title, _):
-                status(systemImage: model.fix == .tryAgain ? "exclamationmark.triangle" : "lock.slash", title: title)
+                status(title: "Opening your photos")
+            case .unavailable:
+                // Opening Photos says why, as the home page's other modules do.
+                Color.clear
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// While the library opens, or when it can't, the tile says so rather than sitting blank. No photo
-    /// shows until the library is ready, so nothing of another account's can linger here.
-    private func status(systemImage: String?, title: String) -> some View {
+    /// While the library opens, the tile says so. No photo shows until the library is ready, so nothing
+    /// of another account's can linger here.
+    private func status(title: String) -> some View {
         let theme = Theme.current
         return VStack(spacing: Space.s2) {
-            if let systemImage {
-                Image(systemName: systemImage)
-                    .font(.system(size: Space.s5))
-                    .foregroundStyle(theme.textSecondary.color)
-                    .accessibilityHidden(true)
-            } else {
-                ProgressView()
-                    .accessibilityHidden(true)
-            }
+            ProgressView()
+                .accessibilityHidden(true)
             Text(title)
                 .font(Typeface.callout)
                 .foregroundStyle(theme.textSecondary.color)
