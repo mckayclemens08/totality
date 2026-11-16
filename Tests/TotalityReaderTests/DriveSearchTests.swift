@@ -42,7 +42,7 @@ private func linked() async throws -> (FakeDrive, DriveSetup) {
         let (fake, setup) = try await linked()
         let hits = await setup.drive.searchContents("tagus")
         #expect(Set(hits.map(\.entry.id)) == ["1essay", "1lab"], "The tax return isn't in a linked folder")
-        #expect(hits.allSatisfy(\.byContents))
+        #expect(hits.allSatisfy { $0.byContents })
         // The lab report's folders are followed up to the linked one.
         #expect(hits.first { $0.entry.id == "1lab" }?.folders == ["1cells", "1bio"])
         #expect(fake.searches.count == 1)
