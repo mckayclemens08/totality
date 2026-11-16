@@ -226,7 +226,7 @@ struct JournalView: View {
 }
 
 /// An earlier day: quieter, locked, and read-only. Listen and copy still work.
-private struct JournalPastDay: View {
+struct JournalPastDay: View {
     let day: String
     let entry: ReaderItem?
     let notes: [ReaderItem]
@@ -270,7 +270,7 @@ private struct JournalPastDay: View {
 }
 
 /// A note added under a day: indented, and labelled with the day it was added.
-private struct JournalNoteBlock: View {
+struct JournalNoteBlock: View {
     let note: ReaderItem
     let text: String
     let onEdit: () -> Void

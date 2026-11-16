@@ -120,6 +120,54 @@ import TotalityUI
             }
             .padding(.top, Space.s4)
             try write(linkStates, name: "writing-links-states-\(label).png", to: directory)
+
+            // The journal (issue 128): its pinned row in each state, and an earlier, locked day with notes.
+            let zone = TimeZone.current.identifier
+            let today = JournalClock.day(of: Date(), in: .current)
+            let earlier = { (back: Double) in JournalClock.day(of: Date().addingTimeInterval(-86_400 * back), in: .current) }
+            func journalItem(_ day: String, about: String? = nil, title: String = "", bytes: Int = 400) -> ReaderItem {
+                var made = item(title, kind: .journal)
+                made.journal = JournalStamp(day: day, zone: zone, about: about)
+                made.byteCount = bytes
+                return made
+            }
+            let opening = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
+            let failed = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
+            failed.journalLoaded = false
+            let writing = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
+            writing.journal = JournalListing(entries: (0..<5).map { journalItem(earlier(Double($0))) }, notes: [:])
+            writing.journalLoaded = true
+            writing.journalTodayWords = 412
+            let rowStates = VStack(alignment: .leading, spacing: Space.s4) {
+                JournalRow(model: writing)
+                JournalRow(model: opening)
+                JournalRow(model: failed)
+                Spacer()
+            }
+            .padding(Space.s4)
+            try write(rowStates, name: "journal-rows-\(label).png", to: directory)
+            let past = earlier(3)
+            let entry = journalItem(past)
+            let note = journalItem(earlier(1), about: past)
+            let kept = journalItem(past, about: past, title: "Conflict copy")
+            let texts = [
+                entry.id: "Climbed the slab at Rocklands with Sam. Fell twice on the crux, then sent it on the third go.\n\n- Footwork first\n- Breathe before the move",
+                note.id: "Two days on, the fingers are still sore. Worth it.",
+                kept.id: "Climbed the slab with Sam, fell on the crux.",
+            ]
+            let day = VStack(alignment: .leading, spacing: Space.s4) {
+                JournalPastDay(day: past, entry: entry, notes: [note, kept], texts: texts,
+                               onListen: { _ in }, onAddNote: {}, onEditNote: { _ in })
+                Divider()
+                ReaderMessage(
+                    systemImage: "lock.slash", title: "Your journal didn't open",
+                    detail: "This device's copy couldn't be read. Go back and try again."
+                )
+                ReaderMessage(systemImage: "lock.slash", title: "Today's entry didn't open", detail: "Go back and try again.")
+                Spacer()
+            }
+            .padding(Space.s4)
+            try write(day, name: "journal-day-\(label).png", to: directory)
         }
     }
 }
