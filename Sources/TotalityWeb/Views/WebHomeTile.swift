@@ -2,10 +2,10 @@ import SwiftUI
 import TotalityUI
 
 /// Web's big home tiles, one job for each size (issue 127). Medium is a glance at the bookmarks. Large
-/// is a search box and the open tabs, or with none, the bookmarks used most. The square has the box,
+/// is a Search button and the open tabs, or with none, the bookmarks used most. The square has the button,
 /// eight bookmarks, open tabs and the newest download. Never history, and never a private tab. A site's
-/// first letter stands in for its icon, because fetching one would tell the site. The box searches only
-/// when Go is pressed.
+/// first letter stands in for its icon, because fetching one would tell the site. Search opens Web's own
+/// field, because tiles never hold a text box.
 public struct WebHomeTile: View {
     private static let perRow = 4
 
@@ -122,7 +122,7 @@ public struct WebHomeTile: View {
             Text("No tabs or bookmarks yet")
                 .font(Typeface.headline)
                 .foregroundStyle(theme.textPrimary.color)
-            Text("Search above, or bookmark a page in Web to keep it here.")
+            Text("Bookmark a page in Web to keep it here.")
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
         }
@@ -180,38 +180,16 @@ public struct WebHomeTile: View {
     }
 }
 
-/// The tile's search box. Typing goes nowhere; Go searches, or opens an address, in Web.
+/// A plain Search button. Web opens with its own search field ready: tiles never hold a text box.
 private struct WebTileSearch: View {
-    @Bindable var model: WebModel
+    let model: WebModel
     let onOpen: @MainActor () -> Void
 
     var body: some View {
-        let theme = Theme.current
-        HStack(spacing: Space.s2) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(theme.textSecondary.color)
-                .accessibilityHidden(true)
-            TextField("Search or enter address", text: $model.homeQuery)
-                .foregroundStyle(theme.textPrimary.color)
-                .autocorrectionDisabled()
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                .submitLabel(.go)
-                #endif
-                .onSubmit(go)
-            if !model.homeQuery.isEmpty {
-                Button("Go", action: go)
-                    .font(Typeface.callout)
-                    .foregroundStyle(theme.accent.color)
-                    .buttonStyle(.plain)
-            }
+        TileButton("Search", systemImage: "magnifyingglass", isProminent: true) {
+            model.openSearchFromHome()
+            onOpen()
         }
-        .font(Typeface.body)
-        .raisedField()
-    }
-
-    private func go() {
-        if model.submitFromHome() { onOpen() }
     }
 }
 

@@ -527,10 +527,8 @@ public final class WebModel {
     }
 
     /// A panel the home page asked for, for when Web comes up.
-    public enum Panel: Sendable { case tabs, downloads }
+    public enum Panel: Sendable { case tabs, downloads, search }
     public var requestedPanel: Panel?
-    /// What's typed in the home tile's search box. It's searched only when the person presses Go.
-    public var homeQuery = ""
 
     /// Web in the home search: bookmarks only. History stays inside Web, as it does on the home tile.
     public func searchHits(_ query: String) -> [SearchHit] {

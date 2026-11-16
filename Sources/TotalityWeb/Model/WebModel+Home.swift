@@ -31,15 +31,11 @@ extension WebModel {
     /// The newest download, running or done.
     public var homeDownload: WebDownload? { downloads.first }
 
-    /// Go pressed in the home tile's box: an address opens and anything else is searched, in a normal
-    /// tab of its own, the way a bookmark opens from the home page.
-    public func submitFromHome() -> Bool {
-        let text = homeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, WebAddress.parse(text) != nil else { return false }
+    /// Search pressed on the home tile: Web comes up with its search field ready, in a normal tab of
+    /// its own, the way a bookmark opens from the home page. Tiles never hold a text box (issue 127).
+    public func openSearchFromHome() {
         if current.isPrivate || current.showing != .start { newTab() }
-        submit(text)
-        homeQuery = ""
-        return true
+        requestedPanel = .search
     }
 
     /// A tab card tapped on the home page: Web comes up on that tab.

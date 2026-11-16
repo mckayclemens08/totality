@@ -41,22 +41,19 @@ import TotalityCore
         #expect(model.homeTabs.first?.id == lisbon.id)
     }
 
-    @Test("The box searches only on Go, in a tab of its own")
-    func searchOnGo() async throws {
+    @Test("Search opens Web's own field in a tab of its own, and searches nothing by itself")
+    func searchButton() async throws {
         let model = try await model()
         model.open(URL(string: "https://en.wikipedia.org/wiki/Lisbon")!)
         defer { model.tabs.forEach { $0.page?.stop() } }
         let before = model.tabs.count
-        model.homeQuery = "tram 28 timetable"
-        #expect(model.tabs.count == before, "Typing does nothing by itself")
-        #expect(model.submitFromHome())
+        model.openSearchFromHome()
         #expect(model.tabs.count == before + 1, "It doesn't replace the page that was open")
-        #expect(model.current.showing == .results)
-        #expect(model.current.search.query == "tram 28 timetable")
-        #expect(model.homeQuery.isEmpty)
-        // Nothing typed, nothing happens.
-        model.homeQuery = "   "
-        #expect(!model.submitFromHome())
+        #expect(model.current.showing == .start)
+        #expect(model.requestedPanel == .search)
+        // From a fresh tab, it stays in that tab.
+        model.openSearchFromHome()
+        #expect(model.tabs.count == before + 1)
     }
 
     @Test("Without visits, bookmarks keep the person's order")
