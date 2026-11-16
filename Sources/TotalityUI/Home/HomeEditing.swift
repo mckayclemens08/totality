@@ -40,7 +40,7 @@ struct AddModuleTile: View {
                 .font(Typeface.callout)
                 .foregroundStyle(theme.textSecondary.color)
                 .frame(width: width, height: Space.s8)
-                .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+                .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
