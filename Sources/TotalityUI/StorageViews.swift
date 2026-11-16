@@ -113,7 +113,6 @@ struct StorageTrack: View {
             }
         }
         .frame(height: Space.s3)
-        .neumorphic(.pressed, in: Capsule())
         .animation(Motion.standard, value: fraction)
         .animation(Motion.standard, value: level)
     }
