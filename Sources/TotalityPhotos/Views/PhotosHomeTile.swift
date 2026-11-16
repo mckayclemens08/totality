@@ -26,9 +26,39 @@ public struct PhotosHomeTile: View {
 
     public var body: some View {
         Group {
-            if rows.isEmpty { front } else { wall }
+            switch model.phase {
+            case .ready:
+                if rows.isEmpty { front } else { wall }
+            case .loading:
+                status(systemImage: nil, title: "Opening your photos")
+            case .unavailable(let title, _):
+                status(systemImage: model.fix == .tryAgain ? "exclamationmark.triangle" : "lock.slash", title: title)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// While the library opens, or when it can't, the tile says so rather than sitting blank. No photo
+    /// shows until the library is ready, so nothing of another account's can linger here.
+    private func status(systemImage: String?, title: String) -> some View {
+        let theme = Theme.current
+        return VStack(spacing: Space.s2) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: Space.s5))
+                    .foregroundStyle(theme.textSecondary.color)
+                    .accessibilityHidden(true)
+            } else {
+                ProgressView()
+                    .accessibilityHidden(true)
+            }
+            Text(title)
+                .font(Typeface.callout)
+                .foregroundStyle(theme.textSecondary.color)
+                .lineLimit(2)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
     }
 
     private var wall: some View {

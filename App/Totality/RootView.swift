@@ -287,8 +287,9 @@ struct RootView: View {
             guard mail.current.phase == .ready else { return nil }
             return AnyView(MailHomeTile(model: mail.current, size: size) { bringUp(.mail) })
         case .photos:
-            // Signing out shows nothing at once, before the library is closed.
-            guard photos.phase == .ready, let account, case .signedIn = account.phase else { return nil }
+            // Signing out shows nothing at once, before the library is closed. Otherwise the tile shows
+            // its own loading and can't-open states, so it's never blank.
+            guard let account, case .signedIn = account.phase else { return nil }
             return AnyView(PhotosHomeTile(model: photos, size: size) { bringUp(.photos) })
         default:
             return nil
