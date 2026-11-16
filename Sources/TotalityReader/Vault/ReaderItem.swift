@@ -3,7 +3,8 @@ import Foundation
 /// One doc, file, or folder. All of this is encrypted at rest, because titles and filenames are content.
 public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
     public enum Kind: String, Codable, Sendable {
-        case note, file, folder
+        /// A day of the journal, or a note added under one (issue 128). Never listed with the library.
+        case note, file, folder, journal
     }
 
     public let id: UUID
@@ -24,6 +25,8 @@ public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
     /// The length a doc is meant to reach, in words. It's sealed with the doc, so it follows it to every
     /// device, and only its owner can read it.
     public var wordTarget: Int? = nil
+    /// Set on a journal entry: its day, its time zone, and when it locked.
+    public var journal: JournalStamp? = nil
 
     public var displayTitle: String {
         title.isEmpty ? "Untitled" : title
@@ -34,6 +37,7 @@ public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
         switch (kind, mime) {
         case (.folder, _): "Folder"
         case (.note, _): "Doc"
+        case (.journal, _): "Journal"
         case (_, "application/pdf"): "PDF"
         case (_, ReadableText.epubMime): "EPUB"
         case (_, ReadableText.wordMime): "Word"
@@ -58,6 +62,10 @@ public enum ReaderError: Error, Equatable {
     case folderInsideItself
     case notReadable
     case closed
+    /// A journal day that's over. It can be read, but never changed.
+    case journalClosed
+    /// The journal is private, so it's never shared or moved into the library.
+    case journalIsPrivate
 }
 
 extension ReaderError {
@@ -74,6 +82,8 @@ extension ReaderError {
         case .passwordProtected: "This PDF is password protected, so it can be stored but not read."
         case .notReadable: "Totality can keep this file, but it can't read this format yet."
         case .closed: "This wasn't saved because your encryption key was changing. Try again."
+        case .journalClosed: "This day is over, so its entry is locked. You can add a note under it."
+        case .journalIsPrivate: "Your journal is private, so it can't be shared or moved."
         }
     }
 }

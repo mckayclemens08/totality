@@ -41,6 +41,20 @@ up and down through the sealed store's resumable transfer, and checks every piec
 sending it. A key change moves piece files a piece at a time. A Drive file over 32 MB that isn't text is
 downloaded straight into a sealed piece file in the Drive cache, under `google-drive-pieces`.
 
+The journal (issue 128) is Reader items of kind `journal`, listed on its own page and never with the
+library, shared, moved, renamed, attached or pointed at by a `ContentRef`. Home search finds it. Each
+day's entry has an ID derived from the root key over the day, so two of the person's devices write the
+same entry and the server can't tell which day an ID is. It's kept only once something is written. A note
+added under a past day has a random ID. The day, its starting time zone, and the day a note is under are
+in the sealed details (`JournalStamp`), and it syncs as a `note`, so the server sees an ordinary doc.
+A day ends at 4 a.m. by the wall clock in the zone it was started in, so travel never moves or reopens
+one. A note locks at the end of its own day. The lock comes from the day and the zone, and the first
+device to see it pass also writes `closedAt`, so a clock set back later can't reopen it. The vault
+refuses a save to a closed entry. Sync may bring a closed entry only an edit made before it locked, or a
+change that leaves its words alone. Anything else is left unstored, so the next sync sends the locked
+copy back. In a conflict the copy saved before the lock wins, and the other is kept as a note under
+that day, so nothing is lost and nothing leaves the journal.
+
 A doc's body is Pandoc-flavoured Markdown inside the sealed blob, stored exactly as typed, with the mime
 `text/markdown; variant=pandoc` (RFC 7763). Issue 104 is the spec. The writing page is a `WKWebView`
 running CodeMirror 6, bundled from `web/reader-editor` by `scripts/build-reader-editor.sh` from a pinned

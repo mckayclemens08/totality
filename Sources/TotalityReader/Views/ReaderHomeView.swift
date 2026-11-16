@@ -9,12 +9,14 @@ enum ReaderRoute: Hashable {
     case drive(DriveLocation)
     /// A file in Google Drive, opened in the Reader's viewers.
     case driveFile(DriveFileRoute)
+    /// The journal (issue 128), opened at today, or at a day a search found.
+    case journal(String?)
 
     var opens: UUID? {
         switch self {
         case .folder(let id): id
         case .item(let item): item.id
-        case .trash, .drive, .driveFile: nil
+        case .trash, .drive, .driveFile, .journal: nil
         }
     }
 }
@@ -43,8 +45,12 @@ public struct ReaderHomeView: View {
                         switch route {
                         case .folder(let id):
                             ReaderFolderView(folder: id, model: model, path: $path, onClose: nil)
+                        case .item(let item) where item.kind == .journal:
+                            JournalView(model: model, showing: item.journal?.about ?? item.journal?.day)
                         case .item(let item):
                             ReaderItemView(item: item, model: model)
+                        case .journal(let day):
+                            JournalView(model: model, showing: day)
                         case .trash:
                             ReaderTrashView(model: model)
                         case .drive(let location):
@@ -134,6 +140,7 @@ extension ReaderItem {
         case "PDF": "doc.richtext"
         case "EPUB": "book.closed"
         case "Word": "doc.plaintext"
+        case "Journal": "text.book.closed"
         default: "doc"
         }
     }

@@ -172,19 +172,36 @@ struct ReaderFolderView: View {
                 detail: "It was deleted or moved. Anything that was inside is at the top of your Reader, or in Recently Deleted."
             )
         case .ready where isEmptyLibrary:
-            ReaderMessage(
-                systemImage: "book",
-                title: "Nothing here yet",
-                detail: model.isSynced
-                    ? "Write a doc, or import a PDF, EPUB, or Word file. Everything is encrypted before it leaves this device."
-                    : "Write a doc, or import a PDF, EPUB, or Word file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
-            )
+            VStack(spacing: 0) {
+                journalLink
+                    .padding(.horizontal, Space.s4)
+                    .padding(.top, Space.s2)
+                emptyLibrary
+            }
         case .ready:
             VStack(alignment: .leading, spacing: 0) {
                 if folder != nil { breadcrumbs }
                 if showsGrid { grid } else { list }
             }
         }
+    }
+
+    /// The journal, pinned at the top of the Reader (issue 128).
+    private var journalLink: some View {
+        NavigationLink(value: ReaderRoute.journal(nil)) {
+            JournalRow(model: model)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var emptyLibrary: some View {
+        ReaderMessage(
+            systemImage: "book",
+            title: "Nothing here yet",
+            detail: model.isSynced
+                ? "Write a doc, or import a PDF, EPUB, or Word file. Everything is encrypted before it leaves this device."
+                : "Write a doc, or import a PDF, EPUB, or Word file. Everything is encrypted before it's stored, and can't be recovered on a new device yet."
+        )
     }
 
     private var isEmptyLibrary: Bool {
@@ -267,6 +284,9 @@ struct ReaderFolderView: View {
     private var list: some View {
         List {
             if folder == nil {
+                journalLink
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 status
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -302,7 +322,10 @@ struct ReaderFolderView: View {
     private var grid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s3) {
-                if folder == nil { status }
+                if folder == nil {
+                    journalLink
+                    status
+                }
                 if folder == nil, let drive = model.drive {
                     VStack(alignment: .leading, spacing: Space.s2) { DriveLinksSection(drive: drive) }
                         .buttonStyle(.plain)
