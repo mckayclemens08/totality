@@ -7,6 +7,12 @@ public enum ShelfEntry: Identifiable, Equatable {
     /// `needsConnecting` for a folder linked on another device, with an account not connected here.
     case drive(DriveRecent, needsConnecting: Bool = false)
 
+    /// A linked Drive folder rather than something to read.
+    public var isFolder: Bool {
+        if case .drive(let recent, _) = self { return recent.isFolder }
+        return false
+    }
+
     /// What a tap asks the Reader for. A Drive file's is the ID it opens under, so Listen matches it.
     public var id: UUID {
         switch self {

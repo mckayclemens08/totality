@@ -79,11 +79,11 @@ public struct WebHomeTile: View {
             if tabs.isEmpty && model.bookmarks.isEmpty {
                 emptyNote
             } else if tabs.count < WebModel.homeTabCards, !model.bookmarks.isEmpty {
-                // Room the tabs don't fill goes to the bookmarks people use most.
-                Spacer(minLength: 0)
-                wall(rows(1, of: model.homeBookmarks))
-                Spacer(minLength: 0)
+                // Room the tabs don't fill goes to the bookmarks people use most, right under the button.
+                wall(rows(tabs.isEmpty ? 2 : 1, of: model.homeBookmarks))
+                    .padding(.top, Space.s3)
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -99,10 +99,8 @@ public struct WebHomeTile: View {
                 emptyNote
             }
             if !grid.isEmpty {
-                // With nothing under them, the bookmarks sit in the middle of the room, not under the button.
-                let alone = tabs.isEmpty && model.homeDownload == nil
-                if alone { Spacer(minLength: 0) }
                 wall(grid)
+                    .padding(.top, Space.s3)
             }
             Spacer(minLength: 0)
             ForEach(tabs) { tab in

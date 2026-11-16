@@ -11,7 +11,7 @@ public struct ListenLine: Equatable, Sendable {
 /// is in it, the sentence Listen is saying, and two more recent items.
 extension ReaderModel {
     static let homeMore = 2
-    static let homeList = 4
+    static let homeList = 5
 
     /// The front item is what Listen is playing.
     public var homeIsListening: Bool {
