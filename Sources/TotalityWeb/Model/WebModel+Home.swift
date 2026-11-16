@@ -21,9 +21,12 @@ extension WebModel {
         for visit in history {
             if let host = visit.url.host()?.lowercased() { visits[host, default: 0] += 1 }
         }
+        func count(_ bookmark: WebBookmark) -> Int {
+            guard let host = bookmark.url.host()?.lowercased() else { return 0 }
+            return visits[host] ?? 0
+        }
         return bookmarks.enumerated().sorted { a, b in
-            let one = a.element.url.host()?.lowercased().flatMap { visits[$0] } ?? 0
-            let other = b.element.url.host()?.lowercased().flatMap { visits[$0] } ?? 0
+            let one = count(a.element), other = count(b.element)
             return one != other ? one > other : a.offset < b.offset
         }.map(\.element)
     }
