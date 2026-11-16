@@ -173,6 +173,46 @@ struct DriveAPI: Sendable {
         return Array(found.prefix(Self.mostEntries))
     }
 
+    // MARK: Searching
+
+    /// The most a search asks Drive for, and the most words it sends.
+    static let mostFound = 50
+    static let mostTerms = 6
+
+    /// Files whose text or name has every word, by Drive's own search. The words go to Google, and only
+    /// to Google: it's the person's own Drive. Each word is quoted for Drive's query language, so nothing
+    /// typed can change what's asked.
+    func search(_ terms: [String], accessToken: String) async throws -> [(entry: DriveEntry, parents: [String])] {
+        let words = terms.prefix(Self.mostTerms).map { String($0.prefix(100)) }.filter { !$0.isEmpty }
+        guard !words.isEmpty else { return [] }
+        let query = words.map { "fullText contains \(Self.quoted($0))" }.joined(separator: " and ")
+            + " and trashed = false and mimeType != '\(DriveEntry.folderMime)'"
+        let items = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "fields", value: "files(\(Self.entryFields),parents)"),
+            URLQueryItem(name: "pageSize", value: String(Self.mostFound)),
+            URLQueryItem(name: "corpora", value: "allDrives"),
+            URLQueryItem(name: "supportsAllDrives", value: "true"),
+            URLQueryItem(name: "includeItemsFromAllDrives", value: "true"),
+        ]
+        let listing: Listing = try await get(Self.url("files", items), accessToken: accessToken)
+        return listing.files.prefix(Self.mostFound).compactMap { file in file.entry.map { ($0, file.checkedParents) } }
+    }
+
+    /// The folders a folder is in, for following a found file up to a linked folder.
+    func parents(of id: String, accessToken: String) async throws -> [String] {
+        guard Self.isID(id) else { throw DriveProblem.unexpected }
+        let items = [URLQueryItem(name: "fields", value: "id,parents"), URLQueryItem(name: "supportsAllDrives", value: "true")]
+        let file: File = try await get(Self.url("files/\(id)", items), accessToken: accessToken)
+        return file.checkedParents
+    }
+
+    /// A word as a string in Drive's query language: in single quotes, with backslashes and quotes escaped.
+    static func quoted(_ word: String) -> String {
+        let cleaned = String(String.UnicodeScalarView(word.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }))
+        return "'" + cleaned.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'") + "'"
+    }
+
     // MARK: Changes
 
     /// Where an account's list of changes starts now. Only changes after this are read next time.
@@ -348,6 +388,10 @@ struct DriveAPI: Sendable {
         let version: String?
         let trashed: Bool?
         let capabilities: Capabilities?
+        /// Only asked for by search. Anything that isn't a Drive ID is dropped.
+        let parents: [String]?
+
+        var checkedParents: [String] { (parents ?? []).filter(DriveAPI.isID).prefix(10).map { $0 } }
 
         /// Nil for anything that doesn't check out, so it's left out rather than trusted.
         var entry: DriveEntry? {

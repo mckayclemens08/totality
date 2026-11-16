@@ -36,6 +36,9 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
     private(set) var changeLog: [(id: String, parent: String?, removed: Bool)] = []
     /// True when Drive no longer has the starting points it gave out.
     var forgetsChangeTokens = false
+    /// Every search query Drive was sent, as its `q`.
+    private(set) var searched: [String] = []
+    var searches: [String] { lock.withLock { searched } }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let url = try #require(request.url)
@@ -93,7 +96,8 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
         }
         if components.path.hasPrefix(filePrefix), query["alt"] == nil, !components.path.hasSuffix("/export") {
             let id = String(components.path.dropFirst(filePrefix.count))
-            guard let file = lock.withLock({ children.values.joined().first { $0["id"] as? String == id } }) else { return answer(404, errorBody) }
+            guard var file = lock.withLock({ children.values.joined().first { $0["id"] as? String == id } }) else { return answer(404, errorBody) }
+            file["parents"] = lock.withLock { children.filter { $0.value.contains { $0["id"] as? String == id } }.map(\.key) }
             return answer(200, file)
         }
         if components.path.hasSuffix("/export") {
@@ -110,6 +114,28 @@ final class FakeDrive: GoogleHTTP, @unchecked Sendable {
         }
         #expect(components.path == "/drive/v3/files")
         let q = try #require(query["q"])
+        if q.hasPrefix("fullText contains ") {
+            lock.withLock { searched.append(q) }
+            #expect(query["fields"]?.contains("parents") == true)
+            // Each quoted word, unescaped as Drive would read it.
+            let words = q.components(separatedBy: "fullText contains '").dropFirst().map { part in
+                var word = "", escaped = false
+                for character in part {
+                    if escaped { word.append(character); escaped = false } else if character == "\\" { escaped = true } else if character == "'" { break } else { word.append(character) }
+                }
+                return word
+            }
+            let found: [[String: Any]] = lock.withLock {
+                children.flatMap { parent, files in
+                    files.filter { file in
+                        guard file["mimeType"] as? String != DriveEntry.folderMime, let id = file["id"] as? String else { return false }
+                        let text = (file["name"] as? String ?? "") + " " + String(decoding: contents[id] ?? Data(), as: UTF8.self)
+                        return words.allSatisfy { text.localizedCaseInsensitiveContains($0) }
+                    }.map { file in file.merging(["parents": [parent]]) { $1 } }
+                }
+            }
+            return answer(200, ["files": found])
+        }
         let parent: String
         if q.hasPrefix("sharedWithMe = true") {
             parent = "shared"

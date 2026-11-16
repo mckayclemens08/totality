@@ -44,9 +44,12 @@ public final class SearchModel {
         running = Task { [search, pause] in
             try? await Task.sleep(for: pause)
             guard !Task.isCancelled else { return }
-            let found = await search.run(query)
+            // What's found so far shows as each module answers.
+            for await found in search.stream(query) {
+                guard !Task.isCancelled else { return }
+                results = found
+            }
             guard !Task.isCancelled else { return }
-            results = found
             phase = .finished
         }
     }

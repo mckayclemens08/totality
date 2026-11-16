@@ -79,7 +79,7 @@ public struct SearchView: View {
         if model.phase == .waiting {
             SearchMessage(
                 systemImage: "magnifyingglass", title: "Search everything in Totality",
-                detail: "Reader, Calendar, Mail, Messages, Photos, and Web bookmarks. Searching happens on this device. Nothing you type is saved or sent."
+                detail: "Reader, Calendar, Mail, Messages, Photos, and Web bookmarks. Searching happens on this device, and nothing you type is saved. With Google Drive folders linked in the Reader, your words also go to Google to look inside them, and nowhere else."
             )
         } else if results.groups.isEmpty {
             if model.phase == .searching {

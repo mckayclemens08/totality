@@ -20,6 +20,8 @@ public final class ReaderModel {
     public var query = ""
     /// An item another module asked to open. The home screen takes it from here.
     public var requestedItem: UUID?
+    /// A Drive file home search found, by its result's ID. The home screen takes it from here.
+    public var requestedDriveHit: String?
     /// A doc a wiki link leads to. It opens on top of the doc the link is in, so Back returns there.
     public var linkedItem: UUID?
     /// A heading a wiki link named, for the doc it leads to to jump to once it opens.

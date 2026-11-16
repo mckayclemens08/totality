@@ -100,6 +100,11 @@ public struct ReaderHomeView: View {
                 model.notice = ReaderError.notFound.message
             }
         }
+        .task(id: model.requestedDriveHit) {
+            guard let hit = model.requestedDriveHit else { return }
+            model.requestedDriveHit = nil
+            if let route = await model.openDriveSearchHit(hit) { path = [route] } else { model.notice = DriveProblem.notFound.message }
+        }
         .task(id: model.linkedItem) {
             guard let id = model.linkedItem else { return }
             model.linkedItem = nil
