@@ -59,6 +59,11 @@ public final class MailModel {
     public var query = ""
     /// A conversation the home page asked to open. Mail opens it in the Inbox and clears this.
     public var requestedConversation: UUID?
+    /// A reply the home page asked for. Mail opens compose with it started and clears this; it still
+    /// sends only on the person's press.
+    public var requestedReply: UUID?
+    /// Which unread conversation the big square shows, once Next has been pressed. Nil is the newest.
+    public var homeShown: UUID?
     public var isSelecting = false
     public var selection = Set<UUID>()
 

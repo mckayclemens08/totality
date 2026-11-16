@@ -301,6 +301,9 @@ struct RootView: View {
         case .mail:
             guard mail.current.phase == .ready else { return nil }
             return AnyView(MailHomeTile(model: mail.current, size: size) { bringUp(.mail) })
+        case .messages:
+            guard messages.phase == .ready else { return nil }
+            return AnyView(MessagesHomeTile(model: messages, size: size) { bringUp(.messages) })
         case .photos:
             // Signing out shows nothing at once, before the library is closed. Only signing out: the
             // account's phase stays loading after a launch until the Account screen is opened, and the

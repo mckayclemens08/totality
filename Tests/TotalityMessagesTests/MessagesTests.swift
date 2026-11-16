@@ -1225,3 +1225,99 @@ private let ana = PublicProfile(username: "ana_ruiz", displayName: "Ana Ruiz", b
     await model.refresher.refresh()
     #expect(model.people.name(ofMatrixID: "@ana_ruiz:usetotality.com") == "Ana R.")
 }
+
+// MARK: Home tiles (issue 127)
+
+@MainActor
+private func homeModel(_ chats: [ChatSummary]) async -> MessagesModel {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: chats)
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    await model.connect()
+    await settle()
+    return model
+}
+
+private let homeChats = [
+    ChatSummary(id: "!ana", title: "Ana Ruiz", lastMessage: "See you there", lastActivity: jan1, unread: 2, otherPerson: "@ana_ruiz:usetotality.com"),
+    ChatSummary(id: "!lake", title: "Lake trip", lastMessage: "Bring the map", lastActivity: jan1 - 60, isGroup: true, lastSender: "@dev_patel:usetotality.com"),
+    ChatSummary(id: "!sam", title: "Sam Ortiz", lastMessage: "You: Thanks!", lastActivity: jan1 - 120, otherPerson: "@sam_ortiz:usetotality.com"),
+    ChatSummary(id: "!priya", title: "Priya N", lastMessage: "Done", lastActivity: jan1 - 180, unread: 1, otherPerson: "@priya_n:usetotality.com"),
+    ChatSummary(id: "!omar", title: "Omar Haddad", lastMessage: "Ok", lastActivity: jan1 - 240, otherPerson: "@omar:usetotality.com"),
+    ChatSummary(id: "!req", title: "mckay_test", isRequest: true, from: "@mckay_test:usetotality.com"),
+]
+
+@MainActor
+@Test("Medium: faces of chats with something unread, or the most recent when there's nothing")
+func homeMediumFaces() async {
+    let model = await homeModel(homeChats)
+    #expect(model.homeFaces.hasUnread)
+    #expect(model.homeFaces.chats.map(\.id) == ["!ana", "!priya"])
+    let quiet = await homeModel(homeChats.map {
+        ChatSummary(id: $0.id, title: $0.title, isRequest: $0.isRequest, lastMessage: $0.lastMessage, lastActivity: $0.lastActivity, isGroup: $0.isGroup)
+    })
+    #expect(!quiet.homeFaces.hasUnread)
+    // Requests never show as faces: looking one up would say it was seen.
+    #expect(quiet.homeFaces.chats.map(\.id) == ["!ana", "!lake", "!sam", "!priya"])
+}
+
+@MainActor
+@Test("Large: the three most recent, and a group names who spoke last")
+func homeLargeRows() async {
+    let model = await homeModel(homeChats)
+    #expect(model.homeRows.map(\.id) == ["!ana", "!lake", "!sam"])
+    #expect(model.homeLastLine(of: model.homeRows[0]) == "See you there")
+    #expect(model.homeLastLine(of: model.homeRows[1]) == "dev_patel: Bring the map")
+    #expect(model.homeLastLine(of: model.homeRows[2]) == "You: Thanks!")
+}
+
+@MainActor
+@Test("Square: the newest chat with something unread, switched by its faces")
+func homeSquarePicks() async {
+    let model = await homeModel(homeChats)
+    #expect(model.homeTarget?.id == "!ana")
+    #expect(model.homeSwitcher.map(\.id) == ["!ana", "!priya", "!lake", "!sam", "!omar"])
+    model.homePicked = "!sam"
+    #expect(model.homeTarget?.id == "!sam")
+    // A pick that's gone falls back.
+    model.homePicked = "!gone"
+    #expect(model.homeTarget?.id == "!ana")
+    let empty = await homeModel([])
+    #expect(empty.homeTarget == nil)
+}
+
+@MainActor
+@Test("Square: showing a chat there marks nothing read and sends nothing")
+func homeSquareDoesntRead() async {
+    let channel = FakeChannel()
+    channel.startingMessages = (1...6).map {
+        ChatMessage(id: "$\($0)", sender: "@mckay_test:usetotality.com", body: "Message \($0)", isOwn: false, time: jan1 + Double($0))
+    }
+    let chat = ChatModel(channel: channel, defaults: UserDefaults(suiteName: "home-\(UUID())")!)
+    await chat.start(markingRead: false)
+    await settle()
+    #expect(chat.messages.count == 6)
+    #expect(channel.receipts.isEmpty)
+    #expect(channel.sent.isEmpty)
+    #expect(channel.typing.isEmpty)
+}
+
+@MainActor
+@Test("Opening a chat in Messages still marks it read")
+func openingStillReads() async {
+    let channel = FakeChannel()
+    channel.startingMessages = [ChatMessage(id: "$1", sender: "@mckay_test:usetotality.com", body: "Hi", isOwn: false, time: jan1)]
+    let chat = ChatModel(channel: channel, defaults: UserDefaults(suiteName: "open-\(UUID())")!)
+    await chat.start()
+    await settle()
+    #expect(!channel.receipts.isEmpty)
+}
+
+@MainActor
+@Test("Square: a double tap hearts the message")
+func homeSquareHeart() async {
+    let channel = FakeChannel()
+    let chat = ChatModel(channel: channel, defaults: UserDefaults(suiteName: "heart-\(UUID())")!)
+    let message = ChatMessage(id: "$1", sender: "@mckay_test:usetotality.com", body: "Hi", isOwn: false, time: jan1)
+    await chat.toggleReaction(QuickReactions.heart, on: message)
+    #expect(channel.reactions == ["❤️@$1"])
+}

@@ -140,7 +140,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         case .joined:
             // Messages only shows end-to-end encrypted chats, so its label stays true.
             guard await room.isEncrypted() else { return nil }
-            let (text, time) = preview(await room.latestEvent())
+            let (text, time, sender) = preview(await room.latestEvent())
             let title = info.displayName ?? info.heroes.first.map { MessagesUsername.display($0.userId) } ?? "Chat"
             let unread = Int(info.numUnreadMessages) + (info.isMarkedUnread ? 1 : 0)
             // A group's photo is shown once you've joined, never on a request: fetching it would tell
@@ -148,20 +148,21 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             return ChatSummary(
                 id: info.id, title: title, lastMessage: text, lastActivity: time, unread: unread,
                 isGroup: !info.isDirect, photo: info.isDirect ? nil : info.avatarUrl,
-                otherPerson: info.isDirect ? info.heroes.first?.userId : nil
+                otherPerson: info.isDirect ? info.heroes.first?.userId : nil, lastSender: sender
             )
         default:
             return nil
         }
     }
 
-    private static func preview(_ latest: LatestEventValue) -> (String?, Date?) {
+    /// The last message's words, when, and who sent it if it wasn't you.
+    private static func preview(_ latest: LatestEventValue) -> (String?, Date?, String?) {
         switch latest {
-        case .none, .remoteInvite: (nil, nil)
-        case .remote(let timestamp, _, let isOwn, _, let content):
-            (preview(content, isOwn: isOwn).map { isOwn ? "You: \($0)" : $0 }, date(timestamp))
+        case .none, .remoteInvite: (nil, nil, nil)
+        case .remote(let timestamp, let sender, let isOwn, _, let content):
+            (preview(content, isOwn: isOwn).map { isOwn ? "You: \($0)" : $0 }, date(timestamp), isOwn ? nil : sender)
         case .local(let timestamp, _, _, let content, _):
-            (preview(content).map { "You: \($0)" }, date(timestamp))
+            (preview(content).map { "You: \($0)" }, date(timestamp), nil)
         }
     }
 

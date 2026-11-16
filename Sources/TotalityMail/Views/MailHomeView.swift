@@ -88,11 +88,17 @@ public struct MailHomeView: View {
         .onChange(of: model.phase) { openRequested() }
     }
 
-    /// A conversation tapped on the home page opens straight away, once it's in the mailbox.
+    /// A conversation tapped on the home page opens straight away, once it's in the mailbox, with a reply
+    /// started when Reply was what was pressed.
     private func openRequested() {
         guard let id = model.requestedConversation, model.phase == .ready else { return }
         model.requestedConversation = nil
-        if model.mailbox.conversation(id, in: model.place) != nil { opened = id }
+        let reply = model.requestedReply == id
+        model.requestedReply = nil
+        guard let conversation = model.mailbox.conversation(id, in: model.place) else { return }
+        opened = id
+        // Reply on the home page starts the reply here. It goes only when the person presses Send.
+        if reply { composing = .reply(to: conversation.latest, all: false, in: model) }
     }
 
     @ViewBuilder private func content(isWide: Bool) -> some View {
