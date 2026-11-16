@@ -4,7 +4,7 @@ import TotalityUI
 
 /// Tasks' big home tile. Each size has its own job (issue 127): medium is a glance at today's count and
 /// the next deadline, large is today's list with tick boxes that work on the tile, and the big square is a
-/// workspace, today's list plus quick add over the home page, without opening Tasks.
+/// workspace, today's list plus an Add task button that opens quick add over the home page.
 public struct TasksHomeTile: View {
     private let model: TasksModel
     private let size: BigTileSize
@@ -94,23 +94,14 @@ public struct TasksHomeTile: View {
     private var workspace: some View {
         let theme = Theme.current
         return VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: Space.s2) {
-                Image(systemName: "plus")
-                    .font(Typeface.callout.weight(.semibold))
-                    .foregroundStyle(theme.accentOn.color)
-                    .frame(width: Space.s5, height: Space.s5)
-                    .background(Circle().fill(theme.accent.color))
-                Text("Add a task, like “Call Gran tomorrow 5pm”")
-                    .font(Typeface.callout.weight(.regular))
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Space.s3)
-            .padding(.vertical, Space.s2)
-            .neumorphic(.pressed, in: Capsule())
-            .tileLink("New task") { onQuickAdd() }
-            list(limit: 7)
+            list(limit: 6)
+            // A plain button, never a field or a "type here" prompt: a tile holds no text input.
+            Label("Add task", systemImage: "plus")
+                .font(Typeface.callout.weight(.semibold))
+                .foregroundStyle(theme.accent.color)
+                .padding(.vertical, Space.s1)
+                .contentShape(Rectangle())
+                .tileLink("Add task") { onQuickAdd() }
         }
     }
 

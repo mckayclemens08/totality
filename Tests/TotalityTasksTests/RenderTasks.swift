@@ -146,14 +146,73 @@ import TotalityUI
         let parsed = QuickAddParser.parseLines(typed, now: agreed, calendar: denver)
         try write(VStack(alignment: .leading, spacing: Space.s4) {
             Text("New task").font(Typeface.headline).frame(maxWidth: .infinity)
-            Text(typed).font(Typeface.body).padding(Space.s4).frame(maxWidth: .infinity, alignment: .leading)
-                .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
+            Text(typed).font(Typeface.body).frame(maxWidth: .infinity, alignment: .leading)
+                .raisedField()
             QuickAddPreview(parsed: parsed, text: typed, model: model)
         }.padding(Space.s4).padding(.top, Space.s5), name: "tasks-quick-add.png", to: directory, height: 420)
         let list = "Outline chapter 3\nEmail advisor tomorrow\nBook MUN hotel #mun due Friday"
         try write(VStack(alignment: .leading, spacing: Space.s4) {
             QuickAddPreview(parsed: QuickAddParser.parseLines(list, now: agreed, calendar: denver), text: list, model: model)
         }.padding(Space.s4).padding(.top, Space.s5), name: "tasks-quick-add-list.png", to: directory, height: 300)
+
+        // Every Tasks text box in the raised-capsule look. ImageRenderer can't draw a live text field on the
+        // Mac, so each is drawn as its words inside the same raisedField() the real fields use.
+        let theme = Theme.current
+        let quiet = theme.textSecondary.color
+        try write(VStack(alignment: .leading, spacing: Space.s3) {
+            Text("Quick add").font(Typeface.caption).foregroundStyle(quiet)
+            Text("Email Dr. Lee about chapter 2 tomorrow 9am #thesis").font(Typeface.body).foregroundStyle(quiet)
+                .frame(maxWidth: .infinity, alignment: .leading).raisedField()
+            Text("An open task").font(Typeface.caption).foregroundStyle(quiet).padding(.top, Space.s3)
+            VStack(alignment: .leading, spacing: Space.s3) {
+                Text("Pack for the MUN conference").font(Typeface.body).frame(maxWidth: .infinity, alignment: .leading).raisedField()
+                Text("Hotel is the Marriott on 5th. Check in after 3.").font(Typeface.callout.weight(.regular))
+                    .frame(maxWidth: .infinity, alignment: .leading).raisedField(.block)
+                ForEach([("Country placard", true), ("Blazer", false), ("Laptop charger", false)], id: \.0) { item, done in
+                    HStack(spacing: Space.s1) {
+                        TickMark(isDone: done, diameter: Space.s4).frame(width: Space.s6, height: Space.s6)
+                        Text(item).font(Typeface.callout.weight(.regular)).foregroundStyle(done ? quiet : theme.textPrimary.color)
+                        Spacer()
+                        Image(systemName: "xmark").font(Typeface.micro).foregroundStyle(quiet).frame(width: Space.s6, height: Space.s6)
+                    }
+                    .padding(.horizontal, -Space.s2)
+                    .raisedField()
+                }
+                HStack(spacing: Space.s1) {
+                    Image(systemName: "plus").font(Typeface.micro).foregroundStyle(quiet).frame(width: Space.s6, height: Space.s6)
+                    Text("Add to checklist").font(Typeface.callout.weight(.regular)).foregroundStyle(quiet)
+                    Spacer()
+                }
+                .padding(.horizontal, -Space.s2)
+                .raisedField()
+                FlowRow {
+                    ChipLabel(systemImage: "calendar", text: "Thursday")
+                    ChipLabel(systemImage: "flag", text: "Deadline")
+                    ChipLabel(systemImage: "exclamationmark", text: "Priority")
+                }
+                FlowRow {
+                    HStack(spacing: Space.s1) { Text("#mun"); Image(systemName: "xmark").font(Typeface.micro) }
+                        .font(Typeface.caption).foregroundStyle(quiet)
+                        .padding(.horizontal, Space.s2).padding(.vertical, Space.s1)
+                        .neumorphic(.subtle, in: Capsule())
+                    HStack(spacing: Space.s1) {
+                        Image(systemName: "number").font(Typeface.micro).foregroundStyle(quiet)
+                        Text("Add tag").font(Typeface.callout.weight(.regular)).foregroundStyle(quiet)
+                    }
+                    .raisedField()
+                }
+            }
+            .padding(Space.s3)
+            .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+            Text("Logbook search").font(Typeface.caption).foregroundStyle(quiet).padding(.top, Space.s3)
+            // SearchBox's look, with Text standing in for its TextField, which ImageRenderer can't draw.
+            HStack(spacing: Space.s2) {
+                Image(systemName: "magnifyingglass").foregroundStyle(theme.textSecondary.color)
+                Text("Search the Logbook").foregroundStyle(theme.textSecondary.color)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .raisedField()
+        }.padding(Space.s4).padding(.top, Space.s5), name: "tasks-fields.png", to: directory, height: 1000)
 
         // The undo bar.
         try write(UndoBar(title: "Submit MUN registration", onUndo: {}, onDismiss: {}).padding(Space.s4).padding(.top, Space.s5),
