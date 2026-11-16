@@ -77,6 +77,18 @@ public struct ModuleRegistry: Sendable {
         handlers.compactMap { $0 as? any ModuleRefresher }
     }
 
+    /// Every module that can say what's on the person's calendar.
+    public var agendas: [any AgendaProvider] {
+        handlers.compactMap { $0 as? any AgendaProvider }
+    }
+
+    /// Everything on the calendar from `start` up to `end`, from every module that keeps one.
+    public func agenda(from start: Date, to end: Date) async -> [AgendaItem] {
+        var items: [AgendaItem] = []
+        for provider in agendas { items += await provider.agenda(from: start, to: end) }
+        return items
+    }
+
     /// Every module that can be searched, in the order they were registered.
     public var searchers: [any ModuleSearcher] {
         handlers.compactMap { $0 as? any ModuleSearcher }

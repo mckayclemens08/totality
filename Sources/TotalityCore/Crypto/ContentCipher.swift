@@ -50,6 +50,10 @@ public enum KeyPurpose: String, Sendable, Hashable {
     /// A Reader doc's earlier versions and their list, kept on the device only. Its own purpose, so an old
     /// version can't pass for the doc itself.
     case docVersion = "doc-version"
+    /// A task, and a list of tasks (issue 123). Each has its own purpose, so a list can't pass for a task, or
+    /// either for anything another module keeps.
+    case task
+    case taskList = "task-list"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.

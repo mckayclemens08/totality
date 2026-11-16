@@ -23,6 +23,7 @@ public struct ModuleEntry: Identifiable, Sendable, Equatable {
         .init(id: .messages, name: "Messages", systemImage: "bubble.left"),
         .init(id: .reader, name: "Reader", systemImage: "book"),
         .init(id: .calendar, name: "Calendar", systemImage: "calendar"),
+        .init(id: .tasks, name: "Tasks", systemImage: "checklist"),
         .init(id: .ai, name: "Assistant", systemImage: "sparkles"),
         .init(id: .player, name: "Music", systemImage: "music.note"),
         .init(id: .mail, name: "Mail", systemImage: "envelope"),

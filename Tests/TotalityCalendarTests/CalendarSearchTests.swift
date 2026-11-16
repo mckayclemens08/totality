@@ -485,3 +485,32 @@ import TotalityCore
         #expect(model.entries(on: CalendarDay(year: 2026, month: 10, day: 30)).map(\.title) == ["Physio"])
     }
 }
+
+/// What Tasks' Upcoming reads through the registry: titles and times, for a range of days.
+@Suite struct CalendarAgendaTests {
+    @Test("Own events, repeats, all-day events and device events in a range, and hidden calendars left out")
+    func agenda() async throws {
+        let vault = CalendarVault(store: MemoryBlobs(), rootKey: try ContentRootKey.generate())
+        try await vault.save(Dates.event(Dates.date(2026, 11, 16, 9), title: "Phonology lecture", rule: RepeatRule(frequency: .weekly)))
+        try await vault.save(Dates.allDay(2026, 11, 20, through: 21))
+        try await vault.save(Dates.event(Dates.date(2026, 12, 30, 9), title: "Far away"))
+        let devices = FakeDevices()
+        devices.state = .allowed
+        devices.available = [DeviceCalendar(id: "school", title: "School", account: "iCloud"), DeviceCalendar(id: "hidden", title: "Hidden", account: "iCloud")]
+        devices.stored = [
+            DeviceEvent(id: "d1", title: "MUN committee", location: "", notes: "", start: Dates.date(2026, 11, 18, 14),
+                        end: Dates.date(2026, 11, 18, 16), isAllDay: false, calendarTitle: "School"),
+        ]
+        let module = CalendarModule(vault: vault, devices: devices, hidden: { ["hidden"] }, display: Dates.calendar())
+        let items = await module.agenda(from: Dates.date(2026, 11, 16), to: Dates.date(2026, 11, 30))
+        #expect(items.filter { $0.title == "Phonology lecture" }.map(\.start) == [Dates.date(2026, 11, 16, 9), Dates.date(2026, 11, 23, 9)])
+        #expect(!items.contains { $0.title == "Far away" })
+        let trip = try #require(items.first { $0.title == "Trip" })
+        #expect(trip.isAllDay)
+        #expect(trip.start == Dates.date(2026, 11, 20))
+        #expect(trip.end == Dates.date(2026, 11, 22))
+        #expect(items.contains { $0.title == "MUN committee" })
+        #expect(devices.askedFor.last == ["school"])
+        #expect(await module.agenda(from: Dates.date(2026, 11, 16), to: Dates.date(2026, 11, 16)).isEmpty)
+    }
+}

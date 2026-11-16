@@ -11,6 +11,8 @@ A new contract is recorded here before it is implemented.
 | Calendar | Calls | an event may attach a call ref | not built |
 | AI | Reader, Calendar, Money | read `ContentRef` lists under a grant | not built |
 | Social | Messages | social DMs are Messages threads | not built |
+| Calendar | Tasks | each day's events for Upcoming, through `AgendaProvider` | built |
+| Home | Tasks | search, refresh, the big tile with working tick boxes | built |
 
 ## Reader
 
@@ -623,3 +625,46 @@ Issue 37, steps 4 and 5. The screens are in `Sources/TotalityMail`, and the app 
 **Home tiles.** The small tile shows `MailModel.glance`: the Inbox's unread count, then who wrote last, and its second line opens that conversation. The big tile, `MailHomeTile`, shows the count under a plain envelope, then the Inbox's newest conversations (1, 3, or 5 by size), each marked unread with the one accent dot and each opening itself through `requestFromHome`, which moves Mail to the Inbox. Only the Inbox reaches the home page, never Spam or Trash. Until Mail has opened with its key, both say only "Open to check your mail", because the home page is no place to report a key problem.
 
 **Not built yet.** There's no outbox: a send that finds the device offline fails at once and stays a draft that says so, and nothing sends later on its own. Attachments from the Reader aren't offered yet, only Files and Photos. Downloads run one at a time, and Mail fetches only when it appears, since there's no push. Search stays inside Mail, and the home page's magnifying glass doesn't reach it. The Mac's selecting uses the same check marks as iPhone, not Shift or Command clicks.
+
+## Tasks
+
+Issue 123 is the spec, agreed 2026-11-15; this is step 1. `TasksModule` handles the `task` and `task_list`
+content kinds, and is a `ModuleSearcher` and a `ModuleRefresher`. Tasks imports only `TotalityCore` and
+`TotalityUI`, and nothing imports Tasks but the app.
+
+Each task and each list is one sealed blob in `TaskVault`, under the `task` and `task-list` key purposes, and
+one row in `content_objects` with everything in `meta_cipher` and no `storage_key`
+(migration `20261116000001_task_kinds.sql`). Titles, notes, checklists, tags, dates, priority and list names
+are all inside the seal. A blob's name is its random ID and kind, nothing more. A server that relabels a task
+as a list, or anything as a task, is refused, because each kind opens only under its own purpose.
+
+When and Deadline are `TaskDay`s, plain dates with no zone, and the optional time is a `TaskTime` on the
+person's clock. A task planned for Thursday at 9 is Thursday at 9 wherever the person is, and a clock change
+can't move it to another day. Days are counted as calendar days, never as 24-hour spans. A time a clock
+change skips moves to the first moment after it, on the same day.
+
+Sync conflicts merge part by part. Every task keeps an edit time per part (`TaskItem.Field`: title, notes,
+place, schedule, deadline, checklist, tags, priority, list, order, completion), and a merge takes the newer
+edit of each part, so a title changed on one device and a tick on another both survive with no conflict copy.
+A tie on the clock is settled by the bytes of the value, so both devices agree; a tie on completion goes to
+done. Edit times for parts a newer version adds are kept by an older one. An open editor sends only the parts
+it changed since it opened, so a sync that lands meanwhile isn't undone. Lists keep the newer whole for now;
+step 2 gives them parts.
+
+Upcoming's events come from `AgendaProvider` in `TotalityCore`: `agenda(from:to:)` returns `AgendaItem`s, a
+title, a start and end and whether it's all-day, for the range asked. An all-day item's end is the start of
+the day after its last. The Calendar answers it from its own events with their repeats, the device calendars
+the person chose, and connected Google calendars. Tasks reaches it only through `ModuleRegistry.agenda`, holds
+the items in memory, and never stores or sends them.
+
+Quick add reads English on the device (`QuickAddParser`): today, tonight, tomorrow, weekdays (short names only
+after on, this, next, by or due), this or next week, next month, the weekend, in N days, weeks or months, dates
+written out or in numbers in the region's order, times with and without am or pm, `at 3` as the afternoon,
+`due` or `by` with a date for the deadline, `#tags` with `/` nesting, `!high` to `!low` or `!!!` to `!!`, and
+someday or anytime. Each kind is read once, and `every …` stays as typed until repeats arrive in step 3. Every
+piece understood is highlighted where it was typed. Pasting several lines makes one task per line, bullets
+and numbering dropped.
+
+The home tile is `TasksHomeTile`. Its tick boxes, its titles, the next deadline and its + are `tileLink`s,
+so they work on the tile itself. Home search finds tasks by title, notes, checklist items and tags, including
+done ones, and its `itemID` is the task's UUID, which opens the task in its list, expanded.

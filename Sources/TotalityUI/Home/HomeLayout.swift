@@ -73,6 +73,7 @@ public struct HomeLayout: Equatable, Sendable {
         let starting: [HomeTile] = [
             .init(id: .reader, size: .large), .init(id: .calendar, size: .medium),
             .init(id: .messages, size: .small), .init(id: .mail, size: .small),
+            .init(id: .tasks, size: .medium),
             .init(id: .ai, size: .medium),
             .init(id: .player, size: .small), .init(id: .photos, size: .small),
             .init(id: .money, size: .small), .init(id: .calls, size: .small),

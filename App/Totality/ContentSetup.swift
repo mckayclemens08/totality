@@ -6,6 +6,7 @@ import TotalityMail
 import TotalityMessages
 import TotalityPhotos
 import TotalityReader
+import TotalityTasks
 import TotalityWeb
 
 /// Connects the modules that seal content to this device's key and storage. They share one key, so
@@ -20,7 +21,7 @@ enum ContentSetup {
 
     private static func stores() throws -> (
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
-        googleCalendar: FileBlobStore, googleDrive: FileBlobStore
+        googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -32,7 +33,8 @@ enum ContentSetup {
             // Apart from the Calendar's own, because this never syncs.
             try FileBlobStore(directory: base.appendingPathComponent("GoogleCalendar", isDirectory: true)),
             // The Reader's linked Drive folders. Never synced: each device reads Google itself.
-            try FileBlobStore(directory: base.appendingPathComponent("GoogleDrive", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("GoogleDrive", isDirectory: true)),
+            try FileBlobStore(directory: base.appendingPathComponent("Tasks", isDirectory: true))
         )
     }
 
@@ -61,6 +63,7 @@ enum ContentSetup {
             SealedArea(files: stores.photos, purposes: PhotoLibrary.sealedPurposes, chunked: PhotoLibrary.chunkedPurposes),
             SealedArea(store: stores.googleCalendar, purposes: GoogleCalendars.sealedPurposes),
             SealedArea(store: stores.googleDrive, purposes: GoogleDrive.sealedPurposes),
+            SealedArea(store: stores.tasks, purposes: TaskVault.sealedPurposes),
         ])
     }
 
@@ -76,8 +79,8 @@ enum ContentSetup {
     static func makeModels(
         mailRefresh: @escaping @Sendable () async -> Void, refresh: @escaping @Sendable (ModuleID) async -> Void
     ) throws -> (
-        reader: ReaderModel, calendar: CalendarModel, web: WebModel, areas: [any SyncArea], registry: ModuleRegistry,
-        mail: MailContent, photos: PhotosContent
+        reader: ReaderModel, calendar: CalendarModel, web: WebModel, tasks: TasksModel, areas: [any SyncArea],
+        registry: ModuleRegistry, mail: MailContent, photos: PhotosContent
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -85,6 +88,7 @@ enum ContentSetup {
         let readerVault = ReaderVault(store: stores.reader, rootKey: rootKey)
         let calendarVault = CalendarVault(store: stores.calendar, rootKey: rootKey)
         let webVault = WebVault(store: stores.web, rootKey: rootKey)
+        let taskVault = TaskVault(store: stores.tasks, rootKey: rootKey)
         let devices = SystemCalendarSource()
         let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
         let reader = ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices()))
@@ -110,7 +114,11 @@ enum ContentSetup {
             MailModule(refresh: mailRefresh),
             PhotosModule(refresh: { await refresh(.photos) }),
             MessagesRefresher(refresh: { await refresh(.messages) }),
+            TasksModule(vault: taskVault, refresh: { await refresh(.tasks) }),
         ], profiles: AccountSetup.profiles)
+        let tasks = TasksModel(vault: taskVault)
+        // Upcoming's events come through the registry, so Tasks never reaches into the Calendar.
+        tasks.agenda = { [registry] start, end in await registry.agenda(from: start, to: end) }
         return (
             reader,
             CalendarModel(
@@ -123,9 +131,10 @@ enum ContentSetup {
                 downloads: try base().appendingPathComponent("Downloads", isDirectory: true),
                 receiver: registry.receiver(for: .web)
             ),
+            tasks,
             // The Drive record syncs whether or not this build can sign in to Google, so links made on
             // another device aren't lost here.
-            [readerVault, calendarVault, webVault, drive, places],
+            [readerVault, calendarVault, webVault, drive, places, taskVault],
             registry,
             MailContent(rootKey: rootKey, store: stores.mail),
             PhotosContent(rootKey: rootKey, store: stores.photos)
