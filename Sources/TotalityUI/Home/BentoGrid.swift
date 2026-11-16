@@ -39,6 +39,7 @@ struct BentoGrid: View {
                 }
             }
             .frame(width: width, height: metrics.height(of: placements), alignment: .topLeading)
+            .environment(\.liftsTileControls, !isEditing)
             .overlayPreferenceValue(TileLinkKey.self) { links in
                 GeometryReader { proxy in
                     let spots = links.map { LinkSpot(link: $0, frame: proxy[$0.bounds]) }
@@ -50,6 +51,17 @@ struct BentoGrid: View {
                     #if os(iOS)
                     touchArea(metrics: metrics, spots: spots)
                     #endif
+                }
+            }
+            // Above the touch area, so a tile's own buttons and boxes hear their touches.
+            .overlayPreferenceValue(TileControlKey.self) { controls in
+                GeometryReader { proxy in
+                    ForEach(Array(controls.enumerated()), id: \.offset) { _, control in
+                        let frame = proxy[control.bounds]
+                        control.view
+                            .frame(width: frame.width, height: frame.height)
+                            .position(x: frame.midX, y: frame.midY)
+                    }
                 }
             }
             if isEditing, drag == nil {

@@ -21,13 +21,16 @@ public struct ChatSummary: Identifiable, Sendable, Equatable {
     /// The Matrix ID of the one other person in a joined chat, for their public profile. Never set on a
     /// request: looking them up would only tell the directory the request was seen.
     public let otherPerson: String?
+    /// The Matrix ID of whoever sent the last message, when it wasn't you. A group's row names them.
+    public let lastSender: String?
 
     public init(
         id: String, title: String, isRequest: Bool = false, from: String? = nil,
         lastMessage: String? = nil, lastActivity: Date? = nil, unread: Int = 0, isGroup: Bool = false,
-        photo: String? = nil, otherPerson: String? = nil
+        photo: String? = nil, otherPerson: String? = nil, lastSender: String? = nil
     ) {
         self.id = id
+        self.lastSender = lastSender
         self.otherPerson = otherPerson
         self.isGroup = isGroup
         self.photo = photo

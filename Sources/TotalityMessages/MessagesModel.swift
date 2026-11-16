@@ -144,6 +144,7 @@ public final class MessagesModel {
         requests = []
         connection = .connecting
         people.close()
+        closeHome()
         if let service {
             self.service = nil
             await service.stop()
@@ -309,6 +310,10 @@ public final class MessagesModel {
 
     /// A chat another part of the app asked to open, such as the home tile or search.
     public var requestedChat: String?
+    /// The chat the home square shows, opened without marking it read (issue 127).
+    public internal(set) var homeChat: ChatModel?
+    /// The chat picked from the square's faces row. Nil follows the newest with something unread.
+    public var homePicked: String?
 
     /// Chats whose name, or a person's name, matches every word. Message text is never searched or
     /// shown, so search can't put a private message on screen outside its chat.
@@ -333,7 +338,7 @@ public final class MessagesModel {
     private func show(_ all: [ChatSummary]) {
         requests = all.filter(\.isRequest).sorted(by: ChatSummary.newestFirst)
         chats = all.filter { !$0.isRequest }.sorted(by: ChatSummary.newestFirst)
-        let others = chats.compactMap(\.otherPerson)
+        let others = Array(Set(chats.compactMap(\.otherPerson) + chats.filter(\.isGroup).compactMap(\.lastSender)))
         if !others.isEmpty { Task { await people.want(matrixIDs: others) } }
     }
 
@@ -402,7 +407,12 @@ public final class ChatModel {
 
     private var viewedKey: String { "messages.viewedUpTo.\(channel.id)" }
 
-    public func start() async {
+    /// False while the chat only shows on the home tile. Seeing it there isn't reading it, so nothing
+    /// is marked read and no receipt goes until the person replies or opens the chat.
+    private var marksRead = true
+
+    public func start(markingRead: Bool = true) async {
+        marksRead = markingRead
         viewedUpTo = defaults.object(forKey: viewedKey) as? Date
         await channel.observeDisappearing { [weak self] setting in
             Task { @MainActor in
@@ -427,7 +437,7 @@ public final class ChatModel {
                     self.all = messages
                     self.now = Date()
                     self.loaded = true
-                    if grew { await self.channel.markRead(share: self.share) }
+                    if grew, self.marksRead { await self.channel.markRead(share: self.share) }
                     await self.removeDue()
                 }
             },
@@ -437,7 +447,7 @@ public final class ChatModel {
         )
         await channel.loadEarlier()
         loaded = true
-        await channel.markRead(share: share)
+        if marksRead { await channel.markRead(share: share) }
     }
 
     public func loadEarlier() async { await channel.loadEarlier() }
@@ -528,6 +538,8 @@ public final class ChatModel {
         do {
             notice = nil
             try await channel.send(text, replyingTo: reply?.id)
+            // A reply from the home tile reads what it answers.
+            if !marksRead { await channel.markRead(share: share) }
         } catch {
             draft = text
             replyingTo = reply
@@ -602,8 +614,9 @@ public final class ChatModel {
     public func close() {
         clock?.cancel()
         clock = nil
-        // After viewing: what you've seen now won't show next time you open the chat.
-        if disappearing == .afterViewing, let newest = all.filter({ !$0.isOwn && disappearingState.covers($0) }).map(\.time).max() {
+        // After viewing: what you've seen now won't show next time you open the chat. A look on the
+        // home tile isn't a viewing.
+        if marksRead, disappearing == .afterViewing, let newest = all.filter({ !$0.isOwn && disappearingState.covers($0) }).map(\.time).max() {
             defaults.set(newest, forKey: viewedKey)
         }
         photos.removeAll()
