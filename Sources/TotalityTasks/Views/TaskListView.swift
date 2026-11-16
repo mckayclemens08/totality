@@ -27,7 +27,6 @@ struct TaskListView: View {
         .animation(Motion.standard, value: model.tasks(in: bucket).map(\.id))
         .animation(Motion.standard, value: expanded)
         .pullsToRefresh(with: model.refresher)
-        .modifier(LogbookSearch(isOn: bucket == .logbook, query: $query))
         .sheet(item: $scheduling) { target in
             ScheduleSheet(model: model, target: target) { scheduling = nil }
         }
@@ -76,7 +75,19 @@ struct TaskListView: View {
 
     @ViewBuilder private var today: some View {
         let tasks = model.tasks(in: .today)
-        if tasks.isEmpty {
+        let progress = model.progress
+        if !progress.isEmpty {
+            TodayProgressView(progress: progress)
+                .padding(.bottom, Space.s4)
+                .plainRow()
+        }
+        if tasks.isEmpty, !progress.isEmpty {
+            Text("Everything for today is done.")
+                .font(Typeface.callout)
+                .foregroundStyle(Theme.current.textSecondary.color)
+                .frame(maxWidth: .infinity)
+                .plainRow()
+        } else if tasks.isEmpty {
             EmptyList(bucket: .today).plainRow()
         } else if splitToday {
             ForEach(TodayPart.allCases) { part in
@@ -114,6 +125,9 @@ struct TaskListView: View {
 
     @ViewBuilder private var logbook: some View {
         let days = model.logbook(matching: query)
+        SearchBox("Search the Logbook", text: $query)
+            .padding(.bottom, Space.s2)
+            .plainRow()
         if days.isEmpty {
             if query.isEmpty {
                 EmptyList(bucket: .logbook).plainRow()
@@ -157,20 +171,6 @@ struct TaskListView: View {
                 }
                 .tint(Theme.current.textSecondary.color)
             }
-        }
-    }
-}
-
-/// The Logbook can be searched. Other lists have nothing to search yet.
-private struct LogbookSearch: ViewModifier {
-    let isOn: Bool
-    @Binding var query: String
-
-    func body(content: Content) -> some View {
-        if isOn {
-            content.searchable(text: $query, prompt: "Search the Logbook")
-        } else {
-            content
         }
     }
 }
@@ -236,7 +236,7 @@ struct EmptyList: View {
                 .font(Typeface.display)
                 .foregroundStyle(theme.textSecondary.color)
                 .frame(width: Space.s8, height: Space.s8)
-                .neumorphic(.pressed, in: Circle())
+                .neumorphic(.subtle, in: Circle())
                 .padding(.bottom, Space.s2)
                 .accessibilityHidden(true)
             Text(bucket.emptyTitle)

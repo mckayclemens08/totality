@@ -31,8 +31,7 @@ public struct QuickAddView: View {
                         .foregroundStyle(theme.textPrimary.color)
                         .focused($isFocused)
                         .lineLimit(1...8)
-                        .padding(Space.s4)
-                        .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.field, style: .continuous))
+                        .raisedField()
                         .onChange(of: text) { old, new in
                             // Return at the end adds the task and starts the next. A pasted list stays to be checked.
                             if new.hasSuffix("\n"), new.count == old.count + 1 {

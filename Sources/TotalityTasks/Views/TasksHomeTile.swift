@@ -2,9 +2,9 @@ import SwiftUI
 import TotalityCore
 import TotalityUI
 
-/// Tasks' big home tile. Each size has its own job (issue 127): medium is a glance at today's count and
-/// the next deadline, large is today's list with tick boxes that work on the tile, and the big square is a
-/// workspace, today's list plus quick add over the home page, without opening Tasks.
+/// Tasks' big home tile. Each size has its own job (issue 127): medium is a glance at today's ring, done
+/// against planned, and the next deadline, large is today's list with tick boxes that work on the tile, and the big square is a
+/// workspace, today's list plus an Add task button that opens quick add over the home page.
 public struct TasksHomeTile: View {
     private let model: TasksModel
     private let size: BigTileSize
@@ -34,22 +34,34 @@ public struct TasksHomeTile: View {
 
     private var glance: some View {
         let theme = Theme.current
-        let count = model.count(.today)
+        let progress = model.progress
         return VStack(alignment: .leading, spacing: Space.s1) {
             Spacer(minLength: 0)
-            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                Text("\(count)")
-                    .font(Typeface.display)
-                    .monospacedDigit()
-                    .foregroundStyle(count > 0 ? theme.accent.color : theme.textSecondary.color)
-                Text(count == 0 ? "Nothing planned today" : count == 1 ? "task today" : "tasks today")
-                    .font(Typeface.callout)
+            if progress.isEmpty {
+                Text("Nothing planned today")
+                    .font(Typeface.headline)
                     .foregroundStyle(theme.textSecondary.color)
+            } else {
+                HStack(spacing: Space.s3) {
+                    ProgressRing(progress: progress, isWhole: true)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(progress.count)
+                            .font(Typeface.title)
+                            .monospacedDigit()
+                            .foregroundStyle(theme.textPrimary.color)
+                            .contentTransition(.numericText())
+                        Text("done today")
+                            .font(Typeface.caption)
+                            .foregroundStyle(theme.textSecondary.color)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .tileLink(progress.spoken) { onOpenToday() }
             }
-            .tileLink(count == 1 ? "1 task today" : "\(count) tasks today", action: count > 0 ? { onOpenToday() } : nil)
             footer
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(Motion.standard, value: progress)
     }
 
     private func onOpenToday() {
@@ -63,14 +75,23 @@ public struct TasksHomeTile: View {
         let theme = Theme.current
         let todays = model.tasks(in: .today)
         return VStack(alignment: .leading, spacing: Space.s1) {
-            if todays.isEmpty {
+            let progress = model.progress
+            if progress.isEmpty {
                 Text("Nothing planned today")
                     .font(Typeface.headline)
                     .foregroundStyle(theme.textSecondary.color)
             } else {
-                Text(todays.count == 1 ? "1 today" : "\(todays.count) today")
-                    .font(Typeface.headline)
-                    .foregroundStyle(theme.accent.color)
+                HStack(spacing: Space.s2) {
+                    ProgressRing(progress: progress, diameter: Space.s5, lineWidth: Space.s1, isWhole: true)
+                    Text("\(progress.count) done today")
+                        .font(Typeface.headline)
+                        .monospacedDigit()
+                        .foregroundStyle(theme.textPrimary.color)
+                        .contentTransition(.numericText())
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(progress.spoken)
+                .animation(Motion.standard, value: progress)
             }
             ForEach(todays.prefix(limit)) { task in
                 TileTaskLine(model: model, task: task, onOpen: onOpen)
@@ -94,23 +115,14 @@ public struct TasksHomeTile: View {
     private var workspace: some View {
         let theme = Theme.current
         return VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: Space.s2) {
-                Image(systemName: "plus")
-                    .font(Typeface.callout.weight(.semibold))
-                    .foregroundStyle(theme.accentOn.color)
-                    .frame(width: Space.s5, height: Space.s5)
-                    .background(Circle().fill(theme.accent.color))
-                Text("Add a task, like “Call Gran tomorrow 5pm”")
-                    .font(Typeface.callout.weight(.regular))
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Space.s3)
-            .padding(.vertical, Space.s2)
-            .neumorphic(.pressed, in: Capsule())
-            .tileLink("New task") { onQuickAdd() }
-            list(limit: 7)
+            list(limit: 6)
+            // A plain button, never a field or a "type here" prompt: a tile holds no text input.
+            Label("Add task", systemImage: "plus")
+                .font(Typeface.callout.weight(.semibold))
+                .foregroundStyle(theme.accent.color)
+                .padding(.vertical, Space.s1)
+                .contentShape(Rectangle())
+                .tileLink("Add task") { onQuickAdd() }
         }
     }
 

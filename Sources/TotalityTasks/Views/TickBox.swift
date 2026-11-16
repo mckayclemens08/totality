@@ -1,7 +1,7 @@
 import SwiftUI
 import TotalityUI
 
-/// A small raised circle that presses in when the task is done.
+/// A small raised circle that fills with the accent and a check when the task is done.
 struct TickMark: View {
     let isDone: Bool
     var diameter: CGFloat = Space.s5
@@ -10,11 +10,14 @@ struct TickMark: View {
         let theme = Theme.current
         Image(systemName: "checkmark")
             .font(Typeface.micro.weight(.bold))
-            .foregroundStyle(theme.textSecondary.color)
+            .foregroundStyle(theme.accentOn.color)
             .opacity(isDone ? 1 : 0)
             .scaleEffect(isDone ? 1 : 0.4)
             .frame(width: diameter, height: diameter)
-            .neumorphic(isDone ? .pressed : .subtle, in: Circle())
+            .background {
+                if isDone { Circle().fill(theme.accent.color) }
+            }
+            .neumorphic(.subtle, in: Circle())
             .animation(Motion.quick, value: isDone)
             .accessibilityHidden(true)
     }

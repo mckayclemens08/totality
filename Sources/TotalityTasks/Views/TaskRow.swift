@@ -138,7 +138,7 @@ struct TaskEditor: View {
                 .font(Typeface.body)
                 .foregroundStyle(theme.textPrimary.color)
                 .focused($focus, equals: .title)
-                .padding(.top, Space.s3 - Space.s1)
+                .raisedField()
             notes
             checklist
             chips
@@ -195,6 +195,7 @@ struct TaskEditor: View {
                 .foregroundStyle(theme.textPrimary.color)
                 .focused($focus, equals: .notes)
                 .lineLimit(1...12)
+                .raisedField(.block)
         } else {
             // Markdown, shown as it reads. Tapping goes back to the words as typed.
             Text(Self.markdown(draft.notes))
@@ -202,6 +203,7 @@ struct TaskEditor: View {
                 .foregroundStyle(theme.textPrimary.color)
                 .tint(theme.accent.color)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .raisedField(.block)
                 .contentShape(Rectangle())
                 .onTapGesture { focus = .notes }
                 .accessibilityHint("Edit notes")
@@ -215,7 +217,7 @@ struct TaskEditor: View {
 
     private var checklist: some View {
         let theme = Theme.current
-        return VStack(alignment: .leading, spacing: 0) {
+        return VStack(alignment: .leading, spacing: Space.s2) {
             ForEach($draft.checklist) { $item in
                 HStack(spacing: Space.s1) {
                     TickBox(isDone: item.isDone, title: item.title, diameter: Space.s4) { item.isDone.toggle() }
@@ -234,6 +236,8 @@ struct TaskEditor: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Remove \(item.title)")
                 }
+                .padding(.horizontal, -Space.s2)
+                .raisedField()
             }
             HStack(spacing: Space.s1) {
                 Image(systemName: "plus")
@@ -252,8 +256,9 @@ struct TaskEditor: View {
                         focus = .newItem
                     }
             }
+            .padding(.horizontal, -Space.s2)
+            .raisedField()
         }
-        .padding(.leading, -Space.s2)
     }
 
     private var chips: some View {
@@ -300,21 +305,28 @@ struct TaskEditor: View {
                     .foregroundStyle(theme.textSecondary.color)
                     .padding(.horizontal, Space.s2)
                     .padding(.vertical, Space.s1)
-                    .neumorphic(.pressed, in: Capsule())
+                    .neumorphic(.subtle, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Remove tag \(tag)")
             }
-            TextField("Add tag", text: $newTag)
-                .font(Typeface.caption)
-                .focused($focus, equals: .newTag)
-                .frame(minWidth: Space.s8)
-                .fixedSize()
-                .onSubmit {
-                    let tag = newTag.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).lowercased()
-                    if !tag.isEmpty, !draft.tags.contains(tag) { draft.tags.append(tag) }
-                    newTag = ""
-                }
+            HStack(spacing: Space.s1) {
+                Image(systemName: "number")
+                    .font(Typeface.micro)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .accessibilityHidden(true)
+                TextField("Add tag", text: $newTag)
+                    .font(Typeface.callout.weight(.regular))
+                    .focused($focus, equals: .newTag)
+                    .frame(minWidth: Space.s8)
+                    .fixedSize()
+                    .onSubmit {
+                        let tag = newTag.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).lowercased()
+                        if !tag.isEmpty, !draft.tags.contains(tag) { draft.tags.append(tag) }
+                        newTag = ""
+                    }
+            }
+            .raisedField()
         }
     }
 }
