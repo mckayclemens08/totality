@@ -90,6 +90,13 @@ struct JournalView: View {
             }
         }
         .background(theme.bg.color)
+        // Outside the scrolling page, so it rides above the keyboard instead of hiding under it.
+        .safeAreaInset(edge: .bottom) {
+            if today != nil {
+                WritingFormatBar(controller: editor)
+                    .background(theme.bg.color)
+            }
+        }
         .navigationTitle("Journal")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -178,8 +185,10 @@ struct JournalView: View {
             }
             JournalEditor(
                 draft: today, model: model, editor: editor, placeholder: "What happened today?", focusOnOpen: showing == nil,
-                onDayEnd: { Task { await nextDay() } }
+                onDayEnd: { Task { await nextDay() } }, showsBar: false
             )
+                // The page's own gutter lines the writing up with the headings above it.
+                .padding(.horizontal, -Space.s4)
                 .containerRelativeFrame(.vertical) { height, _ in height * 0.85 }
         }
     }
@@ -342,6 +351,8 @@ struct JournalEditor: View {
     let focusOnOpen: Bool
     /// The entry's day has ended. Anything typed before then is saved first.
     var onDayEnd: () -> Void = {}
+    /// Today's page puts the format bar above the keyboard itself, so the editor leaves it out.
+    var showsBar = true
 
     private static let savePause = Duration.milliseconds(600)
 
@@ -364,10 +375,9 @@ struct JournalEditor: View {
                             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(theme.bg.color)
                         }
                     }
-                WritingFormatBar(controller: editor)
+                if showsBar { WritingFormatBar(controller: editor) }
             }
         }
-        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         .task(id: draft.id) { await open() }
         .task(id: current?.journal?.locksAt) { await waitForDayEnd() }
         .onChange(of: editor.phase) { if editor.phase == .ready, focusOnOpen { editor.focus() } }
