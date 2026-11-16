@@ -134,12 +134,12 @@ import TotalityUI
             let opening = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
             let failed = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
             failed.journalLoaded = false
-            let writing = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
-            writing.journal = JournalListing(entries: (0..<5).map { journalItem(earlier(Double($0))) }, notes: [:])
-            writing.journalLoaded = true
-            writing.journalTodayWords = 412
+            let open = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
+            open.journal = JournalListing(entries: (0..<5).map { journalItem(earlier(Double($0))) }, notes: [:])
+            open.journalLoaded = true
+            open.journalTodayWords = 412
             let rowStates = VStack(alignment: .leading, spacing: Space.s4) {
-                JournalRow(model: writing)
+                JournalRow(model: open)
                 JournalRow(model: opening)
                 JournalRow(model: failed)
                 Spacer()

@@ -767,10 +767,11 @@ extension ReaderVault: SyncArea {
         // the locked one back, so an older device can't overwrite it.
         if try journalKeepsWords(object, theirs: theirs) {
             // Their words may be newer than the clocks say, so they're kept as a note under the day.
-            // Named for the version, so a second sync can't make a second note.
+            // Named for the version, so a second sync can't make a second note, and keyed, so the server
+            // can't tell the note came from a refused upload.
             let incoming = try openedFile(object, keep: 0)
             if try !file(of: object.id).sameBytes(as: incoming) {
-                try writeConflictCopy(of: theirs, file: incoming, id: UUID(derivedFrom: object.hash))
+                try writeConflictCopy(of: theirs, file: incoming, id: rootKey.derivedID(from: "reader-journal-kept:\(object.hash)"))
             }
             return
         }
