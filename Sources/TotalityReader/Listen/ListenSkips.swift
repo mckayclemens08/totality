@@ -8,21 +8,24 @@ import PDFKit
 enum ListenSkips {
     static let readHeadingsKey = "reader.listen.readHeadings"
 
-    /// Everything to skip in an item's text. `data` is the file, and `mime` says what kind it is.
-    static func ranges(text: String, data: Data, mime: String?, readHeadings: Bool) -> [Range<Int>] {
+    /// Everything to skip in an item's text. `file` is the file, read a page or a part at a time, and
+    /// `mime` says what kind it is.
+    static func ranges(text: String, file: any ByteSource, mime: String?, readHeadings: Bool) -> [Range<Int>] {
         if mime == "application/pdf" {
-            guard let document = PDFDocument(data: data), !document.isLocked else { return [] }
-            let pages = (0..<document.pageCount).map { document.page(at: $0)?.string ?? "" }
+            guard let pdf = PDFSource.open(file), !pdf.isLocked else { return [] }
+            let pages = pdf.pages
             let map = PDFPageMap(whole: text, pages: pages)
             var found = furniture(pages: pages, map: map)
-            if !readHeadings { found += outlineHeadings(document, pages: pages, map: map) }
+            // A PDF too big to hold whole has no chapter list read, only its running heads and feet.
+            if !readHeadings, let document = pdf.document { found += outlineHeadings(document, pages: pages, map: map) }
             return merged(found)
         }
         guard !readHeadings else { return [] }
         let titles: [String]
         if mime == MarkdownText.mime {
+            let data = (try? ReadableText.whole(file)) ?? Data()
             titles = MarkdownText.headings(String(decoding: data, as: UTF8.self)).map(\.text).map(MarkdownText.plainText)
-        } else if let document = try? ReadableText.document(data, mime: mime) {
+        } else if let document = try? ReadableText.document(file, mime: mime) {
             titles = document.sections.flatMap(\.blocks).filter(\.isHeading).map(\.text)
         } else {
             titles = []

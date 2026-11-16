@@ -34,8 +34,9 @@ public struct ReadableDocument: Sendable, Equatable {
 /// declaration and no doctype, because that's where encoding and entity tricks live, and nothing here
 /// ever fetches anything.
 enum SafeXML {
-    /// More text than this isn't a book, so it stops rather than filling memory.
-    static let maxCharacters = 32 * 1024 * 1024
+    /// More text than this isn't a book, so it stops rather than filling memory. It's about 15,000 pages,
+    /// many times the longest book, and a big file's pictures don't count toward it.
+    static let maxCharacters = 64 * 1024 * 1024
     static let maxTitleLength = 300
 
     private static let namedEntities = [
@@ -311,8 +312,13 @@ enum BookReader {
         return EPUBPackage(title: package.title, spine: spine, types: types)
     }
 
-    static func epub(_ data: Data) throws -> (title: String?, document: ReadableDocument) {
-        var archive = try ZipArchive(data)
+    static func epub(_ source: any ByteSource) throws -> (title: String?, document: ReadableDocument) {
+        var archive = try ZipArchive(source)
+        return try epub(&archive)
+    }
+
+    /// The book's words, read a chapter at a time from an archive already open.
+    static func epub(_ archive: inout ZipArchive) throws -> (title: String?, document: ReadableDocument) {
         let package = try package(&archive)
         var sections: [ReadableDocument.Section] = []
         for path in package.spine {
@@ -325,8 +331,14 @@ enum BookReader {
         return (package.title, ReadableDocument(sections: sections))
     }
 
-    static func word(_ data: Data) throws -> ReadableDocument {
-        var archive = try ZipArchive(data)
+    /// Just the title, without reading any chapter.
+    static func epubTitle(_ source: any ByteSource) throws -> String? {
+        var archive = try ZipArchive(source)
+        return try package(&archive).title
+    }
+
+    static func word(_ source: any ByteSource) throws -> ReadableDocument {
+        var archive = try ZipArchive(source)
         guard let part = try archive.read("word/document.xml") else { throw ReaderError.notReadable }
         let parser = WordParser()
         SafeXML.parse(part, with: parser)

@@ -64,7 +64,7 @@ public enum DriveProblem: Error, Equatable, Sendable {
         case .notSetUp: "Totality isn't set up to use Google Drive yet. That's on Totality's side, not your account's. Try again later."
         case .notFound: "This is no longer in Google Drive, or it's no longer shared with you."
         case .unexpected: "Google Drive sent something Totality didn't understand. Pull down to try again."
-        case .tooLarge: "This file is too big to open here. It's still in Google Drive."
+        case .tooLarge: "This file is too big to open here. Files up to 5 GB open, and text up to 64 MB. It's still in Google Drive."
         }
     }
 }
@@ -264,6 +264,28 @@ struct DriveAPI: Sendable {
         return try await send(request)
     }
 
+    /// A file's bytes, handed to `receive` as they arrive, for a file too big to hold whole. Only a file
+    /// stored in Drive comes this way: Google's own formats are exported, and an export is small.
+    func download(_ entry: DriveEntry, into receive: @escaping @Sendable (Data) throws -> Void, accessToken: String) async throws {
+        guard Self.isID(entry.id) else { throw DriveProblem.unexpected }
+        var request = URLRequest(url: Self.url("files/\(entry.id)", [
+            URLQueryItem(name: "alt", value: "media"),
+            URLQueryItem(name: "supportsAllDrives", value: "true"),
+        ]))
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let refusal: Data, response: HTTPURLResponse
+        do {
+            (refusal, response) = try await signIn.stream(request, into: receive)
+        } catch let problem as DriveProblem {
+            throw problem
+        } catch let error as CryptoError {
+            throw error
+        } catch {
+            throw DriveProblem.from(error)
+        }
+        try Self.check(response.statusCode, refusal)
+    }
+
     static let uploadBase = URL(string: "https://www.googleapis.com/upload/drive/v3")!
 
     /// Saves new bytes over a file, which Drive keeps as a new revision.
@@ -360,10 +382,16 @@ struct DriveAPI: Sendable {
         } catch {
             throw DriveProblem.from(error)
         }
-        switch response.statusCode {
-        case 200...204: return data
+        try Self.check(response.statusCode, data)
+        return data
+    }
+
+    /// What an answer's status means.
+    static func check(_ status: Int, _ body: Data) throws {
+        switch status {
+        case 200...204: return
         case 401: throw DriveProblem.expired
-        case 403: throw Self.refusal(data)
+        case 403: throw Self.refusal(body)
         case 404, 410: throw DriveProblem.notFound
         case 429, 500...: throw DriveProblem.unreachable
         default: throw DriveProblem.unexpected

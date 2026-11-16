@@ -73,11 +73,16 @@ func makePDF(_ text: String, password: String? = nil) throws -> Data {
         }
     }
 
-    @Test func oversizedImportIsRefused() async throws {
+    @Test func aFileFarPastWhatMemoryCanHoldIsRefusedWhereItCantBeSealedInPieces() async throws {
+        // A store with no real files can only keep a body whole.
         let vault = try newVault()
-        await #expect(throws: ReaderError.tooLarge) {
-            try await vault.importFile(Data(count: ReaderVault.maxImportBytes + 1), filename: "a.pdf")
-        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("big-\(UUID().uuidString).pdf")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(ReaderFile.wholeLimit + 1))
+        try handle.close()
+        defer { try? FileManager.default.removeItem(at: url) }
+        await #expect(throws: ReaderError.tooLarge) { try await vault.importFile(at: url, filename: "big.pdf") }
     }
 
     @Test func deleteRemovesBothBlobs() async throws {

@@ -9,7 +9,7 @@ import Sodium
 /// and tag. Every chunk's associated data names the object, the chunk's place, the chunk size and the
 /// whole length, so a server can't swap chunks between files or places, cut the file short, or add to it.
 public enum ChunkedCipher {
-    static let version: UInt8 = 2
+    public static let version: UInt8 = 2
     public static let chunkSize = 1 << 20
     static let headerCount = 13
     private static let nonceCount = 24
@@ -22,25 +22,89 @@ public enum ChunkedCipher {
         return headerCount + plainLength + chunks * overhead
     }
 
-    /// Seals `input` into `output`, a chunk at a time. `output` is replaced.
-    public static func seal(file input: URL, to output: URL, key: ObjectKey, objectID: UUID, chunkSize: Int = chunkSize) throws {
+    /// Seals `input` into `output`, a chunk at a time. `output` is replaced. `progress` hears how many
+    /// bytes are sealed so far, after each chunk.
+    public static func seal(
+        file input: URL, to output: URL, key: ObjectKey, objectID: UUID, chunkSize: Int = chunkSize,
+        progress: ((Int) -> Void)? = nil
+    ) throws {
         let length = try input.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard length > 0, chunkSize > 0 else { throw CryptoError.malformedCiphertext }
         let reader = try FileHandle(forReadingFrom: input)
         defer { try? reader.close() }
-        FileManager.default.createFile(atPath: output.path, contents: nil)
-        let writer = try FileHandle(forWritingTo: output)
-        defer { try? writer.close() }
-        try writer.truncate(atOffset: 0)
-        let header = Header(chunkSize: chunkSize, plainLength: length)
-        try writer.write(contentsOf: header.bytes)
-        var index = 0
-        var done = 0
-        while done < length {
-            let count = min(chunkSize, length - done)
-            guard let plain = try reader.read(upToCount: count), plain.count == count else { throw CryptoError.malformedCiphertext }
-            try writer.write(contentsOf: try sealChunk(plain, key: key, objectID: objectID, index: index, header: header))
-            done += count
+        let writer = try Writer(to: output, plainLength: length, key: key, objectID: objectID, chunkSize: chunkSize)
+        while writer.written < length {
+            // A file's reads are let go a piece at a time. Async code drains no pool of its own, so
+            // without this a whole file's worth would build up before any was freed.
+            try autoreleasepool {
+                guard let plain = try reader.read(upToCount: min(chunkSize, length - writer.written)), !plain.isEmpty else {
+                    throw CryptoError.malformedCiphertext
+                }
+                try writer.append(plain)
+            }
+            progress?(writer.written)
+        }
+        try writer.finish()
+    }
+
+    /// Seals a file whose length is known before its bytes arrive, as they arrive, so none of it is ever
+    /// held whole or written anywhere unsealed. Only the chunk being filled is in memory.
+    public final class Writer {
+        public let plainLength: Int
+        private let header: Header
+        private let handle: FileHandle
+        private let key: ObjectKey
+        private let objectID: UUID
+        private var pending = Data()
+        private var index = 0
+        private var sealedCount = 0
+
+        /// `output` is replaced.
+        public init(to output: URL, plainLength: Int, key: ObjectKey, objectID: UUID, chunkSize: Int = ChunkedCipher.chunkSize) throws {
+            guard plainLength > 0, chunkSize > 0, chunkSize <= 16 << 20 else { throw CryptoError.malformedCiphertext }
+            header = Header(chunkSize: chunkSize, plainLength: plainLength)
+            FileManager.default.createFile(atPath: output.path, contents: nil)
+            handle = try FileHandle(forWritingTo: output)
+            do {
+                try handle.truncate(atOffset: 0)
+                try handle.write(contentsOf: header.bytes)
+            } catch {
+                try? handle.close()
+                throw error
+            }
+            self.plainLength = plainLength
+            self.key = key
+            self.objectID = objectID
+        }
+
+        deinit {
+            try? handle.close()
+        }
+
+        /// How many bytes have come in so far.
+        public var written: Int { sealedCount + pending.count }
+
+        /// More of the file. More than the length given at the start is refused.
+        public func append(_ data: Data) throws {
+            guard data.count <= plainLength - written else { throw CryptoError.malformedCiphertext }
+            pending += data
+            while pending.count >= header.chunkSize {
+                try sealPending(header.chunkSize)
+            }
+        }
+
+        /// Seals the last chunk. A file that came up short of its length is refused.
+        public func finish() throws {
+            if !pending.isEmpty { try sealPending(pending.count) }
+            guard sealedCount == plainLength else { throw CryptoError.malformedCiphertext }
+            try handle.synchronize()
+            try handle.close()
+        }
+
+        private func sealPending(_ count: Int) throws {
+            let plain = pending.prefix(count)
+            try handle.write(contentsOf: try ChunkedCipher.sealChunk(Data(plain), key: key, objectID: objectID, index: index, header: header))
+            pending = Data(pending.dropFirst(count))
+            sealedCount += count
             index += 1
         }
     }
@@ -129,8 +193,14 @@ public enum ChunkedCipher {
         private let key: ObjectKey
         private let objectID: UUID
         private let lock = NSLock()
+        /// The most recently opened chunks, so reading a little at a time doesn't open each chunk again.
+        private let keep: Int
+        private var kept: [Int: Data] = [:]
+        private var keptOrder: [Int] = []
 
-        public init(file: URL, key: ObjectKey, objectID: UUID) throws {
+        /// `keepChunks` is how many opened chunks stay in memory, for readers that ask for small ranges.
+        public init(file: URL, key: ObjectKey, objectID: UUID, keepChunks: Int = 0) throws {
+            keep = max(0, keepChunks)
             handle = try FileHandle(forReadingFrom: file)
             do {
                 guard let first = try handle.read(upToCount: ChunkedCipher.headerCount) else { throw CryptoError.malformedCiphertext }
@@ -153,11 +223,12 @@ public enum ChunkedCipher {
             try? handle.close()
         }
 
-        var chunkSize: Int { header.chunkSize }
-        var chunkCount: Int { (plainLength + header.chunkSize - 1) / header.chunkSize }
+        public var chunkSize: Int { header.chunkSize }
+        public var chunkCount: Int { (plainLength + header.chunkSize - 1) / header.chunkSize }
 
-        func chunk(_ index: Int) throws -> Data {
-            try open(index)
+        public func chunk(_ index: Int) throws -> Data {
+            guard index >= 0, index < chunkCount else { throw CryptoError.malformedCiphertext }
+            return try open(index)
         }
 
         /// Opens every chunk once, so a file damaged anywhere is refused before it's kept or played.
@@ -202,15 +273,32 @@ public enum ChunkedCipher {
         }
 
         private func open(_ index: Int) throws -> Data {
+            if keep > 0, let hit = lock.withLock({ kept[index] }) { return hit }
+            let plain = try unseal(index)
+            if keep > 0 {
+                lock.withLock {
+                    kept[index] = plain
+                    keptOrder.removeAll { $0 == index }
+                    keptOrder.append(index)
+                    while keptOrder.count > keep { kept[keptOrder.removeFirst()] = nil }
+                }
+            }
+            return plain
+        }
+
+        private func unseal(_ index: Int) throws -> Data {
             let start = index * header.chunkSize
             let count = min(header.chunkSize, plainLength - start)
             let offset = ChunkedCipher.headerCount + index * (header.chunkSize + ChunkedCipher.overhead)
+            // Copied out of its pool, so the read is let go now, not when some later pool drains.
             let sealed: Data = try lock.withLock {
-                try handle.seek(toOffset: UInt64(offset))
-                guard let data = try handle.read(upToCount: count + ChunkedCipher.overhead), data.count == count + ChunkedCipher.overhead else {
-                    throw CryptoError.malformedCiphertext
+                try autoreleasepool {
+                    try handle.seek(toOffset: UInt64(offset))
+                    guard let data = try handle.read(upToCount: count + ChunkedCipher.overhead), data.count == count + ChunkedCipher.overhead else {
+                        throw CryptoError.malformedCiphertext
+                    }
+                    return Data(data)
                 }
-                return data
             }
             let aead = Sodium().aead.xchacha20poly1305ietf
             guard let plain = aead.decrypt(

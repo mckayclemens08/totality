@@ -176,12 +176,19 @@ public struct SealedStoreClient: SealedStore {
         let count = Int(try handle.seekToEnd())
         try handle.seek(toOffset: 0)
         var hasher = SHA256()
-        while let piece = try handle.read(upToCount: pieceSize), !piece.isEmpty { hasher.update(data: piece) }
+        // Each read is let go before the next, so a big file is never held while it's hashed.
+        while try autoreleasepool(invoking: { () throws -> Bool in
+            guard let piece = try handle.read(upToCount: pieceSize), !piece.isEmpty else { return false }
+            hasher.update(data: piece)
+            return true
+        }) {}
         let hash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         try await upload(count: count, hash: hash, as: id) { range in
-            try handle.seek(toOffset: UInt64(range.lowerBound))
-            guard let piece = try handle.read(upToCount: range.count), piece.count == range.count else { throw SealedStoreError.mismatch }
-            return piece
+            try autoreleasepool {
+                try handle.seek(toOffset: UInt64(range.lowerBound))
+                guard let piece = try handle.read(upToCount: range.count), piece.count == range.count else { throw SealedStoreError.mismatch }
+                return Data(piece)
+            }
         }
     }
 

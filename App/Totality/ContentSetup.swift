@@ -56,7 +56,7 @@ enum ContentSetup {
     static func keyRing() throws -> ContentKeyRing {
         let stores = try stores()
         return ContentKeyRing(keys: KeychainKeyStore(), areas: [
-            SealedArea(store: stores.reader, purposes: ReaderVault.sealedPurposes),
+            SealedArea(files: stores.reader, purposes: ReaderVault.sealedPurposes, chunked: ReaderVault.chunkedPurposes),
             SealedArea(store: stores.calendar, purposes: CalendarVault.sealedPurposes),
             SealedArea(store: stores.web, purposes: WebVault.sealedPurposes),
             SealedArea(store: stores.mail, purposes: MailVault.sealedPurposes),
@@ -92,6 +92,11 @@ enum ContentSetup {
         let devices = SystemCalendarSource()
         let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
         let reader = ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices()))
+        // Read when an import asks, since sign-in may come after the Reader opens.
+        reader.storageLeft = {
+            guard let usage = await MainActor.run(body: { AccountSetup.storageUsage }) else { return nil }
+            return try? await usage().left
+        }
         // Beside the Reader's items, under its own key purpose, and sealed the same way.
         let places = ReadingPlaceBook(store: stores.reader, rootKey: rootKey)
         reader.places = places

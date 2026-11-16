@@ -1,32 +1,81 @@
 import CryptoKit
 import Foundation
 
+/// A sealed body kept in a file, for one too big to hold in memory, like a long book or a scanned PDF.
+/// The digest is the SHA-256 of the file's bytes, worked out once, a piece at a time.
+public struct SealedFile: Sendable, Equatable {
+    public let url: URL
+    public let count: Int
+    public let digest: Data
+
+    public init(url: URL, count: Int, digest: Data) {
+        self.url = url
+        self.count = count
+        self.digest = digest
+    }
+
+    /// Reads the file once, a megabyte at a time.
+    public init(reading url: URL) throws {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        var count = 0
+        // Each read is let go before the next, so a big file is never held while it's hashed.
+        while try autoreleasepool(invoking: { () throws -> Bool in
+            guard let piece = try handle.read(upToCount: 1 << 20), !piece.isEmpty else { return false }
+            hasher.update(data: piece)
+            count += piece.count
+            return true
+        }) {}
+        self.init(url: url, count: count, digest: Data(hasher.finalize()))
+    }
+}
+
 /// One item as it travels: sealed metadata, and a sealed body if it has one. The server sees these
-/// bytes and nothing inside them.
+/// bytes and nothing inside them. A big body travels as a file, `bodyFile`, and is never read whole.
 public struct SealedObject: Sendable, Equatable {
     public let id: UUID
     public let kind: ContentKind
     public let meta: Data
     public let body: Data?
+    public let bodyFile: SealedFile?
 
     public init(id: UUID, kind: ContentKind, meta: Data, body: Data?) {
         self.id = id
         self.kind = kind
         self.meta = meta
         self.body = body
+        bodyFile = nil
+    }
+
+    public init(id: UUID, kind: ContentKind, meta: Data, bodyFile: SealedFile) {
+        self.id = id
+        self.kind = kind
+        self.meta = meta
+        body = nil
+        self.bodyFile = bodyFile
+    }
+
+    public var hasBody: Bool { body != nil || bodyFile != nil }
+
+    /// How many bytes the body is, in memory or in its file.
+    public var bodyCount: Int { bodyFile?.count ?? body?.count ?? 0 }
+
+    private var bodyDigest: Data? {
+        bodyFile?.digest ?? body.map { Data(SHA256.hash(data: $0)) }
     }
 
     /// Identifies these exact bytes. Sealing is randomized, so any change gives a new hash.
     public var hash: String {
         var hasher = SHA256()
         hasher.update(data: Data(SHA256.hash(data: meta)))
-        hasher.update(data: Data(SHA256.hash(data: body ?? Data())))
+        hasher.update(data: bodyDigest ?? Data(SHA256.hash(data: Data())))
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// Identifies just the body, so a change to the details alone doesn't move the whole file again.
     public var bodyHash: String? {
-        body.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() }
+        bodyDigest.map { $0.map { String(format: "%02x", $0) }.joined() }
     }
 }
 

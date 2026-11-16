@@ -425,9 +425,9 @@ struct BookPagesReader: View {
                 Task { await model.listen(to: item.id, from: offset, on: script) }
             }
             do {
-                let data = try await model.fileData(of: item.id)
+                let file = try await model.file(of: item.id)
                 let text = try? await model.text(of: item.id)
-                guard let source = BookSource(data: data, mime: item.mime, text: text) else {
+                guard let source = BookSource(data: file, mime: item.mime, text: text) else {
                     problem = ReaderError.notReadable.message
                     return
                 }

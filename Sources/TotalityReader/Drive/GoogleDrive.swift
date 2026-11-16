@@ -63,6 +63,8 @@ public actor GoogleDrive {
     let rootKey: ContentRootKey
     let now: @Sendable () -> Date
     private(set) var isClosed = false
+    /// Piece files being written now, which a sweep of the cache leaves alone.
+    var downloading: Set<String> = []
     /// A conflict's merge, written when sync stores the other side's copy.
     var pendingMerge: SealedRecordStore<DriveShared>.Pending?
 

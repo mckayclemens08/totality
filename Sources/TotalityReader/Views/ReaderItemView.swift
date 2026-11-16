@@ -168,14 +168,17 @@ private struct SectionText: View {
     }
 }
 
-/// A PDF's real pages. The file is decrypted into memory and never written anywhere.
+/// A PDF's real pages, in PDFKit when the file fits in memory. A bigger one (issue 124) is drawn a page
+/// at a time by `LargePDFPages`, so only the pages near the screen are unsealed. Nothing is ever written
+/// anywhere.
 private struct PDFReader: View {
     let item: ReaderItem
     let model: ReaderModel
     let readAlong: Bool
 
     @State private var document: PDFDocument?
-    @State private var data: Data?
+    @State private var large: LargePDF?
+    @State private var file: ReaderFile?
     @State private var problem: String?
     @State private var along: PDFAlong?
     @State private var isFollowing = true
@@ -210,11 +213,8 @@ private struct PDFReader: View {
     var body: some View {
         let theme = Theme.current
         Group {
-            if let document {
-                PDFPages(document: document, follow: follow, startPage: startPage) { page in
-                    let listen = along?.map.pages.first { $0.index == page }?.start
-                    model.remember(.pdf(page: page), listen: listen, for: item.id)
-                }
+            if document != nil || large != nil {
+                pages
                     .overlay(alignment: .bottom) {
                         if readAlong, along?.script.sentences.isEmpty == true {
                             Text("This PDF has no text to follow.")
@@ -237,48 +237,65 @@ private struct PDFReader: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.bg.color)
         .navigationTitle(item.displayTitle)
+        .task { await open() }
         // The file may still be loading when this first runs, so it runs again once the data is here.
-        .task(id: readAlong && data != nil) {
-            guard readAlong, along == nil, let data, let script = await model.readAlongScript(of: item.id) else { return }
-            // It takes a while in a long file, so it doesn't hold up the pages.
+        .task(id: readAlong && file != nil) {
+            guard readAlong, along == nil, let file, let script = await model.readAlongScript(of: item.id) else { return }
+            // It takes a while in a long file, so it doesn't hold up the pages. It reads its own copy.
             along = await Task.detached {
-                PDFAlong(script: script, map: ReadableText.pageMap(data))
+                PDFAlong(script: script, map: ReadableText.pageMap(file))
             }.value
         }
-        .task {
-            do {
-                let data = try await model.fileData(of: item.id)
-                guard let opened = PDFDocument(data: data) else {
-                    problem = ReaderError.notReadable.message
-                    return
-                }
-                if opened.isLocked {
-                    problem = ReaderError.passwordProtected.message
-                } else {
-                    startPage = await openingPage(data: data, pages: opened.pageCount)
-                    document = opened
-                    self.data = data
-                    // Listen is likely next, and a long book takes seconds to split. The pages show first.
-                    Task { await model.prepareListening(to: item.id) }
-                }
-            } catch let error as ReaderError {
-                problem = error.message
-            } catch {
-                problem = "It may have been damaged, or it may belong to another key."
+    }
+
+    @ViewBuilder private var pages: some View {
+        let onPage = { (page: Int) in
+            let listen = along?.map.pages.first { $0.index == page }?.start
+            model.remember(.pdf(page: page), listen: listen, for: item.id)
+        }
+        if let document {
+            PDFPages(document: document, follow: follow, startPage: startPage, onPage: onPage)
+        } else if let large {
+            LargePDFPages(pdf: large, follow: follow, startPage: startPage, onPage: onPage)
+        }
+    }
+
+    private func open() async {
+        do {
+            let file = try await model.file(of: item.id)
+            guard let opened = PDFSource.open(file) else {
+                problem = ReaderError.notReadable.message
+                return
             }
+            guard !opened.isLocked else {
+                problem = ReaderError.passwordProtected.message
+                return
+            }
+            startPage = await openingPage(file: file, pages: opened.pageCount)
+            switch opened {
+            case .whole(let whole): document = whole
+            case .large(let pdf): large = pdf
+            }
+            self.file = file
+            // Listen is likely next, and a long book takes seconds to split. The pages show first.
+            Task { await model.prepareListening(to: item.id) }
+        } catch let error as ReaderError {
+            problem = error.message
+        } catch {
+            problem = "It may have been damaged, or it may belong to another key."
         }
     }
 }
 
 extension PDFReader {
     /// The page where the person stopped, or the one Listen is on when Read along is on and it got further.
-    fileprivate func openingPage(data: Data, pages: Int) async -> Int? {
+    fileprivate func openingPage(file: ReaderFile, pages: Int) async -> Int? {
         let page: Int?
         switch await model.opening(of: item) {
         case .spot(.pdf(let saved)):
             page = saved
         case .listen(let offset):
-            let map = await Task.detached { ReadableText.pageMap(data) }.value
+            let map = await Task.detached { ReadableText.pageMap(file) }.value
             page = map.pages.last { $0.start <= offset }?.index
         default:
             page = nil
@@ -288,7 +305,7 @@ extension PDFReader {
 }
 
 /// Read along on a PDF's own pages.
-private struct PDFFollow {
+struct PDFFollow {
     let map: PDFPageMap
     let highlight: ReadAlongHighlight?
     let isFollowing: Bool

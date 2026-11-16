@@ -5,6 +5,19 @@ import Security
 /// One HTTPS request and its answer, so tests can stand in for Google.
 public protocol GoogleHTTP: Sendable {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+    /// The same, for a download too big to hold: a successful answer's body goes to `receive` as it
+    /// arrives, and isn't kept. Any other answer's body is returned, for its reason.
+    func stream(_ request: URLRequest, into receive: @escaping @Sendable (Data) throws -> Void) async throws -> (Data, HTTPURLResponse)
+}
+
+extension GoogleHTTP {
+    /// For stand-ins: the whole body at once.
+    public func stream(_ request: URLRequest, into receive: @escaping @Sendable (Data) throws -> Void) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await send(request)
+        guard (200..<300).contains(response.statusCode) else { return (data, response) }
+        try receive(data)
+        return (Data(), response)
+    }
 }
 
 /// Talks to Google with nothing remembered between requests: no cookies, no cache, TLS 1.2 or later.
@@ -26,6 +39,76 @@ public struct EphemeralHTTP: GoogleHTTP {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         return (data, http)
+    }
+
+    /// Through the same session, so redirects, cookies and caching are handled just as `send` handles them.
+    public func stream(_ request: URLRequest, into receive: @escaping @Sendable (Data) throws -> Void) async throws -> (Data, HTTPURLResponse) {
+        let task = session.dataTask(with: request)
+        let delegate = StreamedAnswer(receive: receive)
+        task.delegate = delegate
+        return try await withTaskCancellationHandler {
+            try await delegate.finished(task)
+        } onCancel: {
+            task.cancel()
+        }
+    }
+}
+
+/// One streamed answer. A success's body is handed on as it arrives. Anything else's is kept, up to
+/// 64 KB, which is plenty for Google's reasons.
+private final class StreamedAnswer: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let receive: @Sendable (Data) throws -> Void
+    private let lock = NSLock()
+    private var response: HTTPURLResponse?
+    private var refusal = Data()
+    private var failure: Error?
+    private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
+
+    init(receive: @escaping @Sendable (Data) throws -> Void) {
+        self.receive = receive
+    }
+
+    func finished(_ task: URLSessionDataTask) async throws -> (Data, HTTPURLResponse) {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.withLock { self.continuation = continuation }
+            task.resume()
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard let http = response as? HTTPURLResponse else {
+            lock.withLock { failure = URLError(.badServerResponse) }
+            completionHandler(.cancel)
+            return
+        }
+        lock.withLock { self.response = http }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        let stop: Bool = lock.withLock {
+            guard failure == nil, let response else { return true }
+            if (200..<300).contains(response.statusCode) {
+                do { try receive(data) } catch { failure = error; return true }
+            } else if refusal.count < 64 * 1024 {
+                refusal += data.prefix(64 * 1024 - refusal.count)
+            }
+            return false
+        }
+        if stop { dataTask.cancel() }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let (continuation, result): (CheckedContinuation<(Data, HTTPURLResponse), Error>?, Result<(Data, HTTPURLResponse), Error>) = lock.withLock {
+            let waiting = self.continuation
+            self.continuation = nil
+            if let failure { return (waiting, .failure(failure)) }
+            if let error { return (waiting, .failure(error)) }
+            guard let response else { return (waiting, .failure(URLError(.badServerResponse))) }
+            return (waiting, .success((refusal, response)))
+        }
+        continuation?.resume(with: result)
     }
 }
 
@@ -196,6 +279,11 @@ public struct GoogleSignIn: Sendable {
     /// Any other request to Google, through the same cookie-free, cache-free connection.
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         try await http.send(request)
+    }
+
+    /// A download too big to hold, handed to `receive` as it arrives. See `GoogleHTTP.stream`.
+    public func stream(_ request: URLRequest, into receive: @escaping @Sendable (Data) throws -> Void) async throws -> (Data, HTTPURLResponse) {
+        try await http.stream(request, into: receive)
     }
 
     private struct TokenAnswer: Decodable {

@@ -18,6 +18,11 @@ public enum References {
     // MARK: Reading a file in
 
     /// The CSL JSON to store for an imported file, or nil if it isn't a reference library.
+    /// Whether a file of this name might be a reference library, which is read whole to find out.
+    static func mightBeLibrary(_ filename: String) -> Bool {
+        ["bib", "bibtex", "json", "csljson"].contains((filename as NSString).pathExtension.lowercased())
+    }
+
     static func library(from data: Data, filename: String) -> Data? {
         let ext = (filename as NSString).pathExtension.lowercased()
         if ext == "bib" || ext == "bibtex" {

@@ -44,7 +44,7 @@ private func essayPDF(template: ExportTemplate) throws -> Data {
             let text = try ReadableText.extract(data, mime: "application/pdf")
             let pages = try #require(PDFDocument(data: data)).pageCount
             #expect(pages >= 3, "\(template)")
-            let skips = ListenSkips.ranges(text: text, data: data, mime: "application/pdf", readHeadings: true)
+            let skips = ListenSkips.ranges(text: text, file: data, mime: "application/pdf", readHeadings: true)
             let script = ListenScript(text: text, skipping: skips)
             for sentence in script.sentences {
                 #expect(sentence.text.firstMatch(of: /Ortiz \d/) == nil, "\(template): \(sentence.text)")
@@ -68,7 +68,7 @@ private func essayPDF(template: ExportTemplate) throws -> Data {
     func epubHeadings() throws {
         let data = GutenbergBook.epub()
         let text = try ReadableText.extract(data, mime: ReadableText.epubMime)
-        let off = ListenScript(text: text, skipping: ListenSkips.ranges(text: text, data: data, mime: ReadableText.epubMime, readHeadings: false))
+        let off = ListenScript(text: text, skipping: ListenSkips.ranges(text: text, file: data, mime: ReadableText.epubMime, readHeadings: false))
         #expect(!off.sentences.contains { $0.text.contains("CHAPTER") })
         let opening = try #require(off.sentences.first { $0.text.hasPrefix("It is a truth") })
         #expect(opening.pauseBefore)
@@ -77,7 +77,7 @@ private func essayPDF(template: ExportTemplate) throws -> Data {
         #expect(off.sentences.filter(\.pauseBefore).count == 2)
         #expect(inStep(off, text))
 
-        let on = ListenScript(text: text, skipping: ListenSkips.ranges(text: text, data: data, mime: ReadableText.epubMime, readHeadings: true))
+        let on = ListenScript(text: text, skipping: ListenSkips.ranges(text: text, file: data, mime: ReadableText.epubMime, readHeadings: true))
         #expect(on.sentences.contains { $0.text == "CHAPTER I." })
         #expect(on.sentences.contains { $0.text == "CHAPTER II." })
         #expect(on.sentences.allSatisfy { !$0.pauseBefore })
@@ -91,12 +91,12 @@ private func essayPDF(template: ExportTemplate) throws -> Data {
     func otherHeadings() throws {
         let html = Data(SavedArticle.html().utf8)
         let htmlText = try ReadableText.extract(html, mime: "text/html")
-        let article = ListenScript(text: htmlText, skipping: ListenSkips.ranges(text: htmlText, data: html, mime: "text/html", readHeadings: false))
+        let article = ListenScript(text: htmlText, skipping: ListenSkips.ranges(text: htmlText, file: html, mime: "text/html", readHeadings: false))
         #expect(article.sentences.first?.text.hasPrefix("Turnover is less about pay") == true)
 
         let markdown = "# The Tragic Hero in Macbeth\n\nMacbeth's letter arrives before he does.\n\n## The *letter*\n\nShe reads it as a plan."
         let docText = MarkdownText.plainText(markdown)
-        let doc = ListenScript(text: docText, skipping: ListenSkips.ranges(text: docText, data: Data(markdown.utf8), mime: MarkdownText.mime, readHeadings: false))
+        let doc = ListenScript(text: docText, skipping: ListenSkips.ranges(text: docText, file: Data(markdown.utf8), mime: MarkdownText.mime, readHeadings: false))
         #expect(doc.sentences.map(\.text) == ["Macbeth's letter arrives before he does.", "She reads it as a plan."])
         #expect(inStep(doc, docText))
     }

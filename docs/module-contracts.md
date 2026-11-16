@@ -20,6 +20,27 @@ A new contract is recorded here before it is implemented.
 kept the `note` content kind and their IDs so that existing items, refs, and sync rows carry on. Nothing
 uses the `doc` kind yet, so a `doc` ref draws its preview chip.
 
+A file has no size limit of the Reader's own (issue 124). The limits are the sealed store's 5 GB for
+one blob and the account's storage, and the app says which was hit. A file imported since then is
+sealed in 4 MB pieces with `ChunkedCipher`, under its own key purpose `reader-pieces`, as `<id>.pieces`.
+Each piece is XChaCha20-Poly1305 with the item's ID, the piece's place, the piece size and the whole
+length in its associated data, and the file must be exactly as long as its header says. So no piece can be
+reordered, dropped, swapped from another file or added. Older files keep their single sealed `<id>.body`
+and open as before. The two can't be passed off as each other, because each opens only under its own key
+purpose. Files are read a range at a time and never written anywhere unsealed:
+- **PDFs:** up to 64 MB open in PDFKit, as before. A bigger one opens in public CoreGraphics through a
+  data provider (`LargePDF`) and is drawn a page at a time by `LargePDFPages`. For its words and Read
+  along, each page is copied on its own into a small PDF in memory for PDFKit to read. No private API is
+  used.
+- **EPUB and Word:** by zip part.
+- **Listen and search:** a page or a part at a time.
+
+Only a PDF that PDFKit shows, an image, plain text or a web page is read whole, up to 64 MB. Imports seal as they read, away from
+the vault, with a progress bar over 50 MB. Sync carries a piece file as a file (`SealedObject.bodyFile`),
+up and down through the sealed store's resumable transfer, and checks every piece before keeping or
+sending it. A key change moves piece files a piece at a time. A Drive file over 32 MB that isn't text is
+downloaded straight into a sealed piece file in the Drive cache, under `google-drive-pieces`.
+
 A doc's body is Pandoc-flavoured Markdown inside the sealed blob, stored exactly as typed, with the mime
 `text/markdown; variant=pandoc` (RFC 7763). Issue 104 is the spec. The writing page is a `WKWebView`
 running CodeMirror 6, bundled from `web/reader-editor` by `scripts/build-reader-editor.sh` from a pinned

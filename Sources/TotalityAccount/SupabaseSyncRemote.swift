@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Storage
 import Supabase
@@ -11,8 +12,10 @@ public struct SupabaseSyncRemote: SyncRemote, MovesBodies {
     private static let pageSize = 1000
     /// Far more than the free plan can hold, so reaching it means the server is misbehaving.
     private static let rowLimit = 500_000
-    /// The bucket's own ceiling, with room for sealing.
-    private static let objectLimit = 52_428_800 + 1_048_576
+    /// The sealed store's own ceiling for one blob, with room for the sealed details.
+    static let objectLimit = SealedStoreClient.maxBlob + 1_048_576
+    /// A body bigger than this is downloaded into a file, a piece at a time, never into memory whole.
+    static let inMemoryLimit = 16 * 1024 * 1024
 
     private struct ListRow: Decodable {
         let id: UUID
@@ -41,22 +44,38 @@ public struct SupabaseSyncRemote: SyncRemote, MovesBodies {
     private let client: SupabaseClient
     private let account: String?
     private let bodies: SyncBodies
+    /// Where big bodies land as they download. They're ciphertext, and the area that takes one moves it
+    /// into place, so anything left here is from a sync that stopped and is cleared later.
+    private let incoming: URL
 
-    init(client: SupabaseClient, account: String? = nil, sealed: (any SealedStore)? = nil) {
+    init(client: SupabaseClient, account: String? = nil, sealed: (any SealedStore)? = nil, incoming: URL? = nil) {
         self.client = client
         self.account = account
         let store = sealed ?? SealedStoreClient(token: { try await client.auth.session.accessToken })
         bodies = SyncBodies(bucket: SupabaseBucket(client: client, bucket: Self.bucket), sealed: store)
+        self.incoming = incoming ?? FileManager.default.temporaryDirectory.appendingPathComponent("sync-incoming", isDirectory: true)
     }
 
-    private init(client: SupabaseClient, account: String, bodies: SyncBodies) {
+    private init(client: SupabaseClient, account: String, bodies: SyncBodies, incoming: URL) {
         self.client = client
         self.account = account
         self.bodies = bodies
+        self.incoming = incoming
     }
 
     public func forCurrentAccount() async throws -> any SyncRemote {
-        SupabaseSyncRemote(client: client, account: try await owner(), bodies: bodies)
+        Self.clearOldIncoming(in: incoming)
+        return SupabaseSyncRemote(client: client, account: try await owner(), bodies: bodies, incoming: incoming)
+    }
+
+    /// Downloads more than a day old belong to a sync that's long over. A newer one is kept, so a big
+    /// download that dropped carries on from where it got to.
+    static func clearOldIncoming(in folder: URL, now: Date = Date()) {
+        let names = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for file in names {
+            let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if now.timeIntervalSince(date) > 24 * 60 * 60 { try? FileManager.default.removeItem(at: file) }
+        }
     }
 
     /// Reads page by page, because the server stops at a page of its own otherwise, and an item that
@@ -96,33 +115,52 @@ public struct SupabaseSyncRemote: SyncRemote, MovesBodies {
         else { return nil }
         guard (row.byte_size ?? 0) <= Self.objectLimit else { throw AccountError.failed }
         let owner = try await owner()
-        let body = try await row.storage_key.asyncMap { key -> Data in
-            if let bodyHash = local?.bodyHash, let body = local?.body, bodies.holds(key, owner: owner, item: id, bodyHash: bodyHash) {
-                return body
-            }
-            return try await bodies.read(key, owner: owner)
+        guard let key = row.storage_key else { return SealedObject(id: id, kind: kind, meta: meta, body: nil) }
+        if let local, let bodyHash = local.bodyHash, bodies.holds(key, owner: owner, item: id, bodyHash: bodyHash) {
+            if let file = local.bodyFile { return SealedObject(id: id, kind: kind, meta: meta, bodyFile: file) }
+            if let body = local.body { return SealedObject(id: id, kind: kind, meta: meta, body: body) }
         }
-        return SealedObject(id: id, kind: kind, meta: meta, body: body)
+        let bodySize = max(0, (row.byte_size ?? 0) - meta.count)
+        guard SealedBlobKey.isSealed(key), bodySize > Self.inMemoryLimit else {
+            return SealedObject(id: id, kind: kind, meta: meta, body: try await bodies.read(key, owner: owner))
+        }
+        // Named for the key, which names the exact body, so a download that dropped carries on next time.
+        try FileManager.default.createDirectory(at: incoming, withIntermediateDirectories: true)
+        let file = incoming.appendingPathComponent(SealedObject.fileName(forKey: key))
+        try await bodies.download(key, owner: owner, to: file, limit: Self.objectLimit)
+        let downloaded = SealedObject(id: id, kind: kind, meta: meta, bodyFile: try SealedFile(reading: file))
+        // The key names the body by its hash, so a download that went wrong is thrown away, not resumed.
+        guard let bodyHash = downloaded.bodyHash, bodies.holds(key, owner: owner, item: id, bodyHash: bodyHash) else {
+            try? FileManager.default.removeItem(at: file)
+            throw SealedStoreError.mismatch
+        }
+        return downloaded
     }
 
     /// Kinds whose whole content fits in the sealed metadata, so they have no body to store.
     static let metaOnly: Set<ContentKind> = [.event, .bookmark, .mailMarks, .mailSettings, .mailKeys, .mailOutside, .readerDrive, .readerPlaces, .task, .taskList]
 
     public func upload(_ object: SealedObject, expected: String?, replacingDeleted: Bool) async throws {
-        if !Self.metaOnly.contains(object.kind), object.body == nil { throw AccountError.failed }
+        if !Self.metaOnly.contains(object.kind), !object.hasBody { throw AccountError.failed }
         let owner = try await owner()
         let previous = try await currentKey(of: object.id)
         var key: String?
-        if let body = object.body, let bodyHash = object.bodyHash {
+        if object.hasBody, let bodyHash = object.bodyHash {
             // Named for the body alone, so a change to the details doesn't move the whole file again.
             let path = bodies.key(owner: owner, item: object.id, bodyHash: bodyHash)
-            if path != previous { try await bodies.write(body, at: path, owner: owner) }
+            if path != previous {
+                if let file = object.bodyFile {
+                    try await bodies.writeFile(file.url, at: path, owner: owner)
+                } else if let body = object.body {
+                    try await bodies.write(body, at: path, owner: owner)
+                }
+            }
             key = path
         }
         var row: [String: AnyJSON] = [
             "kind": .string(object.kind.rawValue),
             "storage_key": key.map(AnyJSON.string) ?? .null,
-            "byte_size": .integer(object.meta.count + (object.body?.count ?? 0)),
+            "byte_size": .integer(object.meta.count + object.bodyCount),
             "content_hash": .string(Self.literal(try Self.hashBytes(object.hash))),
             "meta_cipher": .string(Self.literal(object.meta)),
             "deleted_at": .null,
@@ -315,9 +353,9 @@ extension SupabaseAccountService {
     }
 }
 
-private extension Optional {
-    func asyncMap<Result>(_ transform: (Wrapped) async throws -> Result) async rethrows -> Result? {
-        guard let self else { return nil }
-        return try await transform(self)
+extension SealedObject {
+    /// A download's file name, from the key, which only ever holds letters, digits, `/`, `-` and `.`.
+    static func fileName(forKey key: String) -> String {
+        SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined() + ".incoming"
     }
 }
