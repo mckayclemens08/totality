@@ -208,8 +208,15 @@ private struct ImportBar: View {
                 .font(Typeface.callout)
                 .foregroundStyle(theme.textSecondary.color)
                 .lineLimit(1)
-            ProgressView(value: progress.fraction)
-                .tint(theme.accent.color)
+            // A flat track, never set into the page (issue 132).
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(theme.surface.color)
+                    Capsule().fill(theme.accent.color)
+                        .frame(width: geometry.size.width * min(1, max(0, progress.fraction)))
+                }
+            }
+            .frame(height: Space.s1)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Adding \(progress.name), \(Int(progress.fraction * 100)) percent")

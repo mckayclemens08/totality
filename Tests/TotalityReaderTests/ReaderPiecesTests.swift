@@ -6,9 +6,26 @@ import Testing
 import TotalityCore
 @testable import TotalityReader
 
+/// Everything these tests write goes in one folder for this run, removed when the run ends, so big test
+/// files never pile up on the Mac.
+private let scratchRoot: URL = {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("reader-pieces-tests-\(ProcessInfo.processInfo.processIdentifier)")
+    atexit { removeScratch() }
+    return root
+}()
+
+private func removeScratch() {
+    try? FileManager.default.removeItem(at: scratchRoot)
+}
+
+private func scratch(_ name: String) -> URL {
+    try? FileManager.default.createDirectory(at: scratchRoot, withIntermediateDirectories: true)
+    return scratchRoot.appendingPathComponent(name)
+}
+
 /// A folder of real files, which pieces need.
 private func fileStore() throws -> FileBlobStore {
-    try FileBlobStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("pieces-\(UUID().uuidString)"))
+    try FileBlobStore(directory: scratch("pieces-\(UUID().uuidString)"))
 }
 
 /// Bytes that don't repeat, so a piece swapped for another can't pass for it.
@@ -25,7 +42,7 @@ private func varied(_ count: Int) -> Data {
 }
 
 private func plainFile(_ data: Data, named name: String) throws -> URL {
-    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("plain-\(UUID().uuidString)")
+    let folder = scratch("plain-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let url = folder.appendingPathComponent(name)
     try data.write(to: url)
@@ -41,7 +58,7 @@ func makeScannedPDF(pages: [String], side: Int = 900) throws -> Data {
     let context = try #require(CGContext(consumer: consumer, mediaBox: &box, nil))
     let font = CTFontCreateWithName("Helvetica" as CFString, 14, nil)
     for (number, text) in pages.enumerated() {
-        let grain = varied(side * side * 4).dropFirst(number)
+        let grain = varied(side * side * 4 + number).dropFirst(number)
         let provider = try #require(CGDataProvider(data: Data(grain.prefix(side * side * 4)) as CFData))
         let picture = try #require(CGImage(
             width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4,
@@ -283,7 +300,7 @@ func makeScannedPDF(pages: [String], side: Int = 900) throws -> Data {
 
     @Test("Up to 5 GB is taken, and more is refused before anything is read")
     func theRealLimit() async throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("huge-\(UUID().uuidString).pdf")
+        let url = scratch("huge-\(UUID().uuidString).pdf")
         FileManager.default.createFile(atPath: url.path, contents: nil)
         // Sparse, so nothing is really written.
         let handle = try FileHandle(forWritingTo: url)
@@ -316,7 +333,7 @@ func makeScannedPDF(pages: [String], side: Int = 900) throws -> Data {
 
     private func sealedReader(_ data: Data) throws -> ChunkedCipher.Reader {
         let id = UUID()
-        let output = FileManager.default.temporaryDirectory.appendingPathComponent("whole-\(UUID().uuidString)")
+        let output = scratch("whole-\(UUID().uuidString)")
         try ReaderFile(data: data).reseal(to: output, key: key.objectKey(for: id, purpose: .readerPieces), objectID: id)
         return try ChunkedCipher.Reader(file: output, key: key.objectKey(for: id, purpose: .readerPieces), objectID: id)
     }
@@ -325,7 +342,7 @@ func makeScannedPDF(pages: [String], side: Int = 900) throws -> Data {
 /// The object with its file copied, as a download would arrive.
 private func copiedObject(_ object: SealedObject) throws -> SealedObject {
     let file = try #require(object.bodyFile)
-    let landed = FileManager.default.temporaryDirectory.appendingPathComponent("incoming-\(UUID().uuidString)")
+    let landed = scratch("incoming-\(UUID().uuidString)")
     try FileManager.default.copyItem(at: file.url, to: landed)
     return SealedObject(id: object.id, kind: object.kind, meta: object.meta, bodyFile: try SealedFile(reading: landed))
 }
@@ -404,7 +421,7 @@ private final class Heard: @unchecked Sendable {
     let id = UUID()
 
     private func output() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("writer-\(UUID().uuidString)")
+        scratch("writer-\(UUID().uuidString)")
     }
 
     @Test("Bytes that arrive in any sizes seal the same as a file read whole")
