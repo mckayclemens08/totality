@@ -27,8 +27,9 @@ enum StorageSetup {
                     throw StorageReadError.offline
                 }
             },
-            parts: {
-                let photoBytes = photos().flatMap(photoShare)
+            parts: { @MainActor in
+                var photoBytes: Int?
+                if let model = photos() { photoBytes = photoShare(model) }
                 async let reader = folderSize("Reader")
                 async let mailbox = folderSize("Mail")
                 var parts: [StoragePart] = []

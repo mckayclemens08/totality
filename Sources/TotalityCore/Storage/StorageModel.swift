@@ -199,7 +199,8 @@ public final class StorageModel {
         guard await sources.account() == current, current == account else { return }
         sealed = settle(sealedResult, name: "sealed", was: sealed)
         if let mailboxResult { mailbox = settle(mailboxResult, name: "mailbox", was: mailbox ?? .loading) }
-        parts = found.filter { $0.bytes > 0 }
+        // The breakdown is of the bar above it, so it waits until that bar has a number.
+        parts = sealed.quota == nil ? [] : found.filter { $0.bytes > 0 }
     }
 
     private nonisolated static func attempt(_ read: @Sendable () async throws -> StorageQuota) async -> Result<StorageQuota, Error> {
@@ -227,7 +228,7 @@ public final class StorageModel {
         }
     }
 
-    static func isOffline(_ error: Error) -> Bool {
+    nonisolated static func isOffline(_ error: Error) -> Bool {
         if let error = error as? StorageReadError { return error == .offline }
         if let error = error as? SealedStoreError { return error == .offline }
         if let error = error as? URLError {
