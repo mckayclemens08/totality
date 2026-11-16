@@ -24,7 +24,12 @@ import TotalityUI
 
     /// The owner's own kinds of tasks, across every list.
     private func model() async throws -> TasksModel {
-        let model = TasksModel(vault: TaskVault(store: MemoryBlobs(), rootKey: try .generate()), calendar: denver, now: { agreed })
+        let vault = TaskVault(store: MemoryBlobs(), rootKey: try .generate())
+        let school = TaskList(name: "School", kind: .area, createdAt: agreed)
+        let mun = TaskList(name: "MUN", kind: .area, createdAt: agreed)
+        try await vault.save(school)
+        try await vault.save(mun)
+        let model = TasksModel(vault: vault, calendar: denver, now: { agreed })
         model.agenda = { from, to in
             [
                 AgendaItem(id: "1", title: "Phonology lecture", start: moment(2026, 11, 16, 9), end: moment(2026, 11, 16, 10, 30), isAllDay: false),
@@ -57,6 +62,10 @@ import TotalityUI
         for title in ["Submit MUN registration", "Outline thesis chapter 1", "Email the debate coach"] {
             let task = try #require(await model.add(title, in: .anytime).first)
             await model.toggle(task.id)
+        }
+        for task in model.tasks {
+            if task.tags.contains("school") || task.title.hasPrefix("Reading response") { await model.change(task.id) { $0.listID = school.id } }
+            if task.tags.contains("mun") { await model.change(task.id) { $0.listID = mun.id } }
         }
         let email = try #require(model.tasks.first { $0.title.hasPrefix("Email Dr. Lee") })
         await model.change(email.id) { $0.notes = "Ask about the **corpus** for chapter 2, and whether *Hayes* is enough." }
@@ -218,6 +227,25 @@ import TotalityUI
         try write(UndoBar(title: "Submit MUN registration", onUndo: {}, onDismiss: {}).padding(Space.s4).padding(.top, Space.s5),
                   name: "tasks-undo.png", to: directory, height: 140)
 
+        try tiles(model, prefix: "tasks-tile", to: directory)
+        let emptyTile = TasksHomeTile(model: empty, size: .medium).padding(Space.s4).frame(width: 361, height: 176)
+            .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)).padding(Space.s4)
+        try write(emptyTile, name: "tasks-tile-empty.png", to: directory, width: 393, height: 210)
+
+        // Today's progress, after two of today's tasks are done.
+        for title in ["Read Hayes", "Pick up blazer"] {
+            let task = try #require(model.tasks.first { $0.title.hasPrefix(title) })
+            await model.toggle(task.id)
+        }
+        model.dismissUndo()
+        try write(screen(.today, model) {
+            TodayProgressView(progress: model.progress).padding(.bottom, Space.s4)
+            rows(model.tasks(in: .today), .today, model)
+        }, name: "tasks-progress-today.png", to: directory)
+        try tiles(model, prefix: "tasks-progress-tile", to: directory)
+    }
+
+    private func tiles(_ model: TasksModel, prefix: String, to directory: String) throws {
         // The home tile, medium and large, as the grid frames it.
         for (size, name, height) in [(BigTileSize.medium, "medium", 176.0), (.large, "large", 270.0), (.square, "square", 380.0)] {
             let entry = ModuleEntry.all.first { $0.id == .tasks }!
@@ -235,11 +263,8 @@ import TotalityUI
             .frame(width: 361, height: height)
             .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
             .padding(Space.s4)
-            try write(tile, name: "tasks-tile-\(name).png", to: directory, width: 393, height: height + Space.s6)
+            try write(tile, name: "\(prefix)-\(name).png", to: directory, width: 393, height: height + Space.s6)
         }
-        let emptyTile = TasksHomeTile(model: empty, size: .medium).padding(Space.s4).frame(width: 361, height: 176)
-            .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)).padding(Space.s4)
-        try write(emptyTile, name: "tasks-tile-empty.png", to: directory, width: 393, height: 210)
     }
 }
 #endif

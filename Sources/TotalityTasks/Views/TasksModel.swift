@@ -128,6 +128,11 @@ public final class TasksModel {
         return TaskRules.logbook(from: found, in: calendar)
     }
 
+    /// Today's tasks done against planned, split by the list each comes from.
+    public var progress: TodayProgress {
+        TaskRules.todayProgress(from: tasks, lists: lists, today: today, in: calendar)
+    }
+
     public var overdue: Int {
         tasks.filter { TaskRules.isOverdue($0, today: today) }.count
     }

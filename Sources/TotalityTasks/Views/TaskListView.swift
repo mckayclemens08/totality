@@ -75,7 +75,19 @@ struct TaskListView: View {
 
     @ViewBuilder private var today: some View {
         let tasks = model.tasks(in: .today)
-        if tasks.isEmpty {
+        let progress = model.progress
+        if !progress.isEmpty {
+            TodayProgressView(progress: progress)
+                .padding(.bottom, Space.s4)
+                .plainRow()
+        }
+        if tasks.isEmpty, !progress.isEmpty {
+            Text("Everything for today is done.")
+                .font(Typeface.callout)
+                .foregroundStyle(Theme.current.textSecondary.color)
+                .frame(maxWidth: .infinity)
+                .plainRow()
+        } else if tasks.isEmpty {
             EmptyList(bucket: .today).plainRow()
         } else if splitToday {
             ForEach(TodayPart.allCases) { part in
