@@ -527,7 +527,7 @@ public final class WebModel {
     }
 
     /// A panel the home page asked for, for when Web comes up.
-    public enum Panel: Sendable { case tabs, downloads }
+    public enum Panel: Sendable { case tabs, downloads, search }
     public var requestedPanel: Panel?
 
     /// Web in the home search: bookmarks only. History stays inside Web, as it does on the home tile.

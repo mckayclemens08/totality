@@ -1,8 +1,9 @@
 import SwiftUI
 import TotalityUI
 
-/// The Calendar's big home tile: this week on a medium tile, the whole month on a larger one. A day opens
-/// that day, and a line opens what it's about.
+/// The Calendar's big home tile: this week on a medium tile, the whole month on a larger one, and on the
+/// square the month with a "Next up" card under it (issue 127). A day opens that day, and a line or the
+/// card opens what it's about.
 public struct CalendarHomeTile: View {
     private let model: CalendarModel
     private let size: BigTileSize
@@ -27,7 +28,14 @@ public struct CalendarHomeTile: View {
         case .square:
             VStack(alignment: .leading, spacing: Space.s3) {
                 month
-                lines
+                if let next = model.nextEntry {
+                    NextUpCard(entry: next, model: model)
+                        .tileLink("Next up: \(next.title)") { open(.entry(next)) }
+                        .layoutPriority(1)
+                } else {
+                    lines
+                        .layoutPriority(1)
+                }
             }
         }
     }
@@ -136,5 +144,38 @@ private struct TileDay: View {
                         .frame(width: Space.s1 / 2 + Space.s1 / 4, height: Space.s1 / 2 + Space.s1 / 4)
                 }
             }
+    }
+}
+
+/// The next timed event: what, when and where.
+private struct NextUpCard: View {
+    let entry: CalendarEntry
+    let model: CalendarModel
+
+    var body: some View {
+        let theme = Theme.current
+        let place = entry.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        VStack(alignment: .leading, spacing: Space.s1) {
+            Text("Next up")
+                .font(Typeface.micro)
+                .foregroundStyle(theme.accent.color)
+            Text(entry.title)
+                .font(Typeface.headline)
+                .foregroundStyle(theme.textPrimary.color)
+                .lineLimit(1)
+            HStack(spacing: Space.s3) {
+                Label(model.nextUpTime(entry), systemImage: "clock")
+                    .lineLimit(1)
+                if !place.isEmpty {
+                    Label(place, systemImage: "mappin.and.ellipse")
+                        .lineLimit(1)
+                }
+            }
+            .font(Typeface.caption)
+            .foregroundStyle(theme.textSecondary.color)
+        }
+        .padding(Space.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
     }
 }

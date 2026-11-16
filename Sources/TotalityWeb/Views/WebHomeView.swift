@@ -66,6 +66,7 @@ public struct WebHomeView: View {
             switch model.requestedPanel {
             case .tabs: showingTabs = true
             case .downloads: showingDownloads = true
+            case .search: isTyping = true
             case nil: return
             }
             model.requestedPanel = nil

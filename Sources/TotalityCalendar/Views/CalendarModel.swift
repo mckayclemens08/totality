@@ -357,6 +357,17 @@ public final class CalendarModel {
         return targets.indices.contains(line) ? targets[line] : nil
     }
 
+    /// When the next event is, for the square's "Next up" card: "Now until 3:00 PM", "2:30 – 3:30 PM",
+    /// or with the day when it isn't today.
+    public func nextUpTime(_ entry: CalendarEntry) -> String {
+        let current = now()
+        let end = entry.end.formatted(date: .omitted, time: .shortened)
+        if entry.start <= current { return "Now until \(end)" }
+        let range = "\(entry.start.formatted(date: .omitted, time: .shortened)) – \(end)"
+        if CalendarDay(entry.start, in: display) == today { return range }
+        return "\(entry.start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(range)"
+    }
+
     private func glanceLine(for entry: CalendarEntry, at current: Date) -> String {
         if entry.start <= current { return "\(entry.title), now" }
         if CalendarDay(entry.start, in: display) == today {
