@@ -159,7 +159,9 @@ Never upgrade the Oracle account to paid: that's the owner's decision under the 
 ## Decisions that are locked (do not relitigate)
 
 Name: Totality. Identity: username (the handle) + password, no email or phone (owner, 2026-10-30). v1 is a native iPhone app with a connected
-Mac app. Groups are Discord-shaped; DMs are Snapchat-shaped minus the clutter. Social is ONE module
+website in place of a Mac app (owner, 2026-11-15: "i think I like that idea better than a mac app"). The website gets
+an architecture proposal, agreed before any code, covering keys in the browser, Matrix E2EE on the web, sign-in, and
+$0 hosting. Social follows the website and is iPhone-only at first; Articles follow Social. Groups are Discord-shaped; DMs are Snapchat-shaped minus the clutter. Social is ONE module
 with a Lemon8-style discovery homepage. Docs are a content type inside the Reader — there is no Docs
 module. Listen is a button inside the Reader — there is no Speechify module. Shopping is
 Amazon-*like*, never an Amazon wrapper. Home is a two-column grid of tiles the person arranges, each showing live content (owner, 2026-10-31). The flower stays as the alternative, one button away, and a setting picks which opens first; tiles are the default. Holding a tile enters edit mode. Web search is a module; search inside Totality is a magnifying glass on the home page, not a module.
