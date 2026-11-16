@@ -28,7 +28,7 @@ enum StorageSetup {
                 }
             },
             parts: {
-                let photoBytes = photos().map(photoShare)
+                let photoBytes = photos().flatMap(photoShare)
                 async let reader = folderSize("Reader")
                 async let mailbox = folderSize("Mail")
                 var parts: [StoragePart] = []
