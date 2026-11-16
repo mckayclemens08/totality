@@ -26,6 +26,8 @@ public final class AppRefresh {
     /// Things kept fresh on the same beat that aren't modules, like settings' storage bars. They run after
     /// the modules, which may have just stored or removed something.
     public var extras: [String: @MainActor () async -> Void] = [:]
+    /// Modules the person removed from Home. They don't fetch in the background until they're added back.
+    public var removed: Set<ModuleID> = []
     private var running: Task<Void, Never>?
     private static let log = Logger(subsystem: "app.totality.client", category: "refresh")
 
@@ -38,7 +40,7 @@ public final class AppRefresh {
             await running.value
             return
         }
-        let refreshers = registry?.refreshers ?? []
+        let refreshers = (registry?.refreshers ?? []).filter { !removed.contains($0.module) }
         let extras = extras.sorted { $0.key < $1.key }.map(\.value)
         let task = Task { @MainActor in
             for refresher in refreshers {

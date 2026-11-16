@@ -314,4 +314,54 @@ struct HomeLayoutTests {
         #expect(metrics.placement(at: CGPoint(x: 180.5, y: 20), among: placements) == nil)
         #expect(metrics.placement(at: CGPoint(x: 20, y: mail.maxY + 1), among: placements) == nil)
     }
+
+    @Test("Removing a module hides its tile, and adding it back puts it where it was, at the same size")
+    func removeAndAddBack() throws {
+        var home = HomeLayout(modules: Self.modules)
+        home.setSize(.large, of: .photos)
+        home.move(.photos, to: .calendar)
+        let before = try place(home, .photos)
+        let saved = home.saved
+
+        home.hidden = [.photos]
+        #expect(!home.placements.contains { $0.id == .photos })
+        #expect(!overlaps(home))
+        // What's saved on the device doesn't change: the tile is only out of sight.
+        #expect(home.saved == saved)
+
+        home.hidden = []
+        #expect(try place(home, .photos) == before)
+        #expect(home.size(of: .photos) == .large)
+    }
+
+    @Test("A removed big square leaves the top free and comes back as the big square")
+    func removedHero() throws {
+        var home = HomeLayout(modules: Self.modules)
+        home.makeHero(.calendar)
+        home.hidden = [.calendar]
+        #expect(home.bigSize(of: .calendar) == nil)
+        #expect(!home.placements.contains { $0.id == .calendar })
+        #expect(try place(home, .reader).row == 0)
+        home.hidden = []
+        #expect(home.bigSize(of: .calendar) == .square)
+    }
+
+    @Test("Moving a tile steps over removed ones")
+    func movingPastRemoved() throws {
+        var home = layout([(.reader, .small), (.photos, .small), (.mail, .small), (.web, .small)])
+        home.hidden = [.photos]
+        home.move(.mail, by: -1)
+        let shown = home.placements.sorted { ($0.row, $0.column) < ($1.row, $1.column) }.map(\.id)
+        #expect(shown == [.mail, .reader, .web])
+    }
+
+    @Test("Every module says what stays when it's removed")
+    func removalWording() {
+        for module in ModuleEntry.all {
+            #expect(!module.summary.isEmpty)
+            let message = HomeRemoval.message(for: module)
+            #expect(message.contains(module.name))
+            #expect(message.contains("won't be deleted"))
+        }
+    }
 }

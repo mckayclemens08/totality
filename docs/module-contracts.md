@@ -699,3 +699,14 @@ Agreed with the owner on 2026-11-15, in issue 125. Settings has a Storage sectio
 - From 80% full a bar turns the accent colour with a note, and from 95% the danger colour.
 - `StorageModel` lives in `TotalityCore` and the view in `TotalityUI`. The app hands it the readers, so Account never imports Photos or Mail.
 - Keeping it current: `AppRefresh` runs it as an extra step after the modules (at launch, on coming back, every 60 seconds), any upload or delete posts `StorageActivity.changed`, and the open page asks every 10 seconds. A single failure keeps what's showing, and only one that lasts is shown. Offline shows the last value read and when it was read, which is kept per account so another account never sees it.
+
+## Removing modules from Home
+
+Agreed with the owner on 2026-11-15, in issue 129. A person can take a module off Home and add it back.
+
+- Removing hides a module and deletes nothing. Its data stays sealed on the server and the device, and a link to its content from another module still opens it.
+- In edit mode each tile has a minus button, which asks once. An "Add module" tile at the end lists every removed module with a line on what it's for, and a tap puts it back at its old place and size. With every module removed, Home shows a note and the Add module tile. The flower view shows the same list.
+- A removed module skips `AppRefresh`, home search, the launch fetches for the Messages and Mail tiles, and Calendar's reminders (removing Calendar clears the ones waiting).
+- Which modules are removed is `HomeChoices` in `TotalityCore`: each module's last removal and last return, merged by keeping the later of each. It's one sealed record per person (`home_layout`, purpose `home-layout`) through `SealedRecordStore`, which moved from the Reader to `TotalityCore` for this, and it syncs. Tile sizes and places stay on each device in `home.layout`.
+- Before the content key opens, Home shows a copy of the choices kept on the device: module names and times, never content, marked with whose record it came from so one person's choices never join another's.
+- Every module can be removed. Account and settings aren't modules, so they can't be.

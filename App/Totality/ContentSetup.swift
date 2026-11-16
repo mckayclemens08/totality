@@ -21,7 +21,7 @@ enum ContentSetup {
 
     private static func stores() throws -> (
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
-        googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore
+        googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore, home: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -34,7 +34,9 @@ enum ContentSetup {
             try FileBlobStore(directory: base.appendingPathComponent("GoogleCalendar", isDirectory: true)),
             // The Reader's linked Drive folders. Never synced: each device reads Google itself.
             try FileBlobStore(directory: base.appendingPathComponent("GoogleDrive", isDirectory: true)),
-            try FileBlobStore(directory: base.appendingPathComponent("Tasks", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Tasks", isDirectory: true)),
+            // Which modules are off Home, as one sealed record that syncs.
+            try FileBlobStore(directory: base.appendingPathComponent("Home", isDirectory: true))
         )
     }
 
@@ -64,6 +66,7 @@ enum ContentSetup {
             SealedArea(store: stores.googleCalendar, purposes: GoogleCalendars.sealedPurposes),
             SealedArea(store: stores.googleDrive, purposes: GoogleDrive.sealedPurposes),
             SealedArea(store: stores.tasks, purposes: TaskVault.sealedPurposes),
+            SealedArea(store: stores.home, purposes: HomeChoicesBook.sealedPurposes),
         ])
     }
 
@@ -80,7 +83,7 @@ enum ContentSetup {
         mailRefresh: @escaping @Sendable () async -> Void, refresh: @escaping @Sendable (ModuleID) async -> Void
     ) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, tasks: TasksModel, areas: [any SyncArea],
-        registry: ModuleRegistry, mail: MailContent, photos: PhotosContent
+        registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -91,6 +94,7 @@ enum ContentSetup {
         let taskVault = TaskVault(store: stores.tasks, rootKey: rootKey)
         let devices = SystemCalendarSource()
         let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
+        let home = HomeChoicesBook(store: stores.home, rootKey: rootKey)
         let reader = ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices()))
         // Read when an import asks, since sign-in may come after the Reader opens.
         reader.storageLeft = {
@@ -128,7 +132,7 @@ enum ContentSetup {
             reader,
             CalendarModel(
                 vault: calendarVault,
-                devices: devices, reminders: SystemReminders(),
+                devices: devices, reminders: HomeGatedReminders(SystemReminders()),
                 registry: registry, google: google
             ),
             WebModel(
@@ -139,10 +143,11 @@ enum ContentSetup {
             tasks,
             // The Drive record syncs whether or not this build can sign in to Google, so links made on
             // another device aren't lost here.
-            [readerVault, calendarVault, webVault, drive, places, taskVault],
+            [readerVault, calendarVault, webVault, drive, places, taskVault, home],
             registry,
             MailContent(rootKey: rootKey, store: stores.mail),
-            PhotosContent(rootKey: rootKey, store: stores.photos)
+            PhotosContent(rootKey: rootKey, store: stores.photos),
+            home
         )
     }
 }
@@ -343,5 +348,24 @@ final class ModuleRefreshers {
     /// An automatic refresh, which shows nothing unless a problem lasts.
     func refresh(_ module: ModuleID) async {
         await refreshers[module]?.refresh(.automatic)
+    }
+}
+
+/// Calendar's reminders, held back while Calendar is off Home. Removing Calendar clears what's waiting, and
+/// adding it back lets the next refresh plan them again.
+struct HomeGatedReminders: ReminderScheduler {
+    private let inner: any ReminderScheduler
+
+    init(_ inner: any ReminderScheduler) {
+        self.inner = inner
+    }
+
+    func requestPermission() async -> Bool {
+        await inner.requestPermission()
+    }
+
+    func replace(with reminders: [PlannedReminder]) async {
+        let removed = await MainActor.run { AppRefresh.shared.removed.contains(.calendar) }
+        await inner.replace(with: removed ? [] : reminders)
     }
 }

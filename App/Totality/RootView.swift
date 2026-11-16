@@ -33,6 +33,8 @@ struct RootView: View {
     @State private var photosTurn = 0
     /// Whichever Photos is current, for settings' storage bars.
     @State private var currentPhotos = CurrentPhotos()
+    /// Modules taken off Home, which also skip refresh, reminders and search.
+    @State private var homeChoices = HomeChoicesModel()
     /// Each module's refresher, which `AppRefresh` reaches through the registry.
     @State private var refreshers = ModuleRefreshers()
     @State private var registry: ModuleRegistry?
@@ -76,7 +78,12 @@ struct RootView: View {
         Group {
             switch open {
             case nil:
-                HomeView(center: recentModule, glances: glances, bigTile: bigTile, lineLink: lineLink, style: homeStyle) { module in
+                HomeView(
+                    center: recentModule, glances: glances, bigTile: bigTile, lineLink: lineLink, style: homeStyle,
+                    removed: homeChoices.removed,
+                    onRemove: { module in Task { await homeChoices.remove(module) } },
+                    onRestore: { module in Task { await homeChoices.restore(module) } }
+                ) { module in
                     if [.reader, .calendar, .web, .mail, .photos, .tasks].contains(module) { prepareContent() }
                     bringUp(module)
                 } onSearch: {
@@ -145,6 +152,7 @@ struct RootView: View {
                 await photosWiring.disconnect()
                 photos = PhotosModel(library: nil)
                 registry = nil
+                homeChoices.close()
                 messages.people.directory = nil
                 AppRefresh.shared.registry = nil
                 syncAreas = []
@@ -154,8 +162,8 @@ struct RootView: View {
             await account?.backup?.settleDevice()
             connectSync()
             await openContentForHome()
-            // So the Messages tile shows who's written without opening Messages first.
-            Task { await messages.connect() }
+            // So the Messages tile shows who's written without opening Messages first. Not while it's off Home.
+            if !homeChoices.removed.contains(.messages) { Task { await messages.connect() } }
             await refreshAhead()
             await account?.sync?.syncNow()
         }
@@ -173,6 +181,13 @@ struct RootView: View {
             currentPhotos.model = photos
         }
         .onChange(of: defaultHomeStyle) { chosenHomeStyle = nil }
+        .onChange(of: homeChoices.removed, initial: true) { old, removed in
+            AppRefresh.shared.removed = removed
+            // Calendar coming off Home clears the reminders already waiting.
+            if removed.contains(.calendar), !old.contains(.calendar) || old == removed {
+                Task { await SystemReminders().replace(with: []) }
+            }
+        }
         .onChange(of: showingAccount) {
             if !showingAccount {
                 Task {
@@ -398,6 +413,7 @@ struct RootView: View {
             messages.people.directory = content.registry.profiles
             AppRefresh.shared.registry = content.registry
             syncAreas = content.areas
+            Task { await homeChoices.open(content.home) }
             refreshRecoveryLabels()
             Task { await tellWhoIsHere() }
         } catch KeyStoreError.keyMissing {
@@ -417,12 +433,14 @@ struct RootView: View {
         await tasks?.load()
         await tellWhoIsHere()
         // So the Mail tile has something to show before Mail is opened.
-        if mail.current.phase != .ready { await mail.current.refresh() }
+        if mail.current.phase != .ready, !homeChoices.removed.contains(.mail) { await mail.current.refresh() }
     }
 
     /// Each module that keeps itself up to date fetches what's new, quietly.
     private func refreshAhead() async {
         await AppRefresh.shared.refresh()
+        // A sync may have brought another device's choices.
+        await homeChoices.reload()
     }
 
     /// Web keeps things only for the key's owner, and Mail shows only the owner's mailbox.
@@ -498,7 +516,10 @@ struct RootView: View {
             if let movable = bound as? any MovesBodies { _ = try? await movable.moveBodies() }
             return report
         }
-        sync.onFinished = { refreshRecoveryLabels() }
+        sync.onFinished = {
+            refreshRecoveryLabels()
+            Task { await homeChoices.reload() }
+        }
         sync.onChanged = {
             await reader?.load()
             await calendar?.load()
@@ -533,7 +554,7 @@ struct RootView: View {
     private func homeSearchers(_ registry: ModuleRegistry) -> [any ModuleSearcher] {
         var searchers = registry.searchers + [MessagesSearcher(model: messages), MailSearcher(model: mail), PhotosSearcher(model: photos)]
         if let web { searchers.append(WebSearcher(model: web)) }
-        return searchers
+        return searchers.onHome(removed: homeChoices.removed)
     }
 
     /// Only the module that found a result knows what its ID means, so it goes back there to open.

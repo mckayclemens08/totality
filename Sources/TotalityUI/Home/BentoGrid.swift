@@ -13,7 +13,10 @@ struct BentoGrid: View {
     let width: CGFloat
     @Binding var isEditing: Bool
     let onOpen: (ModuleID) -> Void
+    var onRemove: (ModuleID) -> Void = { _ in }
     @State private var drag: TileDrag?
+    /// The module waiting for the person to confirm it comes off Home.
+    @State private var removing: ModuleEntry?
     @State private var holds = 0
     #if os(iOS)
     @State private var touched: ModuleID?
@@ -58,6 +61,9 @@ struct BentoGrid: View {
                         TileMenu(module: module, layout: $layout)
                             .frame(width: frame.width, height: frame.height, alignment: .topTrailing)
                             .position(x: frame.midX, y: frame.midY)
+                        RemoveTileButton(module: module) { removing = module }
+                            .frame(width: frame.width, height: frame.height, alignment: .topLeading)
+                            .position(x: frame.midX, y: frame.midY)
                     }
                 }
                 .zIndex(3)
@@ -67,6 +73,17 @@ struct BentoGrid: View {
         .coordinateSpace(.named(Self.space))
         .animation(reduceMotion ? nil : Motion.standard, value: layout)
         .sensoryFeedback(.selection, trigger: holds)
+        .confirmationDialog(
+            "Remove \(removing?.name ?? "") from Home?",
+            isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+            titleVisibility: .visible,
+            presenting: removing
+        ) { module in
+            Button("Remove from Home", role: .destructive) { onRemove(module.id) }
+            Button("Cancel", role: .cancel) {}
+        } message: { module in
+            Text(HomeRemoval.message(for: module))
+        }
     }
 
     private func tile(_ module: ModuleEntry, at frame: CGRect, metrics: BentoMetrics) -> some View {
@@ -284,8 +301,8 @@ struct TileLabel: View {
                 Text(module.name)
                     .lineLimit(1)
             }
-            // Clears the tile's menu, which shares this corner.
-            .padding(.trailing, isEditing ? Space.s6 : 0)
+            // Clears the tile's menu and its remove button, which share the top corners.
+            .padding(.horizontal, isEditing ? Space.s6 : 0)
             .font(Typeface.callout)
             .foregroundStyle(theme.textSecondary.color)
             if let content {
