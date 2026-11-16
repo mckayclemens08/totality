@@ -168,14 +168,16 @@ private struct SectionText: View {
     }
 }
 
-/// A PDF's real pages. PDFKit reads the file a piece at a time as it draws, so only the pages near the
-/// screen are unsealed, and nothing is ever written anywhere.
+/// A PDF's real pages, in PDFKit when the file fits in memory. A bigger one (issue 124) is drawn a page
+/// at a time by `LargePDFPages`, so only the pages near the screen are unsealed. Nothing is ever written
+/// anywhere.
 private struct PDFReader: View {
     let item: ReaderItem
     let model: ReaderModel
     let readAlong: Bool
 
     @State private var document: PDFDocument?
+    @State private var large: LargePDF?
     @State private var file: ReaderFile?
     @State private var problem: String?
     @State private var along: PDFAlong?
@@ -211,11 +213,8 @@ private struct PDFReader: View {
     var body: some View {
         let theme = Theme.current
         Group {
-            if let document {
-                PDFPages(document: document, follow: follow, startPage: startPage) { page in
-                    let listen = along?.map.pages.first { $0.index == page }?.start
-                    model.remember(.pdf(page: page), listen: listen, for: item.id)
-                }
+            if document != nil || large != nil {
+                pages
                     .overlay(alignment: .bottom) {
                         if readAlong, along?.script.sentences.isEmpty == true {
                             Text("This PDF has no text to follow.")
@@ -238,6 +237,7 @@ private struct PDFReader: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.bg.color)
         .navigationTitle(item.displayTitle)
+        .task { await open() }
         // The file may still be loading when this first runs, so it runs again once the data is here.
         .task(id: readAlong && file != nil) {
             guard readAlong, along == nil, let file, let script = await model.readAlongScript(of: item.id) else { return }
@@ -246,27 +246,43 @@ private struct PDFReader: View {
                 PDFAlong(script: script, map: ReadableText.pageMap(file))
             }.value
         }
-        .task {
-            do {
-                let file = try await model.file(of: item.id)
-                guard let opened = file.pdf() else {
-                    problem = ReaderError.notReadable.message
-                    return
-                }
-                if opened.isLocked {
-                    problem = ReaderError.passwordProtected.message
-                } else {
-                    startPage = await openingPage(file: file, pages: opened.pageCount)
-                    document = opened
-                    self.file = file
-                    // Listen is likely next, and a long book takes seconds to split. The pages show first.
-                    Task { await model.prepareListening(to: item.id) }
-                }
-            } catch let error as ReaderError {
-                problem = error.message
-            } catch {
-                problem = "It may have been damaged, or it may belong to another key."
+    }
+
+    @ViewBuilder private var pages: some View {
+        let onPage = { (page: Int) in
+            let listen = along?.map.pages.first { $0.index == page }?.start
+            model.remember(.pdf(page: page), listen: listen, for: item.id)
+        }
+        if let document {
+            PDFPages(document: document, follow: follow, startPage: startPage, onPage: onPage)
+        } else if let large {
+            LargePDFPages(pdf: large, follow: follow, startPage: startPage, onPage: onPage)
+        }
+    }
+
+    private func open() async {
+        do {
+            let file = try await model.file(of: item.id)
+            guard let opened = PDFSource.open(file) else {
+                problem = ReaderError.notReadable.message
+                return
             }
+            guard !opened.isLocked else {
+                problem = ReaderError.passwordProtected.message
+                return
+            }
+            startPage = await openingPage(file: file, pages: opened.pageCount)
+            switch opened {
+            case .whole(let whole): document = whole
+            case .large(let pdf): large = pdf
+            }
+            self.file = file
+            // Listen is likely next, and a long book takes seconds to split. The pages show first.
+            Task { await model.prepareListening(to: item.id) }
+        } catch let error as ReaderError {
+            problem = error.message
+        } catch {
+            problem = "It may have been damaged, or it may belong to another key."
         }
     }
 }
@@ -289,7 +305,7 @@ extension PDFReader {
 }
 
 /// Read along on a PDF's own pages.
-private struct PDFFollow {
+struct PDFFollow {
     let map: PDFPageMap
     let highlight: ReadAlongHighlight?
     let isFollowing: Bool

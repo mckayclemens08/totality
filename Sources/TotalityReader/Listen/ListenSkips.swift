@@ -12,11 +12,12 @@ enum ListenSkips {
     /// `mime` says what kind it is.
     static func ranges(text: String, file: any ByteSource, mime: String?, readHeadings: Bool) -> [Range<Int>] {
         if mime == "application/pdf" {
-            guard let document = ReadableText.pdf(file), !document.isLocked else { return [] }
-            let pages = (0..<document.pageCount).map { document.page(at: $0)?.string ?? "" }
+            guard let pdf = PDFSource.open(file), !pdf.isLocked else { return [] }
+            let pages = pdf.pages
             let map = PDFPageMap(whole: text, pages: pages)
             var found = furniture(pages: pages, map: map)
-            if !readHeadings { found += outlineHeadings(document, pages: pages, map: map) }
+            // A PDF too big to hold whole has no chapter list read, only its running heads and feet.
+            if !readHeadings, let document = pdf.document { found += outlineHeadings(document, pages: pages, map: map) }
             return merged(found)
         }
         guard !readHeadings else { return [] }

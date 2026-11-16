@@ -134,62 +134,9 @@ public final class ReaderFile: ByteSource, @unchecked Sendable {
         try writer.finish()
     }
 
-    /// The file as a PDF that reads only the pages it shows, through `PagedPDF`.
+    /// The file as a PDF in PDFKit, when it fits in memory. A bigger one opens as a `LargePDF`.
     func pdf() -> PDFDocument? {
-        switch source {
-        case .data(let data): PDFDocument(data: data)
-        case .pieces: PagedPDF.document(self)
-        }
+        guard count <= Self.wholeLimit else { return nil }
+        return (try? whole()).flatMap(PDFDocument.init(data:))
     }
-}
-
-/// A PDF that PDFKit reads a range at a time, through a CoreGraphics data provider, so a 1 GB scan never
-/// sits in memory whole. PDFKit has no public way to take a provider, so this uses `initWithProvider:`,
-/// the initializer PDFKit's own documents use, checked for at run time. Where it isn't there, a file up to
-/// `ReaderFile.wholeLimit` opens in memory instead, and a bigger one says it can't be shown.
-enum PagedPDF {
-    private static let initializer = NSSelectorFromString("initWithProvider:")
-
-    static var isAvailable: Bool {
-        PDFDocument.instancesRespond(to: initializer)
-    }
-
-    static func document(_ file: ReaderFile) -> PDFDocument? {
-        guard isAvailable else {
-            return (try? file.whole()).flatMap(PDFDocument.init(data:))
-        }
-        let box = Unmanaged.passRetained(file)
-        var callbacks = CGDataProviderDirectCallbacks(
-            version: 0, getBytePointer: nil, releaseBytePointer: nil,
-            getBytesAtPosition: { info, buffer, position, count in
-                guard let info else { return 0 }
-                let file = Unmanaged<ReaderFile>.fromOpaque(info).takeUnretainedValue()
-                let start = Int(position)
-                guard start >= 0, start < file.count, count > 0 else { return 0 }
-                // A piece that won't open reads as the end of the file, so PDFKit stops there.
-                guard let data = try? file.read(start..<(start + min(count, file.count - start))) else { return 0 }
-                data.copyBytes(to: buffer.assumingMemoryBound(to: UInt8.self), count: data.count)
-                return data.count
-            },
-            releaseInfo: { info in
-                guard let info else { return }
-                Unmanaged<ReaderFile>.fromOpaque(info).release()
-            }
-        )
-        // Whether CoreGraphics calls releaseInfo when it can't make the provider isn't documented, so the
-        // retain is left in place then: a file object kept a little too long beats one freed twice.
-        guard let provider = CGDataProvider(directInfo: box.toOpaque(), size: off_t(file.count), callbacks: &callbacks) else {
-            return nil
-        }
-        // Declared as a protocol so Swift calls alloc and init with the usual ownership rules.
-        let maker = unsafeBitCast(PDFDocument.self, to: ProvidedPDF.Type.self)
-        guard let opened = maker.init(provider: provider) as? PDFDocument, opened.pageCount > 0 else { return nil }
-        return opened
-    }
-}
-
-/// PDFKit's own initializer for a document read through a data provider. It isn't in the public headers,
-/// so `PagedPDF` checks it's there before calling it.
-@objc private protocol ProvidedPDF {
-    init?(provider: CGDataProvider)
 }

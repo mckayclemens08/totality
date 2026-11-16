@@ -13,9 +13,9 @@ enum ReadableText {
     static func extract(_ source: any ByteSource, mime: String?) throws -> String {
         guard let mime else { throw ReaderError.notReadable }
         if mime == "application/pdf" {
-            guard let document = pdf(source) else { throw ReaderError.notReadable }
-            guard !document.isLocked else { throw ReaderError.passwordProtected }
-            return document.string ?? ""
+            guard let pdf = PDFSource.open(source) else { throw ReaderError.notReadable }
+            guard !pdf.isLocked else { throw ReaderError.passwordProtected }
+            return pdf.text
         }
         if mime == epubMime || mime == wordMime { return try document(source, mime: mime).plainText }
         guard mime == References.mime || mime == MarkdownText.mime || mime == markdownMime || HTMLText.mimes.contains(mime)
@@ -35,8 +35,10 @@ enum ReadableText {
     /// Where each page's text sits in the text Listen reads. It's a new copy of the file, so this can run
     /// away from the main thread while the pages are on screen.
     static func pageMap(_ source: any ByteSource) -> PDFPageMap {
-        guard let document = pdf(source) else { return PDFPageMap(whole: "", pages: []) }
-        return pageMap(document)
+        guard let pdf = PDFSource.open(source) else { return PDFPageMap(whole: "", pages: []) }
+        if let document = pdf.document { return pageMap(document) }
+        let pages = pdf.pages
+        return PDFPageMap(whole: pages.joined(separator: "\n"), pages: pages)
     }
 
     static func pageMap(_ document: PDFDocument) -> PDFPageMap {
@@ -61,13 +63,6 @@ enum ReadableText {
                 .map { ReadableDocument.Block(text: String($0)) }
             return ReadableDocument(sections: [.init(blocks: blocks)])
         }
-    }
-
-    /// A PDF that reads its file a range at a time, when the file is sealed in pieces.
-    static func pdf(_ source: any ByteSource) -> PDFDocument? {
-        if let file = source as? ReaderFile { return file.pdf() }
-        if let data = source as? Data { return PDFDocument(data: data) }
-        return (try? whole(source)).flatMap(PDFDocument.init(data:))
     }
 
     /// The whole file, for what can only be read whole. A big one is refused rather than filling memory.

@@ -226,7 +226,6 @@ func makeScannedPDF(pages: [String], side: Int = 900) throws -> Data {
         let item = try await vault.importFile(at: try plainFile(pdf, named: "Plates.pdf"), filename: "Plates.pdf")
         let file = try await vault.file(of: item.id)
         #expect(file.isPieces)
-        #expect(PagedPDF.isAvailable)
         let document = try #require(file.pdf())
         #expect(document.pageCount == 3)
         #expect(document.page(at: 1)?.string?.contains("Pemberley") == true)
@@ -234,6 +233,40 @@ func makeScannedPDF(pages: [String], side: Int = 900) throws -> Data {
         #expect(ReadableText.pageMap(file).pages.count == 3)
         let hits = try await vault.search("Pemberley lawn")
         #expect(hits.map(\.item.id) == [item.id])
+    }
+
+    @Test("A PDF too big to hold whole opens through CoreGraphics, a page at a time, with its words and where they sit")
+    func largePDF() async throws {
+        let pages = [
+            "Plate one: the harbour at Lyme, drawn in 1811.",
+            "Plate two: Pemberley from the north lawn.",
+            "Plate three: the road to Meryton after rain.",
+        ]
+        let item = try await vault.importFile(at: try plainFile(try makeScannedPDF(pages: pages), named: "Plates.pdf"), filename: "Plates.pdf")
+        let file = try await vault.file(of: item.id)
+        // As though it were over the 64 MB a viewer holds whole.
+        guard case .large(let pdf) = try #require(PDFSource.open(file, wholeLimit: 1024)) else {
+            Issue.record("Opened whole")
+            return
+        }
+        #expect(pdf.pageCount == 3)
+        #expect(!pdf.isLocked)
+        #expect(pdf.pageTexts()[1].contains("Pemberley"))
+        let image = try #require(pdf.image(of: 0, pixelWidth: 300))
+        #expect(image.width == 300)
+        #expect(image.height == 388)
+        // A word's place on its own page, as Read along marks it, and back again for a tap.
+        let page = try #require(pdf.textPage(2))
+        let text = try #require(page.string)
+        let found = (text as NSString).range(of: "Meryton")
+        let selection = try #require(page.selection(for: found))
+        let shown = pdf.viewRect(selection.bounds(for: page), page: 2, width: 306)
+        #expect(shown.minY > 0 && shown.minY < 120)
+        let back = try #require(pdf.pagePoint(CGPoint(x: shown.midX, y: shown.midY), page: 2, width: 306))
+        #expect((found.location..<(found.location + found.length)).contains(page.characterIndex(at: back)))
+        // Its text and page map agree, so Listen's place falls on the right page.
+        let map = PDFPageMap(whole: pdf.pageTexts().joined(separator: "\n"), pages: pdf.pageTexts())
+        #expect(map.pages.map(\.index) == [0, 1, 2])
     }
 
     @Test("A book in pieces is read a part at a time, for its title, its pages and its words")

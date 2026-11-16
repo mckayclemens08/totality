@@ -26,12 +26,14 @@ length in its associated data, and the file must be exactly as long as its heade
 reordered, dropped, swapped from another file or added. Older files keep their single sealed `<id>.body`
 and open as before. The two can't be passed off as each other, because each opens only under its own key
 purpose. Files are read a range at a time and never written anywhere unsealed:
-- **PDFs:** through a CoreGraphics data provider, which PDFKit reads with its own `initWithProvider:`,
-  checked for at run time.
+- **PDFs:** up to 64 MB open in PDFKit, as before. A bigger one opens in public CoreGraphics through a
+  data provider (`LargePDF`) and is drawn a page at a time by `LargePDFPages`. For its words and Read
+  along, each page is copied on its own into a small PDF in memory for PDFKit to read. No private API is
+  used.
 - **EPUB and Word:** by zip part.
 - **Listen and search:** a page or a part at a time.
 
-Only an image, plain text or web page is read whole, up to 64 MB. Imports seal as they read, away from
+Only a PDF that PDFKit shows, an image, plain text or a web page is read whole, up to 64 MB. Imports seal as they read, away from
 the vault, with a progress bar over 50 MB. Sync carries a piece file as a file (`SealedObject.bodyFile`),
 up and down through the sealed store's resumable transfer, and checks every piece before keeping or
 sending it. A key change moves piece files a piece at a time. A Drive file over 32 MB that isn't text is
