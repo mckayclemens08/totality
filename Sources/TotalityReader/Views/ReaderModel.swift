@@ -39,6 +39,8 @@ public final class ReaderModel {
     public var drive: DriveModel?
     /// Where the person stopped in each file, synced as one sealed record (issue 117).
     public var places: ReadingPlaceBook?
+    /// Where the person is in the front item, for the home square, such as "Page 112".
+    public internal(set) var homePlace: String?
     private let vault: ReaderVault
     /// The latest item's text and its sentences, made ahead so Listen starts sooner.
     private var prepared: (id: UUID, readHeadings: Bool, split: Task<Result<(String, ListenScript), any Error>, Never>)?

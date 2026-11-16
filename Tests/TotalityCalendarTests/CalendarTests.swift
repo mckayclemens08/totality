@@ -698,6 +698,36 @@ enum Dates {
         #expect(model.glance?.isQuiet == false)
     }
 
+    @Test("The square's Next up card says when the next event is, and where (issue 127)")
+    func nextUpCard() async throws {
+        let model = try model()
+        var dentist = draft("Dentist", hour: 9)
+        dentist.location = "Lakeview Dental, 210 Shore Rd"
+        _ = await model.create(dentist)
+        let next = try #require(model.nextEntry)
+        #expect(next.title == "Dentist")
+        #expect(next.location == "Lakeview Dental, 210 Shore Rd")
+        let time = model.nextUpTime(next)
+        #expect(time.contains("–"))
+        #expect(!time.contains("Oct"), "Today's needs no date")
+    }
+
+    @Test("Next up says now for what's under way, and the day for what isn't today")
+    func nextUpWording() async throws {
+        let model = try model()
+        var workshop = draft("Workshop", hour: 8)
+        workshop.end = Dates.date(2026, 10, 15, 10)
+        _ = await model.create(workshop)
+        #expect(model.nextUpTime(try #require(model.nextEntry)).hasPrefix("Now until "))
+    }
+
+    @Test("Next up gives the day for what isn't today")
+    func nextUpAnotherDay() async throws {
+        let model = try model()
+        _ = await model.create(draft("Flight to Lisbon", day: 20))
+        #expect(model.nextUpTime(try #require(model.nextEntry)).contains("Oct 20"))
+    }
+
     private func onlyOccurrence(_ model: CalendarModel, day: Int) throws -> EventOccurrence {
         let entry = try #require(model.entries(on: CalendarDay(year: 2026, month: 10, day: day)).first)
         guard case .own(let occurrence) = entry.source else {
