@@ -152,7 +152,13 @@ public final class DriveModel {
             guard let link = links.first(where: { $0.account == recent.account && $0.folderID == recent.id }) else { return nil }
             return .folder(account: link.account, folderID: link.folderID, name: link.name)
         }
-        guard let found = try? await drive.whereIs(recent.id, account: recent.account) else { return nil }
+        var found = try? await drive.whereIs(recent.id, account: recent.account)
+        if found == nil {
+            // No listing here shows it yet: read the linked folders once, then look again.
+            _ = await refreshAll(force: true)
+            found = try? await drive.whereIs(recent.id, account: recent.account)
+        }
+        guard let found else { return nil }
         return .file(account: recent.account, folderID: found.folderID, entry: found.entry)
     }
 

@@ -50,7 +50,7 @@ extension GoogleDrive {
     }
 
     /// Every linked folder, and the files opened from them, newest first. A folder never opened counts
-    /// from when it was linked. Files only of connected accounts, and only while a linked folder lists them.
+    /// from when it was linked. Files only of connected accounts.
     public func recent() throws -> [DriveRecent] {
         guard !isClosed else { throw ReaderError.closed }
         let state = try loadState()
@@ -61,8 +61,10 @@ extension GoogleDrive {
             opened[Self.key(link.account, link.folderID)].map { DriveRecent(id: link.folderID, account: link.account, title: link.name, mime: DriveEntry.folderMime, openedAt: $0.openedAt) }
                 ?? DriveRecent(id: link.folderID, account: link.account, title: link.name, mime: DriveEntry.folderMime, openedAt: link.linkedAt)
         }
-        let listed = Set(listedFiles(in: state).keys)
-        let files = state.recent.filter { !$0.isFolder && connected.contains($0.account) && listed.contains($0.key) }
+        // A file stays on the tile even when this device holds no listing of its folder, such as one opened
+        // from home search: the owner wants opened Drive files kept beside the folders (2026-11-16). Where it
+        // is gets found again when it's tapped.
+        let files = state.recent.filter { !$0.isFolder && connected.contains($0.account) }
         return (folders + files).sorted { $0.openedAt > $1.openedAt }
     }
 
