@@ -266,6 +266,28 @@ import TotalityCore
         #expect(try await vault.markdown(of: copy.id).text == text + " Second.")
         #expect(try await vault.search("draft").count == 2)
     }
+
+    @Test("Symbols only a skipped pattern would use still read the same")
+    func quickChecksKeepTheWords() {
+        #expect(MarkdownText.plainText("Plain words, 3 trams and a river.") == "Plain words, 3 trams and a river.")
+        #expect(MarkdownText.plainText("snake_case stays, _this_ goes") == "snake_case stays, this goes")
+        #expect(MarkdownText.plainText("2) Second stop\n\n- [x] Packed") == "Second stop\nPacked")
+        #expect(MarkdownText.plainText("| Stop | Time |\n| :-- | --: |\n| Alfama | 9 |") == "Stop, Time Alfama, 9")
+        #expect(MarkdownText.plainText("A \\*star\\* and <https://example.org> and `code`") == "A *star* and https://example.org and code")
+        #expect(MarkdownText.plainText("--- a dash line that is words") == "--- a dash line that is words")
+    }
+
+    @Test("A long plain paragraph turns into its words quickly, so the first search stays fast")
+    func plainParagraphIsQuick() {
+        let body = String(repeating: "The tram climbs through Alfama past the cathedral, and the river shows between the houses. ", count: 30)
+        #expect(MarkdownText.plainText(body) == body.trimmingCharacters(in: .whitespaces))
+        let clock = ContinuousClock()
+        let time = clock.measure {
+            for _ in 0..<200 { _ = MarkdownText.plainText(body) }
+        }
+        // Before the quick checks, each of these took about 10 ms.
+        #expect(time < .milliseconds(400))
+    }
 }
 
 /// User 2 can't open User 1's docs, the originals kept from converting them, or their text.
