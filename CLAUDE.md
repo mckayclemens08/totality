@@ -102,6 +102,10 @@ on the Oracle server as sealed files, and mail between accounts doesn't use Matr
   and pale grey surfaces with dark grey text. Soft dual shadows; background and surface close in value.
   No rainbow palette, no pure black, no hard borders or harsh drop shadows as the default treatment.
   Elevation comes from the shadow pair, not from lines.
+- **No sunken look anywhere.** No inset, inner-shadowed or pressed-in surface, at rest, selected or
+  pressed (owner, 2026-11-15: "I just don't like the sunken-in look", "anywhere"; issue 132). Selected
+  gets an accent tint or `selectionWash`, a press gets a little scale or opacity, text boxes use
+  `raisedField()`. `NoSunkenLookTests` enforces it.
 - **One accent colour, used sparingly.**
 - Body text meets WCAG AA contrast. The look never wins over legibility.
 - Tokens in `Sources/TotalityUI/Tokens.swift` + `docs/design-tokens.md`. Read them before writing UI.
