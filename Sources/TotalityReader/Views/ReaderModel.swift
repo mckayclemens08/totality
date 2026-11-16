@@ -108,7 +108,9 @@ public final class ReaderModel {
     public var frontOfShelf: ShelfEntry? {
         let shelf = shelf
         let playing = listen.current?.id
-        return shelf.first { $0.id == playing } ?? items.first { $0.id == playing }.map(ShelfEntry.item) ?? shelf.first
+        // A document, not a folder, goes to the front: the folder is only where it came from.
+        return shelf.first { $0.id == playing } ?? items.first { $0.id == playing }.map(ShelfEntry.item)
+            ?? shelf.first { !$0.isFolder } ?? shelf.first
     }
 
     /// Stops anything that could write, for when every blob is about to be rewritten under a new key.
