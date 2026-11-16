@@ -42,8 +42,7 @@ public struct WebHomeTile: View {
         Group {
             switch size {
             case .medium: medium
-            case .large: large
-            case .square: square
+            case .large, .square: startPage
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -62,86 +61,40 @@ public struct WebHomeTile: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: Large: search, and the open tabs
+    // MARK: Large and square: a start page (owner, 2026-11-16)
 
-    /// Only bookmarks to show: Search and the bookmarks sit together in the middle, with even room above
-    /// and below, so the top isn't cramped against the title and the bottom isn't left empty.
-    private func centred(_ rows: [[WebBookmark]]) -> some View {
-        VStack(spacing: Space.s6) {
-            Spacer(minLength: Space.s2)
+    /// A full-width Search button, the bookmarks as raised squares (four across, up to eight), and the open
+    /// tabs as one button at the bottom. The square adds the newest download under them.
+    private var startPage: some View {
+        let marks = Array(model.homeBookmarks.prefix(WebModel.homeGrid))
+        return VStack(alignment: .leading, spacing: Space.s4) {
             WebTileSearch(model: model, onOpen: onOpen)
                 .tileControl()
-            wall(rows)
-            Spacer(minLength: Space.s2)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    @ViewBuilder private var large: some View {
-        let tabs = Array(model.homeTabs.prefix(WebModel.homeTabCards))
-        if tabs.isEmpty && !model.bookmarks.isEmpty {
-            centred(rows(2, of: model.homeBookmarks))
-        } else {
-            largeWithTabs(tabs)
-        }
-    }
-
-    private func largeWithTabs(_ tabs: [WebTab]) -> some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            WebTileSearch(model: model, onOpen: onOpen)
-                .tileControl()
-            ForEach(tabs) { tab in
-                TabCard(tab: tab)
-                    .tileLink("\(tab.title), open tab") {
-                        model.showFromHome(tab)
-                        onOpen()
-                    }
-            }
-            if tabs.isEmpty && model.bookmarks.isEmpty {
+            if marks.isEmpty {
                 emptyNote
-            } else if tabs.count < WebModel.homeTabCards, !model.bookmarks.isEmpty {
-                // Room the tabs don't fill goes to the bookmarks people use most, right under the button.
-                wall(rows(tabs.isEmpty ? 2 : 1, of: model.homeBookmarks))
-                    .padding(.top, Space.s3)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s3), count: Self.perRow),
+                          alignment: .leading, spacing: Space.s3) {
+                    ForEach(marks) { bookmark in
+                        SiteSquare(bookmark: bookmark)
+                            .tileLink(bookmark.displayTitle) {
+                                model.openFromHome(bookmark)
+                                onOpen()
+                            }
+                    }
+                }
             }
             Spacer(minLength: 0)
-        }
-    }
-
-    // MARK: Square: search, bookmarks, tabs and the latest download
-
-    @ViewBuilder private var square: some View {
-        let grid = rows(WebModel.homeGrid / Self.perRow, of: model.homeBookmarks)
-        let tabs = Array(model.homeTabs.prefix(WebModel.homeSquareTabs))
-        if tabs.isEmpty && model.homeDownload == nil && !grid.isEmpty {
-            centred(grid)
-        } else {
-            squareWithTabs(grid: grid, tabs: tabs)
-        }
-    }
-
-    private func squareWithTabs(grid: [[WebBookmark]], tabs: [WebTab]) -> some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            WebTileSearch(model: model, onOpen: onOpen)
-                .tileControl()
-            if grid.isEmpty && tabs.isEmpty && model.homeDownload == nil {
-                emptyNote
-            }
-            if !grid.isEmpty {
-                wall(grid)
-                    .padding(.top, Space.s3)
-            }
-            Spacer(minLength: 0)
-            ForEach(tabs) { tab in
-                TabCard(tab: tab)
-                    .tileLink("\(tab.title), open tab") {
-                        model.showFromHome(tab)
-                        onOpen()
-                    }
-            }
-            if let download = model.homeDownload {
-                DownloadLine(download: download)
-                    .tileLink("Downloads, \(download.filename)") { open(.downloads) }
+            HStack(spacing: Space.s3) {
+                if size == .square, let download = model.homeDownload {
+                    DownloadLine(download: download)
+                        .tileLink("Downloads, \(download.filename)") { open(.downloads) }
+                }
+                Spacer(minLength: 0)
+                if let tabsLine {
+                    TileButton(tabsLine, systemImage: "square.on.square") { open(.tabs) }
+                        .tileControl()
+                }
             }
         }
     }
@@ -215,10 +168,51 @@ private struct WebTileSearch: View {
     let model: WebModel
     let onOpen: @MainActor () -> Void
 
+    /// A raised button across the tile. It opens Web's own field, because a tile holds no text box.
     var body: some View {
-        TileButton("Search", systemImage: "magnifyingglass", isProminent: true) {
+        let theme = Theme.current
+        Button {
             model.openSearchFromHome()
             onOpen()
+        } label: {
+            HStack(spacing: Space.s2) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(theme.accent.color)
+                Text("Search or type address")
+                    .foregroundStyle(theme.textSecondary.color)
+                Spacer(minLength: 0)
+            }
+            .font(Typeface.callout)
+            .lineLimit(1)
+            .padding(.horizontal, Space.s4)
+            .padding(.vertical, Space.s3)
+            .frame(maxWidth: .infinity)
+            .neumorphic(.subtle, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(TilePress())
+        .accessibilityLabel("Search the web")
+    }
+}
+
+/// A bookmark as a raised square with its site's letter, and its name under it.
+private struct SiteSquare: View {
+    let bookmark: WebBookmark
+
+    var body: some View {
+        let theme = Theme.current
+        VStack(spacing: Space.s1) {
+            Text(bookmark.displayTitle.prefix(1).uppercased())
+                .font(Typeface.title)
+                .foregroundStyle(theme.textSecondary.color)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
+                .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                .accessibilityHidden(true)
+            Text(bookmark.displayTitle)
+                .font(Typeface.micro)
+                .foregroundStyle(theme.textSecondary.color)
+                .lineLimit(1)
         }
     }
 }
