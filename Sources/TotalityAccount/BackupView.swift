@@ -72,7 +72,7 @@ struct BackupView: View {
                 .opacity(keyOpacity)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Space.s4)
-                .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+                .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
             Button("Copy for 2 minutes") { RecoveryKeyClipboard.copy(key) }
                 .font(Typeface.callout)
             warning

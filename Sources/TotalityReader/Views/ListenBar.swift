@@ -60,7 +60,7 @@ struct ListenBar: View {
         .accessibilityLabel(label)
     }
 
-    /// Pressed in as well as coloured, so on and off don't differ by colour alone.
+    /// Washed as well as coloured, so on and off don't differ by colour alone.
     private var readAlongToggle: some View {
         Button {
             readAlong.toggle()
@@ -68,9 +68,7 @@ struct ListenBar: View {
             Image(systemName: "text.line.first.and.arrowtriangle.forward")
                 .foregroundStyle(readAlong ? Theme.current.accent.color : Theme.current.textPrimary.color)
                 .modifier(TapTarget())
-                .background {
-                    if readAlong { Color.clear.neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm)) }
-                }
+                .selectionWash(readAlong, in: RoundedRectangle(cornerRadius: Radius.sm))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Read along")

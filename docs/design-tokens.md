@@ -21,7 +21,7 @@ large text 3:1.** Every ratio below was computed, not estimated. The look never 
 |---|---|---|---|
 | `bg` | `#E8EBEF` | app background, the plane bubbles sit on | — |
 | `surface` | `#EDEFF2` | raised cards, controls, bubbles | — |
-| `surfaceSunken` | `#E2E5EA` | pressed / inset state | — |
+| `surfaceSunken` | `#E2E5EA` | a flat tone with no inner shadow: progress tracks, image placeholders, timeline rules, a send button with nothing to send. Never an inset or pressed-in surface. | — |
 | `shadowLight` | `#FFFFFF` @ 90% | top-left highlight of the shadow pair | — |
 | `shadowDark` | `#C3C9D3` @ 70% | bottom-right depth of the shadow pair | — |
 | `textPrimary` | `#15181D` | body, titles | **15.5:1** ✓ AA/AAA |
@@ -29,7 +29,7 @@ large text 3:1.** Every ratio below was computed, not estimated. The look never 
 | `textTertiary` | `#7D8592` | disabled, placeholder | 3.2:1 — large text / non-text only |
 | `accent` | `#1F5FBF` | the one saturated colour, used sparingly | **5.3:1** ✓ AA |
 | `accentOn` | `#FFFFFF` | text on an accent fill | **6.1:1** vs accent ✓ AA |
-| `highlight` | `#D3E0F4` | the sentence Listen is reading | `textPrimary` on it **13.3:1** ✓ AA |
+| `highlight` | `#D3E0F4` | the sentence Listen is reading, and the selection wash: the chosen row, chip, folder or day | `textPrimary` on it **13.3:1** ✓ AA |
 | `highlightStrong` | `#A9C5EE` | the word Listen is reading | `textPrimary` on it **10.1:1** ✓ AA |
 | `danger` | `#B3261E` | destructive, key-loss warnings | 5.7:1 ✓ AA |
 | `success` | `#1E6F4C` | verified contact, synced | 5.3:1 ✓ AA |
@@ -46,10 +46,25 @@ Neumorphism is two shadows, always offset in opposite directions, always soft.
 |---|---|
 | `elevationRaised` | `+6,+6 blur 12 shadowDark` · `−6,−6 blur 12 shadowLight` |
 | `elevationSubtle` | `+3,+3 blur 6` · `−3,−3 blur 6` |
-| `elevationPressed` | inner `+4,+4 blur 8 shadowDark` · inner `−4,−4 blur 8 shadowLight` |
 | `elevationFlat` | none |
 
 Nothing else. No `elevationXL`, no coloured shadows, no border as a substitute.
+
+### No sunken look, anywhere
+
+`elevationPressed` is retired. The owner, 2026-11-15: "I just don't like the sunken-in look", then
+"anywhere" (issue 132). Nothing in the app is inset, inner-shadowed or pressed in: not at rest, not as a
+selected state, not as press feedback. Neumorphism in Totality means raised surfaces only.
+
+- **Selected or on:** accent-tinted icon or text, with `selectionWash` (a flat `highlight` fill) behind
+  the chosen one. A toggle that's raised when off uses `toggleSurface`, which turns into the wash when on.
+- **Pressed:** a slight scale and opacity change (`TilePress`), never a sink.
+- **Tick boxes:** fill with `accent` and a check.
+- **Text boxes:** `raisedField()`.
+- **Flat fills:** progress tracks and image placeholders keep a flat `surfaceSunken` tone, with no inner shadow.
+
+`NoSunkenLookTests` fails the build on `neumorphic(.pressed`, `elevationPressed` or an inner shadow in
+any source file.
 
 ## Radius
 

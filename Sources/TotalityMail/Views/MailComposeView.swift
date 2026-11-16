@@ -309,7 +309,7 @@ struct MailComposeView: View {
             .accessibilityLabel("Remove \(file.name)")
         }
         .padding(Space.s3)
-        .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
     }
 
     private var attachButtons: some View {

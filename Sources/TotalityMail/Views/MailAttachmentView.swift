@@ -59,7 +59,7 @@ struct MailAttachmentView: View {
             }
         }
         .padding(Space.s3)
-        .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
+        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
     }
 
     private var detail: String {

@@ -91,7 +91,7 @@ struct MailAccountChips: View {
                 .lineLimit(1)
                 .padding(.horizontal, Space.s3)
                 .padding(.vertical, Space.s2)
-                .neumorphic(isOn ? .pressed : .subtle, in: Capsule())
+                .toggleSurface(isOn, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? .isSelected : [])

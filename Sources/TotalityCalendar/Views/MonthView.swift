@@ -91,7 +91,7 @@ private struct DayCell: View {
                     if isToday {
                         Circle().fill(theme.accent.color)
                     } else if isSelected {
-                        Color.clear.neumorphic(.pressed, in: Circle())
+                        Circle().fill(theme.highlight.color)
                     }
                 }
             marks(entries)

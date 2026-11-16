@@ -56,7 +56,7 @@ struct Banner: View {
             .foregroundStyle(theme.textPrimary.color)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Space.s3)
-            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
+            .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.sm))
             .transition(.opacity)
     }
 }

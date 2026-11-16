@@ -110,15 +110,17 @@ public enum Motion {
     public static let standard = Animation.spring(response: 0.4, dampingFraction: 0.82)
 }
 
+/// How far a surface stands off the page. There is no pressed or inset elevation: the owner doesn't want
+/// a sunken look anywhere ("I just don't like the sunken-in look", "anywhere", 2026-11-15, issue 132).
+/// A selected thing gets `selectionWash`, and a press gets a little scale or opacity.
 public enum Elevation: Sendable {
-    case flat, subtle, raised, pressed
+    case flat, subtle, raised
 
     var offset: CGFloat {
         switch self {
         case .flat: 0
         case .subtle: 3
         case .raised: 6
-        case .pressed: 4
         }
     }
 }
@@ -127,6 +129,20 @@ extension View {
     /// A soft surface in the given shape. Elevation comes from the shadow pair, never a border.
     public func neumorphic<S: Shape>(_ elevation: Elevation = .raised, in shape: S) -> some View {
         modifier(NeumorphicSurface(elevation: elevation, shape: shape))
+    }
+
+    /// The chosen one of several: a flat, soft wash of the accent behind it, never pressed in.
+    @ViewBuilder
+    public func selectionWash<S: Shape>(_ isOn: Bool, in shape: S) -> some View {
+        background {
+            if isOn { shape.fill(Theme.current.highlight.color) }
+        }
+    }
+
+    /// A toggle's surface: raised a little when off, and a flat accent wash when on.
+    @ViewBuilder
+    public func toggleSurface<S: Shape>(_ isOn: Bool, in shape: S) -> some View {
+        if isOn { selectionWash(true, in: shape) } else { neumorphic(.subtle, in: shape) }
     }
 }
 
@@ -139,17 +155,9 @@ private struct NeumorphicSurface<S: Shape>: ViewModifier {
         let offset = elevation.offset
         let radius = offset * 2
         content.background {
-            if elevation == .pressed {
-                shape.fill(
-                    theme.surfaceSunken.color
-                        .shadow(.inner(color: theme.shadowDark.color, radius: radius, x: offset, y: offset))
-                        .shadow(.inner(color: theme.shadowLight.color, radius: radius, x: -offset, y: -offset))
-                )
-            } else {
-                shape.fill(theme.surface.color)
-                    .shadow(color: theme.shadowDark.color, radius: radius, x: offset, y: offset)
-                    .shadow(color: theme.shadowLight.color, radius: radius, x: -offset, y: -offset)
-            }
+            shape.fill(theme.surface.color)
+                .shadow(color: theme.shadowDark.color, radius: radius, x: offset, y: offset)
+                .shadow(color: theme.shadowLight.color, radius: radius, x: -offset, y: -offset)
         }
     }
 }
