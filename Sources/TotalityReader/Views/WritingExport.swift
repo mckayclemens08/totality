@@ -40,6 +40,8 @@ struct ExportSheet: View {
     let read: (String) async -> ExportDocument?
     /// The open doc's words, saved first.
     let currentText: () async -> String
+    /// For the journal (issue 128): the days with writing, so a range of them can go out instead of all.
+    var journalDays: [String] = []
 
     private enum Phase: Equatable {
         case choosing, working, failed(String)
@@ -50,6 +52,9 @@ struct ExportSheet: View {
     @AppStorage("reader.export.paper") private var paper = PaperSize.local
     @AppStorage("reader.writing.serif") private var serif = false
     @State private var chapters = false
+    @State private var someDays = false
+    @State private var firstDay = Date()
+    @State private var lastDay = Date()
     @State private var phase = Phase.choosing
     @State private var file: ExportFile?
     @State private var saving = false
@@ -78,6 +83,21 @@ struct ExportSheet: View {
                     }
                 } footer: {
                     Text(template.detail)
+                }
+                if let first = journalDays.first.flatMap(Self.date), let last = journalDays.last.flatMap(Self.date) {
+                    Section {
+                        Toggle("Only some days", isOn: $someDays)
+                        if someDays {
+                            DatePicker("From", selection: $firstDay, in: first...max(first, last), displayedComponents: .date)
+                            DatePicker("To", selection: $lastDay, in: first...max(first, last), displayedComponents: .date)
+                        }
+                    } footer: {
+                        Text("Each day goes in under its date, with the notes added to it.")
+                    }
+                    .onAppear {
+                        firstDay = first
+                        lastDay = last
+                    }
                 }
                 if siblings.count > 1 {
                     Section {
@@ -114,7 +134,7 @@ struct ExportSheet: View {
             }
             .fileExporter(
                 isPresented: $saving, document: file, contentType: format.contentType,
-                defaultFilename: "\(Self.filename(item.displayTitle)).\(format.fileExtension)"
+                defaultFilename: "\(Self.filename(journalDays.isEmpty ? item.displayTitle : "Journal")).\(format.fileExtension)"
             ) { result in
                 if case .failure = result { phase = .failed("The file wasn't saved. Try again.") } else { dismiss() }
             }
@@ -128,7 +148,13 @@ struct ExportSheet: View {
 
     private func export() async {
         phase = .working
-        let text = chapters ? await chapterText() : await currentText()
+        let text = if !journalDays.isEmpty, someDays {
+            await model.journalManuscript(from: Self.day(min(firstDay, lastDay)), to: Self.day(max(firstDay, lastDay)))
+        } else if chapters {
+            await chapterText()
+        } else {
+            await currentText()
+        }
         guard let document = await read(text) else {
             phase = .failed("The doc couldn't be read for export.")
             return
@@ -153,6 +179,16 @@ struct ExportSheet: View {
             texts.append(doc.id == item.id ? await currentText() : await model.markdownForExport(doc.id) ?? "")
         }
         return ExportDocument.manuscript(texts)
+    }
+
+    /// A journal day as the date picker shows it, at noon so no clock change moves it.
+    private static func date(_ day: String) -> Date? {
+        JournalClock.noon(of: day, zone: .current)
+    }
+
+    /// The journal day a picked date names, by its calendar date alone.
+    private static func day(_ date: Date) -> String {
+        JournalClock.key(JournalClock.calendar(.current).dateComponents([.year, .month, .day], from: date))
     }
 
     /// A filename without the characters file systems refuse.

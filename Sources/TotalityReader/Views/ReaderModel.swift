@@ -32,6 +32,12 @@ public final class ReaderModel {
     public var notice: String?
     /// A big file being imported, and how far it's got, for the progress bar.
     public private(set) var importing: ImportProgress?
+    /// The journal (issue 128): every day with writing, and the notes added under them.
+    public internal(set) var journal = JournalListing.empty
+    /// Nil until the journal has been read, and false when it couldn't be.
+    public internal(set) var journalLoaded: Bool?
+    /// Words in today's entry, for the journal's row.
+    public internal(set) var journalTodayWords = 0
     /// How much room is left in the account's storage on the Totality server, or nil when it can't be
     /// told right now. The app sets it, so a file that won't fit is refused before it's sealed.
     public var storageLeft: (@Sendable () async -> Int?)?
@@ -43,7 +49,8 @@ public final class ReaderModel {
     public var places: ReadingPlaceBook?
     /// Where the person is in the front item, for the home square, such as "Page 112".
     public internal(set) var homePlace: String?
-    private let vault: ReaderVault
+    /// The journal's code, in its own file, reaches the vault too.
+    let vault: ReaderVault
     /// The latest item's text and its sentences, made ahead so Listen starts sooner.
     private var prepared: (id: UUID, readHeadings: Bool, split: Task<Result<(String, ListenScript), any Error>, Never>)?
 
@@ -129,6 +136,7 @@ public final class ReaderModel {
             let kept = Set(listing.items.map(\.id)).union(trash.map(\.item.id))
             await forgetPlaces(wasTrashed.subtracting(kept))
             unreadable = listing.unreadable
+            await loadJournal()
             phase = .ready
         } catch {
             phase = .failed
@@ -503,7 +511,7 @@ public final class ReaderModel {
     }
 
     private func title(of id: UUID) -> String {
-        (library.items.first { $0.id == id } ?? library.lastOpened.first { $0.id == id })?.displayTitle ?? ""
+        (library.items.first { $0.id == id } ?? library.lastOpened.first { $0.id == id } ?? journalItem(id))?.displayTitle ?? ""
     }
 
     private func track(for id: UUID, from offset: Int? = nil) async -> ListenTrack? {

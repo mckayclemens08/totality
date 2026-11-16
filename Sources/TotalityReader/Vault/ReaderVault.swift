@@ -182,6 +182,17 @@ public actor ReaderVault {
     }
 
     public func list() throws -> ReaderListing {
+        let (all, unreadable) = try everything()
+        // The journal has a page of its own and never mixes with the library.
+        let sorted = all.filter { $0.kind != .journal }.sorted { $0.updatedAt > $1.updatedAt }
+        return ReaderListing(
+            items: sorted.filter { $0.kind != .folder }, folders: sorted.filter { $0.kind == .folder },
+            opened: try openedDates(), unreadable: unreadable
+        )
+    }
+
+    /// Every item that opens, the journal's too, and how many didn't.
+    private func everything() throws -> ([ReaderItem], Int) {
         var items: [ReaderItem] = []
         var unreadable = 0
         for name in try store.names() where name.hasSuffix(".meta") {
@@ -192,11 +203,7 @@ public actor ReaderVault {
                 unreadable += 1
             }
         }
-        let sorted = items.sorted { $0.updatedAt > $1.updatedAt }
-        return ReaderListing(
-            items: sorted.filter { $0.kind != .folder }, folders: sorted.filter { $0.kind == .folder },
-            opened: try openedDates(), unreadable: unreadable
-        )
+        return (items, unreadable)
     }
 
     /// A time that won't open only costs an item its place in the list.
@@ -253,6 +260,7 @@ public actor ReaderVault {
 
     public func rename(_ id: UUID, to title: String) throws {
         var updated = try item(id)
+        guard updated.kind != .journal else { throw ReaderError.journalIsPrivate }
         updated.title = title
         updated.updatedAt = Date()
         try writeMeta(updated)
@@ -262,6 +270,7 @@ public actor ReaderVault {
     /// device isn't told it fell behind.
     public func move(_ id: UUID, to folder: UUID?) throws {
         var updated = try item(id)
+        guard updated.kind != .journal else { throw ReaderError.journalIsPrivate }
         guard try library().canMove(updated, to: folder) else { throw ReaderError.folderInsideItself }
         updated.folderID = folder
         try writeMeta(updated)
@@ -662,7 +671,9 @@ public actor ReaderVault {
     public func search(_ query: String) throws -> [ReaderSearchHit] {
         let terms = SearchText.terms(in: query)
         guard !terms.isEmpty else { return [] }
-        return try list().items.compactMap { item in
+        // The journal is searched too, though it's listed apart.
+        let journal = try everything().0.filter { $0.kind == .journal }.sorted { $0.updatedAt > $1.updatedAt }
+        return try (try list().items + journal).compactMap { item in
             // A newer search is waiting on this actor, so a stale one stops between items.
             try Task.checkCancellation()
             let text = (try? text(of: item.id)) ?? ""
@@ -678,6 +689,7 @@ public actor ReaderVault {
     /// A share is one sealed snapshot, so a file has to fit in memory to be shared this way.
     public func share(_ id: UUID, with recipient: IdentityBundle) throws -> ReaderShare {
         let item = try item(id)
+        guard item.kind != .journal else { throw ReaderError.journalIsPrivate }
         let body = try file(of: id).whole()
         let key = try ObjectKey.generate()
         let header = ReaderShare.Header(kind: item.kind, title: item.title, mime: item.mime)
@@ -749,7 +761,19 @@ extension ReaderVault: SyncArea {
         let (object, made) = try asFile(object)
         defer { if let made { try? FileManager.default.removeItem(at: made) } }
         guard object.hasBody else { throw CryptoError.malformedCiphertext }
-        guard try openedItem(object.meta, id: object.id).id == object.id else { throw CryptoError.authenticationFailed }
+        let theirs = try openedItem(object.meta, id: object.id)
+        guard theirs.id == object.id else { throw CryptoError.authenticationFailed }
+        // A journal day that's over keeps its words. Leaving this copy as it is means the next sync sends
+        // the locked one back, so an older device can't overwrite it.
+        if try journalKeepsWords(object, theirs: theirs) {
+            // Their words may be newer than the clocks say, so they're kept as a note under the day.
+            // Named for the version, so a second sync can't make a second note.
+            let incoming = try openedFile(object, keep: 0)
+            if try !file(of: object.id).sameBytes(as: incoming) {
+                try writeConflictCopy(of: theirs, file: incoming, id: UUID(derivedFrom: object.hash))
+            }
+            return
+        }
         if let file = object.bodyFile {
             let ours = try files?.location(of: piecesName(object.id))
             // The same pieces already here need no second look. Anything else is opened in full first.
@@ -833,7 +857,18 @@ extension ReaderVault: SyncArea {
         defer { if let madeRemote { try? FileManager.default.removeItem(at: madeRemote) } }
         let mine = try openedItem(local.meta, id: local.id)
         let theirs = try openedItem(remote.meta, id: remote.id)
-        let keepMine = mine.updatedAt >= theirs.updatedAt
+        var keepMine = mine.updatedAt >= theirs.updatedAt
+        if let lock = journalLock(mine) ?? journalLock(theirs) {
+            // A day that's over keeps what was written before it ended. The other version becomes a note
+            // under that day, so nothing is lost.
+            let mineInTime = mine.updatedAt <= lock
+            let theirsInTime = theirs.updatedAt <= lock
+            if mineInTime != theirsInTime {
+                keepMine = mineInTime
+            } else if !mineInTime {
+                keepMine = mine.updatedAt <= theirs.updatedAt
+            }
+        }
         let mineFile = try openedFile(local, keep: 0)
         let theirsFile = try openedFile(remote, keep: 0)
         let same = try mine.kind == .folder || (mine.title == theirs.title && mineFile.sameBytes(as: theirsFile))
@@ -863,11 +898,20 @@ extension ReaderVault: SyncArea {
     private func writeConflictCopy(of item: ReaderItem, file: ReaderFile, id: UUID) throws {
         guard try store.read(metaName(id)) == nil else { return }
         let now = Date()
-        let copy = ReaderItem(
-            id: id, kind: item.kind, title: "\(item.displayTitle) (conflict copy)", collection: nil,
-            mime: item.mime, byteCount: item.byteCount, createdAt: now, updatedAt: now, listenPosition: 0,
-            folderID: item.folderID
-        )
+        let copy = if let stamp = item.journal {
+            // A journal copy stays in the journal, as a note under the same day, locked when that day is.
+            ReaderItem(
+                id: id, kind: .journal, title: "Conflict copy", collection: nil, mime: item.mime,
+                byteCount: item.byteCount, createdAt: now, updatedAt: min(now, stamp.locksAt ?? now), listenPosition: 0,
+                journal: JournalStamp(day: stamp.day, zone: stamp.zone, about: stamp.about ?? stamp.day, closedAt: stamp.closedAt)
+            )
+        } else {
+            ReaderItem(
+                id: id, kind: item.kind, title: "\(item.displayTitle) (conflict copy)", collection: nil,
+                mime: item.mime, byteCount: item.byteCount, createdAt: now, updatedAt: now, listenPosition: 0,
+                folderID: item.folderID
+            )
+        }
         if file.isPieces, let files {
             // Sealed again under the copy's own ID and key, a piece at a time.
             let part = try files.location(of: importingName(id))
@@ -1009,5 +1053,178 @@ extension ReaderVault: SyncArea {
         for id in heldOrder { textCache[id] = nil }
         held = [:]
         heldOrder = []
+    }
+}
+
+/// The journal (issue 128), oldest day first. Notes added under a past day are listed with that day.
+public struct JournalListing: Sendable, Equatable {
+    /// Each day's own entry. A day with nothing written has none.
+    public let entries: [ReaderItem]
+    /// Notes, by the day they were added under, oldest first.
+    public let notes: [String: [ReaderItem]]
+
+    /// Days with any writing, for the month strip and the streak.
+    public var days: Set<String> {
+        Set(entries.filter { $0.byteCount > 0 }.compactMap(\.journal?.day))
+            .union(notes.values.joined().filter { $0.byteCount > 0 }.compactMap(\.journal?.day))
+    }
+
+    public static let empty = JournalListing(entries: [], notes: [:])
+}
+
+extension ReaderVault {
+    /// A day's entry has an ID from the day and the key, so two of this person's devices write the same
+    /// entry, and the server can't tell which day an ID is.
+    private func journalID(_ day: String) -> UUID {
+        rootKey.derivedID(from: "reader-journal:\(day)")
+    }
+
+    /// When a journal item's day ended, if it has. Nil for anything else, or a day still open.
+    fileprivate func journalLock(_ item: ReaderItem, now: Date = Date()) -> Date? {
+        guard item.kind == .journal, let stamp = item.journal, stamp.isClosed(at: now) else { return nil }
+        return stamp.locksAt ?? stamp.closedAt ?? .distantPast
+    }
+
+    /// Whether a closed journal item here must keep its words against what sync brought. An edit made
+    /// before its day ended that arrives late still counts. After that, only the details around the
+    /// words may change, like where Listen stopped.
+    fileprivate func journalKeepsWords(_ incoming: SealedObject, theirs: ReaderItem) throws -> Bool {
+        guard let meta = try store.read(metaName(incoming.id)), let mine = try? openedItem(meta, id: incoming.id),
+              let lock = journalLock(mine), let stamp = mine.journal
+        else { return false }
+        let sameEntry = theirs.kind == .journal && theirs.journal?.day == stamp.day
+            && theirs.journal?.zone == stamp.zone && theirs.journal?.about == stamp.about
+        if sameEntry, theirs.updatedAt > mine.updatedAt, theirs.updatedAt <= lock { return false }
+        guard sameEntry, theirs.title == mine.title else { return true }
+        return try !file(of: incoming.id).sameBytes(as: openedFile(incoming, keep: 0))
+    }
+
+    /// Every journal item. One whose day has ended is marked closed here, the first time a device sees
+    /// it, so a clock set back later can't reopen it.
+    public func journal(now: Date = Date()) throws -> JournalListing {
+        var entries: [String: [ReaderItem]] = [:]
+        var notes: [String: [ReaderItem]] = [:]
+        for var item in try everything().0 where item.kind == .journal {
+            guard var stamp = item.journal else { continue }
+            if stamp.closedAt == nil, stamp.isClosed(at: now), !isClosed {
+                stamp.closedAt = stamp.locksAt ?? now
+                item.journal = stamp
+                // Locking isn't an edit, so the time stays.
+                try writeMeta(item)
+            }
+            if let about = stamp.about {
+                notes[about, default: []].append(item)
+            } else {
+                entries[stamp.day, default: []].append(item)
+            }
+        }
+        // A day's entry is found by its sealed day, not its ID, which a change of key would change. A day
+        // with two, as after one, shows the second as a note under it, so nothing goes missing.
+        var days: [ReaderItem] = []
+        for (day, found) in entries {
+            let ordered = found.sorted(by: entryFirst(day))
+            days.append(ordered[0])
+            notes[day, default: []].append(contentsOf: ordered.dropFirst())
+        }
+        let byDay = { (a: ReaderItem, b: ReaderItem) in
+            (a.journal?.day ?? "", a.createdAt) < (b.journal?.day ?? "", b.createdAt)
+        }
+        return JournalListing(entries: days.sorted(by: byDay), notes: notes.mapValues { $0.sorted(by: byDay) })
+    }
+
+    /// Of two entries for one day, the one this key names comes first, then the older.
+    private func entryFirst(_ day: String) -> (ReaderItem, ReaderItem) -> Bool {
+        let named = journalID(day)
+        return { a, b in a.id == named ? b.id != named || a.createdAt < b.createdAt : b.id == named ? false : a.createdAt < b.createdAt }
+    }
+
+    /// The day's entry, by its sealed day.
+    private func journalEntry(on day: String) throws -> ReaderItem? {
+        if let named = try? item(journalID(day)), named.kind == .journal, named.journal?.about == nil { return named }
+        return try everything().0
+            .filter { $0.kind == .journal && $0.journal?.day == day && $0.journal?.about == nil }
+            .min(by: entryFirst(day))
+    }
+
+    /// Today's entry, ready to write in. It isn't kept until something is written, so a day with nothing
+    /// in it leaves nothing behind. When today's entry closed early because the person flew somewhere
+    /// whose clock is behind, the next day's opens, since an entry that's over never reopens.
+    public func journalToday(now: Date = Date(), zone: TimeZone = .current) throws -> ReaderItem {
+        var day = JournalClock.day(of: now, in: zone)
+        for _ in 0..<3 {
+            let id = journalID(day)
+            if let existing = try journalEntry(on: day) {
+                if journalLock(existing, now: now) == nil { return existing }
+            } else {
+                let stamp = JournalStamp(day: day, zone: zone.identifier)
+                if !stamp.isClosed(at: now) {
+                    return ReaderItem(
+                        id: id, kind: .journal, title: "Journal, \(JournalClock.heading(day))", collection: nil,
+                        mime: MarkdownText.mime, byteCount: 0, createdAt: now, updatedAt: .distantPast,
+                        listenPosition: 0, journal: stamp
+                    )
+                }
+            }
+            guard let next = JournalClock.day(day, adding: 1) else { break }
+            day = next
+        }
+        throw ReaderError.journalClosed
+    }
+
+    /// A note to add under a past day. It belongs to today, so it locks when today does, and it isn't
+    /// kept until something is written.
+    public func journalNote(under day: String, now: Date = Date(), zone: TimeZone = .current) throws -> ReaderItem {
+        let today = try journalToday(now: now, zone: zone)
+        guard let stamp = today.journal, JournalClock.components(day) != nil, day < stamp.day else { throw ReaderError.notFound }
+        return ReaderItem(
+            id: UUID(), kind: .journal, title: "Note on \(JournalClock.short(day))", collection: nil,
+            mime: MarkdownText.mime, byteCount: 0, createdAt: now, updatedAt: .distantPast, listenPosition: 0,
+            journal: JournalStamp(day: stamp.day, zone: stamp.zone, about: day)
+        )
+    }
+
+    /// The words of a journal entry or note. Nothing written yet reads as empty.
+    public func journalText(of id: UUID) throws -> String {
+        do {
+            _ = try item(id)
+        } catch ReaderError.notFound {
+            return ""
+        }
+        return String(decoding: try body(of: id), as: UTF8.self)
+    }
+
+    /// Saves today's entry or a note from the editor. A day that's over is refused, whatever the editor
+    /// thinks. `basedOn` is the version the editor loaded: when another device saved since, what was typed
+    /// is kept as a note under the same day, so neither is lost.
+    public func saveJournal(_ draft: ReaderItem, body: String, basedOn: Date, now: Date = Date()) throws -> NoteSave {
+        guard draft.kind == .journal, let draftStamp = draft.journal else { throw ReaderError.notANote }
+        let current = try? item(draft.id)
+        // The kept copy says what this is, so an editor can't move an entry to another day.
+        let stamp = current?.journal ?? draftStamp
+        guard current == nil || current?.kind == .journal else { throw ReaderError.notANote }
+        guard !stamp.isClosed(at: now) else { throw ReaderError.journalClosed }
+        // A new entry takes the day's own ID. One already kept may have an older one, from before a key change.
+        if stamp.about == nil, current == nil, draft.id != journalID(stamp.day) { throw ReaderError.notFound }
+        let data = Data(body.utf8)
+        guard data.count <= Self.maxTextBytes else { throw ReaderError.tooLarge }
+        if let current, current.updatedAt != basedOn {
+            let copy = ReaderItem(
+                id: UUID(), kind: .journal, title: "Conflict copy", collection: nil, mime: MarkdownText.mime,
+                byteCount: data.count, createdAt: now, updatedAt: now, listenPosition: 0,
+                journal: JournalStamp(day: stamp.day, zone: stamp.zone, about: stamp.about ?? stamp.day)
+            )
+            try writeBody(data, id: copy.id)
+            try writeMeta(copy)
+            return .keptAsCopy(copy)
+        }
+        // Nothing written in a day that has no entry yet leaves no entry.
+        if current == nil, data.isEmpty { return .saved(draft) }
+        var updated = current ?? draft
+        updated.byteCount = data.count
+        updated.updatedAt = now
+        if current == nil { try store.delete(deletionName(draft.id)) }
+        try writeBody(data, id: updated.id)
+        try writeMeta(updated)
+        return .saved(updated)
     }
 }

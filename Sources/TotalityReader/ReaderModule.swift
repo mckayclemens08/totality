@@ -21,7 +21,10 @@ public struct ReaderModule: ContentProvider {
     public func current(_ ref: ContentRef) async throws -> ContentRef? {
         guard let vault else { return nil }
         do {
-            return Self.ref(try await vault.item(ref.id))
+            let item = try await vault.item(ref.id)
+            // The journal is private, so nothing outside the Reader ever points at it.
+            guard item.kind != .journal else { return nil }
+            return Self.ref(item)
         } catch ReaderError.notFound {
             return nil
         }

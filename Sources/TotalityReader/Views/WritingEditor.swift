@@ -143,6 +143,12 @@ final class WritingEditorController: NSObject {
         accept(text, revision: revision)
     }
 
+    /// Puts the cursor in the page, ready to type.
+    func focus() {
+        guard let webView, pageReady else { return }
+        Task { _ = try? await webView.callAsyncJavaScript("window.totality.focus()", arguments: [:], in: nil, contentWorld: .page) }
+    }
+
     func run(_ command: String, _ argument: Any? = nil) {
         Task { _ = await call(command, argument) }
     }
