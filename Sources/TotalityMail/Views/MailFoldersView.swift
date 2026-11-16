@@ -181,11 +181,7 @@ struct MailFoldersView: View {
             .padding(Space.s3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background {
-                if isCurrent {
-                    Color.clear.neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
-                }
-            }
+            .selectionWash(isCurrent, in: RoundedRectangle(cornerRadius: Radius.sm))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isCurrent ? .isSelected : [])

@@ -489,7 +489,7 @@ struct WritingFormatBar: View {
             content()
                 .foregroundStyle(isOn ? theme.accent.color : theme.textPrimary.color)
                 .frame(width: Space.s6 + Space.s2, height: Space.s6 + Space.s2)
-                .neumorphic(isOn ? .pressed : .subtle, in: RoundedRectangle(cornerRadius: Radius.sm))
+                .toggleSurface(isOn, in: RoundedRectangle(cornerRadius: Radius.sm))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)

@@ -202,8 +202,10 @@ private struct BubbleLabel: View {
 private struct BubbleButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .neumorphic(configuration.isPressed ? .pressed : .raised, in: Circle())
+            .neumorphic(.raised, in: Circle())
             .contentShape(Circle())
+            .scaleEffect(configuration.isPressed ? TilePress.scale : 1)
+            .opacity(configuration.isPressed ? TilePress.opacity : 1)
             .animation(Motion.instant, value: configuration.isPressed)
     }
 }

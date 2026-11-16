@@ -119,7 +119,7 @@ struct MailStrip: View {
             .foregroundStyle(isWarning ? theme.danger.color : theme.textSecondary.color)
             .padding(Space.s3)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
+            .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.sm))
     }
 }
 
@@ -203,7 +203,7 @@ struct MailBodyView: View {
         }
         .padding(Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.sm))
+        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.sm))
     }
 }
 

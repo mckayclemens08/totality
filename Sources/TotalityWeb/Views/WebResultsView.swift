@@ -32,9 +32,7 @@ struct WebResultsView: View {
                         .foregroundStyle(isChosen ? theme.accent.color : theme.textSecondary.color)
                         .padding(.horizontal, Space.s3)
                         .padding(.vertical, Space.s2)
-                        .background {
-                            if isChosen { Color.clear.neumorphic(.pressed, in: Capsule()) }
-                        }
+                        .selectionWash(isChosen, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(isChosen ? .isSelected : [])

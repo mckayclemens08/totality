@@ -328,12 +328,8 @@ struct MailRow: View {
         .padding(.horizontal, Space.s3)
         .padding(.vertical, Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            // Only the open or picked row is set in. The rest sit flat, so the list reads as one surface.
-            if isOpen || isSelected {
-                Color.clear.neumorphic(.pressed, in: RoundedRectangle(cornerRadius: Radius.md))
-            }
-        }
+        // Only the open or picked row gets a soft accent wash. The rest sit flat, so the list reads as one surface.
+        .selectionWash(isOpen || isSelected, in: RoundedRectangle(cornerRadius: Radius.md))
         .contentShape(RoundedRectangle(cornerRadius: Radius.md))
         .accessibilityElement(children: .combine)
         .accessibilityValue(isUnread ? "Unread" : "")
