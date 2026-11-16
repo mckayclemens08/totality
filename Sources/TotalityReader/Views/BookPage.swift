@@ -114,8 +114,9 @@ enum BookPage {
     }
 }
 
-/// An open book's parts, served from memory. The file was opened from its sealed copy and never touches
-/// the disk. A name only ever looks something up in the archive, so `../` can't reach anything else.
+/// An open book's parts, served from memory. The file is read from its sealed copy a part at a time, so
+/// only the chapter or picture being shown is unsealed, and never touches the disk. A name only ever looks
+/// something up in the archive, so `../` can't reach anything else.
 @MainActor
 final class BookSource {
     struct Chapter: Equatable {
@@ -147,14 +148,16 @@ final class BookSource {
     ]
 
     /// Nil when the file can't be opened as pages.
-    init?(data: Data, mime: String?, text: String?) {
+    init?(data: any ByteSource, mime: String?, text: String?) {
         if mime == ReadableText.epubMime {
             guard var archive = try? ZipArchive(data), let package = try? BookReader.package(&archive), !package.spine.isEmpty else { return nil }
             kind = .epub
             types = package.types
             html = nil
             self.archive = archive
-            let document = (try? BookReader.epub(data))?.document
+            // Its own copy of the archive, so reading every chapter's words once doesn't spend the pages' budget.
+            var reading = archive
+            let document = (try? BookReader.epub(&reading))?.document
             // Listen reads the book's text. Each chapter's part of it is found from the same reading.
             var places: [String: Range<Int>] = [:]
             var titles: [String: String] = [:]
@@ -172,7 +175,7 @@ final class BookSource {
             let matches = text == nil || text == whole
             self.text = matches ? whole : ""
             chapters = package.spine.map { Chapter(path: $0, title: titles[$0], listen: matches ? places[$0] : nil) }
-        } else if let mime, HTMLText.mimes.contains(mime) {
+        } else if let mime, HTMLText.mimes.contains(mime), let data = try? ReadableText.whole(data) {
             kind = .html
             types = [:]
             html = data
@@ -293,7 +296,7 @@ enum BookMessage: Equatable {
             else { return nil }
             return .page(page: page, pages: pages)
         case "tap":
-            guard let offset = message["offset"] as? Int, offset >= 0, offset <= ReaderVault.maxImportBytes else { return nil }
+            guard let offset = message["offset"] as? Int, offset >= 0, offset <= SafeXML.maxCharacters * 2 else { return nil }
             return .tap(offset: offset)
         case "scrolled":
             return .scrolled

@@ -67,7 +67,7 @@ public struct ExportDocument: Equatable, Sendable {
 
     static let maxBlocks = 50_000
     static let maxDepth = 8
-    static let maxText = ReaderVault.maxImportBytes
+    static let maxText = ReaderVault.maxTextBytes
 
     // MARK: Reading what the page sent
 

@@ -381,10 +381,10 @@ public final class DriveModel {
         guard let vault else { throw ReaderError.notFound }
         let item = ReaderItem(
             id: Self.readerID(account: file.account, fileID: file.entry.id), kind: .file, title: file.entry.name, collection: nil,
-            mime: file.mime, byteCount: file.data.count, createdAt: file.modifiedAt ?? Date(),
+            mime: file.mime, byteCount: file.file.count, createdAt: file.modifiedAt ?? Date(),
             updatedAt: file.modifiedAt ?? Date(), listenPosition: 0
         )
-        try await vault.hold(item, body: file.data)
+        try await vault.hold(item, file: file.file)
         return item
     }
 
@@ -397,7 +397,8 @@ public final class DriveModel {
             let note = try await vault.createNote(title: title, folder: folder)
             return try await vault.saveNote(note.id, title: title, body: markdown, mime: MarkdownText.mime)
         }
-        return try await vault.importFile(file.data, filename: Self.filename(for: file), folder: folder)
+        guard file.file.isPieces else { return try await vault.importFile(file.data, filename: Self.filename(for: file), folder: folder) }
+        return try await vault.importFile(file.file, filename: Self.filename(for: file), folder: folder)
     }
 
     /// The name without a document extension, so "Essay.md" becomes "Essay" but "Report v1.2" stays.

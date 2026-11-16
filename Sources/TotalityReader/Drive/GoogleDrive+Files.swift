@@ -13,19 +13,48 @@ struct CachedFile: Codable, Equatable, Sendable {
     let mime: String
     let bytes: Int
     var openedAt: Date
+    /// Sealed in pieces, for a big file that's read a piece at a time (issue 124). Nil in older records.
+    var pieces: Bool? = nil
 }
 
-/// A Drive file, opened: its bytes in memory, and what kind of file the Reader should treat it as.
+/// A Drive file, opened: its bytes, and what kind of file the Reader should treat it as. A big file is
+/// read a piece at a time from its sealed copy on the device; anything else is in memory.
 public struct DriveOpenedFile: Sendable, Equatable {
     public let entry: DriveEntry
     public let account: String
     public let folderID: String
-    public let data: Data
+    public let file: ReaderFile
     /// What the Reader's viewers read it as. A Google Doc comes as Markdown, and Sheets or Slides as PDF.
     public let mime: String
     /// The Drive version it is, which a save checks against (step 4).
     public let version: String?
     public let modifiedAt: Date?
+
+    public init(entry: DriveEntry, account: String, folderID: String, file: ReaderFile, mime: String, version: String?, modifiedAt: Date?) {
+        self.entry = entry
+        self.account = account
+        self.folderID = folderID
+        self.file = file
+        self.mime = mime
+        self.version = version
+        self.modifiedAt = modifiedAt
+    }
+
+    public init(entry: DriveEntry, account: String, folderID: String, data: Data, mime: String, version: String?, modifiedAt: Date?) {
+        self.init(entry: entry, account: account, folderID: folderID, file: ReaderFile(data: data), mime: mime, version: version, modifiedAt: modifiedAt)
+    }
+
+    /// The whole file. Text is never opened in pieces, so a doc being edited is always all here. A big
+    /// picture past what memory can spare comes back empty.
+    public var data: Data {
+        (try? file.whole()) ?? Data()
+    }
+
+    public static func == (lhs: DriveOpenedFile, rhs: DriveOpenedFile) -> Bool {
+        lhs.entry == rhs.entry && lhs.account == rhs.account && lhs.folderID == rhs.folderID && lhs.mime == rhs.mime
+            && lhs.version == rhs.version && lhs.modifiedAt == rhs.modifiedAt
+            && (lhs.file === rhs.file || (!lhs.file.isPieces && !rhs.file.isPieces && lhs.data == rhs.data))
+    }
 }
 
 /// How much opened files may take on this device.
@@ -35,8 +64,17 @@ public enum DriveCacheLimit {
 }
 
 extension GoogleDrive {
-    /// The biggest file that's opened. The viewers hold a file in memory whole.
-    static let mostFileBytes = 100 * 1_000_000
+    /// The biggest file that's opened: what the Reader itself takes.
+    static let mostFileBytes = ReaderVault.maxFileBytes
+    /// A file bigger than this is downloaded and kept sealed in pieces, as it arrives, and read a piece
+    /// at a time, so it's never held whole (issue 124). Text never is, since it's edited whole.
+    static let inMemoryBytes = 32 * 1024 * 1024
+
+    /// Whether a file comes in pieces. Google's own formats are exported, which Google keeps small.
+    static func comesInPieces(_ entry: DriveEntry, opensAs mime: String, export: String?) -> Bool {
+        guard export == nil, let size = entry.size, size > inMemoryBytes else { return false }
+        return !(mime == MarkdownText.mime || mime.hasPrefix("text/"))
+    }
 
     static let fileSuffix = ".gdfile"
     static func fileName(_ id: UUID) -> String { id.uuidString.lowercased() + fileSuffix }
@@ -74,14 +112,23 @@ extension GoogleDrive {
         if let kept = try keptFile(key, matching: entry) {
             try noteOpened(entry, account: account)
             return DriveOpenedFile(
-                entry: entry, account: account, folderID: folderID, data: kept, mime: kind.opensAs,
+                entry: entry, account: account, folderID: folderID, file: kept, mime: kind.opensAs,
                 version: entry.version, modifiedAt: entry.modifiedAt
             )
         }
 
         let (api, token) = try await reader(account)
+        if Self.comesInPieces(entry, opensAs: kind.opensAs, export: kind.export) {
+            let file = try await downloadPieces(entry, as: key, mime: kind.opensAs, folderKey: folderKey, limit: limit, api: api, token: token)
+            try noteOpened(entry, account: account)
+            return DriveOpenedFile(
+                entry: entry, account: account, folderID: folderID, file: file, mime: kind.opensAs,
+                version: entry.version, modifiedAt: entry.modifiedAt
+            )
+        }
         let data = try await api.download(entry, exportingAs: kind.export, accessToken: token)
-        guard data.count <= Self.mostFileBytes else { throw DriveProblem.tooLarge }
+        // Anything held whole stays within what memory can spare.
+        guard data.count <= ReaderFile.wholeLimit else { throw DriveProblem.tooLarge }
         // Unlinked while it downloaded: shown this once, but not kept.
         if try reachableFolder(folderKey) {
             try keep(data, as: key, entry: entry, mime: kind.opensAs, folderKey: folderKey, limit: limit)
@@ -94,13 +141,22 @@ extension GoogleDrive {
     }
 
     /// The bytes of a kept copy that's still Drive's latest, or nil. One that won't open is dropped.
-    private func keptFile(_ key: String, matching entry: DriveEntry) throws -> Data? {
+    private func keptFile(_ key: String, matching entry: DriveEntry) throws -> ReaderFile? {
         var state = try loadState()
         guard let cached = state.files[key], let cache else { return nil }
         let current = cached.version == entry.version && cached.modifiedAt == entry.modifiedAt
-        guard current, let sealed = try cache.read(Self.fileName(cached.blob)),
-              let plain = try? ContentCipher.open(sealed, key: fileKey(cached.blob), objectID: cached.blob)
-        else {
+        let plain: ReaderFile? = if cached.pieces == true {
+            // Each piece is checked as it's read, so a damaged one stops the reading there.
+            (try? (cache as? FileBlobStore)?.location(of: Self.fileName(cached.blob))).flatMap { url in
+                (try? ChunkedCipher.Reader(file: url, key: piecesKey(cached.blob), objectID: cached.blob, keepChunks: ReaderFile.piecesKept))
+                    .map(ReaderFile.init(pieces:))
+            }
+        } else {
+            (try? cache.read(Self.fileName(cached.blob))).flatMap { $0 }
+                .flatMap { try? ContentCipher.open($0, key: fileKey(cached.blob), objectID: cached.blob) }
+                .map(ReaderFile.init(data:))
+        }
+        guard current, let plain else {
             try cache.delete(Self.fileName(cached.blob))
             state.files[key] = nil
             try saveState(state)
@@ -151,6 +207,53 @@ extension GoogleDrive {
         rootKey.objectKey(for: blob, purpose: .googleDriveFile)
     }
 
+    private func piecesKey(_ blob: UUID) -> ObjectKey {
+        rootKey.objectKey(for: blob, purpose: .googleDrivePieces)
+    }
+
+    /// Downloads a big file straight into a sealed piece file, a piece at a time as it arrives, so none
+    /// of it is held whole or written anywhere unsealed. It's kept like any opened file, and stays at
+    /// least until the next file opens, even past the allowance, because that's where it's read from.
+    private func downloadPieces(
+        _ entry: DriveEntry, as key: String, mime: String, folderKey: String, limit: Int, api: DriveAPI, token: String
+    ) async throws -> ReaderFile {
+        guard let files = cache as? FileBlobStore, let size = entry.size else { throw DriveProblem.tooLarge }
+        try ReaderVault.checkRoom(for: ChunkedCipher.sealedLength(plain: size, chunkSize: ReaderVault.pieceSize), near: try files.location(of: "room"))
+        let blob = UUID()
+        let name = Self.fileName(blob)
+        let url = try files.location(of: name)
+        downloading.insert(name)
+        defer { downloading.remove(name) }
+        do {
+            let writer = try ChunkedCipher.Writer(to: url, plainLength: size, key: piecesKey(blob), objectID: blob, chunkSize: ReaderVault.pieceSize)
+            let sink = PieceSink(writer)
+            try await api.download(entry, into: { try sink.append($0) }, accessToken: token)
+            // Short of the size Drive listed, or more than it, and it's refused.
+            try sink.finish()
+            guard !isClosed else { throw ReaderError.closed }
+            var state = try loadState()
+            if let old = state.files[key] { try files.delete(Self.fileName(old.blob)) }
+            state.files[key] = CachedFile(
+                blob: blob, folderKey: folderKey, version: entry.version, modifiedAt: entry.modifiedAt,
+                mime: mime, bytes: size, openedAt: now(), pieces: true
+            )
+            try saveState(Self.evicting(state, to: limit, keeping: key, cache: files))
+            if !(try reachableFolder(folderKey)) { try forgetKept(key) }
+            return ReaderFile(pieces: try ChunkedCipher.Reader(file: url, key: piecesKey(blob), objectID: blob, keepChunks: ReaderFile.piecesKept))
+        } catch {
+            try? files.delete(name)
+            if error is CryptoError { throw DriveProblem.unexpected }
+            throw error
+        }
+    }
+
+    /// Unlinked while it downloaded: the open goes on reading it, and the next sweep clears it.
+    private func forgetKept(_ key: String) throws {
+        var state = try loadState()
+        state.files[key] = nil
+        try saveState(state)
+    }
+
     // MARK: Keeping opened files current
 
     /// The most kept files one refresh downloads again, so a big change can't keep the phone busy.
@@ -170,10 +273,12 @@ extension GoogleDrive {
         for (key, folderID, entry) in stale.prefix(Self.mostRefreshedFiles) {
             let parts = key.split(separator: "/", maxSplits: 1).map(String.init)
             guard parts.count == 2, let kind = Self.readerMime(for: entry) else { continue }
-            if let size = entry.size, size > Self.mostFileBytes { continue }
+            // A big file is downloaded again when it's next opened, not in the background.
+            if Self.comesInPieces(entry, opensAs: kind.opensAs, export: kind.export) { continue }
+            if let size = entry.size, size > ReaderFile.wholeLimit { continue }
             guard let (api, token) = try? await reader(parts[0]),
                   let data = try? await api.download(entry, exportingAs: kind.export, accessToken: token),
-                  data.count <= Self.mostFileBytes
+                  data.count <= ReaderFile.wholeLimit
             else { continue }
             // Kept the way opening keeps it, without counting as an open.
             let folderKey = Self.key(parts[0], folderID)
@@ -209,9 +314,27 @@ extension GoogleDrive {
     /// behind, or a half-written file from a crash. Nothing there can be opened with this key anyway.
     public func sweepCache() throws {
         guard let cache else { return }
-        let named = Set(try loadState().files.values.map { Self.fileName($0.blob) })
+        let named = Set(try loadState().files.values.map { Self.fileName($0.blob) }).union(downloading)
         for name in try cache.names() where !named.contains(name) {
             try cache.delete(name)
         }
+    }
+}
+
+/// Hands a download's bytes to its sealing writer from URLSession's own thread, one call at a time.
+private final class PieceSink: @unchecked Sendable {
+    private let writer: ChunkedCipher.Writer
+    private let lock = NSLock()
+
+    init(_ writer: ChunkedCipher.Writer) {
+        self.writer = writer
+    }
+
+    func append(_ data: Data) throws {
+        try lock.withLock { try writer.append(data) }
+    }
+
+    func finish() throws {
+        try lock.withLock { try writer.finish() }
     }
 }

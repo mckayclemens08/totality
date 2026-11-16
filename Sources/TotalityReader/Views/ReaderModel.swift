@@ -28,6 +28,11 @@ public final class ReaderModel {
     public var isSynced = false
     /// A problem to show the person, cleared when they dismiss it.
     public var notice: String?
+    /// A big file being imported, and how far it's got, for the progress bar.
+    public private(set) var importing: ImportProgress?
+    /// How much room is left in the account's storage on the Totality server, or nil when it can't be
+    /// told right now. The app sets it, so a file that won't fit is refused before it's sealed.
+    public var storageLeft: (@Sendable () async -> Int?)?
 
     public let listen: ListenController
     /// Linked Google Drive folders (issue 102), or nil when this build has no Google sign-in.
@@ -383,9 +388,14 @@ public final class ReaderModel {
         try await vault.document(of: id)
     }
 
-    /// The file itself, decrypted into memory only, for showing PDF pages.
+    /// The file itself, decrypted into memory only, for a viewer that needs it whole, like an image.
     public func fileData(of id: UUID) async throws -> Data {
         try await vault.body(of: id)
+    }
+
+    /// The file, read a piece at a time as a viewer asks for it. Never written anywhere unsealed.
+    public func file(of id: UUID) async throws -> ReaderFile {
+        try await vault.file(of: id)
     }
 
     public func text(of id: UUID) async throws -> String {
@@ -407,12 +417,28 @@ public final class ReaderModel {
         await load()
     }
 
+    /// Read and sealed a piece at a time, so a file of any size up to 5 GB never sits in memory whole.
     private func importFile(_ url: URL, folder: UUID?) async throws {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size <= ReaderVault.maxImportBytes else { throw ReaderError.tooLarge }
-        _ = try await vault.importFile(Data(contentsOf: url), filename: url.lastPathComponent, folder: folder)
+        guard size <= ReaderVault.maxFileBytes else { throw ReaderError.tooLarge }
+        // Refused now, rather than sealed here and then never able to sync. Unknown room doesn't stop it.
+        if let storageLeft, let left = await storageLeft(), size > left { throw ReaderError.storageFull }
+        let name = url.lastPathComponent
+        let shows = size > ImportProgress.shownOver
+        if shows { importing = ImportProgress(name: name, fraction: 0) }
+        defer { if shows { importing = nil } }
+        _ = try await vault.importFile(at: url, filename: name, folder: folder) { fraction in
+            guard shows else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.importing?.name == name else { return }
+                // Small steps would redraw the bar for nothing.
+                if fraction - (self.importing?.fraction ?? 0) >= 0.01 || fraction >= 1 {
+                    self.importing = ImportProgress(name: name, fraction: fraction)
+                }
+            }
+        }
     }
 
     public func delete(_ item: ReaderItem) async {
@@ -504,10 +530,10 @@ public final class ReaderModel {
                 do {
                     let text = try await vault.text(of: id)
                     let mime = try await vault.item(id).mime
-                    let data = try await vault.body(of: id)
+                    let file = try await vault.file(of: id)
                     // Headings and page furniture are found from the file, and left out of what's read.
                     let script = await Task.detached(priority: .userInitiated) {
-                        ListenScript(text: text, skipping: ListenSkips.ranges(text: text, data: data, mime: mime, readHeadings: readHeadings))
+                        ListenScript(text: text, skipping: ListenSkips.ranges(text: text, file: file, mime: mime, readHeadings: readHeadings))
                     }.value
                     return .success((text, script))
                 } catch {
@@ -571,4 +597,14 @@ extension ReaderModel {
         guard let places, !ids.isEmpty else { return }
         try? await places.forget(ids)
     }
+}
+
+/// A big file on its way into the Reader.
+public struct ImportProgress: Equatable, Sendable {
+    /// Smaller files are done before a bar would be seen.
+    public static let shownOver = 50 * 1024 * 1024
+
+    public let name: String
+    /// From 0 to 1.
+    public let fraction: Double
 }

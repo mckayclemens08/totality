@@ -54,10 +54,18 @@ public enum NoteSave: Sendable, Equatable {
 }
 
 /// A user's Reader content. Each item is two blobs: metadata and body, under separate per-object
-/// keys. Blob names hold only the object ID.
+/// keys. Blob names hold only the object ID. A file imported since issue 124 has its body sealed in
+/// 4 MB pieces, `<id>.pieces`, so it opens a piece at a time and is never held whole. An older one has a
+/// single sealed body, `<id>.body`, and opens as it always did. Docs and folders keep a single body.
 public actor ReaderVault {
-    /// Under Supabase's 50 MB upload limit, leaving room for what sealing adds.
-    public static let maxImportBytes = 49 * 1024 * 1024
+    /// The sealed store takes up to 5 GB in one blob, and sealing adds a little to each piece.
+    public static let maxFileBytes = SealedStoreClient.maxBlob - 1024 * 1024
+    /// The most text a doc, or one file's words, may be. Far more than any book.
+    public static let maxTextBytes = 64 * 1024 * 1024
+    /// How much of a file each sealed piece holds.
+    public static let pieceSize = 4 * 1024 * 1024
+    /// Files sealed in pieces, which a key change moves a piece at a time.
+    public static let chunkedPurposes: [String: KeyPurpose] = [".pieces": .readerPieces, ".pieces.trash": .readerPieces]
     /// How each kind of blob is sealed, so a key change can reach them without knowing what they are.
     public static let sealedPurposes: [String: KeyPurpose] = [
         ".meta": .metadata, ".body": .content, ".meta.trash": .metadata, ".body.trash": .content,
@@ -68,23 +76,42 @@ public actor ReaderVault {
     public static let trashLifetime: TimeInterval = 30 * 24 * 60 * 60
 
     private let store: any BlobStore
+    /// The same store, when its blobs are real files, which pieces need. Tests that keep blobs in memory
+    /// get single-piece bodies.
+    private let files: FileBlobStore?
     private let rootKey: ContentRootKey
     private var textCache: [UUID: String] = [:]
     private var isClosed = false
     private var hashes: [UUID: String] = [:]
+    /// Each piece file's size, change time and digest, so a 1 GB file isn't read again on every sync.
+    private var digests: [UUID: (size: Int, changed: Date, file: SealedFile)] = [:]
     /// Files opened from outside the vault, like Google Drive (issue 102). In memory only: they're never
     /// written here, listed, searched, or synced, but the viewers and Listen read them like any item.
-    private var held: [UUID: (item: ReaderItem, body: Data)] = [:]
+    private var held: [UUID: (item: ReaderItem, file: ReaderFile)] = [:]
     private var heldOrder: [UUID] = []
     /// A few, so Listen can keep going on one while another is opened.
     static let mostHeld = 3
 
     public init(store: any BlobStore, rootKey: ContentRootKey) {
         self.store = store
+        files = store as? FileBlobStore
         self.rootKey = rootKey
     }
 
     private func metaName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).meta" }
+    private nonisolated func piecesName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).pieces" }
+    private nonisolated func importingName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).pieces-importing" }
+    private func incomingName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).pieces-incoming" }
+    private nonisolated func piecesKey(_ id: UUID) -> ObjectKey { rootKey.objectKey(for: id, purpose: .readerPieces) }
+
+    private func hasPieces(_ id: UUID) throws -> Bool {
+        guard let files else { return false }
+        return try files.exists(piecesName(id))
+    }
+
+    private func piecesReader(_ url: URL, id: UUID, keep: Int = ReaderFile.piecesKept) throws -> ChunkedCipher.Reader {
+        try ChunkedCipher.Reader(file: url, key: piecesKey(id), objectID: id, keepChunks: keep)
+    }
     private func deletionName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).deleted" }
     private func bodyName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).body" }
     private func openedName(_ id: UUID) -> String { "\(id.uuidString.lowercased()).opened" }
@@ -110,7 +137,41 @@ public actor ReaderVault {
         hashes[id] = nil
         let key = rootKey.objectKey(for: id, purpose: .content)
         try store.write(try ContentCipher.seal(data, key: key, objectID: id), as: bodyName(id))
+        // One body per item, so a file that was sealed in pieces is now this.
+        try store.delete(piecesName(id))
+        digests[id] = nil
         textCache[id] = nil
+    }
+
+    /// Puts a finished piece file in place as an item's body.
+    private func placePieces(_ url: URL, id: UUID) throws {
+        guard !isClosed else { throw ReaderError.closed }
+        guard held[id] == nil, let files else { throw ReaderError.notFound }
+        let target = try files.location(of: piecesName(id))
+        if url.standardizedFileURL != target.standardizedFileURL {
+            if FileManager.default.fileExists(atPath: target.path) {
+                _ = try FileManager.default.replaceItemAt(target, withItemAt: url)
+            } else {
+                try FileManager.default.moveItem(at: url, to: target)
+            }
+        }
+        try store.delete(bodyName(id))
+        hashes[id] = nil
+        digests[id] = nil
+        textCache[id] = nil
+    }
+
+    /// Seals `data` as an item's body in pieces when this store can hold them, or whole when it can't.
+    private func writeFileBody(_ data: Data, id: UUID) throws {
+        guard let files, !data.isEmpty else { return try writeBody(data, id: id) }
+        let part = try files.location(of: importingName(id))
+        do {
+            try ReaderFile(data: data).reseal(to: part, key: piecesKey(id), objectID: id)
+            try placePieces(part, id: id)
+        } catch {
+            try? FileManager.default.removeItem(at: part)
+            throw error
+        }
     }
 
     public func item(_ id: UUID) throws -> ReaderItem {
@@ -297,8 +358,82 @@ public actor ReaderVault {
         try writeMeta(current)
     }
 
+    /// Imports a file the person chose on this device. It's read and sealed a piece at a time, away from
+    /// the vault, so even a big file never sits in memory whole and the library stays usable meanwhile.
+    /// `progress` hears how far it's got, from 0 to 1.
+    public nonisolated func importFile(
+        at url: URL, filename: String, folder: UUID? = nil, progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> ReaderItem {
+        let source = try PlainFileSource(url)
+        let count = source.count
+        guard count <= Self.maxFileBytes else { throw ReaderError.tooLarge }
+        // A reference library is read whole to become CSL JSON, and an empty file has no pieces.
+        guard let files, count > 0, !References.mightBeLibrary(filename) else {
+            guard count <= ReaderFile.wholeLimit else { throw ReaderError.tooLarge }
+            return try await importFile(try source.read(0..<count), filename: filename, folder: folder)
+        }
+        try Self.checkRoom(for: ChunkedCipher.sealedLength(plain: count, chunkSize: Self.pieceSize), near: try files.location(of: "room"))
+        let id = UUID()
+        let part = try files.location(of: importingName(id))
+        do {
+            try ChunkedCipher.seal(file: url, to: part, key: piecesKey(id), objectID: id, chunkSize: Self.pieceSize) { done in
+                progress?(Double(done) / Double(count))
+            }
+            let mime = ReadableText.mime(forFilename: filename)
+            // A book's own title beats its filename. One that can't be read still gets stored.
+            let bookTitle = mime == ReadableText.epubMime ? (try? BookReader.epubTitle(source)) ?? nil : nil
+            return try await finishImport(part, id: id, filename: filename, title: bookTitle, mime: mime, count: count, folder: folder)
+        } catch {
+            try? FileManager.default.removeItem(at: part)
+            throw error
+        }
+    }
+
+    private func finishImport(
+        _ part: URL, id: UUID, filename: String, title: String?, mime: String?, count: Int, folder: UUID?
+    ) throws -> ReaderItem {
+        let now = Date()
+        let item = ReaderItem(
+            id: id, kind: .file, title: title ?? (filename as NSString).deletingPathExtension,
+            collection: nil, mime: mime,
+            byteCount: count, createdAt: now, updatedAt: now, listenPosition: 0, folderID: folder
+        )
+        try placePieces(part, id: id)
+        try writeMeta(item)
+        return item
+    }
+
+    /// Refuses a file this device hasn't room to keep sealed, with room to spare for everything else.
+    static func checkRoom(for bytes: Int, near url: URL) throws {
+        let folder = url.deletingLastPathComponent()
+        guard let free = try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage
+        else { return }
+        // A free volume of zero means it couldn't be measured, as happens on some Macs.
+        guard free == 0 || Int64(bytes) + 200 * 1024 * 1024 <= free else { throw ReaderError.noRoomHere }
+    }
+
+    /// A file opened a piece at a time somewhere else, like a big file from Drive, sealed again here a
+    /// piece at a time under its own key.
+    public func importFile(_ source: ReaderFile, filename: String, folder: UUID? = nil) throws -> ReaderItem {
+        guard source.isPieces, let files else { return try importFile(try source.whole(), filename: filename, folder: folder) }
+        guard source.count <= Self.maxFileBytes else { throw ReaderError.tooLarge }
+        try Self.checkRoom(for: ChunkedCipher.sealedLength(plain: source.count, chunkSize: Self.pieceSize), near: try files.location(of: "room"))
+        let id = UUID()
+        let part = try files.location(of: importingName(id))
+        do {
+            try source.reseal(to: part, key: piecesKey(id), objectID: id)
+            let mime = ReadableText.mime(forFilename: filename)
+            let title = mime == ReadableText.epubMime ? (try? BookReader.epubTitle(source)) ?? nil : nil
+            return try finishImport(part, id: id, filename: filename, title: title, mime: mime, count: source.count, folder: folder)
+        } catch {
+            try? FileManager.default.removeItem(at: part)
+            throw error
+        }
+    }
+
     public func importFile(_ data: Data, filename: String, folder: UUID? = nil) throws -> ReaderItem {
-        guard data.count <= Self.maxImportBytes else { throw ReaderError.tooLarge }
+        guard data.count <= Self.maxFileBytes else { throw ReaderError.tooLarge }
         // A .bib or CSL JSON file becomes a reference library, stored as CSL JSON whatever it came as.
         if let library = References.library(from: data, filename: filename) {
             return try importLibrary(library, title: (filename as NSString).deletingPathExtension, folder: folder)
@@ -306,13 +441,13 @@ public actor ReaderVault {
         let now = Date()
         let mime = ReadableText.mime(forFilename: filename)
         // A book's own title beats its filename. One that can't be read still gets stored.
-        let bookTitle = mime == ReadableText.epubMime ? (try? BookReader.epub(data).title) : nil
+        let bookTitle = mime == ReadableText.epubMime ? (try? BookReader.epubTitle(data)) ?? nil : nil
         let item = ReaderItem(
             id: UUID(), kind: .file, title: bookTitle ?? (filename as NSString).deletingPathExtension,
             collection: nil, mime: mime,
             byteCount: data.count, createdAt: now, updatedAt: now, listenPosition: 0, folderID: folder
         )
-        try writeBody(data, id: item.id)
+        try writeFileBody(data, id: item.id)
         try writeMeta(item)
         return item
     }
@@ -343,22 +478,31 @@ public actor ReaderVault {
         return try JSONSerialization.data(withJSONObject: merged, options: [.sortedKeys])
     }
 
+    /// The item's body, whole. For a file sealed in pieces this is refused past `ReaderFile.wholeLimit`:
+    /// those are read through `file(of:)` instead.
     public func body(of id: UUID) throws -> Data {
-        if let outside = held[id] { return outside.body }
-        guard let sealed = try store.read(bodyName(id)) else { throw ReaderError.notFound }
-        return try ContentCipher.open(sealed, key: rootKey.objectKey(for: id, purpose: .content), objectID: id)
+        try file(of: id).whole()
     }
 
-    /// Plaintext stays in memory. It is never written outside the sealed blobs.
+    /// The item's bytes, ready to read a range at a time. Pieces are unsealed only as they're read.
+    public func file(of id: UUID) throws -> ReaderFile {
+        if let outside = held[id] { return outside.file }
+        if let files, try hasPieces(id) { return ReaderFile(pieces: try piecesReader(try files.location(of: piecesName(id)), id: id)) }
+        guard let sealed = try store.read(bodyName(id)) else { throw ReaderError.notFound }
+        return ReaderFile(data: try ContentCipher.open(sealed, key: rootKey.objectKey(for: id, purpose: .content), objectID: id))
+    }
+
+    /// Plaintext stays in memory. It is never written outside the sealed blobs. A PDF or a book is read
+    /// a page or a part at a time to get it.
     public func text(of id: UUID) throws -> String {
         if let cached = textCache[id] { return cached }
-        let text = try ReadableText.extract(body(of: id), mime: item(id).mime)
+        let text = try ReadableText.extract(file(of: id), mime: item(id).mime)
         textCache[id] = text
         return text
     }
 
     public func document(of id: UUID) throws -> ReadableDocument {
-        try ReadableText.document(body(of: id), mime: item(id).mime)
+        try ReadableText.document(file(of: id), mime: item(id).mime)
     }
 
     /// Kept in its own file on this device. In the sealed details it would re-upload the item's whole
@@ -397,17 +541,25 @@ public actor ReaderVault {
     }
 
     private func moveToTrash(_ id: UUID) throws {
-        guard let object = try sealedObject(id) else { return }
+        guard let meta = try store.read(metaName(id)) else { return }
         // The stamp goes first, so a crash can't leave trash that's never cleaned up.
         try store.write(Data(ISO8601DateFormatter().string(from: Date()).utf8), as: trashStampName(id))
-        try store.write(object.meta, as: metaName(id) + ".trash")
-        if let body = object.body { try store.write(body, as: bodyName(id) + ".trash") }
+        try store.write(meta, as: metaName(id) + ".trash")
+        if let files, try hasPieces(id) {
+            // Moved, not copied, so a big file never needs room twice.
+            let trash = try files.location(of: piecesName(id) + ".trash")
+            try? FileManager.default.removeItem(at: trash)
+            try FileManager.default.moveItem(at: try files.location(of: piecesName(id)), to: trash)
+        } else if let body = try store.read(bodyName(id)) {
+            try store.write(body, as: bodyName(id) + ".trash")
+        }
         try removeBlobs(id)
     }
 
     private func removeTrash(_ id: UUID) throws {
         try store.delete(metaName(id) + ".trash")
         try store.delete(bodyName(id) + ".trash")
+        try store.delete(piecesName(id) + ".trash")
         try store.delete(trashStampName(id))
     }
 
@@ -417,10 +569,10 @@ public actor ReaderVault {
         return try store.names().compactMap { name -> TrashedItem? in
             guard name.hasSuffix(".trashed"), let id = UUID(uuidString: String(name.dropLast(".trashed".count))),
                   let stamp = try store.read(name), let meta = try store.read(metaName(id) + ".trash"),
-                  let opened = try? opened(SealedObject(id: id, kind: .note, meta: meta, body: nil))
+                  let item = try? openedItem(meta, id: id)
             else { return nil }
             let date = formatter.date(from: String(decoding: stamp, as: UTF8.self)) ?? Date()
-            return TrashedItem(item: opened.item, deletedAt: date)
+            return TrashedItem(item: item, deletedAt: date)
         }
     }
 
@@ -453,13 +605,25 @@ public actor ReaderVault {
 
     private func restoreOne(_ id: UUID) throws {
         guard let meta = try store.read(metaName(id) + ".trash") else { throw ReaderError.notFound }
-        let body = try store.read(bodyName(id) + ".trash")
+        let trashedPieces = try files.flatMap { files -> URL? in
+            let url = try files.location(of: piecesName(id) + ".trash")
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        let body = trashedPieces == nil ? try store.read(bodyName(id) + ".trash") : nil
         if try store.read(metaName(id)) != nil {
             // It came back another way, so this version stays beside it rather than replacing it.
-            let old = try opened(SealedObject(id: id, kind: .note, meta: meta, body: body))
-            if old.item.kind != .folder { try writeConflictCopy(of: old.item, body: old.body, id: UUID()) }
+            let item = try openedItem(meta, id: id)
+            if item.kind != .folder {
+                let file = try trashedPieces.map { ReaderFile(pieces: try piecesReader($0, id: id, keep: 0)) }
+                    ?? ReaderFile(data: try body.map { try ContentCipher.open($0, key: rootKey.objectKey(for: id, purpose: .content), objectID: id) } ?? Data())
+                try writeConflictCopy(of: item, file: file, id: UUID())
+            }
         } else {
-            if let body { try store.write(body, as: bodyName(id)) }
+            if let trashedPieces {
+                try placePieces(trashedPieces, id: id)
+            } else if let body {
+                try store.write(body, as: bodyName(id))
+            }
             try store.write(meta, as: metaName(id))
             try store.delete(deletionName(id))
             hashes[id] = nil
@@ -487,9 +651,11 @@ public actor ReaderVault {
     private func removeBlobs(_ id: UUID) throws {
         try store.delete(metaName(id))
         try store.delete(bodyName(id))
+        try store.delete(piecesName(id))
         try store.delete(openedName(id))
         textCache[id] = nil
         hashes[id] = nil
+        digests[id] = nil
     }
 
     /// Every word must appear in the title or text. Files with no readable text match on title only.
@@ -509,15 +675,17 @@ public actor ReaderVault {
 
     /// Never wraps a key derived from the root: a grantee who kept it could read every later edit
     /// and forge a body the owner would accept.
+    /// A share is one sealed snapshot, so a file has to fit in memory to be shared this way.
     public func share(_ id: UUID, with recipient: IdentityBundle) throws -> ReaderShare {
         let item = try item(id)
+        let body = try file(of: id).whole()
         let key = try ObjectKey.generate()
         let header = ReaderShare.Header(kind: item.kind, title: item.title, mime: item.mime)
         return ReaderShare(
             objectID: id,
             wrappedKey: try key.wrapped(for: recipient),
             sealedHeader: try ContentCipher.seal(JSONEncoder().encode(header), key: key, objectID: id),
-            sealedBody: try ContentCipher.seal(body(of: id), key: key, objectID: id)
+            sealedBody: try ContentCipher.seal(body, key: key, objectID: id)
         )
     }
 }
@@ -529,6 +697,7 @@ extension ReaderVault: SyncArea {
         // A crash can stop a delete halfway. The record says what was meant, so finish it.
         if !isClosed {
             for id in try deletedObjectIDs() where try store.read(metaName(id)) != nil { try moveToTrash(id) }
+            clearLeftovers()
         }
         return try store.names().compactMap { name in
             name.hasSuffix(".meta") ? UUID(uuidString: String(name.dropLast(".meta".count))) : nil
@@ -537,7 +706,7 @@ extension ReaderVault: SyncArea {
 
     public func sealedHash(of id: UUID) throws -> String? {
         if let known = hashes[id] { return known }
-        guard try store.read(bodyName(id)) != nil else { return nil }
+        guard try hasPieces(id) || store.exists(bodyName(id)) else { return nil }
         let hash = try sealedObject(id)?.hash
         hashes[id] = hash
         return hash
@@ -547,13 +716,29 @@ extension ReaderVault: SyncArea {
         guard let meta = try store.read(metaName(id)) else { return nil }
         // A folder travels as a note, so the server can't tell how someone organizes things.
         let kind: ContentKind = (try? item(id).kind) == .file ? .file : .note
+        if let files, try hasPieces(id) {
+            return SealedObject(id: id, kind: kind, meta: meta, bodyFile: try pieceFile(try files.location(of: piecesName(id)), id: id))
+        }
         return SealedObject(id: id, kind: kind, meta: meta, body: try store.read(bodyName(id)))
+    }
+
+    /// A piece file as sync carries it. Its digest is worked out once and kept while the file is unchanged.
+    private func pieceFile(_ url: URL, id: UUID) throws -> SealedFile {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        let size = values.fileSize ?? -1
+        let changed = values.contentModificationDate ?? .distantPast
+        if let known = digests[id], known.size == size, known.changed == changed, known.file.url == url { return known.file }
+        let file = try SealedFile(reading: url)
+        digests[id] = (size, changed, file)
+        return file
     }
 
     public func verifiedObject(_ id: UUID) throws -> SealedObject? {
         guard let object = try sealedObject(id) else { return nil }
-        guard object.body != nil else { throw CryptoError.malformedCiphertext }
-        _ = try opened(object)
+        guard object.hasBody else { throw CryptoError.malformedCiphertext }
+        _ = try openedItem(object.meta, id: id)
+        // Every piece is opened once, so a file damaged anywhere never replaces the server's copy.
+        try openedFile(object, keep: 0).verify()
         return object
     }
 
@@ -561,12 +746,50 @@ extension ReaderVault: SyncArea {
         guard !isClosed else { throw ReaderError.closed }
         guard try sealedHash(of: object.id) == expected else { throw SyncError.changedLocally }
         if expected == nil, try store.read(deletionName(object.id)) != nil { throw SyncError.changedLocally }
-        guard let body = object.body else { throw CryptoError.malformedCiphertext }
-        guard try opened(object).item.id == object.id else { throw CryptoError.authenticationFailed }
-        try store.write(body, as: bodyName(object.id))
+        let (object, made) = try asFile(object)
+        defer { if let made { try? FileManager.default.removeItem(at: made) } }
+        guard object.hasBody else { throw CryptoError.malformedCiphertext }
+        guard try openedItem(object.meta, id: object.id).id == object.id else { throw CryptoError.authenticationFailed }
+        if let file = object.bodyFile {
+            let ours = try files?.location(of: piecesName(object.id))
+            // The same pieces already here need no second look. Anything else is opened in full first.
+            if file.url.standardizedFileURL != ours?.standardizedFileURL { try openedFile(object, keep: 0).verify() }
+            try placePieces(file.url, id: object.id)
+        } else if let body = object.body {
+            _ = try openedFile(object, keep: 0)
+            try store.write(body, as: bodyName(object.id))
+            try store.delete(piecesName(object.id))
+            digests[object.id] = nil
+        }
         try store.write(object.meta, as: metaName(object.id))
         textCache[object.id] = nil
         hashes[object.id] = nil
+    }
+
+    /// A body small enough to arrive in memory that was sealed in pieces is put in a file, since pieces
+    /// are only ever read from one. Returns the file made, for the caller to clear if it isn't kept.
+    private func asFile(_ object: SealedObject) throws -> (SealedObject, URL?) {
+        guard let body = object.body, body.first == ChunkedCipher.version else { return (object, nil) }
+        guard let files else { throw CryptoError.malformedCiphertext }
+        let url = try files.location(of: incomingName(object.id))
+        try body.write(to: url, options: .atomic)
+        return (SealedObject(id: object.id, kind: object.kind, meta: object.meta, bodyFile: try SealedFile(reading: url)), url)
+    }
+
+    /// Imports and downloads cut off by a crash leave part-made files behind. They're ciphertext, but big.
+    private func clearLeftovers() {
+        guard let files, let names = try? files.names() else { return }
+        for name in names where name.hasSuffix(".pieces-incoming") || name.hasSuffix(".pieces-moving") {
+            try? files.delete(name)
+        }
+        // An import still under way is newer than a day.
+        for name in names where name.hasSuffix(".pieces-importing") {
+            guard let url = try? files.location(of: name),
+                  let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                  Date().timeIntervalSince(date) > 24 * 60 * 60
+            else { continue }
+            try? files.delete(name)
+        }
     }
 
     public func removeObject(_ id: UUID, ifLocalHash expected: String) throws {
@@ -604,26 +827,40 @@ extension ReaderVault: SyncArea {
     /// a copy. If only a Listen position or a location differs, there's nothing to keep, and a folder
     /// has nothing to keep at all.
     public func resolveConflict(local: SealedObject, remote: SealedObject) throws -> ConflictResolution {
-        let mine = try opened(local)
-        let theirs = try opened(remote)
-        let keepMine = mine.item.updatedAt >= theirs.item.updatedAt
-        let same = mine.item.kind == .folder || (mine.body == theirs.body && mine.item.title == theirs.item.title)
+        let (local, madeLocal) = try asFile(local)
+        defer { if let madeLocal { try? FileManager.default.removeItem(at: madeLocal) } }
+        let (remote, madeRemote) = try asFile(remote)
+        defer { if let madeRemote { try? FileManager.default.removeItem(at: madeRemote) } }
+        let mine = try openedItem(local.meta, id: local.id)
+        let theirs = try openedItem(remote.meta, id: remote.id)
+        let keepMine = mine.updatedAt >= theirs.updatedAt
+        let mineFile = try openedFile(local, keep: 0)
+        let theirsFile = try openedFile(remote, keep: 0)
+        let same = try mine.kind == .folder || (mine.title == theirs.title && mineFile.sameBytes(as: theirsFile))
         if !same {
-            let older = keepMine ? theirs : mine
             // Named for the version it preserves, so retries can't double it even if this device changes again.
-            try writeConflictCopy(of: older.item, body: older.body, id: UUID(derivedFrom: (keepMine ? remote : local).hash))
+            try writeConflictCopy(
+                of: keepMine ? theirs : mine, file: keepMine ? theirsFile : mineFile,
+                id: UUID(derivedFrom: (keepMine ? remote : local).hash)
+            )
         }
         return keepMine ? .keepLocal : .keepRemote
     }
 
-    private func opened(_ object: SealedObject) throws -> (item: ReaderItem, body: Data) {
-        let id = object.id
-        let meta = try ContentCipher.open(object.meta, key: rootKey.objectKey(for: id, purpose: .metadata), objectID: id)
-        let body = try object.body.map { try ContentCipher.open($0, key: rootKey.objectKey(for: id, purpose: .content), objectID: id) }
-        return (try JSONDecoder().decode(ReaderItem.self, from: meta), body ?? Data())
+    private func openedItem(_ meta: Data, id: UUID) throws -> ReaderItem {
+        let plain = try ContentCipher.open(meta, key: rootKey.objectKey(for: id, purpose: .metadata), objectID: id)
+        return try JSONDecoder().decode(ReaderItem.self, from: plain)
     }
 
-    private func writeConflictCopy(of item: ReaderItem, body: Data, id: UUID) throws {
+    /// The object's body, opened. A body in pieces is checked a piece at a time as it's read.
+    private func openedFile(_ object: SealedObject, keep: Int = ReaderFile.piecesKept) throws -> ReaderFile {
+        let id = object.id
+        if let file = object.bodyFile { return ReaderFile(pieces: try piecesReader(file.url, id: id, keep: keep)) }
+        guard let body = object.body else { return ReaderFile(data: Data()) }
+        return ReaderFile(data: try ContentCipher.open(body, key: rootKey.objectKey(for: id, purpose: .content), objectID: id))
+    }
+
+    private func writeConflictCopy(of item: ReaderItem, file: ReaderFile, id: UUID) throws {
         guard try store.read(metaName(id)) == nil else { return }
         let now = Date()
         let copy = ReaderItem(
@@ -631,7 +868,19 @@ extension ReaderVault: SyncArea {
             mime: item.mime, byteCount: item.byteCount, createdAt: now, updatedAt: now, listenPosition: 0,
             folderID: item.folderID
         )
-        try writeBody(body, id: copy.id)
+        if file.isPieces, let files {
+            // Sealed again under the copy's own ID and key, a piece at a time.
+            let part = try files.location(of: importingName(id))
+            do {
+                try file.reseal(to: part, key: piecesKey(id), objectID: id)
+                try placePieces(part, id: id)
+            } catch {
+                try? FileManager.default.removeItem(at: part)
+                throw error
+            }
+        } else {
+            try writeBody(try file.whole(), id: copy.id)
+        }
         try writeMeta(copy)
     }
 
@@ -737,9 +986,14 @@ extension ReaderVault: SyncArea {
     /// Lets the viewers and Listen open a file that isn't the vault's, like one from Google Drive. Its ID
     /// must not be one of the vault's own. Only the latest few are held, and nothing is written.
     public func hold(_ item: ReaderItem, body: Data) throws {
+        try hold(item, file: ReaderFile(data: body))
+    }
+
+    /// The same, for a file that's opened a piece at a time.
+    public func hold(_ item: ReaderItem, file: ReaderFile) throws {
         guard !isClosed else { throw ReaderError.closed }
         guard try store.read(metaName(item.id)) == nil else { throw ReaderError.notFound }
-        held[item.id] = (item, body)
+        held[item.id] = (item, file)
         textCache[item.id] = nil
         heldOrder.removeAll { $0 == item.id }
         heldOrder.append(item.id)

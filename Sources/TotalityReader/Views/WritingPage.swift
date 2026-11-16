@@ -127,7 +127,7 @@ enum WritingMessage: Equatable {
     case place(cursor: Int, scroll: Double)
 
     /// A doc can be as large as an imported file, and no larger.
-    static let maxText = ReaderVault.maxImportBytes
+    static let maxText = ReaderVault.maxTextBytes
 
     static func parse(_ body: Any) -> WritingMessage? {
         guard let message = body as? [String: Any], let type = message["type"] as? String else { return nil }

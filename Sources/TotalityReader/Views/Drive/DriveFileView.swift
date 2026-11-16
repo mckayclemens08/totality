@@ -139,7 +139,7 @@ struct DriveFileView: View {
             await model.load()
             notice = "\(item.displayTitle) is now in your Reader, encrypted, and uses your Totality storage. The original stays in Google Drive."
         } catch let error as ReaderError {
-            notice = error == .tooLarge ? "Files up to 49 MB can be imported for now. This one stays in Google Drive." : error.message
+            notice = error == .tooLarge ? "Files up to 5 GB can be imported. This one stays in Google Drive." : error.message
         } catch {
             notice = "This couldn't be imported. Try again."
         }

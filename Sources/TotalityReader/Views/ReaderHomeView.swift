@@ -56,10 +56,13 @@ public struct ReaderHomeView: View {
                         }
                     }
                     .safeAreaInset(edge: .top, spacing: 0) {
-                        SearchBox("Search titles and text", text: $model.query)
-                            .padding(.horizontal, Space.s4)
-                            .padding(.vertical, Space.s2)
-                            .background(Theme.current.bg.color)
+                        VStack(spacing: Space.s2) {
+                            SearchBox("Search titles and text", text: $model.query)
+                            if let importing = model.importing { ImportBar(progress: importing) }
+                        }
+                        .padding(.horizontal, Space.s4)
+                        .padding(.vertical, Space.s2)
+                        .background(Theme.current.bg.color)
                     }
             }
             .tint(Theme.current.accent.color)
@@ -191,5 +194,24 @@ struct ReaderMessage: View {
         }
         .padding(Space.s6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A big file being sealed into the Reader, a piece at a time.
+private struct ImportBar: View {
+    let progress: ImportProgress
+
+    var body: some View {
+        let theme = Theme.current
+        VStack(alignment: .leading, spacing: Space.s1) {
+            Text("Adding \(progress.name)")
+                .font(Typeface.callout)
+                .foregroundStyle(theme.textSecondary.color)
+                .lineLimit(1)
+            ProgressView(value: progress.fraction)
+                .tint(theme.accent.color)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Adding \(progress.name), \(Int(progress.fraction * 100)) percent")
     }
 }

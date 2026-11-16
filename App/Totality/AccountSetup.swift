@@ -17,6 +17,8 @@ enum AccountSetup {
     /// What locks Messages' key backup: derived from the content key, and only once that key is the
     /// account's backed-up one, which the recovery key restores. Never from the password.
     private(set) static var messagesRecovery: (@Sendable (String) async -> String?)?
+    /// How much of the account's sealed storage is used, of how much.
+    private(set) static var storageUsage: (@Sendable () async throws -> SealedStoreUsage)?
     /// Other people's public profiles, which Messages reaches through the `ModuleRegistry`.
     private(set) static var profiles: (any ProfileDirectory)?
 
@@ -32,6 +34,8 @@ enum AccountSetup {
         matrixPass = { try await service.matrixPass() }
         accountID = { await service.signedInAccountID() }
         photoRows = { service.photoRows(for: $0) }
+        let sealedStore = SealedStoreClient(token: { try await service.accessToken() })
+        storageUsage = { try await sealedStore.usage() }
         profiles = service
         messagesRecovery = { account in
             let joined = (try? await content.joinedBackup()) != nil

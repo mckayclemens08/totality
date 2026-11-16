@@ -46,7 +46,14 @@ public struct ReaderItem: Identifiable, Codable, Sendable, Equatable, Hashable {
 public enum ReaderError: Error, Equatable {
     case notFound
     case notANote
+    /// Over the sealed store's 5 GB for one file.
     case tooLarge
+    /// Kept, but too big for a viewer that needs the whole file in memory, like a huge image.
+    case tooLargeToShow
+    /// The account's storage on the Totality server hasn't room for it.
+    case storageFull
+    /// This device hasn't room for its sealed copy.
+    case noRoomHere
     case passwordProtected
     case folderInsideItself
     case notReadable
@@ -60,7 +67,10 @@ extension ReaderError {
         case .notFound: "This item is no longer here."
         case .folderInsideItself: "A folder can't go inside itself."
         case .notANote: "Only notes can be edited."
-        case .tooLarge: "Files can be up to 49 MB for now."
+        case .tooLarge: "Files can be up to 5 GB."
+        case .tooLargeToShow: "This file is too big to show here. It's kept safely, and Listen and search still read it."
+        case .storageFull: "Your Totality storage is full. Delete something from Recently Deleted or the Reader, then try again."
+        case .noRoomHere: "There isn't room on this device for this file. Free up some space, then try again."
         case .passwordProtected: "This PDF is password protected, so it can be stored but not read."
         case .notReadable: "Totality can keep this file, but it can't read this format yet."
         case .closed: "This wasn't saved because your encryption key was changing. Try again."

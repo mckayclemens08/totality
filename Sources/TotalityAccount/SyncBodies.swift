@@ -42,6 +42,23 @@ public struct SyncBodies: Sendable {
         return try await bucket.download(key)
     }
 
+    /// Downloads the body under a sealed key into `file`, a piece at a time, carrying on from any part
+    /// already there. A bucket key is read whole, since nothing over 50 MB was ever kept there.
+    public func download(_ key: String, owner: String, to file: URL, limit: Int) async throws {
+        guard SealedBlobKey.isSealed(key) else {
+            try await bucket.download(key).write(to: file, options: .atomic)
+            return
+        }
+        guard let blob = SealedBlobKey.blob(in: key, owner: owner) else { throw AccountError.failed }
+        guard try await sealed.download(blob, to: file, limit: limit) else { throw SealedStoreError.unavailable }
+    }
+
+    /// Stores a body kept in a file without reading it whole, resuming an upload that stopped partway.
+    public func writeFile(_ file: URL, at key: String, owner: String) async throws {
+        guard let blob = SealedBlobKey.blob(in: key, owner: owner) else { throw AccountError.failed }
+        try await sealed.putFile(file, as: blob)
+    }
+
     public func write(_ body: Data, at key: String, owner: String) async throws {
         guard let blob = SealedBlobKey.blob(in: key, owner: owner) else { throw AccountError.failed }
         try await sealed.put(body, as: blob)
