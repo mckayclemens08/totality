@@ -12,8 +12,10 @@ private struct Searcher: ModuleSearcher {
     let kinds: Set<ContentKind> = []
     var titles: [String] = []
     var fails = false
+    var delay: Duration = .zero
 
     func search(_ query: String) async throws -> [SearchHit] {
+        if delay > .zero { try? await Task.sleep(for: delay) }
         if fails { throw CocoaError(.fileReadCorruptFile) }
         return titles.map { SearchHit(module: module, itemID: $0, title: $0) }
     }
@@ -43,6 +45,30 @@ struct UniversalSearchTests {
         let results = await search.run("lisbon")
         #expect(results.groups.map(\.module) == [.calendar])
         #expect(results.failed == [.reader])
+    }
+
+    @Test("Two searchers for one module share its group, each result once, in their order")
+    func shared() async {
+        let search = UniversalSearch(searchers: [
+            Searcher(module: .reader, titles: ["Lisbon notes", "Essay"]),
+            Searcher(module: .calendar, titles: ["Flight to Lisbon"]),
+            Searcher(module: .reader, titles: ["Essay", "Lisbon in Drive"]),
+        ])
+        let results = await search.run("lisbon")
+        #expect(results.groups.map(\.module) == [.reader, .calendar])
+        #expect(results.groups[0].hits.map(\.title) == ["Lisbon notes", "Essay", "Lisbon in Drive"])
+    }
+
+    @Test("A slow module doesn't hold up the rest: what's found shows as each answers")
+    func streams() async {
+        let search = UniversalSearch(searchers: [
+            Searcher(module: .reader, titles: ["Lisbon in Drive"], delay: .milliseconds(300)),
+            Searcher(module: .calendar, titles: ["Flight to Lisbon"]),
+        ])
+        var seen: [[ModuleID]] = []
+        for await results in search.stream("lisbon") { seen.append(results.groups.map(\.module)) }
+        #expect(seen.first == [.calendar])
+        #expect(seen.last == [.reader, .calendar])
     }
 
     @Test("Only spaces searches nothing, so a module can't fail on it")

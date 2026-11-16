@@ -70,3 +70,15 @@ extension ReaderModel {
         }
     }
 }
+
+extension ReaderModel {
+    /// Where a Drive file from home search opens: its folders are read down to it first. Nil when it
+    /// can't be reached any more, such as after its folder was unlinked or the account disconnected.
+    func openDriveSearchHit(_ itemID: String) async -> ReaderRoute? {
+        guard let drive, let found = DriveSearcher.parse(itemID), !drive.needsConnecting(found.account),
+              let entry = try? await drive.drive.prepareFound(found.fileID, folders: found.folders, account: found.account)
+        else { return nil }
+        let name = drive.links.first { $0.account == found.account && $0.folderID == found.folders[0] }?.name ?? ""
+        return .driveFile(DriveFileRoute(location: DriveLocation(account: found.account, folderID: found.folders[0], name: name), entry: entry))
+    }
+}

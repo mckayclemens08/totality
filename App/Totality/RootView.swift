@@ -556,6 +556,8 @@ struct RootView: View {
     private func homeSearchers(_ registry: ModuleRegistry) -> [any ModuleSearcher] {
         var searchers = registry.searchers + [MessagesSearcher(model: messages), MailSearcher(model: mail), PhotosSearcher(model: photos)]
         if let web { searchers.append(WebSearcher(model: web)) }
+        // Linked Google Drive folders, in the Reader's group.
+        if let drive = reader?.drive { searchers += drive.searchers }
         return searchers.onHome(removed: homeChoices.removed)
     }
 
@@ -563,7 +565,12 @@ struct RootView: View {
     private func show(_ hit: SearchHit) {
         showingSearch = false
         switch hit.module {
-        case .reader: reader?.requestedItem = UUID(uuidString: hit.itemID)
+        case .reader:
+            if DriveSearcher.parse(hit.itemID) != nil {
+                reader?.requestedDriveHit = hit.itemID
+            } else {
+                reader?.requestedItem = UUID(uuidString: hit.itemID)
+            }
         case .calendar: calendar?.requestedHit = hit
         case .messages: messages.requestedChat = hit.itemID
         case .mail:

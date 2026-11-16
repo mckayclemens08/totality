@@ -56,22 +56,56 @@ public struct UniversalSearch: Sendable {
         self.searchers = searchers
     }
 
+    /// Everything, once every module has answered.
     public func run(_ query: String) async -> SearchResults {
-        guard !SearchText.terms(in: query).isEmpty else { return SearchResults() }
-        let answers = await withTaskGroup(of: (Int, [SearchHit]?).self) { group in
-            for (index, searcher) in searchers.enumerated() {
-                group.addTask { (index, try? await searcher.search(query)) }
+        var last = SearchResults()
+        for await results in stream(query) { last = results }
+        return last
+    }
+
+    /// The results so far, again each time a module answers, so a slow one, like Google Drive's search,
+    /// doesn't hold up the rest. Two searchers for one module, like the Reader's library and its Drive
+    /// folders, share one group, in the order they're listed, each result once.
+    public func stream(_ query: String) -> AsyncStream<SearchResults> {
+        AsyncStream { continuation in
+            guard !SearchText.terms(in: query).isEmpty else {
+                continuation.yield(SearchResults())
+                continuation.finish()
+                return
             }
-            var answers = [Int: [SearchHit]?]()
-            for await (index, hits) in group { answers[index] = hits }
-            return answers
+            let searchers = searchers
+            let work = Task {
+                await withTaskGroup(of: (Int, [SearchHit]?).self) { group in
+                    for (index, searcher) in searchers.enumerated() {
+                        group.addTask { (index, try? await searcher.search(query)) }
+                    }
+                    var answers = [Int: [SearchHit]?]()
+                    for await (index, hits) in group {
+                        answers[index] = hits
+                        continuation.yield(Self.assemble(answers, from: searchers))
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in work.cancel() }
         }
+    }
+
+    private static func assemble(_ answers: [Int: [SearchHit]?], from searchers: [any ModuleSearcher]) -> SearchResults {
         var results = SearchResults()
+        var seen = Set<String>()
         for (index, searcher) in searchers.enumerated() {
-            if let hits = answers[index] ?? nil {
-                if !hits.isEmpty { results.groups.append(.init(module: searcher.module, hits: hits)) }
+            guard let answer = answers[index] else { continue }
+            guard let hits = answer else {
+                if !results.failed.contains(searcher.module) { results.failed.append(searcher.module) }
+                continue
+            }
+            let fresh = hits.filter { seen.insert($0.id).inserted }
+            guard !fresh.isEmpty else { continue }
+            if let at = results.groups.firstIndex(where: { $0.module == searcher.module }) {
+                results.groups[at] = .init(module: searcher.module, hits: results.groups[at].hits + fresh)
             } else {
-                results.failed.append(searcher.module)
+                results.groups.append(.init(module: searcher.module, hits: fresh))
             }
         }
         return results
