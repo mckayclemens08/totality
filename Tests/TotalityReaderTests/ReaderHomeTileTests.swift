@@ -46,13 +46,14 @@ import TotalityCore
         }
         await model.load()
         let front = try #require(model.frontOfShelf)
-        #expect(model.homeMore.count == 2)
+        #expect(model.homeMore.count == 3)
         #expect(!model.homeMore.contains { $0.id == front.id })
         #expect(model.homeCanListen && !model.homeIsListening)
         #expect(model.homeListenLine == nil)
 
         await model.playFromHome()
         #expect(model.homeIsListening)
+        #expect(model.homeMore.count == 2)
         #expect(model.listen.current?.id == front.id)
         let first = try #require(model.homeListenLine)
         #expect(!first.text.isEmpty)

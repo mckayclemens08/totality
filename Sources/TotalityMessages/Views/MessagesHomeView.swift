@@ -183,27 +183,20 @@ public struct MessagesHomeView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if let onClose {
-            ToolbarItem(placement: .cancellationAction) {
-                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
+        // Home and settings on the left, camera and compose on the right, so the title has room.
+        ToolbarItem(placement: .cancellationAction) {
+            HStack(spacing: Space.s3) {
+                if let onClose {
+                    ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
+                }
+                if model.phase == .ready {
+                    settingsMenu
+                }
             }
         }
         if model.phase == .ready {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: Space.s3) {
-                    Menu {
-                        Button("New group", systemImage: "person.3") { makingGroup = true }
-                        Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
-                        Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
-                        if model.keys == .backedUp {
-                            Section {
-                                Label("History backed up, this device verified", systemImage: "checkmark.shield")
-                            }
-                        }
-                    } label: {
-                        ToolbarGlyph(systemImage: "ellipsis")
-                    }
-                    .accessibilityLabel("Messages settings")
                     #if os(iOS)
                     if CameraPicker.isAvailable && !model.chats.isEmpty {
                         ToolbarIcon("Camera", systemImage: "camera.fill") { showingCamera = true }
@@ -213,6 +206,22 @@ public struct MessagesHomeView: View {
                 }
             }
         }
+    }
+
+    private var settingsMenu: some View {
+        Menu {
+            Button("New group", systemImage: "person.3") { makingGroup = true }
+            Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
+            Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
+            if model.keys == .backedUp {
+                Section {
+                    Label("History backed up, this device verified", systemImage: "checkmark.shield")
+                }
+            }
+        } label: {
+            ToolbarGlyph(systemImage: "ellipsis")
+        }
+        .accessibilityLabel("Messages settings")
     }
 }
 

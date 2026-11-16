@@ -11,6 +11,7 @@ public struct ListenLine: Equatable, Sendable {
 /// is in it, the sentence Listen is saying, and two more recent items.
 extension ReaderModel {
     static let homeMore = 2
+    static let homeList = 4
 
     /// The front item is what Listen is playing.
     public var homeIsListening: Bool {
@@ -25,10 +26,12 @@ extension ReaderModel {
         return true
     }
 
-    /// The two most recent after the front one.
+    /// The most recent after the front one: two under Listen's sentence, or a short list filling the
+    /// square when nothing is playing, so the tile isn't left empty.
     public var homeMore: [ShelfEntry] {
         let front = frontOfShelf?.id
-        return Array(shelf.filter { $0.id != front }.prefix(Self.homeMore))
+        let count = homeIsListening ? Self.homeMore : Self.homeList
+        return Array(shelf.filter { $0.id != front }.prefix(count))
     }
 
     /// The sentence Listen is saying, as Read along marks it.

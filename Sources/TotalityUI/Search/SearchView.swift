@@ -78,8 +78,8 @@ public struct SearchView: View {
         let results = model.results
         if model.phase == .waiting {
             SearchMessage(
-                systemImage: "magnifyingglass", title: "Search everything in Totality",
-                detail: "Reader, Calendar, Mail, Messages, Photos, and Web bookmarks. Searching happens on this device, and nothing you type is saved. With Google Drive folders linked in the Reader, your words also go to Google to look inside them, and nowhere else."
+                systemImage: "magnifyingglass", title: "Search everything",
+                detail: "Linked Drive folders are searched at Google."
             )
         } else if results.groups.isEmpty {
             if model.phase == .searching {
@@ -187,7 +187,7 @@ private struct SearchRow: View {
 private struct SearchMessage: View {
     let systemImage: String
     let title: String
-    let detail: String
+    var detail: String = ""
 
     var body: some View {
         let theme = Theme.current
@@ -199,9 +199,11 @@ private struct SearchMessage: View {
             Text(title)
                 .font(Typeface.headline)
                 .foregroundStyle(theme.textPrimary.color)
-            Text(detail)
-                .font(Typeface.body)
-                .foregroundStyle(theme.textSecondary.color)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+            }
         }
         .multilineTextAlignment(.center)
         .padding(Space.s6)

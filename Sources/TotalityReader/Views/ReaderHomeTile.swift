@@ -78,9 +78,6 @@ public struct ReaderHomeTile: View {
                     .font(size == .medium ? Typeface.headline : Typeface.title)
                     .foregroundStyle(theme.textPrimary.color)
                     .lineLimit(size == .medium ? 1 : 2)
-                Text(item.typeName)
-                    .font(Typeface.caption)
-                    .foregroundStyle(theme.textSecondary.color)
             }
             .multilineTextAlignment(.center)
             if isPlaying {
@@ -135,17 +132,21 @@ private struct ReaderDeskTile: View {
         VStack(alignment: .leading, spacing: Space.s3) {
             if let front = model.frontOfShelf {
                 VStack(alignment: .leading, spacing: Space.s1) {
-                    Text(model.homeIsListening ? "Listening" : "Reading")
-                        .font(Typeface.caption)
-                        .foregroundStyle(model.homeIsListening ? theme.accent.color : theme.textSecondary.color)
+                    if model.homeIsListening {
+                        Text("Listening")
+                            .font(Typeface.caption)
+                            .foregroundStyle(theme.accent.color)
+                    }
                     Text(front.title)
                         .font(Typeface.title)
                         .foregroundStyle(theme.textPrimary.color)
                         .lineLimit(2)
-                    Text([front.typeName, model.homePlace].compactMap { $0 }.joined(separator: " · "))
-                        .font(Typeface.caption)
-                        .foregroundStyle(theme.textSecondary.color)
-                        .lineLimit(1)
+                    if let place = model.homePlace {
+                        Text(place)
+                            .font(Typeface.caption)
+                            .foregroundStyle(theme.textSecondary.color)
+                            .lineLimit(1)
+                    }
                 }
                 .tileLink(front.title) { open(front) }
                 if model.homeIsListening {
@@ -158,32 +159,45 @@ private struct ReaderDeskTile: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityLabel(line.text)
                 }
+                if !model.homeIsListening {
+                    more.padding(.top, Space.s3)
+                }
                 Spacer(minLength: 0)
                 if model.homeCanListen {
                     ReaderTileListen(model: model)
                         .tileControl()
                         .layoutPriority(1)
                 }
-                if !model.homeMore.isEmpty {
-                    HStack(alignment: .top, spacing: Space.s3) {
-                        ForEach(model.homeMore) { entry in
-                            HStack(spacing: Space.s2) {
-                                BookIcon(systemImage: entry.systemImage, size: Space.s5)
-                                Text(entry.title)
-                                    .font(Typeface.caption)
-                                    .foregroundStyle(theme.textSecondary.color)
-                                    .lineLimit(2)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .tileLink(entry.title) { open(entry) }
-                        }
-                    }
-                    .layoutPriority(1)
+                if model.homeIsListening {
+                    more.layoutPriority(1)
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: model.frontOfShelf?.id) { await model.loadHomePlace() }
+    }
+
+    /// The most recent items: two across under Listen, or a list filling the square when nothing plays.
+    @ViewBuilder private var more: some View {
+        let theme = Theme.current
+        let across = model.homeIsListening
+        let layout = across
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: Space.s3))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s4))
+        layout {
+            ForEach(model.homeMore) { entry in
+                HStack(spacing: Space.s3) {
+                    BookIcon(systemImage: entry.systemImage, size: Space.s5)
+                        .frame(width: Space.s6)
+                    Text(entry.title)
+                        .font(across ? Typeface.caption : Typeface.body)
+                        .foregroundStyle(across ? theme.textSecondary.color : theme.textPrimary.color)
+                        .lineLimit(across ? 2 : 1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .tileLink(entry.title) { open(entry) }
+            }
+        }
     }
 
     /// The sentence on the soft highlight and the word being said on the strong one, as Read along has them.
