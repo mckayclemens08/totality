@@ -50,6 +50,12 @@ public final class TasksModel {
     @ObservationIgnored private let vault: TaskVault?
     @ObservationIgnored private let clock: @Sendable () -> Date
     @ObservationIgnored private var undoTimer: Task<Void, Never>?
+    @ObservationIgnored private var deleteTimer: Task<Void, Never>?
+
+    /// Deleted a moment ago, still held here for Undo.
+    public private(set) var pendingDelete: PendingDelete?
+    /// How long Undo stays after deleting. Then the delete is for good (owner, 2026-11-18). Tests shorten it.
+    @ObservationIgnored public var deleteUndoTime = Duration.seconds(5)
 
     public init(vault: TaskVault?, calendar: Calendar = .autoupdatingCurrent, now: @escaping @Sendable () -> Date = { Date() }) {
         self.vault = vault
@@ -78,8 +84,10 @@ public final class TasksModel {
         }
         do {
             let listing = try await vault.everything()
-            tasks = listing.tasks
-            lists = listing.lists
+            // What's waiting out its Undo stays hidden, though it's still on the device.
+            let held = pendingDelete.map { Set($0.tasks.map(\.id) + $0.lists.map(\.id)) } ?? []
+            tasks = listing.tasks.filter { !held.contains($0.id) }
+            lists = listing.lists.filter { !held.contains($0.id) }
             unreadable = listing.unreadable
             phase = .ready
         } catch {
@@ -175,15 +183,20 @@ public final class TasksModel {
 
     /// Adds one task per line typed, each read for dates, tags and priority. Returns what was added.
     @discardableResult
-    public func add(_ text: String, in bucket: TaskBucket) async -> [TaskItem] {
+    public func add(_ text: String, in bucket: TaskBucket, list: UUID? = nil, heading: UUID? = nil) async -> [TaskItem] {
         now = clock()
         let parsed = QuickAddParser.parseLines(text, now: now, calendar: calendar)
         var order = (tasks.map(\.order).max() ?? 0) + 1
         var added: [TaskItem] = []
         for item in parsed {
-            let task = item.task(
-                defaultPlace: Self.place(for: bucket), defaultWhen: bucket == .today ? today : nil, order: order, now: now
+            var task = item.task(
+                defaultPlace: list == nil ? Self.place(for: bucket) : .anytime, defaultWhen: bucket == .today ? today : nil,
+                order: order, now: now
             )
+            if let list {
+                task.listID = list
+                task.headingID = heading
+            }
             order += 1
             guard await save(task, over: nil) else { break }
             added.append(task)
@@ -313,4 +326,260 @@ public enum ScheduleChoice: Equatable, Sendable {
     case day(TaskDay, evening: Bool)
     case anytime
     case someday
+}
+
+/// Something deleted a moment ago, which Undo can still bring back.
+public struct PendingDelete: Equatable, Sendable {
+    public let tasks: [TaskItem]
+    public let lists: [TaskList]
+    /// When it goes for good.
+    public let until: Date
+
+    /// "3 tasks deleted", "“Hegel paper” deleted".
+    public let title: String
+}
+
+/// Where a task can be moved: one of the fixed lists, or a project or area.
+public enum TaskDestination: Hashable, Sendable {
+    case bucket(TaskBucket)
+    case list(UUID, heading: UUID? = nil)
+}
+
+// MARK: - Step 2: areas, projects, smart lists, moving, several at once, and undoable delete
+
+extension TasksModel {
+    public var areas: [TaskList] { ListRules.areas(in: lists) }
+    public var smartLists: [TaskList] { ListRules.smartLists(in: lists) }
+
+    public func list(_ id: UUID?) -> TaskList? {
+        guard let id else { return nil }
+        return lists.first { $0.id == id }
+    }
+
+    public func projects(in area: UUID?, status: TaskList.Status? = .active) -> [TaskList] {
+        ListRules.projects(in: area, from: lists, status: status)
+    }
+
+    public func sections(of project: TaskList) -> [ProjectSection] {
+        ListRules.sections(of: project, from: tasks)
+    }
+
+    public func projectProgress(of project: TaskList) -> ListProgress {
+        ListRules.progress(of: project, from: tasks)
+    }
+
+    public func nextTask(in project: TaskList) -> TaskItem? {
+        ListRules.nextTask(in: project, from: tasks)
+    }
+
+    public func looseTasks(in area: TaskList) -> [TaskItem] {
+        ListRules.looseTasks(in: area, from: tasks)
+    }
+
+    public func tasks(matching rules: SmartRules) -> [TaskItem] {
+        ListRules.tasks(matching: rules, from: tasks, lists: lists, today: today, in: calendar)
+    }
+
+    /// The tags in use, for a smart list's rule.
+    public var allTags: [String] {
+        Array(Set(tasks.flatMap(\.tags))).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// Makes an area, project or smart list. Returns it, or nil if it couldn't be saved.
+    @discardableResult
+    public func addList(
+        name: String, kind: TaskList.Kind, area: UUID? = nil, deadline: TaskDay? = nil, rules: SmartRules? = nil,
+        isPinned: Bool = false
+    ) async -> TaskList? {
+        let now = clock()
+        let order = (lists.filter { $0.kind == kind }.map(\.order).max() ?? 0) + 1
+        let list = TaskList(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind, areaID: kind == .project ? area : nil,
+            deadline: kind == .project ? deadline : nil, rules: kind == .smart ? (rules ?? SmartRules()) : nil,
+            isPinned: kind == .smart && isPinned, order: order, createdAt: now
+        )
+        return await save(list) ? list : nil
+    }
+
+    /// Changes one list in place and saves it. Lists keep the newer whole, so the edit time moves on.
+    @discardableResult
+    public func changeList(_ id: UUID, _ edit: (inout TaskList) -> Void) async -> Bool {
+        guard let old = list(id) else { return false }
+        var new = old
+        edit(&new)
+        guard new != old else { return true }
+        new.updatedAt = max(clock(), old.updatedAt)
+        return await save(new)
+    }
+
+    public func addHeading(_ title: String, to project: UUID) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await changeList(project) { $0.headings.append(TaskList.Heading(title: trimmed)) }
+    }
+
+    /// Removes a heading. Its tasks stay in the project, above the first heading.
+    public func removeHeading(_ heading: UUID, from project: UUID) async {
+        for task in tasks where task.listID == project && task.headingID == heading {
+            await change(task.id) { $0.headingID = nil }
+        }
+        await changeList(project) { $0.headings.removeAll { $0.id == heading } }
+    }
+
+    private func save(_ list: TaskList) async -> Bool {
+        guard let vault else { return false }
+        do {
+            try await vault.save(list)
+            if let index = lists.firstIndex(where: { $0.id == list.id }) {
+                lists[index] = list
+            } else {
+                lists.append(list)
+            }
+            return true
+        } catch {
+            notice = "That change couldn't be saved on this device. Try again."
+            return false
+        }
+    }
+
+    // MARK: Moving
+
+    /// Moves tasks to a list. Today plans them for today; Inbox takes them out of any project.
+    public func move(_ ids: some Sequence<UUID>, to destination: TaskDestination) async {
+        let today = today
+        for id in ids {
+            await change(id) { task in
+                switch destination {
+                case .bucket(.inbox):
+                    task.place = .inbox
+                    task.listID = nil
+                    task.headingID = nil
+                    task.when = nil
+                    task.isEvening = false
+                case .bucket(.today):
+                    task.when = today
+                    if task.place != .anytime { task.place = .anytime }
+                case .bucket(.someday):
+                    task.place = .someday
+                    task.when = nil
+                    task.isEvening = false
+                    task.time = nil
+                case .bucket(.anytime):
+                    task.place = .anytime
+                    task.when = nil
+                    task.isEvening = false
+                    task.time = nil
+                case .bucket(.upcoming), .bucket(.logbook):
+                    break
+                case let .list(list, heading):
+                    task.listID = list
+                    task.headingID = heading
+                    if task.place == .inbox { task.place = .anytime }
+                }
+            }
+        }
+    }
+
+    /// Puts a dragged task just above another, taking its heading when they share a project.
+    public func place(_ id: UUID, before target: UUID, in shown: [TaskItem]) async {
+        guard id != target, let index = shown.firstIndex(where: { $0.id == target }) else { return }
+        let above = shown[..<index].last { $0.id != id }
+        let order = above.map { ($0.order + shown[index].order) / 2 } ?? shown[index].order - 1
+        let targetTask = shown[index]
+        await change(id) { task in
+            task.order = order
+            if task.listID == targetTask.listID, task.listID != nil { task.headingID = targetTask.headingID }
+        }
+    }
+
+    // MARK: Several at once
+
+    public func complete(_ ids: some Sequence<UUID>) async {
+        let at = clock()
+        for id in ids where !isDone(id) {
+            await change(id) { $0.completedAt = at }
+        }
+        completions += 1
+    }
+
+    public func schedule(_ ids: some Sequence<UUID>, _ choice: ScheduleChoice) async {
+        for id in ids { await schedule(id, choice) }
+    }
+
+    public func addTag(_ tag: String, to ids: some Sequence<UUID>) async {
+        let clean = tag.trimmingCharacters(in: CharacterSet(charactersIn: "# ").union(.whitespacesAndNewlines))
+        guard !clean.isEmpty else { return }
+        for id in ids {
+            await change(id) { task in
+                if !task.tags.contains(where: { $0.caseInsensitiveCompare(clean) == .orderedSame }) { task.tags.append(clean) }
+            }
+        }
+    }
+
+    // MARK: Undoable delete
+
+    /// Deletes tasks and lists with no question asked. They vanish at once, Undo can bring them back for
+    /// a few seconds, and then they're gone for good. Deleting an area or project takes everything in it.
+    public func delete(tasks ids: Set<UUID>, lists listIDs: Set<UUID> = []) async {
+        await finishPendingDelete()
+        var goneLists = listIDs
+        for area in lists where listIDs.contains(area.id) && area.kind == .area {
+            goneLists.formUnion(lists.filter { $0.areaID == area.id }.map(\.id))
+        }
+        let heldLists = lists.filter { goneLists.contains($0.id) }
+        let heldTasks = tasks.filter { ids.contains($0.id) || ($0.listID.map(goneLists.contains) ?? false) }
+        guard !heldLists.isEmpty || !heldTasks.isEmpty else { return }
+        let held = Set(heldTasks.map(\.id))
+        tasks.removeAll { held.contains($0.id) }
+        lists.removeAll { goneLists.contains($0.id) }
+        lingering.subtract(held)
+        if let last = lastCompleted, held.contains(last.id) { lastCompleted = nil }
+        let wait = deleteUndoTime
+        let title: String
+        if listIDs.count == 1, let named = heldLists.first(where: { listIDs.contains($0.id) }) {
+            title = "“\(named.displayName)” deleted"
+        } else if !listIDs.isEmpty {
+            title = "\(listIDs.count) lists deleted"
+        } else {
+            title = heldTasks.count == 1 ? "1 task deleted" : "\(heldTasks.count) tasks deleted"
+        }
+        pendingDelete = PendingDelete(
+            tasks: heldTasks, lists: heldLists, until: clock().addingTimeInterval(Self.seconds(wait)), title: title
+        )
+        deleteTimer?.cancel()
+        deleteTimer = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled else { return }
+            await self?.finishPendingDelete()
+        }
+    }
+
+    /// Brings back what was just deleted.
+    public func undoDelete() {
+        guard let pending = pendingDelete else { return }
+        deleteTimer?.cancel()
+        pendingDelete = nil
+        tasks.append(contentsOf: pending.tasks)
+        lists.append(contentsOf: pending.lists)
+    }
+
+    /// Makes the delete permanent now, as when its time runs out or the next delete starts.
+    public func finishPendingDelete() async {
+        guard let pending = pendingDelete, let vault else { return }
+        deleteTimer?.cancel()
+        pendingDelete = nil
+        var failed = false
+        for id in pending.tasks.map(\.id) + pending.lists.map(\.id) {
+            do { try await vault.delete(id) } catch { failed = true }
+        }
+        if failed {
+            notice = "Some of that couldn't be deleted on this device. It's back in place."
+            await load()
+        }
+    }
+
+    private static func seconds(_ duration: Duration) -> TimeInterval {
+        let parts = duration.components
+        return TimeInterval(parts.seconds) + TimeInterval(parts.attoseconds) / 1e18
+    }
 }

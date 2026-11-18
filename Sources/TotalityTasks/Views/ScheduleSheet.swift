@@ -36,7 +36,7 @@ struct ScheduleSheet: View {
                     if target.kind == .deadline, task?.deadline != nil {
                         Button("Remove deadline", role: .destructive) {
                             Task {
-                                await model.change(target.id) { $0.deadline = nil }
+                                for id in target.ids { await model.change(id) { $0.deadline = nil } }
                                 onDone()
                             }
                         }
@@ -58,9 +58,9 @@ struct ScheduleSheet: View {
                         let chosen = TaskDay(day, in: calendar)
                         Task {
                             if target.kind == .when {
-                                await model.schedule(target.id, .day(chosen, evening: false))
+                                await model.schedule(target.ids, .day(chosen, evening: false))
                             } else {
-                                await model.change(target.id) { $0.deadline = chosen }
+                                for id in target.ids { await model.change(id) { $0.deadline = chosen } }
                             }
                             onDone()
                         }
@@ -79,7 +79,7 @@ struct ScheduleSheet: View {
         let theme = Theme.current
         return Button {
             Task {
-                await model.schedule(target.id, choice())
+                await model.schedule(target.ids, choice())
                 onDone()
             }
         } label: {

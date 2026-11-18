@@ -6,14 +6,19 @@ import TotalityUI
 public struct QuickAddView: View {
     let model: TasksModel
     let bucket: TaskBucket
+    /// A project or area to add into, and a heading in it.
+    var list: UUID?
+    var heading: UUID?
     let onDone: () -> Void
     @State private var text = ""
     @State private var added = 0
     @FocusState private var isFocused: Bool
 
-    public init(model: TasksModel, bucket: TaskBucket, onDone: @escaping () -> Void) {
+    public init(model: TasksModel, bucket: TaskBucket, list: UUID? = nil, heading: UUID? = nil, onDone: @escaping () -> Void) {
         self.model = model
         self.bucket = bucket
+        self.list = list
+        self.heading = heading
         self.onDone = onDone
     }
 
@@ -67,7 +72,7 @@ public struct QuickAddView: View {
 
     private func add(keepOpen: Bool) async {
         guard !parsed.isEmpty else { return }
-        let made = await model.add(text, in: bucket)
+        let made = await model.add(text, in: bucket, list: list, heading: heading)
         added += made.count
         text = ""
         if !keepOpen, !made.isEmpty { onDone() }

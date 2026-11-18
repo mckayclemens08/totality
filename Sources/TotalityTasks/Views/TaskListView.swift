@@ -49,7 +49,10 @@ struct TaskListView: View {
         case .today: today
         case .upcoming: upcoming
         case .logbook: logbook
-        default: rows(model.tasks(in: bucket))
+        default:
+            let tasks = model.tasks(in: bucket)
+            if tasks.isEmpty { EmptyList(bucket: bucket).plainRow() }
+            rows(tasks)
         }
     }
 
@@ -126,12 +129,47 @@ struct TaskListView: View {
     }
 
     private func rows(_ tasks: [TaskItem]) -> some View {
+        TaskRows(model: model, tasks: tasks, bucket: bucket, expanded: $expanded, scheduling: $scheduling)
+    }
+}
+
+/// Tasks as raised cards in a list: tap to open in place, swipe right to complete or left to schedule,
+/// long press to pick several, and drag by the handle onto a list or above another task.
+struct TaskRows: View {
+    let model: TasksModel
+    let tasks: [TaskItem]
+    /// The list they're shown in. Nil works it out for each task, as in a project.
+    var bucket: TaskBucket?
+    @Binding var expanded: UUID?
+    @Binding var scheduling: ScheduleTarget?
+    var showsList = true
+    @Environment(\.taskSelection) private var selection
+
+    var body: some View {
         ForEach(tasks) { task in
             TaskRow(
-                model: model, task: task, bucket: bucket, isExpanded: expanded == task.id,
+                model: model, task: task, bucket: bucket ?? TaskRules.bucket(of: task, today: model.today),
+                isExpanded: expanded == task.id,
                 onTap: { expanded = expanded == task.id ? nil : task.id },
-                onSchedule: { scheduling = $0 }
+                onSchedule: { scheduling = $0 },
+                showsList: showsList
             )
+            .dropsTask(above: task, in: tasks, model: model, selection: selection)
+            // A long press opens this menu, and holding and moving drags instead, as everywhere on iOS.
+            .contextMenu {
+                if let selection, !selection.isOn {
+                    Button("Select several", systemImage: "checkmark.circle") {
+                        withMotion(Motion.snappy) { selection.start(with: task.id) }
+                    }
+                    Button(model.isDone(task.id) ? "Not done" : "Complete", systemImage: "checkmark") {
+                        Task { await model.toggle(task.id) }
+                    }
+                    Button("Schedule", systemImage: "calendar") { scheduling = ScheduleTarget(id: task.id, kind: .when) }
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        Task { await model.delete(tasks: [task.id]) }
+                    }
+                }
+            }
             .id(task.id)
             // Every task is a raised card, with room between them for the shadows.
             .plainRow(vertical: Space.s1 + Space.s1 / 2)

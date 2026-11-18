@@ -1,6 +1,7 @@
 import SwiftUI
 import TotalityCore
 import TotalityUI
+import UniformTypeIdentifiers
 
 /// Tasks' screen: Home, the list's big title, a pill for each list, and the list itself (redesign,
 /// 2026-11-17). Today opens first, with its progress ring.
@@ -13,6 +14,13 @@ public struct TasksHomeView: View {
     @State private var bucket: TaskBucket = .today
     @State private var expanded: UUID?
     @State private var addingTo: TaskBucket?
+    /// Every list at once, with areas, projects and smart lists (step 2).
+    @State private var showsLists = false
+    /// An area, project or smart list, open over the rest.
+    @State private var openList: UUID?
+    @State private var making: TaskList.Kind?
+    @State private var selection = TaskSelection()
+    @State private var selectionSheet: SelectionSheet?
     @AppStorage("tasks.splitToday") private var splitToday = false
 
     public init(model: TasksModel, onClose: (() -> Void)? = nil) {
@@ -28,16 +36,63 @@ public struct TasksHomeView: View {
         }
         .background(theme.bg.color)
         .edgeSwipeBack(onClose)
-        .tint(theme.accent.color)
         .overlay(alignment: .bottomTrailing) {
-            if model.phase == .ready {
-                AddButton("New task") { addingTo = bucket == .logbook ? .inbox : bucket }
+            if model.phase == .ready, !selection.isOn, openList == nil {
+                if showsLists {
+                    Menu {
+                        Button("New task", systemImage: "plus") { addingTo = .inbox }
+                        Button("New project", systemImage: "circle") { making = .project }
+                        Button("New area", systemImage: "square.stack") { making = .area }
+                        Button("New smart list", systemImage: "line.3.horizontal.decrease") { making = .smart }
+                    } label: {
+                        AddMark()
+                    }
+                    .accessibilityLabel("New task, list, project or area")
                     .padding(Space.s4)
-                    .keyboardShortcut("n", modifiers: .command)
+                } else {
+                    AddButton("New task") { addingTo = bucket == .logbook ? .inbox : bucket }
+                        .padding(Space.s4)
+                        .keyboardShortcut("n", modifiers: .command)
+                }
+            }
+        }
+        .overlay {
+            if let id = openList {
+                ListScreen(model: model, listID: id, onBack: closeList, onOpen: { openList = $0 })
+                    .id(id)
+                    .transition(.move(edge: .trailing))
+                    .zIndex(1)
+            }
+        }
+        .motion(Motion.smooth, value: openList)
+        .overlay(alignment: .top) {
+            if selection.isOn {
+                SelectionHeader(selection: selection, visible: visibleIDs)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .overlay(alignment: .bottom) {
-            if let last = model.lastCompleted {
+            if selection.isOn {
+                SelectionBar(model: model, selection: selection, sheet: $selectionSheet)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if selection.showsTray {
+                DragTray(model: model, selection: selection)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .motion(Motion.snappy, value: selection.isOn)
+        .motion(Motion.snappy, value: selection.showsTray)
+        .onDrop(of: [.plainText, .utf8PlainText], delegate: DragWatcher(selection: selection))
+        .sensoryFeedback(.selection, trigger: selection.ticks)
+        .environment(\.taskSelection, selection)
+        .tint(theme.accent.color)
+        .overlay(alignment: .bottom) {
+            if let pending = model.pendingDelete {
+                DeleteUndoBar(pending: pending, onUndo: model.undoDelete)
+                    .padding(.horizontal, Space.s4)
+                    .padding(.bottom, selection.isOn ? Space.s8 + Space.s6 : Space.s5 + Metric.addButton)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let last = model.lastCompleted {
                 UndoBar(title: last.title, onUndo: { Task { await model.undoCompletion() } }, onDismiss: model.dismissUndo)
                     .padding(.horizontal, Space.s4)
                     .padding(.bottom, Space.s5 + Metric.addButton)
@@ -45,6 +100,32 @@ public struct TasksHomeView: View {
             }
         }
         .motion(Motion.smooth, value: model.lastCompleted)
+        .motion(Motion.smooth, value: model.pendingDelete)
+        .sheet(item: $making) { kind in
+            if kind == .smart {
+                SmartListEditor(model: model) { making = nil }
+            } else {
+                NewListSheet(model: model, kind: kind) { made in
+                    making = nil
+                    if let made { openList = made }
+                }
+            }
+        }
+        .sheet(item: $selectionSheet) { sheet in
+            let ids = selection.ids
+            let done = {
+                selectionSheet = nil
+                selection.end()
+            }
+            switch sheet {
+            case .move: MoveSheet(model: model, ids: ids, onDone: done)
+            case .tag: TagSheet(model: model, ids: ids, onDone: done)
+            case .date:
+                if let first = ids.first {
+                    ScheduleSheet(model: model, target: ScheduleTarget(id: first, kind: .when, others: Array(ids.subtracting([first]))), onDone: done)
+                }
+            }
+        }
         .sensoryFeedback(.success, trigger: model.completions)
         .sheet(item: $addingTo) { bucket in
             QuickAddView(model: model, bucket: bucket) { addingTo = nil }
@@ -60,7 +141,39 @@ public struct TasksHomeView: View {
         }
         .onChange(of: model.requestedTask) { takeRequests() }
         .onChange(of: model.requestedQuickAdd) { takeRequests() }
-        .onChange(of: bucket) { expanded = nil }
+        .onChange(of: bucket) {
+            expanded = nil
+            selection.end()
+        }
+        .onChange(of: showsLists) { selection.end() }
+        .onChange(of: openList) { selection.end() }
+        .onDisappear {
+            Task { await model.finishPendingDelete() }
+        }
+    }
+
+    private func closeList() {
+        openList = nil
+    }
+
+    /// The tasks on screen now, for Select all.
+    private var visibleIDs: [UUID] {
+        if let id = openList, let list = model.list(id) {
+            switch list.kind {
+            case .project: return model.sections(of: list).flatMap(\.tasks).map(\.id)
+            case .area: return model.looseTasks(in: list).map(\.id)
+            case .smart: return model.tasks(matching: list.rules ?? SmartRules()).map(\.id)
+            }
+        }
+        guard !showsLists else { return [] }
+        switch bucket {
+        case .upcoming:
+            return (model.upcoming.flatMap { $0.tasks + $0.deadlines } + model.later).map(\.id)
+        case .logbook:
+            return model.logbook().flatMap(\.tasks).map(\.id)
+        default:
+            return model.tasks(in: bucket).map(\.id)
+        }
     }
 
     private var noticeShown: Binding<Bool> {
@@ -73,6 +186,8 @@ public struct TasksHomeView: View {
         if let id = model.requestedTask, let task = model.tasks.first(where: { $0.id == id }) {
             model.requestedTask = nil
             bucket = TaskRules.bucket(of: task, today: model.today)
+            showsLists = false
+            openList = nil
             expanded = id
         }
         if model.requestedQuickAdd {
@@ -90,20 +205,26 @@ public struct TasksHomeView: View {
                     HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
                 }
                 Spacer(minLength: 0)
-                if ready, bucket == .today {
+                if ready, bucket == .today, !showsLists {
                     HeaderMenu("Today options", systemImage: "ellipsis") {
                         Toggle("Split into morning, afternoon and evening", isOn: $splitToday)
                     }
                 }
             }
             .frame(minHeight: Metric.headerButton)
-            ScreenTitle(ready ? bucket.name : "Tasks")
+            ScreenTitle(ready ? (showsLists ? "Lists" : bucket.name) : "Tasks")
             if ready {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: Space.s2) {
+                        FilterPill("Lists", isSelected: showsLists) {
+                            withMotion(Motion.snappy) { showsLists = true }
+                        }
                         ForEach(Self.pillOrder) { item in
-                            FilterPill(pillTitle(item), isSelected: bucket == item) {
-                                withMotion(Motion.snappy) { bucket = item }
+                            FilterPill(pillTitle(item), isSelected: !showsLists && bucket == item) {
+                                withMotion(Motion.snappy) {
+                                    showsLists = false
+                                    bucket = item
+                                }
                             }
                             .accessibilityLabel(pillLabel(item))
                         }
@@ -145,8 +266,17 @@ public struct TasksHomeView: View {
             )
             .pullsToRefresh(with: model.refresher)
         case .ready:
-            TaskListView(model: model, bucket: bucket, expanded: $expanded)
-                .id(bucket)
+            if showsLists {
+                ListsOverview(
+                    model: model,
+                    onBucket: { item in withMotion(Motion.snappy) { showsLists = false; bucket = item } },
+                    onList: { openList = $0 },
+                    onNew: { making = $0 }
+                )
+            } else {
+                TaskListView(model: model, bucket: bucket, expanded: $expanded)
+                    .id(bucket)
+            }
         }
     }
 }
