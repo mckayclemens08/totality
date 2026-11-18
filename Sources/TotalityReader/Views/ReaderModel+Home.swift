@@ -26,6 +26,11 @@ extension ReaderModel {
         return true
     }
 
+    /// Whether the tile offers Listen at all: anything but a folder. A Drive file opens, then plays.
+    public var homeOffersListen: Bool {
+        homeCanListen || frontOfShelf.map { !$0.isFolder } == true
+    }
+
     /// The most recent after the front one: two under Listen's sentence, or a short list filling the
     /// square when nothing is playing, so the tile isn't left empty.
     public var homeMore: [ShelfEntry] {

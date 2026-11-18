@@ -54,7 +54,7 @@ public struct ReaderHomeTile: View {
             TileHeader(model.homeIsListening ? "Listening" : "Reader", systemImage: "book", isTinted: true)
             if let front = model.frontOfShelf {
                 HStack(alignment: .top, spacing: Space.s2) {
-                    ShelfMark(systemImage: front.systemImage, width: Space.s6 + Space.s2)
+                    ShelfMark(entry: front, width: Space.s6 + Space.s2)
                     VStack(alignment: .leading, spacing: Space.s1 / 2) {
                         Text(front.title)
                             .font(Typeface.caption.weight(.bold))
@@ -68,8 +68,8 @@ public struct ReaderHomeTile: View {
                 }
                 .tileLink(front.title) { open(front) }
                 Spacer(minLength: 0)
-                if model.homeCanListen {
-                    ReaderTileListen(model: model, diameter: Space.s6, showsLabel: true)
+                if model.homeOffersListen {
+                    ReaderTileListen(model: model, diameter: Space.s6, showsLabel: true, onOpen: onOpen)
                         .tileControl()
                 }
             } else {
@@ -115,7 +115,7 @@ public struct ReaderHomeTile: View {
             TileHeader(header, systemImage: "book", isTinted: true)
             if let front {
                 HStack(alignment: .top, spacing: Space.s3) {
-                    ShelfMark(systemImage: front.systemImage, width: Space.s7 + Space.s5)
+                    ShelfMark(entry: front, width: Space.s7 + Space.s5)
                         .tileLink(front.title) { open(front) }
                     VStack(alignment: .leading, spacing: 0) {
                         Text(front.title)
@@ -148,9 +148,9 @@ public struct ReaderHomeTile: View {
     }
 
     @ViewBuilder private func listenRow(diameter: CGFloat) -> some View {
-        if model.homeCanListen {
+        if model.homeOffersListen {
             HStack(spacing: Space.s2) {
-                ReaderTileListen(model: model, diameter: diameter, showsLabel: !model.homeIsListening)
+                ReaderTileListen(model: model, diameter: diameter, showsLabel: !model.homeIsListening, onOpen: onOpen)
                     .tileControl()
                 if model.homeIsListening {
                     ListenBars(progress: model.listen.progress)
@@ -173,17 +173,18 @@ public struct ReaderHomeTile: View {
     }
 }
 
-/// An item's mark: its icon on a raised card shaped like a page.
+/// An item's mark: its icon on a cover-shaped card in its own colour, since items carry no cover art.
 private struct ShelfMark: View {
-    let systemImage: String
+    let entry: ShelfEntry
     let width: CGFloat
 
     var body: some View {
-        Image(systemName: systemImage)
+        Image(systemName: entry.systemImage)
             .font(.system(size: width / 2.5))
-            .foregroundStyle(Theme.current.accent.color)
+            .foregroundStyle(Theme.current.accentOn.color)
             .frame(width: width, height: width * 4 / 3)
-            .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            .background(CoverTone.tone(for: entry.id.uuidString).color,
+                        in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
             .accessibilityHidden(true)
     }
 }
@@ -195,7 +196,7 @@ private struct ShelfRow: View {
     var body: some View {
         let theme = Theme.current
         HStack(spacing: Space.s3) {
-            ShelfMark(systemImage: entry.systemImage, width: Space.s5 + Space.s1)
+            ShelfMark(entry: entry, width: Space.s5 + Space.s1)
             VStack(alignment: .leading, spacing: 0) {
                 Text(entry.title)
                     .font(Typeface.caption.weight(.semibold))
@@ -237,17 +238,27 @@ private struct ListenBars: View {
     }
 }
 
-/// Play or pause, working on the tile.
+/// Play or pause, working on the tile. Something that has to open first, like a Drive file, opens in
+/// the Reader and starts there.
 private struct ReaderTileListen: View {
     let model: ReaderModel
     let diameter: CGFloat
     let showsLabel: Bool
+    let onOpen: @MainActor () -> Void
 
     var body: some View {
         let theme = Theme.current
         let playing = model.homeIsListening && !model.listen.isPaused
         Button {
-            if playing { model.listen.togglePause() } else { Task { await model.playFromHome() } }
+            if playing {
+                model.listen.togglePause()
+            } else if model.homeCanListen {
+                Task { await model.playFromHome() }
+            } else if let front = model.frontOfShelf {
+                model.listenWhenOpened = true
+                model.requestedItem = front.id
+                onOpen()
+            }
         } label: {
             HStack(spacing: Space.s2) {
                 Image(systemName: playing ? "pause.fill" : "play.fill")

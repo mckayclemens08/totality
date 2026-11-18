@@ -20,6 +20,9 @@ public final class ReaderModel {
     public var query = ""
     /// An item another module asked to open. The home screen takes it from here.
     public var requestedItem: UUID?
+    /// Set with `requestedItem` when the home tile's Listen needs the item open first, as a Drive file
+    /// does. The item's page starts Listen when it opens and clears this.
+    public var listenWhenOpened = false
     /// A Drive file home search found, by its result's ID. The home screen takes it from here.
     public var requestedDriveHit: String?
     /// A doc a wiki link leads to. It opens on top of the doc the link is in, so Back returns there.
