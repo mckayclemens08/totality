@@ -153,7 +153,6 @@ struct BentoGrid: View {
             }
         }
         .frame(width: frame.width, height: frame.height)
-        .homeZoomSource(module.id)
         .position(dragged?.position ?? CGPoint(x: frame.midX, y: frame.midY))
         // A carried tile stays under the finger; the rest spring aside, and it springs home when let go.
         .transaction { if dragged != nil { $0.animation = nil } }

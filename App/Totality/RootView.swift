@@ -17,7 +17,6 @@ struct RootView: View {
     /// A module asked for from search, opened once the search sheet is gone.
     @State private var pendingOpen: ModuleID?
     /// Where a module zooms out of: its tile on Home.
-    @Namespace private var tileZoom
     // Only which module was last open, on this device. It holds no content.
     @AppStorage("home.recentModule") private var recentModule = ModuleID.reader
     @State private var reader: ReaderModel?
@@ -175,15 +174,15 @@ struct RootView: View {
         }
     }
 
-    /// Home, with the open module over it. On iPhone the module zooms out of its tile and Home stays
-    /// alive underneath, so going back lands where the person left it.
+    /// Home, with the open module over it. On iPhone the module slides up as a cover and Home stays
+    /// alive underneath, so going back lands where the person left it. The tile zoom was dropped
+    /// (owner, 2026-11-18): iOS left stale snapshots of the module in Home's tiles after it closed.
     @ViewBuilder
     private var screens: some View {
         #if os(iOS)
-        rootSheets(home.environment(\.homeZoom, tileZoom), isTop: open == nil)
+        rootSheets(home, isTop: open == nil)
             .fullScreenCover(item: Binding(get: { open.map(OpenModule.init) }, set: { open = $0?.id })) { item in
                 rootSheets(module(item.id), isTop: true)
-                    .zoomsFromHomeTile(item.id, in: tileZoom)
             }
         #else
         rootSheets(
