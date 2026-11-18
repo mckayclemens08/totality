@@ -113,6 +113,9 @@ public struct FilterPill: View {
         Button(action: action) {
             Text(title)
                 .font(Typeface.callout)
+                // A pill keeps its whole word; the row scrolls instead of squashing it.
+                .lineLimit(1)
+                .fixedSize()
                 .foregroundStyle(isSelected ? theme.accentOn.color : theme.textSecondary.color)
                 .padding(.horizontal, Space.s4)
                 .padding(.vertical, Space.s2)

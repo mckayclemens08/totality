@@ -15,8 +15,30 @@ public struct PhotosHomeView: View {
     @State private var path: [PhotosModel.Scope] = []
     @State private var showingSync = false
     @State private var showingGoogle = false
+    @State private var showingPicker = false
 
-    enum Tab: Hashable { case library, albums }
+    /// The pills under the title (redesign, 2026-11-17). Videos and Favourites show their photos here.
+    enum Tab: Hashable, CaseIterable {
+        case library, albums, videos, favourites
+
+        var title: String {
+            switch self {
+            case .library: "Library"
+            case .albums: "Albums"
+            case .videos: "Videos"
+            case .favourites: "Favourites"
+            }
+        }
+
+        var scope: PhotosModel.Scope? {
+            switch self {
+            case .library: .library
+            case .albums: nil
+            case .videos: .videos
+            case .favourites: .favourites
+            }
+        }
+    }
 
     /// The photo open full screen, and which photos the viewer moves through.
     struct Viewing: Equatable {
@@ -38,7 +60,16 @@ public struct PhotosHomeView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(theme.bg.color)
                 .edgeSwipeBack(onClose)
-                .toolbar { toolbar }
+                .overlay(alignment: .bottomTrailing) {
+                    if model.phase == .ready && !isLibraryEmpty {
+                        addButton
+                    }
+                }
+                #if os(iOS)
+                // Photos draws its own header (redesign, 2026-11-17).
+                .toolbar(.hidden, for: .navigationBar)
+                #endif
+                .safeAreaInset(edge: .top, spacing: 0) { header }
                 .navigationDestination(for: PhotosModel.Scope.self) { scope in
                     ScopeScreen(model: model, scope: scope) { open($0, in: scope) } onAlbumDeleted: { path.removeAll() }
                 }
@@ -68,6 +99,7 @@ public struct PhotosHomeView: View {
         } message: {
             Text(model.notice ?? "")
         }
+        .photosPicker(isPresented: $showingPicker, selection: $picked, matching: .any(of: [.images, .videos, .livePhotos]), preferredItemEncoding: .current, photoLibrary: .shared())
         .task { await model.load() }
         .sheet(isPresented: $showingGoogle) { GoogleImportSheet(model: model) }
         #if os(iOS)
@@ -94,44 +126,55 @@ public struct PhotosHomeView: View {
         Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })
     }
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if let onClose {
-            ToolbarItem(placement: .cancellationAction) {
-                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
-            }
-        }
-        if model.phase == .ready {
-            ToolbarItem(placement: .principal) {
-                Picker("Show", selection: $tab) {
-                    Text("Library").tag(Tab.library)
-                    Text("Albums").tag(Tab.albums)
+    private var isLibraryEmpty: Bool { model.items(in: .library).isEmpty }
+
+    /// Home on the left, Google Photos and Sync on the right, the big title, and the pills.
+    private var header: some View {
+        let ready = model.phase == .ready
+        return VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(spacing: Space.s3) {
+                if let onClose {
+                    HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
-            }
-            ToolbarItem(placement: .primaryAction) { addButton(label: "Add", inToolbar: true) }
-            if model.canImportFromGoogle {
-                ToolbarItem(placement: .primaryAction) {
-                    ToolbarIcon("Add from Google Photos", systemImage: "square.and.arrow.down.on.square.fill") { showingGoogle = true }
-                }
-            }
-            #if os(iOS)
-            if model.canSync {
-                ToolbarItem(placement: .primaryAction) {
-                    ToolbarIcon("Sync this iPhone", systemImage: model.isSyncing ? "hourglass" : "arrow.triangle.2.circlepath") {
-                        showingSync = true
+                Spacer(minLength: 0)
+                if ready {
+                    if model.canImportFromGoogle {
+                        HeaderButton("Add from Google Photos", systemImage: "square.and.arrow.down.on.square.fill") { showingGoogle = true }
                     }
+                    #if os(iOS)
+                    if model.canSync {
+                        HeaderButton("Sync this iPhone", systemImage: model.isSyncing ? "hourglass" : "arrow.triangle.2.circlepath") {
+                            showingSync = true
+                        }
+                    }
+                    #endif
                 }
             }
-            #endif
-        }
-        #if os(iOS)
-        if model.phase != .ready {
-            ToolbarItem(placement: .principal) {
-                Text("Photos").font(Typeface.headline).foregroundStyle(Theme.current.textPrimary.color)
+            .frame(minHeight: Metric.headerButton)
+            ScreenTitle("Photos")
+            if ready {
+                // Scrolls sideways rather than squashing the pills.
+                FilterPills(Tab.allCases, selection: $tab) { $0.title }
+                    .padding(.horizontal, -Space.s2)
             }
         }
-        #endif
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s2)
+        .background(Theme.current.bg.color)
+    }
+
+    /// The accent + opens Apple's picker; while photos are adding it shows that instead.
+    @ViewBuilder private var addButton: some View {
+        if model.isAdding {
+            ProgressView()
+                .accessibilityLabel("Adding photos")
+                .frame(width: Metric.addButton, height: Metric.addButton)
+                .neumorphic(.raised, in: Circle())
+                .padding(Space.s4)
+        } else {
+            AddButton("Add photos") { showingPicker = true }
+                .padding(Space.s4)
+        }
     }
 
     private var fixButton: (label: String, action: () -> Void)? {
@@ -146,13 +189,11 @@ public struct PhotosHomeView: View {
         }
     }
 
-    private func addButton(label: String, inToolbar: Bool = false) -> some View {
+    private func addButton(label: String) -> some View {
         let isAdding = model.isAdding
         return PhotosPicker(selection: $picked, matching: .any(of: [.images, .videos, .livePhotos]), preferredItemEncoding: .current, photoLibrary: .shared()) {
             if isAdding {
                 ProgressView().accessibilityLabel("Adding photos")
-            } else if inToolbar {
-                ToolbarGlyph(systemImage: "plus").accessibilityLabel(label)
             } else {
                 Label(label, systemImage: "plus")
             }
@@ -179,6 +220,17 @@ public struct PhotosHomeView: View {
             }
         case .ready where tab == .albums:
             AlbumsScreen(model: model) { path.append($0) }
+        case .ready where tab == .videos || tab == .favourites:
+            let scope = tab.scope ?? .library
+            if model.items(in: scope).isEmpty {
+                PhotosMessage(
+                    systemImage: tab == .videos ? "video" : "heart",
+                    title: tab == .videos ? "No videos yet" : "No favourites yet",
+                    detail: tab == .videos ? "Videos you add show up here." : "Tap the heart on a photo to keep it here."
+                )
+            } else {
+                PhotoGrid(model: model, scope: scope) { open($0, in: scope) } footer: { EmptyView() }
+            }
         case .ready where model.items(in: .library).isEmpty:
             VStack(spacing: Space.s5) {
                 PhotosMessage(
@@ -211,7 +263,7 @@ struct PhotoGrid<Footer: View>: View {
 
     var body: some View {
         let theme = Theme.current
-        let gap: CGFloat = 2
+        let gap = Space.s1
         let columns = Array(repeating: GridItem(.flexible(), spacing: gap), count: model.columns)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Space.s3, pinnedViews: [.sectionHeaders]) {
@@ -221,14 +273,16 @@ struct PhotoGrid<Footer: View>: View {
                             ForEach(month.items) { item in
                                 Button { onOpen(item) } label: {
                                     PhotoCell(model: model, item: item, showsDaysLeft: scope == .recentlyDeleted)
+                                        .clipShape(RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
+                        .padding(.horizontal, Space.s4)
                     } header: {
                         Text(month.title)
-                            .font(Typeface.headline)
-                            .foregroundStyle(theme.textPrimary.color)
+                            .font(Typeface.callout.weight(.semibold))
+                            .foregroundStyle(theme.textSecondary.color)
                             .padding(.horizontal, Space.s4)
                             .padding(.vertical, Space.s2)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -238,6 +292,8 @@ struct PhotoGrid<Footer: View>: View {
                 }
                 footer()
             }
+            // Room for the + button under the last row.
+            .padding(.bottom, Metric.addButton + Space.s5)
         }
         .scaleEffect(pinch, anchor: .center)
         .gesture(
