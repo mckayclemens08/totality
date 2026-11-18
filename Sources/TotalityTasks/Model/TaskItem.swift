@@ -64,6 +64,9 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
     public var priority: Priority
     /// A project or area, from step 2.
     public var listID: UUID?
+    /// A heading inside its project. It moves with `listID`, as one part, so a task never sits under a
+    /// heading of a project it has left.
+    public var headingID: UUID?
     /// Where it sits among its neighbours. Smaller comes first.
     public var order: Double
     public let createdAt: Date
@@ -75,7 +78,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
     public init(
         id: UUID = UUID(), title: String, notes: String = "", place: Place = .inbox, when: TaskDay? = nil,
         isEvening: Bool = false, time: TaskTime? = nil, deadline: TaskDay? = nil, checklist: [ChecklistItem] = [],
-        tags: [String] = [], priority: Priority = .none, listID: UUID? = nil, order: Double = 0,
+        tags: [String] = [], priority: Priority = .none, listID: UUID? = nil, headingID: UUID? = nil, order: Double = 0,
         createdAt: Date, completedAt: Date? = nil
     ) {
         self.id = id
@@ -90,6 +93,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         self.tags = tags
         self.priority = priority
         self.listID = listID
+        self.headingID = headingID
         self.order = order
         self.createdAt = createdAt
         self.completedAt = completedAt
@@ -98,7 +102,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, notes, place, when, isEvening, time, deadline, checklist, tags, priority, listID, order
+        case id, title, notes, place, when, isEvening, time, deadline, checklist, tags, priority, listID, headingID, order
         case createdAt, completedAt, updatedAt, edits
     }
 
@@ -117,6 +121,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         priority = (try? c.decodeIfPresent(Priority.self, forKey: .priority)) ?? .none
         listID = try c.decodeIfPresent(UUID.self, forKey: .listID)
+        headingID = try c.decodeIfPresent(UUID.self, forKey: .headingID)
         order = try c.decodeIfPresent(Double.self, forKey: .order) ?? 0
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
@@ -168,7 +173,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         case .checklist: checklist == other.checklist
         case .tags: tags == other.tags
         case .priority: priority == other.priority
-        case .list: listID == other.listID
+        case .list: listID == other.listID && headingID == other.headingID
         case .order: order == other.order
         case .completion: completedAt == other.completedAt
         }
@@ -187,7 +192,9 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         case .checklist: checklist = other.checklist
         case .tags: tags = other.tags
         case .priority: priority = other.priority
-        case .list: listID = other.listID
+        case .list:
+            listID = other.listID
+            headingID = other.headingID
         case .order: order = other.order
         case .completion: completedAt = other.completedAt
         }
@@ -252,30 +259,10 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
             case .checklist: try c.encode(task.checklist.map { "\($0.id)|\($0.title)|\($0.isDone)" })
             case .tags: try c.encode(task.tags)
             case .priority: try c.encode(task.priority.rawValue)
-            case .list: try c.encode(task.listID?.uuidString ?? "")
+            case .list: try c.encode((task.listID?.uuidString ?? "") + "|" + (task.headingID?.uuidString ?? ""))
             case .order: try c.encode(task.order)
             case .completion: try c.encode(task.completedAt?.timeIntervalSince1970 ?? 0)
             }
         }
-    }
-}
-
-/// A list of tasks: a project or an area. Step 2 gives them screens; step 1 syncs them so nothing made
-/// later is lost on a device that's behind.
-public struct TaskList: Identifiable, Codable, Sendable, Hashable {
-    public enum Kind: String, Codable, Sendable { case area, project }
-
-    public let id: UUID
-    public var name: String
-    public var kind: Kind
-    public let createdAt: Date
-    public var updatedAt: Date
-
-    public init(id: UUID = UUID(), name: String, kind: Kind, createdAt: Date) {
-        self.id = id
-        self.name = name
-        self.kind = kind
-        self.createdAt = createdAt
-        updatedAt = createdAt
     }
 }

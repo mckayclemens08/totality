@@ -10,16 +10,27 @@ struct TaskRow: View {
     let isExpanded: Bool
     let onTap: () -> Void
     let onSchedule: (ScheduleTarget) -> Void
+    /// Off inside the task's own project or area, where its name would only repeat the title.
+    var showsList = true
+    @Environment(\.taskSelection) private var selection
+
+    private var isSelecting: Bool { selection?.isOn ?? false }
 
     var body: some View {
         let isDone = model.isDone(task.id)
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: Space.s2) {
-                TickBox(isDone: isDone, title: task.displayTitle) {
-                    Task { await model.toggle(task.id) }
+                if isSelecting {
+                    SelectionMark(isOn: selection?.ids.contains(task.id) ?? false)
+                        .frame(width: Space.s6, height: Space.s6)
+                        .padding(.top, Space.s2)
+                } else {
+                    TickBox(isDone: isDone, title: task.displayTitle) {
+                        Task { await model.toggle(task.id) }
+                    }
+                    .padding(.top, isExpanded ? 0 : Space.s2)
                 }
-                .padding(.top, isExpanded ? 0 : Space.s2)
-                if isExpanded {
+                if isExpanded && !isSelecting {
                     TaskEditor(model: model, task: task, onSchedule: onSchedule)
                 } else {
                     summary(isDone: isDone)
@@ -60,20 +71,30 @@ struct TaskRow: View {
             if task.priority != .none {
                 PriorityMarker(priority: task.priority)
             }
+            if !isSelecting, !isDone, bucket != .logbook, let selection {
+                DragGrip(id: task.id, title: task.displayTitle, selection: selection)
+            }
         }
         .padding(.vertical, Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
+        .onTapGesture {
+            if let selection, isSelecting { selection.toggle(task.id) } else { onTap() }
+        }
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Opens the task")
+        .accessibilityAddTraits(isSelecting && (selection?.ids.contains(task.id) ?? false) ? [.isButton, .isSelected] : .isButton)
+        .accessibilityHint(isSelecting ? "Selects the task" : "Opens the task")
+        .accessibilityAction(named: "Select several") {
+            if let selection, !isSelecting { selection.start(with: task.id) }
+        }
     }
 
     /// The quiet line, with a near deadline in muted red.
     private var quietLine: Text? {
         let theme = Theme.current
-        guard let line = model.quietLine(for: task, in: bucket) else { return nil }
+        let listName = showsList ? model.list(task.listID)?.displayName : nil
+        guard let line = [listName, model.quietLine(for: task, in: bucket)].compactMap({ $0 }).joined(separator: " · ").nilIfEmpty
+        else { return nil }
         let isNear = TaskRules.deadlineIsNear(task, today: model.today, in: model.calendar)
         let parts = line.components(separatedBy: " · ")
         var text = Text("")
@@ -104,6 +125,10 @@ struct ScheduleTarget: Identifiable, Equatable {
 
     let id: UUID
     let kind: Kind
+    /// More tasks picked with it, to plan all at once.
+    var others: [UUID] = []
+
+    var ids: [UUID] { [id] + others }
 }
 
 /// The whole task, opened in place: title, notes, checklist, dates, tags and priority. Changes save as
@@ -436,5 +461,48 @@ struct FlowRow: Layout {
             x += size.width + spacing
             row = max(row, size.height)
         }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+/// The round mark that shows a task is picked while several are being chosen.
+struct SelectionMark: View {
+    let isOn: Bool
+
+    var body: some View {
+        let theme = Theme.current
+        Image(systemName: "checkmark")
+            .font(Typeface.micro.weight(.bold))
+            .foregroundStyle(theme.accentOn.color)
+            .opacity(isOn ? 1 : 0)
+            .frame(width: Metric.choiceMark, height: Metric.choiceMark)
+            .background { if isOn { Circle().fill(theme.accent.color) } }
+            .neumorphic(.subtle, in: Circle())
+            .motion(Motion.snappy, value: isOn)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The dotted handle a task is dragged by. Picking it up brings up the tray of lists to drop on.
+struct DragGrip: View {
+    let id: UUID
+    let title: String
+    let selection: TaskSelection
+
+    var body: some View {
+        Image(systemName: "line.3.horizontal")
+            .font(Typeface.callout)
+            .foregroundStyle(Theme.current.textTertiary.color)
+            .frame(width: Space.s6, height: Space.s6)
+            .contentShape(Rectangle())
+            .onDrag {
+                selection.dragging = id
+                return NSItemProvider(object: id.uuidString as NSString)
+            }
+            .accessibilityLabel("Move \(title)")
+            .accessibilityHint("Drag onto a list, or above another task")
     }
 }
