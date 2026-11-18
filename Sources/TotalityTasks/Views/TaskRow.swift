@@ -185,6 +185,9 @@ struct TaskEditor: View {
             if task.repeatRule != nil {
                 RepeatCard(model: model, task: task) { editingRepeat = true }
             }
+            if let source = task.source {
+                SourceCard(model: model, task: task, source: source)
+            }
             tags
             HStack {
                 Spacer()

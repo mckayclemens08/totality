@@ -387,6 +387,11 @@ public struct WebHomeView: View {
                 Task { await model.addBookmark(title: page.title, url: url) }
             }
         }
+        if model.taskMaker != nil, !model.current.isPrivate {
+            Button("Add to Tasks", systemImage: "checkmark.circle") {
+                Task { await model.addPageToTasks(title: page.title, url: url) }
+            }
+        }
         Button("Save to Reader", systemImage: "text.book.closed") { Task { await model.saveToReader() } }
         Button("Find on Page", systemImage: "magnifyingglass") { startFinding() }
         Menu("Text Size", systemImage: "textformat.size") {

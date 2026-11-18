@@ -15,6 +15,8 @@ public final class TasksModel {
     public struct Completion: Equatable {
         public let id: UUID
         public let title: String
+        /// What the Undo bar says instead of "Completed …", like "Eli replied, so the task is done".
+        public var line: String? = nil
     }
 
     /// How long Undo stays after completing a task.
@@ -49,6 +51,12 @@ public final class TasksModel {
 
     /// Everything on the calendar between two moments, through the registry. Nil leaves Upcoming without events.
     @ObservationIgnored public var agenda: (@Sendable (Date, Date) async -> [AgendaItem])?
+    /// Modules that say when someone replied, for tasks waiting on a reply (step 4).
+    @ObservationIgnored public var replyWatchers: [any ReplyWatcher] = []
+    /// Opens a task's source in its own module. The app does it, since Tasks can't reach other modules.
+    @ObservationIgnored public var onOpenSource: ((TaskSource) -> Void)?
+    /// Whether a task's source is gone, asked of its own module. Nil means nobody can tell.
+    @ObservationIgnored public var sourceGone: ((TaskSource) async -> Bool)?
     @ObservationIgnored private let vault: TaskVault?
     @ObservationIgnored private let clock: @Sendable () -> Date
     @ObservationIgnored private var undoTimer: Task<Void, Never>?
@@ -106,6 +114,7 @@ public final class TasksModel {
         await applyQueuedActions()
         await planReminders()
         await loadEvents()
+        await checkReplies()
     }
 
     private func loadEvents() async {
@@ -236,8 +245,14 @@ public final class TasksModel {
         let at = clock()
         guard await finish(id, at: at) else { return }
         completions += 1
+        showUndo(Completion(id: id, title: task.displayTitle))
+    }
+
+    /// Keeps a just-completed task ticked in place for a moment, with Undo for a few seconds.
+    func showUndo(_ completion: Completion) {
+        let id = completion.id
         lingering.insert(id)
-        lastCompleted = Completion(id: id, title: task.displayTitle)
+        lastCompleted = completion
         undoTimer?.cancel()
         undoTimer = Task { [weak self] in
             try? await Task.sleep(for: Self.lingerTime)
@@ -254,6 +269,7 @@ public final class TasksModel {
         undoTimer?.cancel()
         lingering.remove(last.id)
         await unfinish(last.id)
+        await keepWaiting(last.id)
     }
 
     /// Lets the Undo bar go before its time, as when the person dismisses it.

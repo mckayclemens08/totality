@@ -11,6 +11,9 @@ public struct CalendarEntry: Identifiable, Sendable, Hashable {
     public enum Source: Sendable, Hashable {
         case own(EventOccurrence)
         case device(DeviceEvent)
+        /// Another module's item with a time, like a task (step 4 of issue 123). Shown on the day's
+        /// timeline only, lighter than events, and opened by its own module.
+        case linked(AgendaItem)
     }
 
     public let source: Source
@@ -19,6 +22,7 @@ public struct CalendarEntry: Identifiable, Sendable, Hashable {
         switch source {
         case .own(let occurrence): "own-\(occurrence.id)"
         case .device(let event): "device-\(event.id)"
+        case .linked(let item): "linked-\(item.module?.rawValue ?? "")-\(item.id)"
         }
     }
 
@@ -26,6 +30,7 @@ public struct CalendarEntry: Identifiable, Sendable, Hashable {
         switch source {
         case .own(let occurrence): occurrence.event.displayTitle
         case .device(let event): event.title.isEmpty ? "Untitled event" : event.title
+        case .linked(let item): item.title
         }
     }
 
@@ -33,6 +38,7 @@ public struct CalendarEntry: Identifiable, Sendable, Hashable {
         switch source {
         case .own(let occurrence): occurrence.event.location
         case .device(let event): event.location
+        case .linked(let item): item.detail ?? ""
         }
     }
 
@@ -40,6 +46,7 @@ public struct CalendarEntry: Identifiable, Sendable, Hashable {
         switch source {
         case .own(let occurrence): occurrence.event.isAllDay
         case .device(let event): event.isAllDay
+        case .linked(let item): item.isAllDay
         }
     }
 
@@ -47,6 +54,7 @@ public struct CalendarEntry: Identifiable, Sendable, Hashable {
         switch source {
         case .own(let occurrence): occurrence.start
         case .device(let event): event.start
+        case .linked(let item): item.start
         }
     }
 
@@ -54,6 +62,7 @@ public struct CalendarEntry: Identifiable, Sendable, Hashable {
         switch source {
         case .own(let occurrence): occurrence.end
         case .device(let event): event.end
+        case .linked(let item): item.end
         }
     }
 
@@ -220,6 +229,12 @@ public final class CalendarModel {
     public private(set) var isSendingToGoogle = false
     private var googleEvents: [DeviceEvent] = []
     private var entriesByDay: [CalendarDay: [CalendarEntry]] = [:]
+    /// Other modules' timed items, like tasks, by day. Held in memory only, never stored or sent.
+    private var linkedByDay: [CalendarDay: [CalendarEntry]] = [:]
+    /// What's planned for the selected day with no time yet, which can be dragged onto one (step 4).
+    public private(set) var unplanned: [AgendaItem] = []
+    /// Opens another module's item, like a task, in its own module. Set by the app.
+    @ObservationIgnored public var onOpenLinked: ((AgendaItem) -> Void)?
     private var built: (first: CalendarDay, last: CalendarDay)?
 
     public init(
@@ -996,5 +1011,53 @@ public final class CalendarModel {
 
     private func syncReminders() async {
         await reminders.replace(with: ReminderPlanner.plan(for: events, now: now(), display: display))
+    }
+}
+
+// MARK: - Other modules' items on the timeline (issue 123, step 4)
+
+extension CalendarModel {
+    /// The day's events, then other modules' timed items, for the Day and Week timelines. The home tile,
+    /// the schedule and search keep to events.
+    public func timeline(on day: CalendarDay) -> [CalendarEntry] {
+        entries(on: day) + (linkedByDay[day] ?? [])
+    }
+
+    /// Reads other modules' timed items for the days shown, and what the selected day has with no time.
+    /// Through the registry only, so the Calendar never reaches into Tasks.
+    public func loadLinked(days: [CalendarDay]) async {
+        guard let registry, let first = days.min(), let last = days.max() else { return }
+        let start = first.start(in: display)
+        let end = last.adding(days: 1, in: display).start(in: display)
+        let items = await registry.agenda(from: start, to: end, except: .calendar)
+        var byDay: [CalendarDay: [CalendarEntry]] = [:]
+        for item in items where !item.isAllDay {
+            let entry = CalendarEntry(source: .linked(item))
+            for day in entry.days(in: display) { byDay[day, default: []].append(entry) }
+        }
+        linkedByDay = byDay
+        var waiting: [AgendaItem] = []
+        for planner in registry.planners { waiting += await planner.unplanned(on: selectedDay.start(in: display)) }
+        unplanned = waiting
+    }
+
+    /// Gives an untimed item a time on the selected day, dropped at `minute` past midnight. It's blocked
+    /// on Totality's calendar only; Google and the device's calendars aren't touched (decision 3).
+    public func plan(_ id: String, on day: CalendarDay, atMinute minute: Int, days: [CalendarDay]) async {
+        guard let planner = registry?.planners.first(where: { planner in unplanned.contains { $0.id == id && $0.module == planner.module } })
+            ?? registry?.planners.first
+        else { return }
+        let start = day.start(in: display).addingTimeInterval(TimeInterval(Self.snapped(minute) * 60))
+        do {
+            try await planner.plan(id, at: start, minutes: 30)
+            await loadLinked(days: days)
+        } catch {
+            notice = "That couldn't be given a time. Try again."
+        }
+    }
+
+    /// Drops land on the quarter hour.
+    nonisolated static func snapped(_ minute: Int) -> Int {
+        min(max(0, Int((Double(minute) / 15).rounded()) * 15), 24 * 60 - 15)
     }
 }

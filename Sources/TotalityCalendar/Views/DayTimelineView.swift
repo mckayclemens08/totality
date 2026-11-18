@@ -1,4 +1,5 @@
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// Day and Week: an hour timeline with one column for each day shown.
@@ -32,7 +33,7 @@ struct DayTimelineView: View {
                         hourLabels
                         ForEach(days, id: \.self) { day in
                             DayColumn(
-                                day: day, model: model, hourHeight: Self.hourHeight, hours: Self.hours,
+                                day: day, model: model, hourHeight: Self.hourHeight, hours: Self.hours, days: days,
                                 onOpen: onOpen, onNew: { onNew(day, $0) }
                             )
                         }
@@ -42,7 +43,11 @@ struct DayTimelineView: View {
                 }
                 .onAppear { proxy.scrollTo(openingHour, anchor: .top) }
             }
+            if days.count == 1, !model.unplanned.isEmpty {
+                UnplannedTray(model: model, day: days[0])
+            }
         }
+        .task(id: days) { await model.loadLinked(days: days) }
     }
 
     private var headings: some View {
@@ -120,8 +125,10 @@ private struct DayColumn: View {
     let model: CalendarModel
     let hourHeight: CGFloat
     let hours: Range<Int>
+    let days: [CalendarDay]
     let onOpen: (CalendarEntry) -> Void
     let onNew: (Int) -> Void
+    @State private var dropHour: Int?
 
     private func position(_ minute: Int) -> CGFloat {
         CGFloat(minute) / 60 * hourHeight
@@ -130,7 +137,7 @@ private struct DayColumn: View {
     var body: some View {
         let theme = Theme.current
         let next = model.nextEntry?.id
-        let blocks = TimelineLayout.blocks(for: model.entries(on: day), on: day, in: model.display)
+        let blocks = TimelineLayout.blocks(for: model.timeline(on: day), on: day, in: model.display)
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
@@ -142,14 +149,24 @@ private struct DayColumn: View {
                             Spacer(minLength: 0)
                         }
                         .frame(height: hourHeight)
+                        .background(dropHour == hour ? theme.accent.color.opacity(0.12) : Color.clear)
                         .accessibilityLabel("New event on \(model.written(day, .dateTime.weekday(.wide).month(.wide).day())) at \(hour):00")
                         .tappable { onNew(hour) }
+                        // A task dragged from the tray gets this time (step 4).
+                        .dropDestination(for: String.self) { ids, location in
+                            guard let id = ids.first else { return false }
+                            let minute = hour * 60 + Int(location.y / hourHeight * 60)
+                            Task { await model.plan(id, on: day, atMinute: minute, days: days) }
+                            return true
+                        } isTargeted: { dropHour = $0 ? hour : (dropHour == hour ? nil : dropHour) }
                     }
                 }
                 ForEach(blocks) { block in
                     let width = geometry.size.width / CGFloat(block.columns)
                     TimelineTile(entry: block.entry, isNext: block.entry.id == next)
-                    .tappable { onOpen(block.entry) }
+                    .tappable {
+                        if case .linked(let item) = block.entry.source { model.onOpenLinked?(item) } else { onOpen(block.entry) }
+                    }
                     .padding(Space.s1 / 2)
                     .frame(width: width, height: position(block.endMinute - block.startMinute))
                     .offset(x: width * CGFloat(block.column), y: position(block.startMinute))
@@ -179,9 +196,45 @@ private struct TimelineTile: View {
         if case .own = entry.source { true } else { false }
     }
 
+    private var isLinked: Bool {
+        if case .linked = entry.source { true } else { false }
+    }
+
     var body: some View {
+        if isLinked { linked } else { event }
+    }
+
+    /// A task with a time: lighter than an event, with a tick ring, so the two never look alike.
+    private var linked: some View {
         let theme = Theme.current
-        VStack(alignment: .leading, spacing: 0) {
+        return HStack(alignment: .top, spacing: Space.s1) {
+            Image(systemName: "circle")
+                .font(Typeface.micro)
+                .foregroundStyle(theme.textSecondary.color)
+                .padding(.top, Space.s1 / 2)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(entry.title)
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                Text(["Task", entry.location.isEmpty ? nil : entry.location].compactMap { $0 }.joined(separator: " · "))
+                    .font(Typeface.micro)
+                    .foregroundStyle(theme.textSecondary.color)
+            }
+        }
+        .padding(.horizontal, Space.s2)
+        .padding(.vertical, Space.s1)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .background(theme.surface.color.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.sm))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Task: \(entry.title)")
+        .accessibilityHint("Opens it in Tasks")
+    }
+
+    private var event: some View {
+        let theme = Theme.current
+        return VStack(alignment: .leading, spacing: 0) {
             Text(entry.title)
                 .font(Typeface.caption.weight(.semibold))
                 .foregroundStyle(isNext ? theme.accent.color : isOwn ? theme.textPrimary.color : theme.textSecondary.color)
@@ -218,5 +271,49 @@ private struct AllDayChip: View {
             .padding(.vertical, Space.s1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .eventSurface(isOwn: isOwn, in: RoundedRectangle(cornerRadius: Radius.sm))
+    }
+}
+
+/// "No time yet": tasks planned for the day, to drag onto an hour (step 4 board). Dropping blocks the time
+/// on Totality's calendar only.
+private struct UnplannedTray: View {
+    let model: CalendarModel
+    let day: CalendarDay
+
+    var body: some View {
+        let theme = Theme.current
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text(day == model.today ? "Today, no time yet · drag one onto the day" : "No time yet · drag one onto the day")
+                .font(Typeface.caption)
+                .foregroundStyle(theme.textSecondary.color)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Space.s2) {
+                    ForEach(model.unplanned) { item in
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(item.title)
+                                .font(Typeface.caption)
+                                .foregroundStyle(theme.textPrimary.color)
+                                .lineLimit(1)
+                            if let detail = item.detail {
+                                Text(detail)
+                                    .font(Typeface.micro)
+                                    .foregroundStyle(theme.textSecondary.color)
+                            }
+                        }
+                        .padding(.horizontal, Space.s3)
+                        .padding(.vertical, Space.s2)
+                        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                        .draggable(item.id) {
+                            Text(item.title).font(Typeface.caption).padding(Space.s2)
+                        }
+                        .accessibilityLabel("\(item.title), no time yet")
+                        .accessibilityHint("Drag onto an hour to give it that time")
+                    }
+                }
+                .padding(Space.s2)
+            }
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.bottom, Space.s2)
     }
 }

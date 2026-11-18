@@ -25,6 +25,8 @@ public final class MessagesModel {
     public private(set) var blockedPeople: [String] = []
     /// The last thing that went wrong with an action, shown until the next one.
     public var notice: String?
+    /// Makes tasks from messages, through the registry (issue 123, step 4).
+    @ObservationIgnored public var taskMaker: (any TaskMaker)?
     public private(set) var keys: MessageKeys = .checking
     /// The secret that locks the key backup, from the recovery key. Nil until it's on this device.
     /// Asked for the account Messages is connected as, so it's never one person's secret for another.

@@ -136,6 +136,7 @@ import TotalityCore
         #expect(registry.handler(for: ref)?.module == .tasks)
         #expect(registry.searchers.map(\.module) == [.tasks])
         #expect(registry.refreshers.map(\.module) == [.tasks])
-        #expect(registry.agendas.isEmpty)
+        // Step 4: timed tasks go on the Calendar through the registry.
+        #expect(registry.agendas.map(\.module) == [.tasks])
     }
 }

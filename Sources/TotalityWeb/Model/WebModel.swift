@@ -102,6 +102,8 @@ public final class WebModel {
     public var notice: String?
     /// Something reached the Reader, so its library has to look again.
     @ObservationIgnored public var onSentToReader: (() -> Void)?
+    /// Makes tasks from pages, through the registry (issue 123, step 4). Nil hides Add to Tasks.
+    @ObservationIgnored public var taskMaker: (any TaskMaker)?
     /// A download is in the Reader and the person asked to go there.
     @ObservationIgnored public var onOpenInReader: ((ContentRef) -> Void)?
 
