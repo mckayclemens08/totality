@@ -34,7 +34,10 @@ struct EventTile: View {
                 .font(Typeface.caption)
                 .monospacedDigit()
                 .foregroundStyle(isNext ? theme.accent.color : theme.textSecondary.color)
-                .frame(width: Space.s7 + Space.s1, alignment: .trailing)
+                // One line, wide enough for "11:50 AM"; a larger text size shrinks it rather than wrap.
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: Space.s8, alignment: .trailing)
                 .padding(.top, Space.s4)
             VStack(alignment: .leading, spacing: Space.s1) {
                 Text(entry.title)

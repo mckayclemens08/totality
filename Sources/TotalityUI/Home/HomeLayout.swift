@@ -28,10 +28,6 @@ public enum TileSize: String, Codable, Sendable, CaseIterable {
 /// The tiles with room for something of a module's own, like the Calendar's month. Home now asks only
 /// for `medium` and `square`: an L tile is square. `large`, the old 2:3 tile, stays until each module's
 /// own tile is redone, so this step doesn't touch other modules.
-public enum BigTileSize: Sendable {
-    case medium, large, square
-}
-
 public struct HomeTile: Equatable, Sendable, Identifiable {
     public let id: ModuleID
     public var size: TileSize
@@ -133,14 +129,9 @@ public struct HomeLayout: Equatable, Sendable {
         tiles.first { $0.id == module }?.size
     }
 
-    /// Nil for a small tile, which has room only for its lines. An L tile is square.
-    public func bigSize(of module: ModuleID) -> BigTileSize? {
-        if hidden.contains(module) { return nil }
-        switch size(of: module) {
-        case .medium: return .medium
-        case .large: return .square
-        case .small, nil: return nil
-        }
+    /// The size a module's own tile view is asked to fill, or nil when it isn't on Home.
+    public func contentSize(of module: ModuleID) -> TileSize? {
+        hidden.contains(module) ? nil : size(of: module)
     }
 
     public mutating func setSize(_ size: TileSize, of module: ModuleID) {
@@ -247,7 +238,7 @@ public struct BentoMetrics: Equatable, Sendable {
     let columnWidth: CGFloat
     let rowHeight: CGFloat
 
-    public init(width: CGFloat, gap: CGFloat = Space.s4) {
+    public init(width: CGFloat, gap: CGFloat = Metric.tileGap) {
         self.gap = gap
         columnWidth = max(0, (width - gap) / CGFloat(HomeLayout.columns))
         rowHeight = max(0, (columnWidth - gap) / 2)

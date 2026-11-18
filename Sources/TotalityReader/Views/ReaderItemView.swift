@@ -38,6 +38,12 @@ struct ReaderItemView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .task(id: item.id) {
+            // Listen pressed on the home tile for something that had to open first.
+            guard model.listenWhenOpened else { return }
+            model.listenWhenOpened = false
+            await model.startListening(to: item.id)
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 ToolbarIcon("Listen", systemImage: "headphones") {

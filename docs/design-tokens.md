@@ -38,6 +38,11 @@ large text 3:1.** Every ratio below was computed, not estimated. The look never 
 > original burnt ochre. The exact shades are placeholders until the Figma file arrives. Changing them
 > is one line in two places.
 
+**Cover tones** (`CoverTone` in `Tokens.swift`): `#4E6B80`, `#A83636`, `#2E6B47`, `#5B45A8`, `#8A5A2B`,
+`#3F5F8A`. A book or document with no cover of its own gets one, picked from its ID so it never changes,
+with a white icon on it. They're content, like a photo, not UI, so the one-accent rule doesn't cover
+them (owner, 2026-11-18: "randomize a color if there isn't a book cover").
+
 ## Shadow pair
 
 Neumorphism is two shadows, always offset in opposite directions, always soft.
@@ -89,6 +94,8 @@ Generous radii are part of the neumorphic read. Nothing in the app is square-cor
 | `removeButton` | 26 | the minus on a tile while Home is edited |
 | `ringStroke` | 7 | a `ProgressRing`'s track (`highlight`) and its accent arc |
 | `selectionOutline` | 2 | the accent outline around the chosen tile while Home is edited |
+| `tileGap` | 14 | the gap between Home's tiles, and a tile's inner padding |
+| `tileBleed` | 6 | the inset of a full-bleed tile's pictures (Photos) |
 
 ## Spacing — 4pt base
 

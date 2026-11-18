@@ -188,7 +188,6 @@ struct JournalView: View {
                 }
                 .padding(.horizontal, Space.s4)
             }
-            .defaultScrollAnchor(.bottom)
             .onChange(of: shownDay) {
                 guard let day = shownDay else { return }
                 shownDay = nil

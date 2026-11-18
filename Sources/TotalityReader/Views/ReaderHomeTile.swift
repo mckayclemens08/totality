@@ -1,18 +1,19 @@
 import SwiftUI
 import TotalityUI
 
-/// The Reader's big home tiles: a shelf, with what's being read or heard at the front. Linked Google Drive
-/// folders and files opened from them sit on it too, by when they were last opened. The square is a
-/// workspace (issue 127): the front item large, where you are in it, Listen's sentence and its controls.
+/// The Reader's home tile at each size, on the soft accent (redesign, 2026-11-17). Small is the front
+/// item and a Listen button. Medium is what's being heard, where you are, and play or pause beside a
+/// bar of how far along it is. Large adds the item's mark and, under it, the rest of the shelf as far
+/// as fits. Linked Google Drive folders and files sit on the shelf too, by when they were last opened.
 public struct ReaderHomeTile: View {
-    private static let shelfSize: [BigTileSize: Int] = [.medium: 0, .large: 3, .square: 3]
+    private static let mostRows = 8
 
     private let model: ReaderModel
-    private let size: BigTileSize
+    private let size: TileSize
     private let onOpen: @MainActor () -> Void
 
     /// `onOpen` brings the Reader up after an item has been asked for.
-    public init(model: ReaderModel, size: BigTileSize, onOpen: @escaping @MainActor () -> Void = {}) {
+    public init(model: ReaderModel, size: TileSize, onOpen: @escaping @MainActor () -> Void = {}) {
         self.model = model
         self.size = size
         self.onOpen = onOpen
@@ -23,214 +24,257 @@ public struct ReaderHomeTile: View {
         onOpen()
     }
 
-    private var front: ShelfEntry? {
-        model.frontOfShelf
+    private var header: String {
+        model.homeIsListening ? "Listening · Reader" : "Reader"
     }
 
-    private var shelf: [ShelfEntry] {
-        Array(model.shelf.filter { $0.id != front?.id }.prefix(Self.shelfSize[size] ?? 0))
+    /// Where you are, or what it is.
+    private func detail(_ entry: ShelfEntry) -> String {
+        model.homePlace ?? entry.typeName
     }
 
     public var body: some View {
-        if size == .square {
-            ReaderDeskTile(model: model, onOpen: onOpen)
-        } else {
-            shelfTile
-        }
-    }
-
-    private var shelfTile: some View {
-        VStack(spacing: Space.s6) {
-            if let front { frontBook(front) }
-            if !shelf.isEmpty {
-                HStack(alignment: .top, spacing: Space.s3) {
-                    ForEach(shelf) { entry in
-                        SmallBook(entry: entry)
-                            .tileLink(entry.title) { open(entry) }
-                    }
-                }
+        Group {
+            switch size {
+            case .small: small
+            case .medium: medium
+            case .large: large
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .tilePadding()
+        .tileTint()
+        .task(id: model.frontOfShelf?.id) { await model.loadHomePlace() }
     }
 
-    private var iconSize: CGFloat {
-        switch size {
-        case .medium: Space.s5
-        case .large: Space.s6
-        case .square: Space.s7
-        }
-    }
+    // MARK: Small
 
-    private func frontBook(_ item: ShelfEntry) -> some View {
+    private var small: some View {
         let theme = Theme.current
-        let isPlaying = model.listen.current?.id == item.id
-        return VStack(spacing: Space.s2) {
-            VStack(spacing: Space.s1) {
-                BookIcon(systemImage: isPlaying ? "waveform" : item.systemImage, size: iconSize)
-                    .padding(.bottom, Space.s1)
-                if isPlaying {
-                    Text("Listening")
-                        .font(Typeface.caption)
-                        .foregroundStyle(theme.accent.color)
-                }
-                Text(item.title)
-                    .font(size == .medium ? Typeface.headline : Typeface.title)
-                    .foregroundStyle(theme.textPrimary.color)
-                    .lineLimit(size == .medium ? 1 : 2)
-            }
-            .multilineTextAlignment(.center)
-            if isPlaying {
-                ListenProgress(value: model.listen.progress)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .tileLink(item.title) { open(item) }
-    }
-}
-
-private struct SmallBook: View {
-    let entry: ShelfEntry
-
-    var body: some View {
-        VStack(spacing: Space.s1) {
-            BookIcon(systemImage: entry.systemImage, size: Space.s5)
-            Text(entry.title)
-                .font(Typeface.micro)
-                .foregroundStyle(Theme.current.textSecondary.color)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-private struct BookIcon: View {
-    let systemImage: String
-    let size: CGFloat
-
-    var body: some View {
-        Image(systemName: systemImage)
-            .font(.system(size: size))
-            .foregroundStyle(Theme.current.textSecondary.color)
-            .accessibilityHidden(true)
-    }
-}
-
-/// The square: what's being read or heard now, with Listen working on the tile, and two more under it.
-private struct ReaderDeskTile: View {
-    let model: ReaderModel
-    let onOpen: @MainActor () -> Void
-
-    private func open(_ entry: ShelfEntry) {
-        model.requestedItem = entry.id
-        onOpen()
-    }
-
-    var body: some View {
-        let theme = Theme.current
-        VStack(alignment: .leading, spacing: Space.s3) {
+        return VStack(alignment: .leading, spacing: Space.s3) {
+            TileHeader(model.homeIsListening ? "Listening" : "Reader", systemImage: "book", isTinted: true)
             if let front = model.frontOfShelf {
-                VStack(alignment: .leading, spacing: Space.s1) {
-                    if model.homeIsListening {
-                        Text("Listening")
-                            .font(Typeface.caption)
-                            .foregroundStyle(theme.accent.color)
-                    }
-                    Text(front.title)
-                        .font(Typeface.title)
-                        .foregroundStyle(theme.textPrimary.color)
-                        .lineLimit(2)
-                    if let place = model.homePlace {
-                        Text(place)
-                            .font(Typeface.caption)
+                HStack(alignment: .top, spacing: Space.s2) {
+                    ShelfMark(entry: front, width: Space.s6 + Space.s2)
+                    VStack(alignment: .leading, spacing: Space.s1 / 2) {
+                        Text(front.title)
+                            .font(Typeface.caption.weight(.bold))
+                            .foregroundStyle(theme.textPrimary.color)
+                            .lineLimit(3)
+                        Text(detail(front))
+                            .font(Typeface.micro)
                             .foregroundStyle(theme.textSecondary.color)
                             .lineLimit(1)
                     }
                 }
                 .tileLink(front.title) { open(front) }
-                if model.homeIsListening {
-                    ListenProgress(value: model.listen.progress)
-                }
-                if let line = model.homeListenLine {
-                    Text(Self.marked(line))
-                        .font(Typeface.body)
-                        .lineLimit(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityLabel(line.text)
-                }
-                if !model.homeIsListening {
-                    more.padding(.top, Space.s3)
-                }
                 Spacer(minLength: 0)
-                if model.homeCanListen {
-                    ReaderTileListen(model: model)
+                if model.homeOffersListen {
+                    ReaderTileListen(model: model, diameter: Space.s6, showsLabel: true, onOpen: onOpen)
                         .tileControl()
-                        .layoutPriority(1)
                 }
+            } else {
+                empty
+            }
+        }
+    }
+
+    // MARK: Medium
+
+    private var medium: some View {
+        let theme = Theme.current
+        return VStack(alignment: .leading, spacing: Space.s1) {
+            TileHeader(header, systemImage: "book", isTinted: true)
+            if let front = model.frontOfShelf {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(front.title)
+                        .font(Typeface.headline)
+                        .foregroundStyle(theme.textPrimary.color)
+                        .lineLimit(1)
+                    Text(detail(front))
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
+                        .lineLimit(1)
+                }
+                .padding(.top, Space.s1)
+                .tileLink(front.title) { open(front) }
+                Spacer(minLength: 0)
+                listenRow(diameter: Space.s6 + Space.s1)
+            } else {
+                empty
+            }
+        }
+    }
+
+    // MARK: Large
+
+    private var large: some View {
+        let theme = Theme.current
+        let front = model.frontOfShelf
+        let rest = Array(model.shelf.filter { $0.id != front?.id }.prefix(Self.mostRows))
+        return VStack(alignment: .leading, spacing: Space.s3) {
+            TileHeader(header, systemImage: "book", isTinted: true)
+            if let front {
+                HStack(alignment: .top, spacing: Space.s3) {
+                    ShelfMark(entry: front, width: Space.s7 + Space.s5)
+                        .tileLink(front.title) { open(front) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(front.title)
+                            .font(Typeface.headline)
+                            .foregroundStyle(theme.textPrimary.color)
+                            .lineLimit(2)
+                        Text(detail(front))
+                            .font(Typeface.caption)
+                            .foregroundStyle(theme.textSecondary.color)
+                            .lineLimit(1)
+                        listenRow(diameter: Space.s6 + Space.s1 / 2)
+                            .padding(.top, Space.s3)
+                    }
+                }
+                // As much of the shelf as fits, so the tile has no empty bottom.
+                ViewThatFits(in: .vertical) {
+                    ForEach(Array(stride(from: rest.count, to: 0, by: -1)), id: \.self) { count in
+                        VStack(alignment: .leading, spacing: Space.s2) {
+                            ForEach(rest.prefix(count)) { entry in
+                                ShelfRow(entry: entry)
+                                    .tileLink(entry.title) { open(entry) }
+                            }
+                        }
+                    }
+                }
+            } else {
+                empty
+            }
+        }
+    }
+
+    @ViewBuilder private func listenRow(diameter: CGFloat) -> some View {
+        if model.homeOffersListen {
+            HStack(spacing: Space.s2) {
+                ReaderTileListen(model: model, diameter: diameter, showsLabel: !model.homeIsListening, onOpen: onOpen)
+                    .tileControl()
                 if model.homeIsListening {
-                    more.layoutPriority(1)
+                    ListenBars(progress: model.listen.progress)
                 }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task(id: model.frontOfShelf?.id) { await model.loadHomePlace() }
-    }
-
-    /// The most recent items: two across under Listen, or a list filling the square when nothing plays.
-    @ViewBuilder private var more: some View {
-        let theme = Theme.current
-        let across = model.homeIsListening
-        let layout = across
-            ? AnyLayout(HStackLayout(alignment: .top, spacing: Space.s3))
-            : AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s4))
-        layout {
-            ForEach(model.homeMore) { entry in
-                HStack(spacing: Space.s3) {
-                    BookIcon(systemImage: entry.systemImage, size: Space.s5)
-                        .frame(width: Space.s6)
-                    Text(entry.title)
-                        .font(across ? Typeface.caption : Typeface.body)
-                        .foregroundStyle(across ? theme.textSecondary.color : theme.textPrimary.color)
-                        .lineLimit(across ? 2 : 1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .tileLink(entry.title) { open(entry) }
             }
         }
     }
 
-    /// The sentence on the soft highlight and the word being said on the strong one, as Read along has them.
-    static func marked(_ line: ListenLine) -> AttributedString {
+    private var empty: some View {
         let theme = Theme.current
-        var text = AttributedString(line.text)
-        text.foregroundColor = theme.textPrimary.color
-        text.backgroundColor = theme.highlight.color
-        let units = line.text.utf16
-        if let word = line.word, word.upperBound <= units.count,
-           let lower = String.Index(units.index(units.startIndex, offsetBy: word.lowerBound), within: line.text),
-           let upper = String.Index(units.index(units.startIndex, offsetBy: word.upperBound), within: line.text),
-           let low = AttributedString.Index(lower, within: text), let up = AttributedString.Index(upper, within: text) {
-            text[low..<up].backgroundColor = theme.highlightStrong.color
+        return VStack(alignment: .leading, spacing: Space.s1) {
+            Spacer(minLength: 0)
+            Text("Nothing here yet")
+                .font(Typeface.headline)
+                .foregroundStyle(theme.textPrimary.color)
+            Text("Add a file, a note or a Drive folder.")
+                .font(Typeface.caption)
+                .foregroundStyle(theme.textSecondary.color)
         }
-        return text
     }
 }
 
-/// Play or pause, and the next sentence, working on the tile.
-private struct ReaderTileListen: View {
-    let model: ReaderModel
+/// An item's mark: its icon on a cover-shaped card in its own colour, since items carry no cover art.
+private struct ShelfMark: View {
+    let entry: ShelfEntry
+    let width: CGFloat
 
     var body: some View {
-        let playing = model.homeIsListening && !model.listen.isPaused
-        HStack(spacing: Space.s2) {
-            TileButton(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill", isProminent: true) {
-                if playing { model.listen.togglePause() } else { Task { await model.playFromHome() } }
+        Image(systemName: entry.systemImage)
+            .font(.system(size: width / 2.5))
+            .foregroundStyle(Theme.current.accentOn.color)
+            .frame(width: width, height: width * 4 / 3)
+            .background(CoverTone.tone(for: entry.id.uuidString).color,
+                        in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+/// One more item on the shelf: its mark, title and what it is.
+private struct ShelfRow: View {
+    let entry: ShelfEntry
+
+    var body: some View {
+        let theme = Theme.current
+        HStack(spacing: Space.s3) {
+            ShelfMark(entry: entry, width: Space.s5 + Space.s1)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(entry.title)
+                    .font(Typeface.caption.weight(.semibold))
+                    .foregroundStyle(theme.textPrimary.color)
+                Text(entry.typeName)
+                    .font(Typeface.micro)
+                    .foregroundStyle(theme.textSecondary.color)
             }
-            if model.homeIsListening {
-                TileButton("Next sentence", systemImage: "forward.fill") { model.listen.skip(by: 1) }
-            }
-            Spacer(minLength: 0)
+            .lineLimit(1)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// How far along Listen is, as a row of bars: the heard part in the accent, the rest fainter.
+private struct ListenBars: View {
+    let progress: Double
+
+    /// Bar heights in quarters of `Space.s1`, a fixed shape so the row reads as sound, not data.
+    private static let heights: [CGFloat] = [6, 12, 18, 10, 22, 14, 8, 20, 16, 24, 12, 6, 18, 24, 12, 8, 14, 20, 10, 16]
+    private static let unheard = 0.4
+
+    var body: some View {
+        let theme = Theme.current
+        let heard = Int((min(max(progress, 0), 1) * Double(Self.heights.count)).rounded())
+        HStack(spacing: Space.s1 - 1) {
+            ForEach(Array(Self.heights.enumerated()), id: \.offset) { index, height in
+                Capsule()
+                    .fill(theme.accent.color)
+                    .opacity(index < heard ? 1 : Self.unheard)
+                    .frame(width: Space.s1 - 1, height: height * Space.s1 / 4)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
+        .accessibilityElement()
+        .accessibilityLabel("Listen progress")
+        .accessibilityValue("\(Int((progress * 100).rounded())) percent")
+    }
+}
+
+/// Play or pause, working on the tile. Something that has to open first, like a Drive file, opens in
+/// the Reader and starts there.
+private struct ReaderTileListen: View {
+    let model: ReaderModel
+    let diameter: CGFloat
+    let showsLabel: Bool
+    let onOpen: @MainActor () -> Void
+
+    var body: some View {
+        let theme = Theme.current
+        let playing = model.homeIsListening && !model.listen.isPaused
+        Button {
+            if playing {
+                model.listen.togglePause()
+            } else if model.homeCanListen {
+                Task { await model.playFromHome() }
+            } else if let front = model.frontOfShelf {
+                model.listenWhenOpened = true
+                model.requestedItem = front.id
+                onOpen()
+            }
+        } label: {
+            HStack(spacing: Space.s2) {
+                Image(systemName: playing ? "pause.fill" : "play.fill")
+                    .font(Typeface.caption.weight(.bold))
+                    .foregroundStyle(theme.accentOn.color)
+                    .frame(width: diameter, height: diameter)
+                    .background(Circle().fill(theme.accent.color))
+                if showsLabel {
+                    Text("Listen")
+                        .font(Typeface.caption.weight(.semibold))
+                        .foregroundStyle(theme.accent.color)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(TilePress())
+        .accessibilityLabel(playing ? "Pause" : "Listen")
     }
 }

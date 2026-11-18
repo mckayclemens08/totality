@@ -21,13 +21,13 @@ import TotalityCore
     }
 
     /// As the home page has it: the module's own tile once something's saved, else its lines.
-    private func tile(_ model: ReaderModel, size: BigTileSize, height: CGFloat) -> some View {
+    private func tile(_ model: ReaderModel, size: TileSize, height: CGFloat) -> some View {
         let glance = model.glance
         return TileLabel(
             module: ModuleEntry.all.first { $0.id == .reader }!, glance: glance, size: size,
             content: glance?.isQuiet == false ? AnyView(ReaderHomeTile(model: model, size: size)) : nil, isEditing: false
         )
-        .frame(width: 361, height: height)
+        .frame(width: size == .small ? 172 : 358, height: height)
         .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg))
     }
 
@@ -58,9 +58,9 @@ import TotalityCore
         await empty.load()
         for (name, model) in [("reading", reading), ("listening", listening), ("empty", empty)] {
             try write(VStack(spacing: Space.s4) {
+                tile(model, size: .small, height: 172)
                 tile(model, size: .medium, height: 172)
-                tile(model, size: .large, height: 266)
-                tile(model, size: .square, height: 361)
+                tile(model, size: .large, height: 358)
             }, name: "reader-tile-\(name).png", to: directory)
         }
     }

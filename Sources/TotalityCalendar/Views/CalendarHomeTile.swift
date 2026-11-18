@@ -1,16 +1,19 @@
 import SwiftUI
 import TotalityUI
 
-/// The Calendar's big home tile: this week on a medium tile, the whole month on a larger one, and on the
-/// square the month with a "Next up" card under it (issue 127). A day opens that day, and a line or the
-/// card opens what it's about.
+/// The Calendar's home tile at each size (redesign, 2026-11-17). Small is today's date and the next
+/// event. Medium lists what's coming, the next one on the soft accent. Large has this week across the
+/// top, today on the accent, and what's coming under it, as much as fits. A day opens that day, and an
+/// event opens itself.
 public struct CalendarHomeTile: View {
+    private static let mostRows = 8
+
     private let model: CalendarModel
-    private let size: BigTileSize
+    private let size: TileSize
     private let onOpen: @MainActor () -> Void
 
     /// `onOpen` brings the Calendar up after a day or an event has been asked for.
-    public init(model: CalendarModel, size: BigTileSize, onOpen: @escaping @MainActor () -> Void = {}) {
+    public init(model: CalendarModel, size: TileSize, onOpen: @escaping @MainActor () -> Void = {}) {
         self.model = model
         self.size = size
         self.onOpen = onOpen
@@ -21,161 +24,220 @@ public struct CalendarHomeTile: View {
         onOpen()
     }
 
+    /// What's still to come, from today on: today's all-day events, then timed ones not yet over.
+    private var upcoming: [CalendarEntry] {
+        let current = model.currentDate
+        return model.schedule.flatMap { day, entries in
+            entries.filter { day == model.today ? ($0.isAllDay || $0.end > current) : true }
+        }
+    }
+
     public var body: some View {
-        switch size {
-        case .medium: week
-        case .large: month
-        case .square:
-            VStack(alignment: .leading, spacing: Space.s3) {
-                month
-                if let next = model.nextEntry {
-                    NextUpCard(entry: next, model: model)
-                        .tileLink("Next up: \(next.title)") { open(.entry(next)) }
-                        .layoutPriority(1)
-                } else {
-                    lines
-                        .layoutPriority(1)
+        Group {
+            switch size {
+            case .small: small
+            case .medium: medium
+            case .large: large
+            }
+        }
+        .tilePadding()
+    }
+
+    // MARK: Small: the date and what's next
+
+    private var small: some View {
+        let theme = Theme.current
+        let next = model.nextEntry
+        return VStack(alignment: .leading, spacing: 0) {
+            TileHeader("Calendar", systemImage: "calendar")
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                Text("\(model.today.day)")
+                    .font(Typeface.display)
+                    .monospacedDigit()
+                    .foregroundStyle(theme.textPrimary.color)
+                Text(model.written(model.today, .dateTime.weekday(.abbreviated)))
+                    .font(Typeface.callout)
+                    .foregroundStyle(theme.textSecondary.color)
+            }
+            .padding(.top, Space.s1)
+            .tileLink(model.heading(for: model.today)) { open(.day(model.today)) }
+            Spacer(minLength: Space.s2)
+            if let next {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(when(next))
+                        .font(Typeface.micro.weight(.semibold))
+                        .foregroundStyle(theme.accent.color)
+                    Text(next.title)
+                        .font(Typeface.caption.weight(.bold))
+                        .foregroundStyle(theme.textPrimary.color)
+                        .lineLimit(2)
+                }
+                .tileLink("Next: \(next.title)") { open(.entry(next)) }
+            } else {
+                Text("Nothing coming up")
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+            }
+        }
+    }
+
+    // MARK: Medium: what's coming
+
+    private var medium: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            TileHeader("Calendar · \(model.written(model.today, .dateTime.weekday(.wide).day()))", systemImage: "calendar")
+            fitting(3)
+        }
+    }
+
+    // MARK: Large: this week, then what's coming
+
+    private var large: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            TileHeader("Calendar · \(model.written(model.today, .dateTime.month(.wide)))", systemImage: "calendar")
+            week
+            fitting(Self.mostRows)
+        }
+    }
+
+    /// As many of what's coming as fit, up to `limit`, so the tile has no empty bottom.
+    @ViewBuilder private func fitting(_ limit: Int) -> some View {
+        let shown = Array(upcoming.prefix(limit))
+        if shown.isEmpty {
+            events([])
+        } else {
+            ViewThatFits(in: .vertical) {
+                ForEach(Array(stride(from: shown.count, to: 0, by: -1)), id: \.self) { count in
+                    events(Array(shown.prefix(count)))
                 }
             }
         }
     }
 
     private var week: some View {
-        VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: 0) {
-                ForEach(Array(model.thisWeek.enumerated()), id: \.offset) { index, day in
-                    VStack(spacing: Space.s1) {
-                        WeekdayLetter(letter: model.weekdayLetters[index])
-                        TileDay(day: day, model: model)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .tileLink(model.heading(for: day)) { open(.day(day)) }
-                }
-            }
-            lines
-        }
-        .frame(maxHeight: .infinity, alignment: .bottom)
-    }
-
-    private var month: some View {
         let theme = Theme.current
-        let days = model.today.monthGrid(in: model.display)
-        let weeks = stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<min($0 + 7, days.count)]) }
-        // The rows share what's left, which is how a six-week month still fits under the title's space.
-        return VStack(alignment: .leading, spacing: 0) {
-            Text(model.written(model.today, .dateTime.month(.wide)))
-                .font(Typeface.headline)
-                .foregroundStyle(theme.textPrimary.color)
-                .padding(.bottom, Space.s4)
-            HStack(spacing: 0) {
-                ForEach(Array(model.weekdayLetters.enumerated()), id: \.offset) { _, letter in
-                    WeekdayLetter(letter: letter)
-                        .frame(maxWidth: .infinity)
+        return HStack(spacing: Space.s1 / 2) {
+            ForEach(Array(model.thisWeek.enumerated()), id: \.offset) { index, day in
+                let isToday = day == model.today
+                VStack(spacing: 0) {
+                    Text(model.weekdayLetters[index])
+                        .font(Typeface.micro)
+                        .foregroundStyle(isToday ? theme.accentOn.color : theme.textSecondary.color)
+                    Text("\(day.day)")
+                        .font(Typeface.callout.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(isToday ? theme.accentOn.color : theme.textPrimary.color)
                 }
-            }
-            .padding(.bottom, Space.s1)
-            ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
-                HStack(spacing: 0) {
-                    ForEach(Array(week.enumerated()), id: \.offset) { _, day in
-                        Group {
-                            if let day {
-                                TileDay(day: day, model: model)
-                            } else {
-                                Color.clear
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .tileLink(day.map(model.heading(for:)) ?? "", action: day.map { day in { open(.day(day)) } })
+                .padding(.vertical, Space.s1 + Space.s1 / 2)
+                .frame(maxWidth: .infinity)
+                .background {
+                    if isToday {
+                        RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(theme.accent.color)
                     }
                 }
+                .tileLink(model.heading(for: day)) { open(.day(day)) }
             }
         }
     }
 
-    /// What's next, then how much is on today.
-    private var lines: some View {
-        let theme = Theme.current
-        let glance = model.glance
-        return VStack(alignment: .leading, spacing: Space.s1) {
-            ForEach(Array((glance?.lines ?? []).prefix(2).enumerated()), id: \.offset) { index, line in
-                let isLead = index == 0 && glance?.isQuiet != true
-                Text(line)
-                    .font(isLead ? Typeface.headline : Typeface.caption)
-                    .foregroundStyle(isLead ? theme.textPrimary.color : theme.textSecondary.color)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tileLink(line, action: model.glanceTarget(at: index).map { target in { open(target) } })
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct WeekdayLetter: View {
-    let letter: String
-
-    var body: some View {
-        Text(letter)
-            .font(Typeface.micro)
-            .foregroundStyle(Theme.current.textSecondary.color)
-    }
-}
-
-/// A day number, marked when it's today, with a dot when something's on.
-private struct TileDay: View {
-    let day: CalendarDay
-    let model: CalendarModel
-
-    var body: some View {
-        let theme = Theme.current
-        let isToday = day == model.today
-        Text("\(day.day)")
-            .font(Typeface.caption)
-            .monospacedDigit()
-            .foregroundStyle(isToday ? theme.accentOn.color : theme.textPrimary.color)
-            .frame(width: Space.s5, height: Space.s5)
-            .background {
-                if isToday { Circle().fill(theme.accent.color) }
-            }
-            .overlay(alignment: .bottom) {
-                if !isToday, !model.entries(on: day).isEmpty {
-                    Circle()
-                        .fill(theme.textSecondary.color)
-                        .frame(width: Space.s1 / 2 + Space.s1 / 4, height: Space.s1 / 2 + Space.s1 / 4)
+    @ViewBuilder private func events(_ entries: [CalendarEntry]) -> some View {
+        if entries.isEmpty {
+            Text("Nothing coming up")
+                .font(Typeface.callout)
+                .foregroundStyle(Theme.current.textSecondary.color)
+                .padding(.top, Space.s1)
+        } else {
+            let next = model.nextEntry
+            VStack(spacing: Space.s2) {
+                ForEach(entries) { entry in
+                    EventCard(entry: entry, detail: detail(entry, isNext: entry.id == next?.id),
+                              time: entry.isAllDay ? "All day" : entry.start.formatted(date: .omitted, time: .shortened),
+                              isNext: entry.id == next?.id)
+                        .tileLink(entry.title) { open(.entry(entry)) }
                 }
             }
+        }
     }
-}
 
-/// The next timed event: what, when and where.
-private struct NextUpCard: View {
-    let entry: CalendarEntry
-    let model: CalendarModel
-
-    var body: some View {
-        let theme = Theme.current
+    /// Under the title: where it is, and for the next one, how soon.
+    private func detail(_ entry: CalendarEntry, isNext: Bool) -> String {
         let place = entry.location.trimmingCharacters(in: .whitespacesAndNewlines)
-        VStack(alignment: .leading, spacing: Space.s1) {
-            Text("Next up")
-                .font(Typeface.micro)
-                .foregroundStyle(theme.accent.color)
-            Text(entry.title)
-                .font(Typeface.headline)
-                .foregroundStyle(theme.textPrimary.color)
-                .lineLimit(1)
-            HStack(spacing: Space.s3) {
-                Label(model.nextUpTime(entry), systemImage: "clock")
-                    .lineLimit(1)
-                if !place.isEmpty {
-                    Label(place, systemImage: "mappin.and.ellipse")
-                        .lineLimit(1)
+        var parts = place.isEmpty ? [] : [place]
+        if isNext, !entry.isAllDay {
+            let current = model.currentDate
+            if entry.start <= current {
+                parts.append("now")
+            } else if entry.start.timeIntervalSince(current) < 60 * 60 * 12 {
+                parts.append("in " + Self.soon(entry.start.timeIntervalSince(current)))
+            }
+        }
+        if CalendarDay(entry.start, in: model.display) != model.today {
+            parts.insert(model.written(CalendarDay(entry.start, in: model.display), .dateTime.weekday(.abbreviated)), at: 0)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// "25 min" or "3 h".
+    static func soon(_ interval: TimeInterval) -> String {
+        let minutes = max(1, Int((interval / 60).rounded(.up)))
+        return minutes < 60 ? "\(minutes) min" : "\(minutes / 60) h"
+    }
+
+    private func when(_ entry: CalendarEntry) -> String {
+        if entry.start <= model.currentDate { return "Now" }
+        let time = entry.start.formatted(date: .omitted, time: .shortened)
+        if CalendarDay(entry.start, in: model.display) == model.today { return time }
+        return "\(model.written(CalendarDay(entry.start, in: model.display), .dateTime.weekday(.abbreviated))) \(time)"
+    }
+}
+
+/// One event as a card: the next one on the soft accent with an accent dot, the rest raised.
+private struct EventCard: View {
+    let entry: CalendarEntry
+    let detail: String
+    let time: String
+    let isNext: Bool
+
+    var body: some View {
+        let theme = Theme.current
+        let shape = RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+        HStack(spacing: Space.s2) {
+            Circle()
+                .fill(isNext ? theme.accent.color : theme.textTertiary.color)
+                .frame(width: Space.s2, height: Space.s2)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(entry.title)
+                    .font(Typeface.caption.weight(.semibold))
+                    .foregroundStyle(theme.textPrimary.color)
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(Typeface.micro)
+                        .foregroundStyle(theme.textSecondary.color)
                 }
             }
-            .font(Typeface.caption)
-            .foregroundStyle(theme.textSecondary.color)
+            .lineLimit(1)
+            Spacer(minLength: Space.s1)
+            Text(time)
+                .font(Typeface.micro)
+                .monospacedDigit()
+                .foregroundStyle(theme.textSecondary.color)
         }
-        .padding(Space.s3)
+        .padding(.horizontal, Space.s3)
+        .padding(.vertical, Space.s2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+        .background {
+            if isNext { shape.fill(theme.highlight.color) }
+        }
+        .modifier(RaisedUnlessNext(isNext: isNext, shape: shape))
+    }
+}
+
+private struct RaisedUnlessNext<S: Shape>: ViewModifier {
+    let isNext: Bool
+    let shape: S
+
+    func body(content: Content) -> some View {
+        if isNext { content } else { content.neumorphic(.subtle, in: shape) }
     }
 }

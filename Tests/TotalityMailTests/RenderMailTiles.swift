@@ -34,12 +34,12 @@ private actor RenderStore: MailStore {
         try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent(name))
     }
 
-    private func tile(_ model: MailModel, size: BigTileSize, height: CGFloat) -> some View {
+    private func tile(_ model: MailModel, size: TileSize, height: CGFloat) -> some View {
         TileLabel(
             module: ModuleEntry.all.first { $0.id == .mail }!, glance: model.glance, size: size,
             content: AnyView(MailHomeTile(model: model, size: size)), isEditing: false
         )
-        .frame(width: 361, height: height)
+        .frame(width: size == .small ? 172 : 358, height: height)
         .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg))
     }
 
@@ -85,9 +85,9 @@ private actor RenderStore: MailStore {
         let empty = await model([], outside: [])
         for (name, model) in [("full", full), ("caught-up", caughtUp), ("empty", empty)] {
             try write(VStack(spacing: Space.s4) {
+                tile(model, size: .small, height: 172)
                 tile(model, size: .medium, height: 172)
-                tile(model, size: .large, height: 266)
-                tile(model, size: .square, height: 361)
+                tile(model, size: .large, height: 358)
             }, name: "mail-tile-\(name).png", to: directory)
         }
     }

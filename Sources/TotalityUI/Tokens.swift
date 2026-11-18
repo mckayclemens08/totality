@@ -104,6 +104,20 @@ public enum Typeface {
     public static let code = Font.body.monospaced()
 }
 
+/// Muted colours for a book or document with no cover of its own, so a shelf isn't a row of blanks. The
+/// same item always gets the same one. Each carries a white icon at WCAG AA for graphics (3:1).
+public enum CoverTone {
+    public static let all: [ColorToken] = [
+        .init(0x4E6B80), .init(0xA83636), .init(0x2E6B47), .init(0x5B45A8), .init(0x8A5A2B), .init(0x3F5F8A),
+    ]
+
+    /// A stable pick from `all` for a key such as an item's ID.
+    public static func tone(for key: String) -> ColorToken {
+        let sum = key.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF }
+        return all[sum % all.count]
+    }
+}
+
 /// Fixed sizes of the shared controls in the redesign (owner approved the canvas on 2026-11-17).
 public enum Metric {
     /// A round header button: the flower and search buttons on Home, and each screen's header.
@@ -116,6 +130,10 @@ public enum Metric {
     public static let ringStroke: CGFloat = 7
     /// How far the chosen tile's outline stands off the tile while Home is being edited.
     public static let selectionOutline: CGFloat = 2
+    /// The gap between Home's tiles, and how far a tile's content stands in from its edge.
+    public static let tileGap: CGFloat = 14
+    /// How far a full-bleed tile's pictures stand in from its edge.
+    public static let tileBleed: CGFloat = 6
 }
 
 public enum Motion {

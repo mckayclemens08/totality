@@ -224,7 +224,7 @@ import TotalityUI
                   name: "tasks-undo.png", to: directory, height: 140)
 
         try tiles(model, prefix: "tasks-tile", to: directory)
-        let emptyTile = TasksHomeTile(model: empty, size: .medium).padding(Space.s4).frame(width: 361, height: 176)
+        let emptyTile = TasksHomeTile(model: empty, size: .medium).frame(width: 358, height: 172)
             .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)).padding(Space.s4)
         try write(emptyTile, name: "tasks-tile-empty.png", to: directory, width: 393, height: 210)
 
@@ -243,20 +243,9 @@ import TotalityUI
 
     private func tiles(_ model: TasksModel, prefix: String, to directory: String) throws {
         // The home tile, medium and large, as the grid frames it.
-        for (size, name, height) in [(BigTileSize.medium, "medium", 176.0), (.large, "large", 270.0), (.square, "square", 380.0)] {
-            let entry = ModuleEntry.all.first { $0.id == .tasks }!
-            let tile = VStack(alignment: .leading, spacing: Space.s2) {
-                HStack(spacing: Space.s2) {
-                    Image(systemName: entry.systemImage)
-                    Text(entry.name)
-                }
-                .font(Typeface.callout)
-                .foregroundStyle(Theme.current.textSecondary.color)
-                TasksHomeTile(model: model, size: size)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-            .padding(Space.s4)
-            .frame(width: 361, height: height)
+        for (size, name, height) in [(TileSize.small, "small", 172.0), (.medium, "medium", 172.0), (.large, "large", 358.0)] {
+            let tile = TasksHomeTile(model: model, size: size)
+            .frame(width: size == .small ? 172 : 358, height: height)
             .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
             .padding(Space.s4)
             try write(tile, name: "\(prefix)-\(name).png", to: directory, width: 393, height: height + Space.s6)
