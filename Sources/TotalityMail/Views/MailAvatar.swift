@@ -80,20 +80,9 @@ struct MailAccountChips: View {
     }
 
     private func chip(_ title: String, _ filter: MailAccountFilter) -> some View {
-        let theme = Theme.current
-        let isOn = model.shownFilter == filter
-        return Button {
+        FilterPill(title, isSelected: model.shownFilter == filter) {
             withAnimation(Motion.quick) { model.accountFilter = filter }
-        } label: {
-            Text(title)
-                .font(Typeface.callout)
-                .foregroundStyle(isOn ? theme.accent.color : theme.textSecondary.color)
-                .lineLimit(1)
-                .padding(.horizontal, Space.s3)
-                .padding(.vertical, Space.s2)
-                .toggleSurface(isOn, in: Capsule())
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isOn ? .isSelected : [])
+        .lineLimit(1)
     }
 }

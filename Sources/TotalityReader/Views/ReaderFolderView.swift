@@ -20,10 +20,14 @@ struct ReaderFolderView: View {
     @State private var moving: ReaderItem?
     @State private var deleting: ReaderItem?
     @State private var linkingDrive = false
+    @State private var adding = false
+    @State private var searching = false
+    @State private var filter = ReaderFilter.all
 
     private var theme: Theme { .current }
     private var current: ReaderItem? { folder.flatMap { id in model.library.folders.first { $0.id == id } } }
     private var title: String { current?.displayTitle ?? "Reader" }
+    private var isTop: Bool { folder == nil }
     private var contents: (folders: [ReaderItem], items: [ReaderItem]) {
         model.library.contents(of: folder, sortedBy: sort)
     }
@@ -33,9 +37,28 @@ struct ReaderFolderView: View {
             // On each folder's list, not on a document being read.
             .pullsToRefresh(with: model.refresher)
             .safeAreaInset(edge: .top, spacing: 0) { RefreshStatusLine(model.refresher) }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if isTop { header }
+            }
+            .addButton("Add to the Reader") { adding = true }
             .background(theme.bg.color)
             .navigationTitle(title)
             .toolbar { toolbar }
+            #if os(iOS)
+            // The top of the Reader draws its own header (redesign, 2026-11-17).
+            .toolbar(isTop ? .hidden : .automatic, for: .navigationBar)
+            #endif
+            .confirmationDialog("Add to the Reader", isPresented: $adding) {
+                Button("New doc") { createDoc() }
+                Button("New folder") {
+                    name = ""
+                    namingFolder = true
+                }
+                Button("Import files") { importing = true }
+                if model.drive?.isAvailable == true {
+                    Button("Google Drive folders") { linkingDrive = true }
+                }
+            }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
                 if case .success(let urls) = result {
                     Task { await model.importFiles(urls, into: folder) }
@@ -107,42 +130,57 @@ struct ReaderFolderView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if let onClose {
-            ToolbarItem(placement: .cancellationAction) {
-                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
+        if !isTop {
+            // In the bar, not the overflow, so iOS doesn't add its own outlined "more" button.
+            ToolbarItem(placement: .primaryAction) {
+                Menu { sortChoices } label: {
+                    ToolbarGlyph(systemImage: "arrow.up.arrow.down").accessibilityLabel("Sort and view")
+                }
             }
         }
-        // In the bar, not the overflow, so iOS doesn't add its own outlined "more" button.
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Picker("Sort by", selection: $sort) {
-                    ForEach(ReaderSort.allCases, id: \.self) { order in
-                        Text(order.label).tag(order)
+    }
+
+    @ViewBuilder private var sortChoices: some View {
+        Picker("Sort by", selection: $sort) {
+            ForEach(ReaderSort.allCases, id: \.self) { order in
+                Text(order.label).tag(order)
+            }
+        }
+        Picker("View", selection: $showsGrid) {
+            Label("List", systemImage: "list.bullet").tag(false)
+            Label("Grid", systemImage: "square.grid.2x2").tag(true)
+        }
+    }
+
+    /// The top of the Reader: Home, sort, search, the big title, and the filters.
+    private var header: some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(spacing: Space.s3) {
+                if let onClose {
+                    HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
+                }
+                Spacer(minLength: 0)
+                HeaderMenu("Sort and view", systemImage: "arrow.up.arrow.down") { sortChoices }
+                HeaderButton(searching ? "Close search" : "Search the Reader", systemImage: searching ? "xmark" : "magnifyingglass") {
+                    withAnimation(Motion.quick) {
+                        if searching { model.query = "" }
+                        searching.toggle()
                     }
                 }
-                Picker("View", selection: $showsGrid) {
-                    Label("List", systemImage: "list.bullet").tag(false)
-                    Label("Grid", systemImage: "square.grid.2x2").tag(true)
-                }
-            } label: {
-                ToolbarGlyph(systemImage: "arrow.up.arrow.down").accessibilityLabel("Sort and view")
+            }
+            ScreenTitle("Reader")
+            if searching || model.isSearching {
+                SearchBox("Search titles and text", text: Bindable(model).query)
+            }
+            if let importing = model.importing { ImportBar(progress: importing) }
+            if !model.isSearching {
+                FilterPills(ReaderFilter.allCases, selection: $filter) { $0.title }
+                    .padding(.horizontal, -Space.s2)
             }
         }
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Button("New doc", systemImage: "square.and.pencil") { createDoc() }
-                Button("New folder", systemImage: "folder.badge.plus") {
-                    name = ""
-                    namingFolder = true
-                }
-                Button("Import files", systemImage: "square.and.arrow.down") { importing = true }
-                if model.drive?.isAvailable == true {
-                    Button("Google Drive folders", systemImage: "link") { linkingDrive = true }
-                }
-            } label: {
-                ToolbarGlyph(systemImage: "plus").accessibilityLabel("Add")
-            }
-        }
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s2)
+        .background(theme.bg.color)
     }
 
     private func createDoc() {
@@ -174,10 +212,13 @@ struct ReaderFolderView: View {
         case .ready where isEmptyLibrary:
             VStack(spacing: 0) {
                 journalLink
+                    .itemCard()
                     .padding(.horizontal, Space.s4)
-                    .padding(.top, Space.s2)
+                    .padding(.top, Space.s3)
                 emptyLibrary
             }
+        case .ready where isTop && filter != .all:
+            filtered
         case .ready:
             VStack(alignment: .leading, spacing: 0) {
                 if folder != nil { breadcrumbs }
@@ -238,8 +279,7 @@ struct ReaderFolderView: View {
                     NavigationLink(value: ReaderRoute.item(hit.item)) {
                         ReaderRow(item: hit.item, snippet: hit.snippet)
                     }
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                    .modifier(CardRow())
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -285,8 +325,7 @@ struct ReaderFolderView: View {
         List {
             if folder == nil {
                 journalLink
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                    .modifier(CardRow())
                 status
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -299,12 +338,20 @@ struct ReaderFolderView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
+            if isTop, let front = model.frontOfShelf {
+                ContinueCard(entry: front, model: model)
+                    .modifier(CardRow())
+                Text("On your shelf")
+                    .font(Typeface.callout)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             ForEach(contents.folders + contents.items) { entry in
                 NavigationLink(value: route(for: entry)) {
                     ReaderRow(item: entry, snippet: detail(for: entry))
                 }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                .modifier(CardRow())
                 .swipeActions {
                     Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(entry) }
                     Button("Move", systemImage: "folder") { moving = entry }
@@ -317,13 +364,63 @@ struct ReaderFolderView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        // Room above the + button for the last row.
+        .contentMargins(.bottom, Metric.addButton + Space.s5, for: .scrollContent)
+    }
+
+    /// Books, docs, Drive, or the journal on their own, from the whole library.
+    private var filtered: some View {
+        List {
+            switch filter {
+            case .all:
+                EmptyView()
+            case .journal:
+                journalLink.modifier(CardRow())
+            case .drive:
+                if let drive = model.drive {
+                    DriveLinksSection(drive: drive)
+                    if drive.isAvailable {
+                        Button("Link Google Drive folders", systemImage: "link") { linkingDrive = true }
+                            .font(Typeface.callout)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                } else {
+                    filterEmpty("Google Drive isn't set up on this device.")
+                }
+            case .books, .docs:
+                let found = model.items.filter { filter == .books ? $0.isBook : $0.isDoc }
+                    .sorted { model.library.date(of: $0, sortedBy: .opened) > model.library.date(of: $1, sortedBy: .opened) }
+                if found.isEmpty {
+                    filterEmpty(filter == .books ? "No books yet. Import a PDF or an EPUB with the + button." : "No docs yet. Start one with the + button.")
+                }
+                ForEach(found) { entry in
+                    NavigationLink(value: route(for: entry)) {
+                        ReaderRow(item: entry, snippet: detail(for: entry))
+                    }
+                    .modifier(CardRow())
+                    .contextMenu { actions(for: entry) }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .contentMargins(.bottom, Metric.addButton + Space.s5, for: .scrollContent)
+    }
+
+    private func filterEmpty(_ text: String) -> some View {
+        Text(text)
+            .font(Typeface.body)
+            .foregroundStyle(theme.textSecondary.color)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
     }
 
     private var grid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s3) {
                 if folder == nil {
-                    journalLink
+                    journalLink.itemCard()
                     status
                 }
                 if folder == nil, let drive = model.drive {
@@ -378,6 +475,69 @@ struct ReaderFolderView: View {
         } else {
             Task { await model.delete(entry) }
         }
+    }
+}
+
+/// The Reader's filters at the top of the library (redesign, 2026-11-17).
+enum ReaderFilter: CaseIterable, Hashable {
+    case all, books, docs, drive, journal
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .books: "Books"
+        case .docs: "Docs"
+        case .drive: "Drive"
+        case .journal: "Journal"
+        }
+    }
+}
+
+/// One row of the library as its own raised card, spaced so the shadows show.
+struct CardRow: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .itemCard()
+            .listRowInsets(EdgeInsets(top: Space.s2, leading: Space.s4, bottom: Space.s2, trailing: Space.s4))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+}
+
+/// What was opened last, with Read and Listen, at the top of the Reader.
+private struct ContinueCard: View {
+    let entry: ShelfEntry
+    let model: ReaderModel
+
+    var body: some View {
+        let theme = Theme.current
+        HStack(alignment: .top, spacing: Space.s4) {
+            ReaderCover(systemImage: entry.systemImage, isAccent: true, width: Space.s8 + Space.s5, height: Space.s8 * 2 - Space.s3)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(model.homeIsListening ? "Listening" : "Continue")
+                    .font(Typeface.caption.weight(.semibold))
+                    .foregroundStyle(theme.accent.color)
+                Text(entry.title)
+                    .font(Typeface.title)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .lineLimit(2)
+                Text([entry.typeName, model.homePlace].compactMap { $0 }.joined(separator: " · "))
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .lineLimit(1)
+                Spacer(minLength: Space.s2)
+                HStack(spacing: Space.s2) {
+                    HeaderPill("Read", isProminent: true) { model.requestedItem = entry.id }
+                    if model.homeCanListen {
+                        HeaderPill(model.homeIsListening ? "Playing" : "Listen", systemImage: "headphones") {
+                            Task { await model.playFromHome() }
+                        }
+                    }
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .task(id: entry.id) { await model.loadHomePlace() }
     }
 }
 
