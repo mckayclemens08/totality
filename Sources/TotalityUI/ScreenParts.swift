@@ -260,3 +260,31 @@ private struct RaisedUnless<S: Shape>: ViewModifier {
         }
     }
 }
+
+/// A `HeaderButton` that opens a menu, such as sort and view choices.
+public struct HeaderMenu<MenuContent: View>: View {
+    let title: String
+    let systemImage: String
+    let content: MenuContent
+
+    public init(_ title: String, systemImage: String, @ViewBuilder content: () -> MenuContent) {
+        self.title = title
+        self.systemImage = systemImage
+        self.content = content()
+    }
+
+    public var body: some View {
+        Menu {
+            content
+        } label: {
+            Image(systemName: systemImage)
+                .font(Typeface.body.weight(.semibold))
+                .foregroundStyle(Theme.current.textSecondary.color)
+                .frame(width: Metric.headerButton, height: Metric.headerButton)
+                .neumorphic(.subtle, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(SoftPress())
+        .accessibilityLabel(title)
+    }
+}

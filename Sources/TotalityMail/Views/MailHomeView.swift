@@ -16,6 +16,10 @@ public struct MailHomeView: View {
     @State private var opened: UUID?
     @State private var showingFolders = false
     @State private var composing: MailComposer?
+    @State private var searching = false
+
+    /// The places a pill reaches in one press. Every other place is under Mailboxes.
+    private static let pillPlaces: [MailPlace] = [.inbox, .starred, .folder(.sent), .folder(.drafts)]
 
     public init(model: MailModel, onClose: (() -> Void)? = nil, onOpenLink: @escaping (URL) -> Void = { _ in }) {
         self.model = model
@@ -31,12 +35,17 @@ public struct MailHomeView: View {
                 content(isWide: isWide)
                     .background(theme.bg.color)
                     .edgeSwipeBack(onClose)
-                    .toolbar { toolbar(isWide: isWide) }
+                    .toolbar { if isWide { toolbar(isWide: isWide) } }
                     .navigationTitle(model.placeName)
                     #if os(iOS)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbarBackground(theme.bg.color, for: .navigationBar)
+                    // A phone draws Mail's own header (redesign, 2026-11-17).
+                    .toolbar(isWide ? .automatic : .hidden, for: .navigationBar)
                     #endif
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if !isWide { header }
+                    }
                     .navigationDestination(item: isWide ? .constant(nil) : $opened) { id in
                         conversationPage(id)
                     }
@@ -138,7 +147,7 @@ public struct MailHomeView: View {
                 HStack(spacing: 0) {
                     MailFoldersView(model: model) {}
                         .frame(width: Self.foldersWidth)
-                    list.frame(width: Self.listWidth)
+                    list(isWide: true).frame(width: Self.listWidth)
                     Group {
                         if let opened, model.mailbox.conversation(opened, in: model.place) != nil {
                             conversationPage(opened).id(opened)
@@ -149,19 +158,77 @@ public struct MailHomeView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                list
+                list(isWide: false)
             }
         }
     }
 
-    private var list: some View {
+    private func list(isWide: Bool) -> some View {
         MailListView(model: model, opened: opened, onOpen: { opened = $0.id }, onWrite: { composing = $0 })
             .safeAreaInset(edge: .top, spacing: 0) {
-                SearchBox("Search mail on this device", text: $model.query)
-                    .padding(.horizontal, Space.s4)
-                    .padding(.vertical, Space.s2)
-                    .background(Theme.current.bg.color)
+                // On a phone the search box is under the header's search button.
+                if isWide {
+                    SearchBox("Search mail on this device", text: $model.query)
+                        .padding(.horizontal, Space.s4)
+                        .padding(.vertical, Space.s2)
+                        .background(Theme.current.bg.color)
+                }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if model.phase == .ready, !model.isSelecting, !isWide {
+                    AddButton("New Message") { composing = .new(in: model) }
+                        .padding(Space.s4)
+                }
+            }
+    }
+
+    /// A phone's header: Home and Mailboxes, select and search, the place's big title, and the pills.
+    private var header: some View {
+        let ready = model.phase == .ready
+        return VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(spacing: Space.s3) {
+                if let onClose {
+                    HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
+                }
+                if ready {
+                    HeaderButton("Mailboxes", systemImage: "tray.2.fill") { showingFolders = true }
+                }
+                Spacer(minLength: 0)
+                if ready {
+                    if model.isSelecting {
+                        HeaderPill("Done", isProminent: true) { model.endSelecting() }
+                    } else if !model.conversations.isEmpty {
+                        HeaderButton("Select", systemImage: "checkmark") { model.beginSelecting() }
+                    }
+                    HeaderButton(searching ? "Close search" : "Search mail", systemImage: searching ? "xmark" : "magnifyingglass") {
+                        withAnimation(Motion.quick) {
+                            if searching { model.query = "" }
+                            searching.toggle()
+                        }
+                    }
+                }
+            }
+            ScreenTitle(model.placeName)
+            if ready {
+                if searching || !model.query.isEmpty {
+                    SearchBox("Search mail on this device", text: $model.query)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Space.s2) {
+                        ForEach(Self.pillPlaces, id: \.self) { place in
+                            FilterPill(model.mailbox.name(of: place), isSelected: model.place == place) {
+                                withAnimation(Motion.quick) { model.place = place }
+                            }
+                        }
+                    }
+                    .padding(Space.s2)
+                }
+                .padding(.horizontal, -Space.s2)
+            }
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s2)
+        .background(Theme.current.bg.color)
     }
 
     private func conversationPage(_ id: UUID) -> some View {

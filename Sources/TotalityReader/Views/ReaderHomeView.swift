@@ -61,15 +61,6 @@ public struct ReaderHomeView: View {
                             DriveFileView(route: file, model: model)
                         }
                     }
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        VStack(spacing: Space.s2) {
-                            SearchBox("Search titles and text", text: $model.query)
-                            if let importing = model.importing { ImportBar(progress: importing) }
-                        }
-                        .padding(.horizontal, Space.s4)
-                        .padding(.vertical, Space.s2)
-                        .background(Theme.current.bg.color)
-                    }
             }
             .tint(Theme.current.accent.color)
             if model.listen.isActive {
@@ -145,6 +136,12 @@ extension ReaderItem {
         }
     }
 
+    /// A PDF or an EPUB: what the Books filter shows.
+    var isBook: Bool { typeName == "PDF" || typeName == "EPUB" }
+
+    /// Written here or a Word file: what the Docs filter shows.
+    var isDoc: Bool { kind == .note || typeName == "Word" }
+
     /// The quiet line under a name.
     var detail: String {
         detail(on: updatedAt)
@@ -163,10 +160,7 @@ struct ReaderRow: View {
     var body: some View {
         let theme = Theme.current
         HStack(spacing: Space.s3) {
-            Image(systemName: item.systemImage)
-                .foregroundStyle(item.kind == .folder ? theme.accent.color : theme.textSecondary.color)
-                .frame(width: Space.s5)
-                .accessibilityHidden(true)
+            ReaderCover(systemImage: item.systemImage, isAccent: item.kind == .folder || item.isBook)
             VStack(alignment: .leading, spacing: Space.s1) {
                 Text(item.displayTitle)
                     .font(Typeface.headline)
@@ -179,8 +173,28 @@ struct ReaderRow: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, Space.s1)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A small upright block standing in for a cover: books and folders in the accent, the rest quiet.
+struct ReaderCover: View {
+    let systemImage: String
+    let isAccent: Bool
+    var width: CGFloat = Space.s6 + Space.s3
+    var height: CGFloat = Space.s7 + Space.s2
+
+    var body: some View {
+        let theme = Theme.current
+        Image(systemName: systemImage)
+            .font(Typeface.headline)
+            .foregroundStyle(isAccent ? theme.accentOn.color : theme.accent.color)
+            .frame(width: width, height: height)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .fill(isAccent ? theme.accent.color : theme.highlight.color)
+            )
+            .accessibilityHidden(true)
     }
 }
 
@@ -210,7 +224,7 @@ struct ReaderMessage: View {
 }
 
 /// A big file being sealed into the Reader, a piece at a time.
-private struct ImportBar: View {
+struct ImportBar: View {
     let progress: ImportProgress
 
     var body: some View {

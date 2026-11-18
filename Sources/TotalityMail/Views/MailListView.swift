@@ -60,6 +60,8 @@ struct MailListView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                // Room above the + button for the last conversation.
+                .contentMargins(.bottom, Metric.addButton + Space.s5, for: .scrollContent)
                 // The spinner stays until every account has been checked.
                 .refreshable { await model.refresh() }
             }
@@ -328,11 +330,24 @@ struct MailRow: View {
         .padding(.horizontal, Space.s3)
         .padding(.vertical, Space.s3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Only the open or picked row gets a soft accent wash. The rest sit flat, so the list reads as one surface.
-        .selectionWash(isOpen || isSelected, in: RoundedRectangle(cornerRadius: Radius.md))
+        // Each conversation is a raised card; the open or picked one gets a flat accent wash instead.
+        .modifier(MailRowSurface(isOn: isOpen || isSelected))
         .contentShape(RoundedRectangle(cornerRadius: Radius.md))
         .accessibilityElement(children: .combine)
         .accessibilityValue(isUnread ? "Unread" : "")
+    }
+}
+
+private struct MailRowSurface: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+        if isOn {
+            content.selectionWash(true, in: shape)
+        } else {
+            content.neumorphic(.raised, in: shape)
+        }
     }
 }
 
