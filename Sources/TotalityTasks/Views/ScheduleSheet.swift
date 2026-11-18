@@ -7,6 +7,8 @@ struct ScheduleSheet: View {
     let target: ScheduleTarget
     let onDone: () -> Void
     @State private var day = Date()
+    /// The deadline's optional time, which "1 hour before" counts back from.
+    @State private var deadlineTime: Date?
 
     var body: some View {
         let theme = Theme.current
@@ -33,10 +35,32 @@ struct ScheduleSheet: View {
                         .environment(\.timeZone, calendar.timeZone)
                         .padding(Space.s3)
                         .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                    if target.kind == .deadline {
+                        HStack {
+                            Toggle("At a time", isOn: Binding(
+                                get: { deadlineTime != nil },
+                                set: { deadlineTime = $0 ? TaskDay(year: 2026, month: 1, day: 15).date(at: TaskTime(hour: 17)!, in: calendar) : nil }
+                            ))
+                            .font(Typeface.body)
+                            .tint(theme.accent.color)
+                            if let chosen = deadlineTime {
+                                DatePicker("Time", selection: Binding(get: { chosen }, set: { deadlineTime = $0 }), displayedComponents: .hourAndMinute)
+                                    .labelsHidden()
+                                    .environment(\.calendar, calendar)
+                                    .environment(\.timeZone, calendar.timeZone)
+                            }
+                        }
+                        .raisedField()
+                    }
                     if target.kind == .deadline, task?.deadline != nil {
                         Button("Remove deadline", role: .destructive) {
                             Task {
-                                for id in target.ids { await model.change(id) { $0.deadline = nil } }
+                                for id in target.ids {
+                                    await model.change(id) {
+                                        $0.deadline = nil
+                                        $0.deadlineTime = nil
+                                    }
+                                }
                                 onDone()
                             }
                         }
@@ -60,7 +84,13 @@ struct ScheduleSheet: View {
                             if target.kind == .when {
                                 await model.schedule(target.ids, .day(chosen, evening: false))
                             } else {
-                                for id in target.ids { await model.change(id) { $0.deadline = chosen } }
+                                let time = deadlineTime.map { TaskTime($0, in: calendar) }
+                                for id in target.ids {
+                                    await model.change(id) {
+                                        $0.deadline = chosen
+                                        $0.deadlineTime = time
+                                    }
+                                }
                             }
                             onDone()
                         }
@@ -72,6 +102,9 @@ struct ScheduleSheet: View {
         .onAppear {
             let current = target.kind == .when ? task?.when : task?.deadline
             day = (current ?? today).start(in: calendar).addingTimeInterval(12 * 3600)
+            if target.kind == .deadline, let time = task?.deadlineTime {
+                deadlineTime = TaskDay(year: 2026, month: 1, day: 15).date(at: time, in: calendar)
+            }
         }
     }
 

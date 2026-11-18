@@ -1,6 +1,7 @@
 import SwiftUI
 import TotalityCore
 import TotalityPhotos
+import TotalityTasks
 import TotalityUI
 
 @main
@@ -8,6 +9,9 @@ struct TotalityApp: App {
     init() {
         // iOS needs this before launch finishes. A run with no library open does nothing.
         SyncSchedule.register()
+        // Before launch finishes too, so Complete or Snooze on a notification, or a place reminder, that
+        // wakes the app is handled.
+        SystemTaskReminders.shared.start()
     }
 
     var body: some Scene {

@@ -62,6 +62,19 @@ struct TaskRow: View {
                 }
             }
             Spacer(minLength: Space.s2)
+            if task.repeatRule != nil {
+                Image(systemName: "repeat")
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.accent.color)
+                    .accessibilityLabel("Repeats")
+            }
+            if !task.reminders.isEmpty, !isDone {
+                let paused = model.reminderAccess.isPaused(task)
+                Image(systemName: paused ? "bell.slash" : "bell")
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .accessibilityLabel(paused ? "Reminder can't ring" : "Has a reminder")
+            }
             if task.hasNotes {
                 Image(systemName: "note.text")
                     .font(Typeface.caption)
@@ -142,6 +155,8 @@ struct TaskEditor: View {
     @State private var newItem = ""
     @State private var newTag = ""
     @State private var confirmingDelete = false
+    @State private var editingRepeat = false
+    @State private var editingReminders = false
     @FocusState private var focus: Focus?
 
     private enum Focus: Hashable { case title, notes, item(UUID), newItem, newTag }
@@ -167,6 +182,9 @@ struct TaskEditor: View {
             notes
             checklist
             chips
+            if task.repeatRule != nil {
+                RepeatCard(model: model, task: task) { editingRepeat = true }
+            }
             tags
             HStack {
                 Spacer()
@@ -197,6 +215,12 @@ struct TaskEditor: View {
             draft = new.applying(typed, since: typedSince, at: new.updatedAt)
         }
         .onDisappear { Task { await save() } }
+        .sheet(isPresented: $editingRepeat) {
+            RepeatSheet(model: model, taskID: task.id) { editingRepeat = false }
+        }
+        .sheet(isPresented: $editingReminders) {
+            RemindersSheet(model: model, taskID: task.id) { editingReminders = false }
+        }
         .confirmationDialog("Delete this task?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Task", role: .destructive) { Task { await model.delete(task.id) } }
         } message: {
@@ -302,6 +326,15 @@ struct TaskEditor: View {
                 isWarning: TaskRules.deadlineIsNear(draft, today: today, in: calendar)
             ) {
                 onSchedule(ScheduleTarget(id: task.id, kind: .deadline))
+            }
+            Chip(systemImage: "repeat", text: task.repeatRule.map { $0.shortSummary(in: calendar) } ?? "Repeat") {
+                editingRepeat = true
+            }
+            Chip(
+                systemImage: model.reminderAccess.isPaused(task) ? "bell.slash" : "bell",
+                text: task.reminders.isEmpty ? "Remind" : (task.reminders.count == 1 ? "1 reminder" : "\(task.reminders.count) reminders")
+            ) {
+                editingReminders = true
             }
             Menu {
                 Picker("Priority", selection: $draft.priority) {
