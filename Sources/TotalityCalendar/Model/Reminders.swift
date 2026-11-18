@@ -17,9 +17,9 @@ public protocol ReminderScheduler: Sendable {
 }
 
 enum ReminderPlanner {
-    /// iOS keeps 64 pending notifications per app. The rest are picked up as these fire and the
-    /// Calendar is opened again.
-    static let limit = 60
+    /// iOS keeps 64 pending notifications per app, shared with Tasks, which takes up to 40. The rest are
+    /// picked up as these fire and the Calendar is opened again.
+    static let limit = 24
     static let horizonDays = 30
     /// All-day events have no start time, so their reminders count back from this hour.
     static let allDayHour = 9

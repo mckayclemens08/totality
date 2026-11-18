@@ -23,7 +23,9 @@ public final class TasksModel {
     public static let lingerTime = Duration.milliseconds(700)
 
     public private(set) var phase = Phase.loading
-    public private(set) var tasks: [TaskItem] = []
+    public private(set) var tasks: [TaskItem] = [] {
+        didSet { remindersNeedPlanning() }
+    }
     public private(set) var lists: [TaskList] = []
     /// Tasks that wouldn't open on this device.
     public private(set) var unreadable = 0
@@ -51,6 +53,14 @@ public final class TasksModel {
     @ObservationIgnored private let clock: @Sendable () -> Date
     @ObservationIgnored private var undoTimer: Task<Void, Never>?
     @ObservationIgnored private var deleteTimer: Task<Void, Never>?
+
+    /// Rings reminders on this iPhone. Nil in tests and previews, where nothing rings.
+    @ObservationIgnored public var reminderCenter: (any TaskReminderScheduling)?
+    /// Complete and Snooze from notifications, waiting for Tasks to open.
+    @ObservationIgnored public var actionQueue: ReminderActionQueue?
+    @ObservationIgnored private var planTimer: Task<Void, Never>?
+    /// Whether reminders can ring here, for the reminders-off notices.
+    public private(set) var reminderAccess = ReminderAccess()
 
     /// Deleted a moment ago, still held here for Undo.
     public private(set) var pendingDelete: PendingDelete?
@@ -93,6 +103,8 @@ public final class TasksModel {
         } catch {
             phase = .failed
         }
+        await applyQueuedActions()
+        await planReminders()
         await loadEvents()
     }
 
@@ -217,12 +229,12 @@ public final class TasksModel {
         guard let task = tasks.first(where: { $0.id == id }) else { return }
         if task.isCompleted {
             lingering.remove(id)
-            await change(id) { $0.completedAt = nil }
+            await unfinish(id)
             if lastCompleted?.id == id { lastCompleted = nil }
             return
         }
         let at = clock()
-        guard await change(id, { $0.completedAt = at }) else { return }
+        guard await finish(id, at: at) else { return }
         completions += 1
         lingering.insert(id)
         lastCompleted = Completion(id: id, title: task.displayTitle)
@@ -241,7 +253,7 @@ public final class TasksModel {
         lastCompleted = nil
         undoTimer?.cancel()
         lingering.remove(last.id)
-        await change(last.id) { $0.completedAt = nil }
+        await unfinish(last.id)
     }
 
     /// Lets the Undo bar go before its time, as when the person dismisses it.
@@ -497,7 +509,7 @@ extension TasksModel {
     public func complete(_ ids: some Sequence<UUID>) async {
         let at = clock()
         for id in ids where !isDone(id) {
-            await change(id) { $0.completedAt = at }
+            await finish(id, at: at)
         }
         completions += 1
     }
@@ -581,5 +593,161 @@ extension TasksModel {
     private static func seconds(_ duration: Duration) -> TimeInterval {
         let parts = duration.components
         return TimeInterval(parts.seconds) + TimeInterval(parts.attoseconds) / 1e18
+    }
+}
+
+// MARK: - Step 3: repeats and reminders
+
+extension TasksModel {
+    /// Ticks a task off. A repeating one leaves its next copy behind, on the next day it falls on.
+    @discardableResult
+    func finish(_ id: UUID, at: Date) async -> Bool {
+        guard let task = tasks.first(where: { $0.id == id }), !task.isCompleted else { return false }
+        let following = TaskRepeats.following(task, completedAt: at, in: calendar)
+        let done = await change(id) { task in
+            task.completedAt = at
+            task.snoozedUntil = nil
+            // The rule moves on to the copy, so the finished one in the Logbook doesn't repeat too.
+            if following != nil { task.repeatRule = nil }
+        }
+        guard done else { return false }
+        if let following, !tasks.contains(where: { $0.id == following.id }) {
+            _ = await save(following, over: nil)
+        }
+        return true
+    }
+
+    /// Brings a finished task back. If it left a copy that's still waiting, the copy goes and the rule
+    /// comes back to this one.
+    func unfinish(_ id: UUID) async {
+        guard tasks.contains(where: { $0.id == id }) else { return }
+        let following = tasks.first { candidate in
+            guard !candidate.isCompleted, candidate.repeatRule != nil, let day = TaskRepeats.anchor(of: candidate) else { return false }
+            return TaskRepeats.followingID(of: id, on: day) == candidate.id
+        }
+        await change(id) { task in
+            task.completedAt = nil
+            if var rule = following?.repeatRule {
+                rule.done = max(0, rule.done - 1)
+                task.repeatRule = rule
+            }
+        }
+        if let following, let vault {
+            try? await vault.delete(following.id)
+            tasks.removeAll { $0.id == following.id }
+        }
+    }
+
+    /// Sets, changes or (with nil) stops a task's repeat. A task with no day starts on the rule's first.
+    public func setRepeat(_ id: UUID, _ rule: RepeatRule?) async {
+        await change(id) { task in
+            task.repeatRule = rule
+            if let rule, task.when == nil, task.deadline == nil {
+                task.when = rule.start
+                if task.place != .anytime { task.place = .anytime }
+            }
+        }
+    }
+
+    /// Passes over the occurrence that's due; the task moves to the next one.
+    public func skipNext(_ id: UUID) async {
+        guard let task = tasks.first(where: { $0.id == id }), let moved = TaskRepeats.skippingNext(task, in: calendar) else { return }
+        await change(id) { task in
+            task.when = moved.when
+            task.deadline = moved.deadline
+            task.reminders = moved.reminders
+            task.repeatRule = moved.repeatRule
+            task.snoozedUntil = nil
+        }
+    }
+
+    /// Crosses a coming date out, or brings it back.
+    public func toggleSkip(_ id: UUID, on day: TaskDay) async {
+        await change(id) { task in
+            guard var rule = task.repeatRule else { return }
+            if rule.skipped.contains(day) { rule.skipped.remove(day) } else { rule.skipped.insert(day) }
+            task.repeatRule = rule
+        }
+    }
+
+    public func addReminder(_ id: UUID, _ kind: TaskReminder.Kind) async {
+        await change(id) { $0.reminders.append(TaskReminder(kind: kind)) }
+        await askForAccess(place: { if case .place = kind { true } else { false } }())
+    }
+
+    public func replaceReminder(_ id: UUID, _ reminder: TaskReminder) async {
+        await change(id) { task in
+            if let index = task.reminders.firstIndex(where: { $0.id == reminder.id }) {
+                task.reminders[index] = reminder
+            } else {
+                task.reminders.append(reminder)
+            }
+        }
+        await askForAccess(place: reminder.isPlace)
+    }
+
+    public func removeReminder(_ id: UUID, _ reminder: UUID) async {
+        await change(id) { $0.reminders.removeAll { $0.id == reminder } }
+    }
+
+    public func setNagging(_ id: UUID, _ nagging: Nagging?) async {
+        await change(id) { $0.nagging = nagging }
+        if nagging != nil { await askForAccess(place: false) }
+    }
+
+    public func snooze(_ id: UUID, _ snooze: ReminderAction.Snooze) async {
+        let until = snooze.until(from: clock(), in: calendar)
+        await change(id) { $0.snoozedUntil = until }
+    }
+
+    /// Asks iOS for what a new reminder needs, the first time only. Location asks for Always, and only
+    /// once a place reminder is made (owner, 2026-11-18).
+    func askForAccess(place: Bool) async {
+        guard let reminderCenter else { return }
+        var access = await reminderCenter.access()
+        if access.notifications == .notAsked { _ = await reminderCenter.requestNotifications() }
+        if place, access.location == .notAsked || access.location == .whileUsing { await reminderCenter.requestAlwaysLocation() }
+        access = await reminderCenter.access()
+        reminderAccess = access
+    }
+
+    public func refreshReminderAccess() async {
+        guard let reminderCenter else { return }
+        reminderAccess = await reminderCenter.access()
+    }
+
+    /// Applies Complete and Snooze taken from notifications while Tasks was closed or in the background.
+    public func applyQueuedActions() async {
+        guard phase == .ready, let actionQueue else { return }
+        for action in actionQueue.drain() {
+            guard let task = tasks.first(where: { $0.id == action.taskID }) else { continue }
+            switch action.kind {
+            case .complete:
+                if !task.isCompleted { await finish(task.id, at: action.at) }
+            case .snooze(let until):
+                if !task.isCompleted { await change(task.id) { $0.snoozedUntil = until } }
+            }
+        }
+    }
+
+    fileprivate func remindersNeedPlanning() {
+        guard reminderCenter != nil, phase == .ready else { return }
+        planTimer?.cancel()
+        planTimer = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await self?.planReminders()
+        }
+    }
+
+    /// Sets every reminder on the iPhone again from the tasks as they are now.
+    public func planReminders() async {
+        guard let reminderCenter, phase == .ready else { return }
+        let names = Dictionary(lists.map { ($0.id, $0.displayName) }, uniquingKeysWith: { a, _ in a })
+        let now = clock()
+        let planned = TaskReminderPlanner.plan(tasks, listNames: names, now: now, calendar: calendar)
+        let places = TaskReminderPlanner.places(tasks, calendar: calendar)
+        await reminderCenter.replace(with: planned, places: places)
+        reminderAccess = await reminderCenter.access()
     }
 }

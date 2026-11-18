@@ -134,6 +134,10 @@ struct RootView: View {
             if removed.contains(.calendar), !old.contains(.calendar) || old == removed {
                 Task { await SystemReminders().replace(with: []) }
             }
+            // Tasks coming off Home clears its reminders; coming back plans them again.
+            if removed.contains(.tasks) != old.contains(.tasks) || old == removed {
+                Task { await tasks?.planReminders() }
+            }
         }
         .onChange(of: showingAccount) {
             if !showingAccount {

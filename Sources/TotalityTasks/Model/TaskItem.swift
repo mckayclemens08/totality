@@ -43,6 +43,8 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
     /// takes the newer of each part and nothing either side changed is lost.
     public enum Field: String, Codable, Sendable, CaseIterable {
         case title, notes, place, schedule, deadline, checklist, tags, priority, list, order, completion
+        /// From step 3. Older versions keep these names' times but can't read the parts, and leave them be.
+        case repeating, reminders, snooze
     }
 
     public let id: UUID
@@ -58,6 +60,8 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
     public var time: TaskTime?
     /// The day it must be done by.
     public var deadline: TaskDay?
+    /// An optional time on the deadline day, which "1 hour before" counts back from.
+    public var deadlineTime: TaskTime?
     public var checklist: [ChecklistItem]
     /// Nested with a slash, like "school/thesis".
     public var tags: [String]
@@ -74,6 +78,14 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
     public var updatedAt: Date
     /// When each part last changed, by `Field` name. Names this version doesn't know are kept.
     public var edits: [String: Date]
+    /// How it comes back once done (step 3).
+    public var repeatRule: RepeatRule?
+    /// Time, deadline and place reminders (step 3).
+    public var reminders: [TaskReminder]
+    /// Keeps reminding after a time reminder rings, until it's done.
+    public var nagging: Nagging?
+    /// Snoozed from a notification: nothing rings, nagging included, until then (owner, 2026-11-18).
+    public var snoozedUntil: Date?
 
     public init(
         id: UUID = UUID(), title: String, notes: String = "", place: Place = .inbox, when: TaskDay? = nil,
@@ -99,11 +111,13 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         self.completedAt = completedAt
         updatedAt = createdAt
         edits = [:]
+        reminders = []
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, notes, place, when, isEvening, time, deadline, checklist, tags, priority, listID, headingID, order
         case createdAt, completedAt, updatedAt, edits
+        case deadlineTime, repeatRule, reminders, nagging, snoozedUntil
     }
 
     /// Missing parts take their defaults, so a task saved by an older version still opens.
@@ -127,6 +141,11 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
         edits = try c.decodeIfPresent([String: Date].self, forKey: .edits) ?? [:]
+        deadlineTime = try? c.decodeIfPresent(TaskTime.self, forKey: .deadlineTime)
+        repeatRule = try? c.decodeIfPresent(RepeatRule.self, forKey: .repeatRule)
+        reminders = (try? c.decodeIfPresent([TaskReminder].self, forKey: .reminders)) ?? []
+        nagging = try? c.decodeIfPresent(Nagging.self, forKey: .nagging)
+        snoozedUntil = try? c.decodeIfPresent(Date.self, forKey: .snoozedUntil)
     }
 
     public var isCompleted: Bool { completedAt != nil }
@@ -169,13 +188,16 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         case .notes: notes == other.notes
         case .place: place == other.place
         case .schedule: when == other.when && isEvening == other.isEvening && time == other.time
-        case .deadline: deadline == other.deadline
+        case .deadline: deadline == other.deadline && deadlineTime == other.deadlineTime
         case .checklist: checklist == other.checklist
         case .tags: tags == other.tags
         case .priority: priority == other.priority
         case .list: listID == other.listID && headingID == other.headingID
         case .order: order == other.order
         case .completion: completedAt == other.completedAt
+        case .repeating: repeatRule == other.repeatRule
+        case .reminders: reminders == other.reminders && nagging == other.nagging
+        case .snooze: snoozedUntil == other.snoozedUntil
         }
     }
 
@@ -188,7 +210,9 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
             when = other.when
             isEvening = other.isEvening
             time = other.time
-        case .deadline: deadline = other.deadline
+        case .deadline:
+            deadline = other.deadline
+            deadlineTime = other.deadlineTime
         case .checklist: checklist = other.checklist
         case .tags: tags = other.tags
         case .priority: priority = other.priority
@@ -197,6 +221,11 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
             headingID = other.headingID
         case .order: order = other.order
         case .completion: completedAt = other.completedAt
+        case .repeating: repeatRule = other.repeatRule
+        case .reminders:
+            reminders = other.reminders
+            nagging = other.nagging
+        case .snooze: snoozedUntil = other.snoozedUntil
         }
     }
 
@@ -255,13 +284,16 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
             case .notes: try c.encode(task.notes)
             case .place: try c.encode(task.place)
             case .schedule: try c.encode([String(describing: task.when), String(task.isEvening), String(describing: task.time)])
-            case .deadline: try c.encode(String(describing: task.deadline))
+            case .deadline: try c.encode(String(describing: task.deadline) + String(describing: task.deadlineTime))
             case .checklist: try c.encode(task.checklist.map { "\($0.id)|\($0.title)|\($0.isDone)" })
             case .tags: try c.encode(task.tags)
             case .priority: try c.encode(task.priority.rawValue)
             case .list: try c.encode((task.listID?.uuidString ?? "") + "|" + (task.headingID?.uuidString ?? ""))
             case .order: try c.encode(task.order)
             case .completion: try c.encode(task.completedAt?.timeIntervalSince1970 ?? 0)
+            case .repeating: try c.encode(task.repeatRule)
+            case .reminders: try c.encode([String(describing: task.reminders), String(describing: task.nagging)])
+            case .snooze: try c.encode(task.snoozedUntil?.timeIntervalSince1970 ?? 0)
             }
         }
     }

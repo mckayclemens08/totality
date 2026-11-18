@@ -126,6 +126,10 @@ enum ContentSetup {
             TasksModule(vault: taskVault, refresh: { await refresh(.tasks) }),
         ], profiles: AccountSetup.profiles)
         let tasks = TasksModel(vault: taskVault)
+        // Reminders ring from this iPhone alone: local notifications and places iOS watches.
+        tasks.reminderCenter = HomeGatedTaskReminders(SystemTaskReminders.shared)
+        tasks.actionQueue = .shared
+        SystemTaskReminders.shared.onAction = { [weak tasks] _ in await tasks?.applyQueuedActions() }
         // Upcoming's events come through the registry, so Tasks never reaches into the Calendar.
         tasks.agenda = { [registry] start, end in await registry.agenda(from: start, to: end) }
         return (
@@ -349,6 +353,24 @@ final class ModuleRefreshers {
     func refresh(_ module: ModuleID) async {
         await refreshers[module]?.refresh(.automatic)
     }
+}
+
+/// Tasks' reminders, held back while Tasks is off Home, like Calendar's.
+struct HomeGatedTaskReminders: TaskReminderScheduling {
+    private let inner: any TaskReminderScheduling
+
+    init(_ inner: any TaskReminderScheduling) {
+        self.inner = inner
+    }
+
+    func replace(with notifications: [PlannedTaskNotification], places: [PlannedPlace]) async {
+        let removed = await MainActor.run { AppRefresh.shared.removed.contains(.tasks) }
+        await inner.replace(with: removed ? [] : notifications, places: removed ? [] : places)
+    }
+
+    func access() async -> ReminderAccess { await inner.access() }
+    func requestNotifications() async -> Bool { await inner.requestNotifications() }
+    func requestAlwaysLocation() async { await inner.requestAlwaysLocation() }
 }
 
 /// Calendar's reminders, held back while Calendar is off Home. Removing Calendar clears what's waiting, and
