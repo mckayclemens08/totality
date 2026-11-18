@@ -3,7 +3,7 @@ import SwiftUI
 import TotalityCore
 import TotalityUI
 
-/// The signed-in page: who you are to other people, and the way to change it.
+/// The public profile: who you are to other people, and the way to change it. Reached from the Account page.
 struct ProfileSummary: View {
     let model: AccountModel
     let onEdit: () -> Void
@@ -60,9 +60,8 @@ struct ProfileHeader: View {
 }
 
 struct ProfilePicture: View {
-    private static let diameter = Space.s8 * 1.5
-
     let url: URL?
+    var diameter = Space.s8 * 1.5
 
     var body: some View {
         let theme = Theme.current
@@ -81,7 +80,7 @@ struct ProfilePicture: View {
                 placeholder
             }
         }
-        .frame(width: Self.diameter, height: Self.diameter)
+        .frame(width: diameter, height: diameter)
         .clipShape(Circle())
         .neumorphic(.raised, in: Circle())
         .foregroundStyle(theme.textSecondary.color)
@@ -194,57 +193,6 @@ struct HomeStyleSetting: View {
             .pickerStyle(.segmented)
             .labelsHidden()
         }
-    }
-}
-
-struct AccountSettingsView: View {
-    let model: AccountModel
-
-    var body: some View {
-        let theme = Theme.current
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.s4) {
-                HomeStyleSetting()
-                NavigationLink("Theme · \(ThemeStore.shared.choice.name)") { ThemePickerView() }
-                    .font(Typeface.callout)
-                if case .signedIn(let username) = model.phase {
-                    AccountDetail(text: "Signed in as \(username).")
-                }
-                AccountDetail(text: model.deviceRegistered ? "This device is added to your account." : "This device isn't added to your account yet.")
-                AccountDetail(text: model.sync?.isAvailable == true
-                    ? "Your notes, files, and events sync between your devices, encrypted. Signing out leaves them on this device, and event reminders keep showing."
-                    : "Set up your recovery key to sync your notes, files, and events. Signing out leaves them on this device, and event reminders keep showing.")
-                if let sync = model.sync, let summary = sync.summary {
-                    AccountDetail(text: summary)
-                    Button("Sync now") { Task { await sync.syncNow() } }
-                        .font(Typeface.callout)
-                        .disabled(sync.status == .syncing)
-                    if sync.heldRemovals > 0 {
-                        Button("Remove those \(sync.heldRemovals) items here too") { Task { await sync.applyHeldRemovals() } }
-                            .font(Typeface.callout)
-                            .disabled(sync.status == .syncing)
-                    }
-                }
-                if let backup = model.backup {
-                    NavigationLink("Recovery key") { BackupView(model: backup) }
-                        .font(Typeface.callout)
-                }
-                if let storage = model.storage {
-                    StorageSection(model: storage)
-                        .padding(.vertical, Space.s2)
-                }
-                AccountButton(title: "Sign out", isWorking: model.isWorking) { Task { await model.signOut() } }
-                if let notice = model.notice {
-                    Text(notice)
-                        .font(Typeface.caption)
-                        .foregroundStyle(theme.danger.color)
-                }
-            }
-            .padding(Space.s4)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .background(theme.bg.color)
-        .navigationTitle("Settings")
     }
 }
 

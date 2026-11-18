@@ -1,7 +1,8 @@
 import SwiftUI
 import TotalityUI
 
-/// Sign in or create an account with a username and password, and your profile once you have. There is no email.
+/// Sign in or create an account with a username and password, and the private Account page once you have.
+/// There is no email.
 public struct AccountView: View {
     private let model: AccountModel
     private let onClose: () -> Void
@@ -9,9 +10,6 @@ public struct AccountView: View {
     @State private var password = ""
     @State private var confirmation = ""
     @State private var creating = false
-    @State private var editing = false
-    @State private var sharing = false
-    @State private var showingSettings = false
 
     private static let noticeID = "notice"
 
@@ -40,35 +38,20 @@ public struct AccountView: View {
                 #endif
             }
             .background(theme.bg.color)
-            .navigationTitle(isSignedIn ? "Profile" : "Account")
+            .navigationTitle("Account")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", action: onClose)
                 }
-                if isSignedIn {
-                    ToolbarItem(placement: .primaryAction) {
-                        ToolbarIcon("Settings", systemImage: "gearshape.fill") { showingSettings = true }
-                    }
-                }
-            }
-            .navigationDestination(isPresented: $editing) {
-                EditProfileView(model: model) { editing = false }
-            }
-            .navigationDestination(isPresented: $sharing) {
-                ShareProfileView(model: model) { sharing = false }
-            }
-            .navigationDestination(isPresented: $showingSettings) {
-                AccountSettingsView(model: model)
             }
         }
+        // Signing in or out drops whatever was opened from the Account page, as it did from Settings.
+        .id(isSignedIn)
         .tint(theme.accent.color)
         .task { await model.load() }
         .onChange(of: model.phase) {
             password = ""
             confirmation = ""
-            editing = false
-            sharing = false
-            showingSettings = false
         }
     }
 
@@ -114,7 +97,7 @@ public struct AccountView: View {
             HomeStyleSetting()
                 .padding(.top, Space.s4)
         case .signedIn:
-            ProfileSummary(model: model, onEdit: { editing = true }, onShare: { sharing = true })
+            AccountPage(model: model)
         }
     }
 
