@@ -153,10 +153,19 @@ public struct HomeView: View {
         }
         .padding(.horizontal, Space.s4)
         .padding(.top, Space.s4)
-        .background {
-            LinearGradient(colors: [background, background.opacity(0)], startPoint: .center, endPoint: .bottom)
-                .ignoresSafeArea(edges: .top)
-                .allowsHitTesting(false)
+        .padding(.bottom, Space.s2)
+        // Solid behind the buttons, so tiles scrolling up never show through them, then a short soft
+        // fade instead of an edge.
+        .background(alignment: .top) {
+            VStack(spacing: 0) {
+                background
+                LinearGradient(colors: [background, background.opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Space.s4)
+                    .offset(y: Space.s4)
+                    .frame(height: 0, alignment: .top)
+            }
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
         }
     }
 }
