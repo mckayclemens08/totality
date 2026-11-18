@@ -31,14 +31,22 @@ public struct CalendarHomeView: View {
                 .navigationDestination(for: CalendarEntry.self) { entry in
                     EventDetailView(entry: entry, model: model, onOpen: onOpen) { path.removeAll() }
                 }
-                .toolbar { toolbar }
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
+                // The Calendar draws its own header (redesign, 2026-11-17).
+                .toolbar(.hidden, for: .navigationBar)
                 #else
                 .navigationTitle("Calendar")
                 #endif
         }
         .tint(theme.accent.color)
+        .overlay(alignment: .bottomTrailing) {
+            if model.phase == .ready, path.isEmpty {
+                AddButton("New event") { creating = model.newDraft() }
+                    .padding(Space.s4)
+                    .keyboardShortcut("n", modifiers: .command)
+            }
+        }
         .sheet(isPresented: isCreating) {
             if let creating {
                 NavigationStack {
@@ -76,32 +84,43 @@ public struct CalendarHomeView: View {
         Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })
     }
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if let onClose {
-            ToolbarItem(placement: .cancellationAction) {
-                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
+    /// Home, back to today, and the view menu, which also reaches Google and device calendars.
+    private var buttons: some View {
+        HStack(spacing: Space.s3) {
+            if let onClose {
+                HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
-        }
-        ToolbarItem(placement: .automatic) {
-            Menu {
-                Picker("View", selection: $model.mode) {
-                    ForEach(CalendarModel.Mode.allCases, id: \.self) { mode in
-                        Label(model.name(of: mode), systemImage: mode.systemImage).tag(mode)
+            Spacer(minLength: 0)
+            if model.phase == .ready {
+                if !model.isShowingToday {
+                    HeaderPill("Today") {
+                        movingForward = model.selectedDay < model.today
+                        withAnimation(Motion.quick) { model.showToday() }
                     }
                 }
-                Divider()
-                Button("Calendars", systemImage: "calendar.badge.checkmark") { showingSources = true }
-            } label: {
-                ToolbarGlyph(systemImage: model.mode.toolbarImage)
-                    .accessibilityLabel("View")
+                HeaderMenu("View", systemImage: model.mode.toolbarImage) {
+                    Picker("View", selection: $model.mode) {
+                        ForEach(CalendarModel.Mode.allCases, id: \.self) { mode in
+                            Label(model.name(of: mode), systemImage: mode.systemImage).tag(mode)
+                        }
+                    }
+                    Divider()
+                    Button("Calendars", systemImage: "calendar.badge.checkmark") { showingSources = true }
+                }
             }
         }
-        ToolbarItem(placement: .primaryAction) {
-            ToolbarIcon("New event", systemImage: "plus") { creating = model.newDraft() }
-        }
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s2)
     }
 
     @ViewBuilder private var content: some View {
+        VStack(spacing: Space.s3) {
+            buttons
+            phaseContent
+        }
+    }
+
+    @ViewBuilder private var phaseContent: some View {
         switch model.phase {
         case .loading:
             ProgressView("Opening your calendar")
@@ -116,6 +135,7 @@ public struct CalendarHomeView: View {
         case .ready:
             VStack(spacing: Space.s3) {
                 header
+                if model.mode == .day { WeekStrip(model: model) }
                 UnreadableNote(model: model)
                 RefreshStatusLine(model.refresher)
                 GoogleSyncNote(model: model)
@@ -145,43 +165,26 @@ public struct CalendarHomeView: View {
     }
 
     private var header: some View {
-        let theme = Theme.current
-        return HStack(spacing: Space.s3) {
-            Text(model.title)
-                .font(Typeface.display)
-                .foregroundStyle(theme.textPrimary.color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityAction(named: "Previous") { move(by: -1) }
-                .accessibilityAction(named: "Next") { move(by: 1) }
-            Spacer(minLength: 0)
-            if !model.isShowingToday {
-                Button("Today") {
-                    movingForward = model.selectedDay < model.today
-                    withAnimation(Motion.quick) { model.showToday() }
-                }
-                .font(Typeface.callout)
-                .foregroundStyle(theme.accent.color)
-                .padding(.horizontal, Space.s3)
-                .padding(.vertical, Space.s2)
-                .neumorphic(.subtle, in: Capsule())
-                .buttonStyle(.plain)
-            }
+        ScreenTitle(model.title)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .accessibilityAction(named: "Previous") { move(by: -1) }
+            .accessibilityAction(named: "Next") { move(by: 1) }
             #if os(macOS)
-            if model.canMove {
-                Button("Previous", systemImage: "chevron.left") { move(by: -1) }
-                    .keyboardShortcut(.leftArrow, modifiers: [])
-                Button("Next", systemImage: "chevron.right") { move(by: 1) }
-                    .keyboardShortcut(.rightArrow, modifiers: [])
+            .overlay(alignment: .trailing) {
+                if model.canMove {
+                    HStack {
+                        Button("Previous", systemImage: "chevron.left") { move(by: -1) }
+                            .keyboardShortcut(.leftArrow, modifiers: [])
+                        Button("Next", systemImage: "chevron.right") { move(by: 1) }
+                            .keyboardShortcut(.rightArrow, modifiers: [])
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                }
             }
             #endif
-        }
-        #if os(macOS)
-        .labelStyle(.iconOnly)
-        .buttonStyle(.plain)
-        #endif
-        .padding(.horizontal, Space.s4)
+            .padding(.horizontal, Space.s4)
     }
 
     private func move(by steps: Int) {
@@ -222,8 +225,8 @@ public struct CalendarHomeView: View {
                                     .tappable { path.append(entry) }
                             }
                         } header: {
-                            Text(model.heading(for: day.day))
-                                .font(Typeface.callout)
+                            Text(scheduleHeading(day.day, count: day.entries.count))
+                                .font(Typeface.caption.weight(.semibold))
                                 .foregroundStyle(theme.textSecondary.color)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, Space.s1)
@@ -232,9 +235,70 @@ public struct CalendarHomeView: View {
                     }
                 }
                 .padding(.horizontal, Space.s4)
-                .padding(.bottom, Space.s4)
+                // Room for the + button over the last event.
+                .padding(.bottom, Metric.addButton + Space.s5)
             }
         }
+    }
+
+    /// "Tuesday · 4 events", as on the canvas.
+    private func scheduleHeading(_ day: CalendarDay, count: Int) -> String {
+        "\(model.heading(for: day)) · \(count == 1 ? "1 event" : "\(count) events")"
+    }
+}
+
+/// The week around the chosen day, over the Day view: the chosen day filled with the accent, and a dot
+/// under each day that has something on it.
+struct WeekStrip: View {
+    let model: CalendarModel
+
+    private var days: [CalendarDay] {
+        let display = model.display
+        let weekday = display.component(.weekday, from: model.selectedDay.start(in: display))
+        let first = model.selectedDay.adding(days: -((weekday - display.firstWeekday + 7) % 7), in: display)
+        return (0..<7).map { first.adding(days: $0, in: display) }
+    }
+
+    var body: some View {
+        HStack(spacing: Space.s1 / 2) {
+            ForEach(days, id: \.self) { day in
+                cell(day)
+            }
+        }
+        .padding(Space.s1 + Space.s1 / 2)
+        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .padding(.horizontal, Space.s4)
+    }
+
+    private func cell(_ day: CalendarDay) -> some View {
+        let theme = Theme.current
+        let isChosen = day == model.selectedDay
+        let hasEvents = !model.entries(on: day).isEmpty
+        return VStack(spacing: Space.s1) {
+            Text(model.written(day, .dateTime.weekday(.narrow)))
+                .font(Typeface.micro)
+                .foregroundStyle(isChosen ? theme.accentOn.color : theme.textSecondary.color)
+            Text("\(day.day)")
+                .font(Typeface.headline)
+                .monospacedDigit()
+                .foregroundStyle(isChosen ? theme.accentOn.color : (day == model.today ? theme.accent.color : theme.textPrimary.color))
+            Circle()
+                .fill(isChosen ? theme.accentOn.color : theme.accent.color)
+                .frame(width: Space.s1, height: Space.s1)
+                .opacity(hasEvents ? 1 : 0)
+        }
+        .padding(.vertical, Space.s2)
+        .frame(maxWidth: .infinity)
+        .background {
+            if isChosen {
+                RoundedRectangle(cornerRadius: Radius.md, style: .continuous).fill(theme.accent.color)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.written(day, .dateTime.weekday(.wide).month(.wide).day()))
+        .accessibilityValue(hasEvents ? "Has events" : "")
+        .accessibilityAddTraits(isChosen ? .isSelected : [])
+        .tappable { withAnimation(Motion.quick) { model.select(day) } }
     }
 }
 
