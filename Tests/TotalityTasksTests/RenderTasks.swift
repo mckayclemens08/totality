@@ -74,27 +74,20 @@ import TotalityUI
     }
 
     private func screen(_ bucket: TaskBucket, _ model: TasksModel, expanded: UUID? = nil, @ViewBuilder _ content: () -> some View) -> some View {
-        let theme = Theme.current
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Space.s3) {
-                Image(systemName: bucket.systemImage)
-                    .font(Typeface.title)
-                    .foregroundStyle(bucket == .today ? theme.accent.color : theme.textSecondary.color)
-                Text(bucket.name).font(Typeface.display).foregroundStyle(theme.textPrimary.color)
-            }
-            .padding(.top, Space.s7)
-            .padding(.bottom, Space.s3)
+        VStack(alignment: .leading, spacing: Space.s3) {
+            ScreenTitle(bucket.name)
+                .padding(.top, Space.s7)
             content()
             Spacer(minLength: 0)
         }
         .padding(.horizontal, Space.s4)
-        .overlay(alignment: .bottomTrailing) { QuickAddButton {}.padding(Space.s5) }
+        .overlay(alignment: .bottomTrailing) { AddButton("New task") {}.padding(Space.s4) }
     }
 
     private func rows(_ tasks: [TaskItem], _ bucket: TaskBucket, _ model: TasksModel, expanded: UUID? = nil) -> some View {
         ForEach(tasks) { task in
             TaskRow(model: model, task: task, bucket: bucket, isExpanded: expanded == task.id, onTap: {}, onSchedule: { _ in })
-                .padding(.vertical, expanded == task.id ? Space.s2 : 0)
+                .padding(.vertical, Space.s1 + Space.s1 / 2)
         }
     }
 
@@ -102,7 +95,10 @@ import TotalityUI
         guard let directory = ProcessInfo.processInfo.environment["TOTALITY_RENDER_DIR"] else { return }
         let model = try await model()
 
-        try write(TasksFront(model: model).padding(.top, Space.s7), name: "tasks-front.png", to: directory)
+        try write(screen(.today, model) {
+            TodayProgressView(progress: model.progress)
+            rows(model.tasks(in: .today), .today, model)
+        }, name: "tasks-front.png", to: directory)
 
         try write(screen(.today, model) { rows(model.tasks(in: .today), .today, model) }, name: "tasks-today.png", to: directory)
 

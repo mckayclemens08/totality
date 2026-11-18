@@ -2,7 +2,7 @@ import SwiftUI
 import TotalityCore
 import TotalityUI
 
-/// One task on the surface: its title and one quiet line. Tapping opens the whole task in place.
+/// One task as a raised card: its title and one quiet line. Tapping opens the whole task in place.
 struct TaskRow: View {
     let model: TasksModel
     let task: TaskItem
@@ -18,6 +18,7 @@ struct TaskRow: View {
                 TickBox(isDone: isDone, title: task.displayTitle) {
                     Task { await model.toggle(task.id) }
                 }
+                .padding(.top, isExpanded ? 0 : Space.s2)
                 if isExpanded {
                     TaskEditor(model: model, task: task, onSchedule: onSchedule)
                 } else {
@@ -26,12 +27,11 @@ struct TaskRow: View {
             }
         }
         .padding(.vertical, isExpanded ? Space.s3 : 0)
-        .padding(.trailing, isExpanded ? Space.s3 : 0)
-        // Closed, a task is a row on the surface. Open, it rises into a card.
+        .padding(.leading, Space.s1)
+        .padding(.trailing, Space.s4)
+        // Every task is a raised card, open or closed (redesign, 2026-11-17).
         .background {
-            if isExpanded {
-                Color.clear.neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-            }
+            Color.clear.neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         }
         .animation(Motion.standard, value: isExpanded)
     }

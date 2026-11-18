@@ -7,6 +7,7 @@ struct TaskListView: View {
     @Bindable var model: TasksModel
     let bucket: TaskBucket
     @Binding var expanded: UUID?
+    // Set from the Today options menu in the header.
     @AppStorage("tasks.splitToday") private var splitToday = false
     @State private var scheduling: ScheduleTarget?
     @State private var query = ""
@@ -14,11 +15,22 @@ struct TaskListView: View {
     var body: some View {
         let theme = Theme.current
         List {
-            header
-                .plainRow()
             RefreshStatusLine(model.refresher)
                 .plainRow()
+            if model.unreadable > 0 {
+                Label(
+                    model.unreadable == 1 ? "1 task can't be opened with this device's key." : "\(model.unreadable) tasks can't be opened with this device's key.",
+                    systemImage: "lock.trianglebadge.exclamationmark"
+                )
+                .font(Typeface.caption)
+                .foregroundStyle(theme.textSecondary.color)
+                .plainRow()
+            }
             content
+            // Room for the + button under the last task.
+            Color.clear
+                .frame(height: Metric.addButton + Space.s5)
+                .plainRow()
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
@@ -30,38 +42,6 @@ struct TaskListView: View {
         .sheet(item: $scheduling) { target in
             ScheduleSheet(model: model, target: target) { scheduling = nil }
         }
-        .toolbar {
-            if bucket == .today {
-                ToolbarItem(placement: .automatic) {
-                    Menu {
-                        Toggle("Split into morning, afternoon and evening", isOn: $splitToday)
-                    } label: {
-                        ToolbarGlyph(systemImage: "ellipsis")
-                            .accessibilityLabel("Today options")
-                    }
-                }
-            }
-        }
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-    }
-
-    private var header: some View {
-        let theme = Theme.current
-        return HStack(spacing: Space.s3) {
-            Image(systemName: bucket.systemImage)
-                .font(Typeface.title)
-                .foregroundStyle(bucket == .today ? theme.accent.color : theme.textSecondary.color)
-                .accessibilityHidden(true)
-            Text(bucket.name)
-                .font(Typeface.display)
-                .foregroundStyle(theme.textPrimary.color)
-            Spacer()
-        }
-        .padding(.top, Space.s2)
-        .padding(.bottom, Space.s3)
-        .accessibilityAddTraits(.isHeader)
     }
 
     @ViewBuilder private var content: some View {
@@ -153,7 +133,8 @@ struct TaskListView: View {
                 onSchedule: { scheduling = $0 }
             )
             .id(task.id)
-            .plainRow(vertical: expanded == task.id ? Space.s2 : 0)
+            // Every task is a raised card, with room between them for the shadows.
+            .plainRow(vertical: Space.s1 + Space.s1 / 2)
             .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .trailing).combined(with: .opacity)))
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                 Button {

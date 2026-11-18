@@ -64,26 +64,26 @@ struct ProgressRing: View {
     }
 }
 
-/// The ring at the top of Today, larger, with "3 of 7" inside and each list's share under it.
+/// The ring at the top of Today, centred, with "3 of 7" inside and how each list is going under it.
 struct TodayProgressView: View {
     let progress: TodayProgress
 
     var body: some View {
         let theme = Theme.current
         VStack(spacing: Space.s3) {
-            ProgressRing(progress: progress, diameter: Space.s8 * 2, lineWidth: Space.s3)
-                .overlay {
-                    VStack(spacing: 0) {
-                        Text(progress.count)
-                            .font(Typeface.title)
-                            .monospacedDigit()
-                            .foregroundStyle(theme.textPrimary.color)
-                            .contentTransition(.numericText())
-                        Text("done")
-                            .font(Typeface.caption)
-                            .foregroundStyle(theme.textSecondary.color)
-                    }
+            // The shared ring, centred, with "3 of 7" inside (redesign, 2026-11-17).
+            TotalityUI.ProgressRing(progress: fraction, diameter: Space.s8 * 2) {
+                VStack(spacing: 0) {
+                    Text(progress.count)
+                        .font(Typeface.title)
+                        .monospacedDigit()
+                        .foregroundStyle(theme.textPrimary.color)
+                        .contentTransition(.numericText())
+                    Text("done")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
                 }
+            }
             if progress.parts.count > 1 {
                 // Centred on one line under the ring when it fits, wrapping when it doesn't.
                 ViewThatFits(in: .horizontal) {
@@ -98,11 +98,14 @@ struct TodayProgressView: View {
         .accessibilityLabel(progress.spoken)
     }
 
+    private var fraction: Double {
+        progress.planned == 0 ? 0 : Double(progress.done) / Double(progress.planned)
+    }
+
     @ViewBuilder private var legend: some View {
         let theme = Theme.current
-        ForEach(Array(progress.parts.enumerated()), id: \.element.id) { index, part in
+        ForEach(progress.parts) { part in
             HStack(spacing: Space.s1) {
-                Circle().fill(ProgressRing.tone(index)).frame(width: Space.s2, height: Space.s2)
                 Text(part.name)
                     .foregroundStyle(theme.textPrimary.color)
                 Text("\(part.done) of \(part.planned)")
