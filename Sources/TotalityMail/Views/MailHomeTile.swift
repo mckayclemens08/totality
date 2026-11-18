@@ -152,27 +152,31 @@ private struct MailTileRow: View {
         let theme = Theme.current
         let sender = conversation.sender(me: me)
         HStack(spacing: Metric.tileItemGap) {
-            // Unread shows as the one accent dot, so the row needs no other colour.
-            Circle()
-                .fill(conversation.isUnread ? theme.accent.color : Color.clear)
-                .frame(width: Space.s2, height: Space.s2)
-                .accessibilityHidden(true)
-            MailAvatar(name: sender.displayName, size: Space.s6, isToned: true)
+            // Laid out like the Messages tile (owner, 2026-11-18: "make mail like messages").
+            MailAvatar(name: sender.displayName, size: Space.s6 + Space.s1, isToned: true)
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                    Text(conversation.heading(me: me, showingRecipients: false))
-                        .font(conversation.isUnread ? Typeface.caption.weight(.bold) : Typeface.caption.weight(.medium))
-                        .foregroundStyle(theme.textPrimary.color)
-                    Spacer(minLength: Space.s1)
-                    Text(MailDate.short(conversation.latest.date, now: Date()))
-                        .font(Typeface.micro)
+                Text(conversation.heading(me: me, showingRecipients: false))
+                    .font(Typeface.tileRow.weight(conversation.isUnread ? .bold : .semibold))
+                    .foregroundStyle(theme.textPrimary.color)
+                HStack(spacing: Space.s1 + Space.s1 / 2) {
+                    // Unread shows as the one accent dot, so the row needs no other colour.
+                    if conversation.isUnread {
+                        Circle()
+                            .fill(theme.accent.color)
+                            .frame(width: Space.s2, height: Space.s2)
+                            .accessibilityHidden(true)
+                    }
+                    Text(conversation.isUnreadable ? "Can't be opened" : conversation.subject)
+                        .font(Typeface.tileDetail.weight(conversation.isUnread ? .semibold : .regular))
                         .foregroundStyle(theme.textSecondary.color)
                 }
-                Text(conversation.isUnreadable ? "Can't be opened" : conversation.subject)
-                    .font(Typeface.tileDetail)
-                    .foregroundStyle(theme.textSecondary.color)
             }
             .lineLimit(1)
+            Spacer(minLength: Space.s1)
+            Text(MailDate.short(conversation.latest.date, now: Date()))
+                .font(Typeface.micro)
+                .foregroundStyle(theme.textSecondary.color)
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

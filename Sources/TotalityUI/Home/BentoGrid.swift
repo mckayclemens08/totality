@@ -96,7 +96,8 @@ struct BentoGrid: View {
         }
         .frame(width: width, height: metrics.height(of: placements), alignment: .topLeading)
         .coordinateSpace(.named(Self.space))
-        .motion(Motion.smooth, value: layout)
+        // No implicit animation on the layout: Home re-reading it, say when a module closes, must not
+        // set tiles sliding. Edits animate where they happen.
         .sensoryFeedback(.selection, trigger: holds)
         .onChange(of: isEditing) { if !isEditing { selected = nil } }
         .confirmationDialog(
@@ -141,13 +142,13 @@ struct BentoGrid: View {
         .accessibilityActions {
             if isEditing {
                 ForEach(TileSize.allCases, id: \.self) { size in
-                    Button("Make \(size.name.lowercased())") { layout.setSize(size, of: module.id) }
+                    Button("Make \(size.name.lowercased())") { withMotion(Motion.smooth) { layout.setSize(size, of: module.id) } }
                 }
                 if layout.canMove(module.id, by: -1) {
-                    Button("Move earlier") { layout.move(module.id, by: -1) }
+                    Button("Move earlier") { withMotion(Motion.smooth) { layout.move(module.id, by: -1) } }
                 }
                 if layout.canMove(module.id, by: 1) {
-                    Button("Move later") { layout.move(module.id, by: 1) }
+                    Button("Move later") { withMotion(Motion.smooth) { layout.move(module.id, by: 1) } }
                 }
             }
         }
@@ -239,7 +240,7 @@ struct BentoGrid: View {
             // new one stops the two trading places over and over.
             if target != current.target {
                 current.target = target
-                if let target { layout.move(current.id, to: target) }
+                if let target { withMotion(Motion.smooth) { layout.move(current.id, to: target) } }
             }
             drag = current
         case .ended:
