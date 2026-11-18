@@ -161,8 +161,6 @@ public struct HomeView: View {
                 background
                 LinearGradient(colors: [background, background.opacity(0)], startPoint: .top, endPoint: .bottom)
                     .frame(height: Space.s4)
-                    .offset(y: Space.s4)
-                    .frame(height: 0, alignment: .top)
             }
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
