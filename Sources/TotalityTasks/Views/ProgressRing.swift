@@ -34,7 +34,7 @@ struct ProgressRing: View {
         .rotationEffect(.degrees(-90))
         .padding(lineWidth / 2)
         .frame(width: diameter, height: diameter)
-        .animation(Motion.standard, value: progress)
+        .motion(Motion.smooth, value: progress)
         .accessibilityHidden(true)
     }
 
@@ -93,7 +93,7 @@ struct TodayProgressView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .animation(Motion.standard, value: progress)
+        .motion(Motion.smooth, value: progress)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(progress.spoken)
     }

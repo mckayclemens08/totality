@@ -79,7 +79,7 @@ public struct MessagesHomeTile: View {
                         .font(Typeface.caption.weight(.bold))
                         .foregroundStyle(theme.textPrimary.color)
                     Text(lead.unread > 0 ? Self.newLine(lead.unread) : (model.homeLastLine(of: lead) ?? ""))
-                        .font(Typeface.caption.weight(lead.unread > 0 ? .semibold : .regular))
+                        .font(Typeface.tileDetail.weight(lead.unread > 0 ? .semibold : .regular))
                         .foregroundStyle(lead.unread > 0 ? theme.accent.color : theme.textSecondary.color)
                 }
                 .lineLimit(1)
@@ -92,18 +92,11 @@ public struct MessagesHomeTile: View {
 
     private func list(rows: Int) -> some View {
         let shown = Array(model.chats.prefix(rows))
-        return VStack(alignment: .leading, spacing: Space.s3) {
+        return VStack(alignment: .leading, spacing: Metric.tileRowGap) {
             TileHeader("Messages", systemImage: "bubble.left")
-            // As many rows as fit, so a large tile has no empty bottom.
-            ViewThatFits(in: .vertical) {
-                ForEach(Array(stride(from: shown.count, to: 0, by: -1)), id: \.self) { count in
-                    VStack(alignment: .leading, spacing: Space.s3) {
-                        ForEach(shown.prefix(count)) { chat in
-                            MessagesTileRow(chat: chat, photo: photo(of: chat), line: line(for: chat))
-                                .tileLink(label(chat)) { open(chat) }
-                        }
-                    }
-                }
+            TileList(shown) { chat in
+                MessagesTileRow(chat: chat, photo: photo(of: chat), line: line(for: chat))
+                    .tileLink(label(chat)) { open(chat) }
             }
         }
     }
@@ -128,7 +121,7 @@ private struct MessagesTileEmpty: View {
                 .font(Typeface.headline)
                 .foregroundStyle(theme.textPrimary.color)
             Text(hasRequests ? "Open Messages to see who it's from." : "Start one with someone's username.")
-                .font(Typeface.caption)
+                .font(Typeface.tileDetail)
                 .foregroundStyle(theme.textSecondary.color)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -144,11 +137,11 @@ private struct MessagesTileRow: View {
     var body: some View {
         let theme = Theme.current
         let isUnread = chat.unread > 0
-        HStack(spacing: Space.s3) {
+        HStack(spacing: Metric.tileItemGap) {
             PersonFace(photo: photo, name: chat.title, diameter: Space.s6 + Space.s1)
             VStack(alignment: .leading, spacing: 0) {
                 Text(chat.title)
-                    .font(Typeface.caption.weight(isUnread ? .bold : .semibold))
+                    .font(Typeface.tileRow.weight(isUnread ? .bold : .semibold))
                     .foregroundStyle(theme.textPrimary.color)
                 HStack(spacing: Space.s1 + Space.s1 / 2) {
                     if isUnread {
@@ -158,8 +151,8 @@ private struct MessagesTileRow: View {
                             .accessibilityHidden(true)
                     }
                     Text(line)
-                        .font(Typeface.caption)
-                        .foregroundStyle(isUnread ? theme.textPrimary.color : theme.textSecondary.color)
+                        .font(Typeface.tileDetail.weight(isUnread ? .semibold : .regular))
+                        .foregroundStyle(isUnread ? theme.accent.color : theme.textSecondary.color)
                 }
             }
             .lineLimit(1)

@@ -53,8 +53,8 @@ public struct ReaderHomeTile: View {
         return VStack(alignment: .leading, spacing: Space.s3) {
             TileHeader(model.homeIsListening ? "Listening" : "Reader", systemImage: "book", isTinted: true)
             if let front = model.frontOfShelf {
-                HStack(alignment: .top, spacing: Space.s2) {
-                    ShelfMark(entry: front, width: Space.s6 + Space.s2)
+                HStack(alignment: .top, spacing: Metric.tileItemGap) {
+                    ShelfMark(entry: front, width: Space.s7 - Space.s1)
                     VStack(alignment: .leading, spacing: Space.s1 / 2) {
                         Text(front.title)
                             .font(Typeface.caption.weight(.bold))
@@ -91,14 +91,14 @@ public struct ReaderHomeTile: View {
                         .foregroundStyle(theme.textPrimary.color)
                         .lineLimit(1)
                     Text(detail(front))
-                        .font(Typeface.caption)
+                        .font(Typeface.tileDetail)
                         .foregroundStyle(theme.textSecondary.color)
                         .lineLimit(1)
                 }
                 .padding(.top, Space.s1)
                 .tileLink(front.title) { open(front) }
                 Spacer(minLength: 0)
-                listenRow(diameter: Space.s6 + Space.s1)
+                listenRow(diameter: Space.s6 + Space.s1 + Space.s1 / 2)
             } else {
                 empty
             }
@@ -123,23 +123,17 @@ public struct ReaderHomeTile: View {
                             .foregroundStyle(theme.textPrimary.color)
                             .lineLimit(2)
                         Text(detail(front))
-                            .font(Typeface.caption)
+                            .font(Typeface.tileDetail)
                             .foregroundStyle(theme.textSecondary.color)
                             .lineLimit(1)
                         listenRow(diameter: Space.s6 + Space.s1 / 2)
                             .padding(.top, Space.s3)
                     }
                 }
-                // As much of the shelf as fits, so the tile has no empty bottom.
-                ViewThatFits(in: .vertical) {
-                    ForEach(Array(stride(from: rest.count, to: 0, by: -1)), id: \.self) { count in
-                        VStack(alignment: .leading, spacing: Space.s2) {
-                            ForEach(rest.prefix(count)) { entry in
-                                ShelfRow(entry: entry)
-                                    .tileLink(entry.title) { open(entry) }
-                            }
-                        }
-                    }
+                // As much of the shelf as fits, spread to the bottom edge.
+                TileList(rest, spacing: Space.s2) { entry in
+                    ShelfRow(entry: entry)
+                        .tileLink(entry.title) { open(entry) }
                 }
             } else {
                 empty
@@ -167,7 +161,7 @@ public struct ReaderHomeTile: View {
                 .font(Typeface.headline)
                 .foregroundStyle(theme.textPrimary.color)
             Text("Add a file, a note or a Drive folder.")
-                .font(Typeface.caption)
+                .font(Typeface.tileDetail)
                 .foregroundStyle(theme.textSecondary.color)
         }
     }
@@ -195,7 +189,7 @@ private struct ShelfRow: View {
 
     var body: some View {
         let theme = Theme.current
-        HStack(spacing: Space.s3) {
+        HStack(spacing: Metric.tileItemGap) {
             ShelfMark(entry: entry, width: Space.s5 + Space.s1)
             VStack(alignment: .leading, spacing: 0) {
                 Text(entry.title)
@@ -268,13 +262,13 @@ private struct ReaderTileListen: View {
                     .background(Circle().fill(theme.accent.color))
                 if showsLabel {
                     Text("Listen")
-                        .font(Typeface.caption.weight(.semibold))
+                        .font(Typeface.tileLabel)
                         .foregroundStyle(theme.accent.color)
                 }
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(TilePress())
+        .buttonStyle(SoftPress())
         .accessibilityLabel(playing ? "Pause" : "Listen")
     }
 }

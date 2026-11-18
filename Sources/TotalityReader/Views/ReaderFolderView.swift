@@ -162,7 +162,7 @@ struct ReaderFolderView: View {
                 Spacer(minLength: 0)
                 HeaderMenu("Sort and view", systemImage: "arrow.up.arrow.down") { sortChoices }
                 HeaderButton(searching ? "Close search" : "Search the Reader", systemImage: searching ? "xmark" : "magnifyingglass") {
-                    withAnimation(Motion.quick) {
+                    withMotion(Motion.snappy) {
                         if searching { model.query = "" }
                         searching.toggle()
                     }

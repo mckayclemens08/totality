@@ -103,7 +103,7 @@ struct ReadAlongView: View {
             let middle = Double(highlight.range.lowerBound - paragraph.offset + highlight.range.count / 2)
             anchor = UnitPoint(x: 0, y: min(max(middle / Double(paragraph.length), 0), 1))
         }
-        withAnimation(Motion.standard) { reader.scrollTo(paragraph.id, anchor: anchor) }
+        withMotion(Motion.smooth) { reader.scrollTo(paragraph.id, anchor: anchor) }
     }
 }
 

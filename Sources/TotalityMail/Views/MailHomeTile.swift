@@ -61,7 +61,7 @@ public struct MailHomeTile: View {
                 .foregroundStyle(count == 0 ? theme.textSecondary.color : theme.textPrimary.color)
                 .padding(.top, Space.s2)
             Text(count == 0 ? "All caught up" : count == 1 ? "new message" : "new messages")
-                .font(Typeface.caption)
+                .font(Typeface.tileDetail)
                 .foregroundStyle(theme.textSecondary.color)
             Spacer(minLength: Space.s2)
             if let newest {
@@ -94,23 +94,14 @@ public struct MailHomeTile: View {
     private func list(rows: Int) -> some View {
         let theme = Theme.current
         let shown = conversations(rows)
-        return VStack(alignment: .leading, spacing: Space.s3) {
+        return VStack(alignment: .leading, spacing: Metric.tileRowGap) {
             TileHeader(header, systemImage: "envelope")
             if shown.isEmpty {
                 Text("Your inbox is empty")
                     .font(Typeface.headline)
                     .foregroundStyle(theme.textSecondary.color)
             }
-            // As many rows as fit, so a large tile has no empty bottom.
-            ViewThatFits(in: .vertical) {
-                ForEach(Array(stride(from: shown.count, to: 0, by: -1)), id: \.self) { count in
-                    VStack(alignment: .leading, spacing: Space.s3) {
-                        ForEach(shown.prefix(count)) { conversation in
-                            row(conversation)
-                        }
-                    }
-                }
-            }
+            TileList(shown) { row($0) }
         }
     }
 
@@ -160,13 +151,13 @@ private struct MailTileRow: View {
     var body: some View {
         let theme = Theme.current
         let sender = conversation.sender(me: me)
-        HStack(spacing: Space.s2) {
+        HStack(spacing: Metric.tileItemGap) {
             // Unread shows as the one accent dot, so the row needs no other colour.
             Circle()
                 .fill(conversation.isUnread ? theme.accent.color : Color.clear)
                 .frame(width: Space.s2, height: Space.s2)
                 .accessibilityHidden(true)
-            MailAvatar(name: sender.displayName, size: Space.s6)
+            MailAvatar(name: sender.displayName, size: Space.s6, isToned: true)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                     Text(conversation.heading(me: me, showingRecipients: false))
@@ -178,7 +169,7 @@ private struct MailTileRow: View {
                         .foregroundStyle(theme.textSecondary.color)
                 }
                 Text(conversation.isUnreadable ? "Can't be opened" : conversation.subject)
-                    .font(Typeface.caption)
+                    .font(Typeface.tileDetail)
                     .foregroundStyle(theme.textSecondary.color)
             }
             .lineLimit(1)

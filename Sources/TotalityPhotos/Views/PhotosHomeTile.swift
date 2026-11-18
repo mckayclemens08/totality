@@ -67,7 +67,7 @@ public struct PhotosHomeTile: View {
         }
     }
 
-    private func photo(_ item: PhotoItem, caption: Bool = false, corner: CGFloat = Radius.md - Metric.tileBleed) -> some View {
+    private func photo(_ item: PhotoItem, caption: Bool = false, corner: CGFloat = Radius.tile - Metric.tileBleed) -> some View {
         PhotoCell(model: model, item: item, fills: true)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))

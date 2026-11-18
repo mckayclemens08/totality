@@ -184,8 +184,8 @@ public struct MessagesHomeView: View {
             }
             .padding(.horizontal, Space.s4)
             .padding(.vertical, Space.s3)
-            .animation(Motion.quick, value: model.requests)
-            .animation(Motion.quick, value: model.connection)
+            .motion(Motion.snappy, value: model.requests)
+            .motion(Motion.snappy, value: model.connection)
         }
     }
 

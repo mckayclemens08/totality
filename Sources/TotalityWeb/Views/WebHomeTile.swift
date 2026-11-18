@@ -48,7 +48,7 @@ public struct WebHomeTile: View {
         let marks = Array(model.homeBookmarks.prefix(3))
         return VStack(alignment: .leading, spacing: Space.s3) {
             TileHeader("Web", systemImage: "globe")
-            WebTileSearch(title: "Search", model: model, onOpen: onOpen)
+            WebTileSearch(title: "Search", model: model, onOpen: onOpen, isCompact: true)
                 .tileControl()
             Spacer(minLength: 0)
             if !marks.isEmpty {
@@ -92,18 +92,12 @@ public struct WebHomeTile: View {
             }
             Spacer(minLength: 0)
             // The open tabs, as many as fit, so the tile has no empty bottom.
-            ViewThatFits(in: .vertical) {
-                ForEach(Array(stride(from: min(tabs.count, 4), through: 0, by: -1)), id: \.self) { count in
-                    VStack(spacing: Space.s2) {
-                        ForEach(tabs.prefix(count)) { tab in
-                            TabLine(tab: tab)
-                                .tileLink(tab.title) {
-                                    model.showFromHome(tab)
-                                    onOpen()
-                                }
-                        }
+            TileList(Array(tabs.prefix(4)), spacing: Space.s2) { tab in
+                TabLine(tab: tab)
+                    .tileLink(tab.title) {
+                        model.showFromHome(tab)
+                        onOpen()
                     }
-                }
             }
         }
     }
@@ -122,7 +116,7 @@ public struct WebHomeTile: View {
                 .font(Typeface.headline)
                 .foregroundStyle(theme.textPrimary.color)
             Text("Bookmark a page in Web to keep it here.")
-                .font(Typeface.caption)
+                .font(Typeface.tileDetail)
                 .foregroundStyle(theme.textSecondary.color)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -134,6 +128,8 @@ private struct WebTileSearch: View {
     let title: String
     let model: WebModel
     let onOpen: @MainActor () -> Void
+    /// The small tile's, with smaller words.
+    var isCompact = false
 
     var body: some View {
         let theme = Theme.current
@@ -148,7 +144,7 @@ private struct WebTileSearch: View {
                     .foregroundStyle(theme.textSecondary.color)
                 Spacer(minLength: 0)
             }
-            .font(Typeface.callout)
+            .font(isCompact ? Typeface.tileDetail : Typeface.tileRow)
             .lineLimit(1)
             .padding(.horizontal, Space.s3)
             .padding(.vertical, Space.s2 + Space.s1 / 2)
@@ -156,7 +152,7 @@ private struct WebTileSearch: View {
             .neumorphic(.subtle, in: Capsule())
             .contentShape(Capsule())
         }
-        .buttonStyle(TilePress())
+        .buttonStyle(SoftPress())
         .accessibilityLabel("Search the web")
     }
 }

@@ -37,7 +37,7 @@ public struct ThemePickerView: View {
                     .padding(.bottom, Space.s1)
                 ForEach(ThemeChoice.allCases) { choice in
                     ThemeRow(choice: choice, isChosen: store.choice == choice) {
-                        withAnimation(Motion.standard) { store.choice = choice }
+                        withMotion(Motion.smooth) { store.choice = choice }
                     }
                 }
             }

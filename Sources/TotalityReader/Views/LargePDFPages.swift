@@ -36,7 +36,7 @@ struct LargePDFPages: View {
                     guard let follow, follow.isFollowing, let highlight = follow.highlight,
                           let page = follow.map.pieces(of: highlight.range).first?.page
                     else { return }
-                    withAnimation(Motion.standard) { proxy.scrollTo(page, anchor: .center) }
+                    withMotion(Motion.smooth) { proxy.scrollTo(page, anchor: .center) }
                 }
             }
         }

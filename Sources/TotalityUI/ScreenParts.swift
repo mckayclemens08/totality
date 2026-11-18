@@ -147,7 +147,7 @@ public struct FilterPills<Item: Hashable>: View {
             HStack(spacing: Space.s2) {
                 ForEach(items, id: \.self) { item in
                     FilterPill(title(item), isSelected: item == selection) {
-                        withAnimation(Motion.quick) { selection = item }
+                        withMotion(Motion.snappy) { selection = item }
                     }
                 }
             }
@@ -238,15 +238,32 @@ extension ProgressRing where Content == EmptyView {
     }
 }
 
-/// A press makes a control a little smaller and fainter. Nothing sinks in (issue 132).
+/// Every tappable thing's press: a little smaller and fainter, on the press spring. Nothing sinks in
+/// (issue 132). Under Reduce Motion it only fades.
 public struct SoftPress: ButtonStyle {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? TilePress.scale : 1)
-            .opacity(configuration.isPressed ? TilePress.opacity : 1)
-            .animation(Motion.instant, value: configuration.isPressed)
+        configuration.label.softPressed(configuration.isPressed)
+    }
+}
+
+extension View {
+    /// The look of a press, for a control that tracks its own touches rather than using `SoftPress`.
+    public func softPressed(_ isPressed: Bool) -> some View {
+        modifier(SoftPressed(isPressed: isPressed))
+    }
+}
+
+private struct SoftPressed: ViewModifier {
+    let isPressed: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isPressed && !reduceMotion ? Motion.pressScale : 1)
+            .opacity(isPressed ? Motion.pressOpacity : 1)
+            .animation(Motion.press, value: isPressed)
     }
 }
 

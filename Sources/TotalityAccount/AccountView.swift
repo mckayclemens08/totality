@@ -32,7 +32,7 @@ public struct AccountView: View {
                         .scrollDismissesKeyboard(.interactively)
                         .onChange(of: model.notice) {
                             guard model.notice != nil else { return }
-                            withAnimation(Motion.quick) { proxy.scrollTo(Self.noticeID, anchor: .bottom) }
+                            withMotion(Motion.snappy) { proxy.scrollTo(Self.noticeID, anchor: .bottom) }
                         }
                 }
                 #else

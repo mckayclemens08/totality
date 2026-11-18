@@ -57,7 +57,7 @@ struct WebDownloadStatus: View {
         }
         .frame(width: Space.s7, height: Space.s7)
         .contentShape(Rectangle())
-        .animation(Motion.standard, value: progress)
+        .motion(Motion.smooth, value: progress)
     }
 }
 

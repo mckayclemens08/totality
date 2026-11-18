@@ -70,12 +70,12 @@ struct MailAttachmentView: View {
     private func toggle() {
         guard attachment.preview != nil else { return }
         if isOpen {
-            withAnimation(Motion.quick) { isOpen = false }
+            withMotion(Motion.snappy) { isOpen = false }
             return
         }
         Task {
             if data == nil { data = await model.data(of: attachment) }
-            if data != nil { withAnimation(Motion.quick) { isOpen = true } }
+            if data != nil { withMotion(Motion.snappy) { isOpen = true } }
         }
     }
 }

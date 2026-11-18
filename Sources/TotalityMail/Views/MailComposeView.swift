@@ -47,7 +47,7 @@ struct MailComposeView: View {
         }
         .tint(theme.accent.color)
         .interactiveDismissDisabled(isBusy)
-        .animation(Motion.quick, value: composer.phase)
+        .motion(Motion.snappy, value: composer.phase)
         .task(id: composer.draft) {
             try? await Task.sleep(for: MailTiming.autosave)
             if !Task.isCancelled { await composer.autosave() }

@@ -34,7 +34,7 @@ public struct TasksHomeTile: View {
             }
         }
         .tilePadding()
-        .animation(Motion.standard, value: model.progress)
+        .motion(Motion.smooth, value: model.progress)
         .sensoryFeedback(.success, trigger: model.completions)
     }
 
@@ -82,7 +82,7 @@ public struct TasksHomeTile: View {
             if model.progress.isEmpty {
                 Spacer(minLength: 0)
                 Text("Nothing planned today")
-                    .font(Typeface.callout)
+                    .font(Typeface.tileDetail)
                     .foregroundStyle(theme.textSecondary.color)
                     .multilineTextAlignment(.center)
                 Spacer(minLength: 0)
@@ -90,7 +90,7 @@ public struct TasksHomeTile: View {
                 ring(diameter: Space.s8 + Space.s5, caption: "done")
                     .frame(maxHeight: .infinity)
                 Text(next.map { "Next: \($0.displayTitle)" } ?? "All done today")
-                    .font(Typeface.caption.weight(.semibold))
+                    .font(Typeface.tileLabel)
                     .foregroundStyle(theme.textPrimary.color)
                     .lineLimit(1)
                     .tileLink(next?.displayTitle ?? "") {
@@ -108,7 +108,7 @@ public struct TasksHomeTile: View {
             if !model.progress.isEmpty {
                 ring(diameter: Space.s8 + Space.s6, caption: "done today")
             }
-            VStack(alignment: .leading, spacing: Space.s2) {
+            VStack(alignment: .leading, spacing: Metric.tileItemGap) {
                 TileHeader("Tasks · Today", systemImage: "checklist")
                 lines(3)
             }
@@ -134,7 +134,7 @@ public struct TasksHomeTile: View {
                         .padding(.top, Space.s1)
                     if let footnote {
                         Text(footnote.text)
-                            .font(Typeface.caption)
+                            .font(Typeface.tileDetail)
                             .foregroundStyle(footnote.isUrgent ? theme.danger.color : theme.textSecondary.color)
                             .lineLimit(1)
                     }
@@ -179,16 +179,10 @@ public struct TasksHomeTile: View {
                 .font(Typeface.callout)
                 .foregroundStyle(Theme.current.textSecondary.color)
         } else {
-            ViewThatFits(in: .vertical) {
-                ForEach(Array(stride(from: shown.count, to: 0, by: -1)), id: \.self) { count in
-                    VStack(alignment: .leading, spacing: Space.s2) {
-                        ForEach(shown.prefix(count)) { task in
-                            TileTaskLine(model: model, task: task, onOpen: onOpen)
-                        }
-                    }
-                }
+            TileList(shown, spacing: Metric.tileItemGap) { task in
+                TileTaskLine(model: model, task: task, onOpen: onOpen)
             }
-            .animation(Motion.standard, value: shown.map(\.id))
+            .motion(Motion.smooth, value: shown.map(\.id))
         }
     }
 }
@@ -209,7 +203,7 @@ private struct TileTaskLine: View {
                     Task { await model.toggle(task.id) }
                 }
             Text(task.displayTitle)
-                .font(Typeface.callout.weight(.regular))
+                .font(Typeface.tileRow)
                 .strikethrough(isDone)
                 .foregroundStyle(isDone ? theme.textSecondary.color : theme.textPrimary.color)
                 .lineLimit(1)

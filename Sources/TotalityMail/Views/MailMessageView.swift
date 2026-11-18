@@ -47,7 +47,7 @@ struct MailMessageView: View {
                     .lineLimit(1)
                 if isOpen {
                     Button {
-                        withAnimation(Motion.quick) { showingDetails.toggle() }
+                        withMotion(Motion.snappy) { showingDetails.toggle() }
                     } label: {
                         Text("To \(ListFormatter.localizedString(byJoining: message.to.map(\.displayName)))")
                             .font(Typeface.caption)

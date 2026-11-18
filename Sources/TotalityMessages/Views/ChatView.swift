@@ -114,11 +114,11 @@ struct ChatView: View {
                             proxy.scrollTo(ChatScroll.bottom, anchor: .bottom)
                         }
                     } else if ChatScroll.follows(atBottom: atBottom, newestIsOwn: last.isOwn) {
-                        withAnimation(Motion.quick) { proxy.scrollTo(ChatScroll.bottom, anchor: .bottom) }
+                        withMotion(Motion.snappy) { proxy.scrollTo(ChatScroll.bottom, anchor: .bottom) }
                     }
                 }
                 .onChange(of: model.typing.isEmpty) {
-                    if atBottom { withAnimation(Motion.quick) { proxy.scrollTo(ChatScroll.bottom, anchor: .bottom) } }
+                    if atBottom { withMotion(Motion.snappy) { proxy.scrollTo(ChatScroll.bottom, anchor: .bottom) } }
                 }
                 .refreshable { await model.loadEarlier() }
             }

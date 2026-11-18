@@ -8,6 +8,8 @@ struct MailAvatar: View {
     /// Shown instead of initials, for mail that has no sender to show.
     var systemImage: String?
     var size: CGFloat = Space.s6 + Space.s2
+    /// Filled with the sender's cover tone and white letters, as on the home tile's canvas.
+    var isToned = false
 
     static func initials(_ name: String) -> String {
         let words = name.split { !$0.isLetter && !$0.isNumber }
@@ -24,13 +26,26 @@ struct MailAvatar: View {
                 Text(Self.initials(name))
             }
         }
-            .font(Typeface.callout)
-            .foregroundStyle(theme.textSecondary.color)
+            .font(isToned ? Typeface.caption.weight(.bold) : Typeface.callout)
+            .foregroundStyle(isToned ? theme.accentOn.color : theme.textSecondary.color)
             .lineLimit(1)
             .minimumScaleFactor(0.6)
             .frame(width: size, height: size)
-            .neumorphic(.subtle, in: Circle())
+            .modifier(AvatarSurface(isToned: isToned, tone: CoverTone.tone(for: name)))
             .accessibilityHidden(true)
+    }
+}
+
+private struct AvatarSurface: ViewModifier {
+    let isToned: Bool
+    let tone: ColorToken
+
+    func body(content: Content) -> some View {
+        if isToned {
+            content.background(tone.color, in: Circle())
+        } else {
+            content.neumorphic(.subtle, in: Circle())
+        }
     }
 }
 
@@ -81,7 +96,7 @@ struct MailAccountChips: View {
 
     private func chip(_ title: String, _ filter: MailAccountFilter) -> some View {
         FilterPill(title, isSelected: model.shownFilter == filter) {
-            withAnimation(Motion.quick) { model.accountFilter = filter }
+            withMotion(Motion.snappy) { model.accountFilter = filter }
         }
         .lineLimit(1)
     }
