@@ -17,28 +17,33 @@ struct WebStartView: View {
                 } else if model.bookmarks.isEmpty {
                     message("Search the web", image: "globe", detail: "Type a search or an address above. Pages you bookmark appear here.")
                 } else {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s3), count: 3), spacing: Space.s5) {
+                    // Four raised letter tiles a row, as on the redesign canvas (2026-11-17).
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s3), count: 4), spacing: Space.s5) {
                         ForEach(model.bookmarks.prefix(Self.shown)) { bookmark in
                             Button {
                                 model.open(bookmark.url)
                             } label: {
                                 VStack(spacing: Space.s2) {
-                                    Image(systemName: "globe")
-                                        .font(Typeface.title)
-                                        .foregroundStyle(theme.textSecondary.color)
+                                    Text(Self.initial(of: bookmark.displayTitle))
+                                        .font(Typeface.title.weight(.bold))
+                                        .foregroundStyle(theme.accent.color)
+                                        .frame(width: Space.s8, height: Space.s8)
+                                        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                                         .accessibilityHidden(true)
                                     Text(bookmark.displayTitle)
-                                        .font(Typeface.caption)
-                                        .foregroundStyle(theme.textPrimary.color)
-                                        .multilineTextAlignment(.center)
-                                        .lineLimit(2)
+                                        .font(Typeface.micro)
+                                        .foregroundStyle(theme.textSecondary.color)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
                                 }
                                 .frame(maxWidth: .infinity)
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(SoftPress())
+                            .accessibilityLabel(bookmark.displayTitle)
                         }
                     }
+                    .padding(.top, Space.s3)
                 }
                 Text(WebCopy.notEncrypted)
                     .font(Typeface.caption)
@@ -52,6 +57,11 @@ struct WebStartView: View {
     }
 
     private static let shown = 12
+
+    /// A bookmark's first letter or digit, for its tile.
+    static func initial(of title: String) -> String {
+        title.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "•"
+    }
 
     private func message(_ title: String, image: String, detail: String) -> some View {
         let theme = Theme.current

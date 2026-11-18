@@ -217,7 +217,7 @@ public struct WebHomeView: View {
         let theme = Theme.current
         return HStack(spacing: Space.s2) {
             if let onClose {
-                ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
+                HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
             HStack(spacing: Space.s2) {
                 if tab.isPrivate {

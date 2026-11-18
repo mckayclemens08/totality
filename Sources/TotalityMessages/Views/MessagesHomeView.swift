@@ -39,12 +39,14 @@ public struct MessagesHomeView: View {
             content
                 .background(theme.bg.color)
                 .edgeSwipeBack(onClose)
-                .toolbar { toolbar }
                 .navigationTitle("Messages")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(theme.bg.color, for: .navigationBar)
+                // Messages draws its own header (redesign, 2026-11-17).
+                .toolbar(.hidden, for: .navigationBar)
                 #endif
+                .safeAreaInset(edge: .top, spacing: 0) { header }
                 .navigationDestination(item: $opened) { id in
                     ChatScreen(messages: model, chatID: id, onOpenAccount: onOpenAccount)
                 }
@@ -169,10 +171,15 @@ public struct MessagesHomeView: View {
                         .foregroundStyle(theme.textSecondary.color)
                         .padding(.top, Space.s4)
                 } else {
-                    ForEach(chats) { chat in
-                        Button { opened = chat.id } label: { ChatRow(chat: chat, messages: model) }
-                            .buttonStyle(.plain)
+                    // One raised card holding every chat, as on the canvas.
+                    VStack(spacing: 0) {
+                        ForEach(chats) { chat in
+                            Button { opened = chat.id } label: { ChatRow(chat: chat, messages: model, inCard: true) }
+                                .buttonStyle(SoftPress())
+                        }
                     }
+                    .padding(.vertical, Space.s1)
+                    .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                 }
             }
             .padding(.horizontal, Space.s4)
@@ -182,34 +189,45 @@ public struct MessagesHomeView: View {
         }
     }
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        // Home and settings on the left, camera and compose on the right, so the title has room.
-        ToolbarItem(placement: .cancellationAction) {
+    /// Home and settings on the left, camera and compose on the right, the big title, and what's
+    /// encrypted. Group names and photos aren't, so the line says messages, not everything.
+    private var header: some View {
+        let theme = Theme.current
+        let ready = model.phase == .ready
+        return VStack(alignment: .leading, spacing: Space.s3) {
             HStack(spacing: Space.s3) {
                 if let onClose {
-                    ToolbarIcon("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
+                    HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
                 }
-                if model.phase == .ready {
+                if ready {
                     settingsMenu
                 }
-            }
-        }
-        if model.phase == .ready {
-            ToolbarItem(placement: .primaryAction) {
-                HStack(spacing: Space.s3) {
+                Spacer(minLength: 0)
+                if ready {
                     #if os(iOS)
                     if CameraPicker.isAvailable && !model.chats.isEmpty {
-                        ToolbarIcon("Camera", systemImage: "camera.fill") { showingCamera = true }
+                        HeaderButton("Camera", systemImage: "camera.fill") { showingCamera = true }
                     }
                     #endif
-                    ToolbarIcon("New message", systemImage: "square.and.pencil") { composing = true }
+                    HeaderButton("New message", systemImage: "square.and.pencil") { composing = true }
                 }
             }
+            .frame(minHeight: Metric.headerButton)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                ScreenTitle("Messages")
+                Label("Messages are end-to-end encrypted", systemImage: "lock.fill")
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+            }
         }
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s2)
+        .padding(.bottom, Space.s2)
+        .background(theme.bg.color)
     }
 
     private var settingsMenu: some View {
-        Menu {
+        HeaderMenu("Messages settings", systemImage: "gearshape.fill") {
             Button("New group", systemImage: "person.3") { makingGroup = true }
             Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
             Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
@@ -218,16 +236,15 @@ public struct MessagesHomeView: View {
                     Label("History backed up, this device verified", systemImage: "checkmark.shield")
                 }
             }
-        } label: {
-            ToolbarGlyph(systemImage: "ellipsis")
         }
-        .accessibilityLabel("Messages settings")
     }
 }
 
 private struct ChatRow: View {
     let chat: ChatSummary
     let messages: MessagesModel
+    /// Inside the chat list's one card, a row has no card of its own.
+    var inCard = false
 
     var body: some View {
         let theme = Theme.current
@@ -254,8 +271,8 @@ private struct ChatRow: View {
                 }
                 HStack(alignment: .firstTextBaseline) {
                     Text(chat.lastMessage ?? "No messages yet")
-                        .font(Typeface.caption)
-                        .foregroundStyle(theme.textSecondary.color)
+                        .font(unread ? Typeface.caption.weight(.semibold) : Typeface.caption)
+                        .foregroundStyle(unread ? theme.accent.color : theme.textSecondary.color)
                         .lineLimit(1)
                     Spacer(minLength: Space.s2)
                     // Unread is the one accent dot, so the row needs no other colour.
@@ -266,8 +283,9 @@ private struct ChatRow: View {
                 }
             }
         }
-        .padding(Space.s3)
-        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
+        .padding(.horizontal, inCard ? Space.s4 : Space.s3)
+        .padding(.vertical, Space.s3)
+        .modifier(OwnCard(isOn: !inCard))
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(unread ? "Unread, \(title)" : title)
@@ -276,6 +294,19 @@ private struct ChatRow: View {
     /// A chat with one person goes by their profile's name once it's known.
     private var title: String {
         chat.otherPerson.flatMap { messages.people.profile(ofMatrixID: $0)?.name } ?? chat.title
+    }
+}
+
+/// A row's own raised card, when it isn't already inside one.
+private struct OwnCard: ViewModifier {
+    let isOn: Bool
+
+    func body(content: Content) -> some View {
+        if isOn {
+            content.neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
+        } else {
+            content
+        }
     }
 }
 

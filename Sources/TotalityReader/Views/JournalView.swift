@@ -59,6 +59,7 @@ struct JournalView: View {
     @State private var showsMonth = false
     @State private var showsExport = false
     @State private var shownDay: String?
+    @Environment(\.dismiss) private var dismiss
 
     struct NoteDraft: Identifiable {
         let item: ReaderItem
@@ -100,15 +101,11 @@ struct JournalView: View {
         .navigationTitle("Journal")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        // The Journal draws its own header (redesign, 2026-11-17).
+        .toolbar(.hidden, for: .navigationBar)
         #endif
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                ToolbarIcon("Calendar", systemImage: "calendar") { showsMonth = true }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                ToolbarIcon("Export", systemImage: "square.and.arrow.up") { showsExport = true }
-            }
-        }
+        .safeAreaInset(edge: .top, spacing: 0) { header }
+        .edgeSwipeBack { dismiss() }
         .sheet(isPresented: $showsMonth) {
             JournalMonthSheet(days: model.journal.days.union(model.journal.notes.keys), today: todayDay) { day in
                 showsMonth = false
@@ -138,10 +135,38 @@ struct JournalView: View {
         .onChange(of: model.journal) { Task { await loadTexts() } }
     }
 
+    /// Back to the Reader, the streak, Calendar and Export, then the big title.
+    private var header: some View {
+        let theme = Theme.current
+        let streak = model.journalStreak
+        return VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(spacing: Space.s3) {
+                HeaderButton("Back to the Reader", systemImage: "chevron.left") { dismiss() }
+                Spacer(minLength: 0)
+                if streak > 1 {
+                    Text("\(streak)-day streak")
+                        .font(Typeface.caption.weight(.semibold))
+                        .foregroundStyle(theme.accent.color)
+                        .padding(.horizontal, Space.s3)
+                        .padding(.vertical, Space.s2)
+                        .background(theme.highlight.color, in: Capsule())
+                }
+                HeaderButton("Calendar", systemImage: "calendar") { showsMonth = true }
+                HeaderButton("Export", systemImage: "square.and.arrow.up") { showsExport = true }
+            }
+            .frame(minHeight: Metric.headerButton)
+            ScreenTitle("Journal")
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s2)
+        .padding(.bottom, Space.s2)
+        .background(theme.bg.color)
+    }
+
     private func page(_ today: ReaderItem) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Space.s6) {
+                LazyVStack(alignment: .leading, spacing: Space.s4) {
                     if pastDays.isEmpty {
                         Text("Your journal starts today")
                             .font(Typeface.title)
@@ -155,6 +180,7 @@ struct JournalView: View {
                             onAddNote: { addNote(under: day) },
                             onEditNote: { note in noteFor = NoteDraft(item: note) }
                         )
+                        .itemCard()
                         .id(day)
                     }
                     todaySection(today)
@@ -178,8 +204,12 @@ struct JournalView: View {
         let theme = Theme.current
         return VStack(alignment: .leading, spacing: Space.s2) {
             Text(todayDay.map { "Today · \(JournalClock.heading($0))" } ?? "Today")
-                .font(Typeface.headline)
-                .foregroundStyle(theme.textPrimary.color)
+                .font(Typeface.callout.weight(.semibold))
+                .foregroundStyle(theme.accent.color)
+            // Literally true: every journal entry is sealed with ContentCipher before it's written or synced.
+            Label("Sealed on this device before it syncs", systemImage: "lock.fill")
+                .font(Typeface.caption)
+                .foregroundStyle(theme.textSecondary.color)
             ForEach(model.journal.notes[todayDay ?? ""] ?? []) { note in
                 JournalNoteBlock(note: note, text: texts[note.id] ?? "") { noteFor = NoteDraft(item: note) }
             }
