@@ -2,7 +2,8 @@ import CoreGraphics
 import Foundation
 import TotalityCore
 
-/// A tile's size, in the grid's two columns and in rows half a small tile tall.
+/// A tile's size, in the grid's two columns and in rows half a small tile tall. S is one column and
+/// square, M is the full width and as short as S, and L is the full width and square.
 public enum TileSize: String, Codable, Sendable, CaseIterable {
     case small, medium, large
 
@@ -10,16 +11,23 @@ public enum TileSize: String, Codable, Sendable, CaseIterable {
         rawValue.capitalized
     }
 
+    /// The letter on the size switch.
+    public var letter: String {
+        String(name.prefix(1))
+    }
+
     var columns: Int {
         self == .small ? 1 : 2
     }
 
     var rows: Int {
-        self == .large ? 3 : 2
+        self == .large ? 4 : 2
     }
 }
 
-/// The tiles with room for something of a module's own, like the Calendar's month.
+/// The tiles with room for something of a module's own, like the Calendar's month. Home now asks only
+/// for `medium` and `square`: an L tile is square. `large`, the old 2:3 tile, stays until each module's
+/// own tile is redone, so this step doesn't touch other modules.
 public enum BigTileSize: Sendable {
     case medium, large, square
 }
@@ -61,33 +69,32 @@ public enum HomeStyle: String, CaseIterable, Sendable, Identifiable {
 /// never content.
 public struct HomeLayout: Equatable, Sendable {
     static let columns = 2
-    private static let heroRows = 4
 
     public private(set) var tiles: [HomeTile]
-    /// The big square at the top. Its tile keeps its place and size, so it goes back to them when
-    /// another module takes over.
-    public private(set) var hero: ModuleID?
     /// Modules removed from Home. Their tiles keep their size and place, unseen, so adding one back puts it
     /// where it was. Not saved here: it comes from `HomeChoices`.
     public var hidden: Set<ModuleID> = []
 
     /// A new install's home page. Modules that aren't listed join at the end as small tiles.
     public init(modules: [ModuleID]) {
+        // As the redesign canvas draws it: the Reader across the top, then small tiles.
         let starting: [HomeTile] = [
-            .init(id: .reader, size: .large), .init(id: .calendar, size: .medium),
-            .init(id: .messages, size: .small), .init(id: .mail, size: .small),
-            .init(id: .tasks, size: .medium),
+            .init(id: .reader, size: .medium),
+            .init(id: .mail, size: .small), .init(id: .calendar, size: .small),
+            .init(id: .tasks, size: .small), .init(id: .messages, size: .small),
+            .init(id: .photos, size: .small), .init(id: .web, size: .small),
             .init(id: .ai, size: .medium),
-            .init(id: .player, size: .small), .init(id: .photos, size: .small),
-            .init(id: .money, size: .small), .init(id: .calls, size: .small),
-            .init(id: .social, size: .medium), .init(id: .web, size: .medium),
+            .init(id: .player, size: .small), .init(id: .money, size: .small),
+            .init(id: .calls, size: .small), .init(id: .social, size: .small),
         ]
         tiles = starting
         fit(to: modules)
     }
 
     /// A saved arrangement, or the starting one if it can't be read. Tiles for modules that no longer
-    /// exist drop out and new modules join the end, so an update can't lose a tile.
+    /// exist drop out and new modules join the end, so an update can't lose a tile. A layout saved
+    /// before the redesign may name a big square at the top: that tile becomes L and goes first, so it
+    /// stays where the person put it.
     public init(saved: Data, modules: [ModuleID]) {
         self.init(modules: modules)
         guard let stored = try? JSONDecoder().decode(Stored.self, from: saved) else { return }
@@ -100,15 +107,17 @@ public struct HomeLayout: Equatable, Sendable {
         }
         guard !restored.isEmpty else { return }
         tiles = restored
-        hero = stored.hero.flatMap(ModuleID.init(rawValue:))
+        if let hero = stored.hero.flatMap(ModuleID.init(rawValue:)),
+           let index = tiles.firstIndex(where: { $0.id == hero }) {
+            var tile = tiles.remove(at: index)
+            tile.size = .large
+            tiles.insert(tile, at: 0)
+        }
         fit(to: modules)
     }
 
     public var saved: Data {
-        let stored = Stored(
-            tiles: tiles.map { .init(module: $0.id.rawValue, size: $0.size.rawValue) },
-            hero: hero?.rawValue
-        )
+        let stored = Stored(tiles: tiles.map { .init(module: $0.id.rawValue, size: $0.size.rawValue) }, hero: nil)
         // Keys in a fixed order, so the same layout always saves as the same bytes.
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
@@ -118,39 +127,25 @@ public struct HomeLayout: Equatable, Sendable {
     private mutating func fit(to modules: [ModuleID]) {
         tiles.removeAll { !modules.contains($0.id) }
         tiles += modules.filter { id in !tiles.contains { $0.id == id } }.map { HomeTile(id: $0, size: .small) }
-        if let hero, !modules.contains(hero) { self.hero = nil }
     }
 
     public func size(of module: ModuleID) -> TileSize? {
         tiles.first { $0.id == module }?.size
     }
 
-    /// The big square as it shows, which is none while its module is removed.
-    var shownHero: ModuleID? {
-        hero.flatMap { hidden.contains($0) ? nil : $0 }
-    }
-
-    /// Nil for a small tile, which has room only for its lines.
+    /// Nil for a small tile, which has room only for its lines. An L tile is square.
     public func bigSize(of module: ModuleID) -> BigTileSize? {
         if hidden.contains(module) { return nil }
-        if shownHero == module { return .square }
         switch size(of: module) {
         case .medium: return .medium
-        case .large: return .large
+        case .large: return .square
         case .small, nil: return nil
         }
     }
 
-    /// Choosing a size for the big square takes it back to an ordinary tile.
     public mutating func setSize(_ size: TileSize, of module: ModuleID) {
         guard let index = tiles.firstIndex(where: { $0.id == module }) else { return }
         tiles[index].size = size
-        if hero == module { hero = nil }
-    }
-
-    public mutating func makeHero(_ module: ModuleID) {
-        guard size(of: module) != nil else { return }
-        hero = module
     }
 
     /// Takes `target`'s place. That alone can change nothing on screen: a wide tile can't share a row,
@@ -181,12 +176,12 @@ public struct HomeLayout: Equatable, Sendable {
     /// One place earlier or later as the grid shows it. A small tile can slide straight back into a
     /// gap, so this carries on until the tile really changes place.
     private func moved(_ module: ModuleID, by step: Int) -> HomeLayout? {
-        let order = placements.filter { $0.id != shownHero }.sorted { ($0.row, $0.column) < ($1.row, $1.column) }.map(\.id)
+        let order = placements.sorted { ($0.row, $0.column) < ($1.row, $1.column) }.map(\.id)
         guard var index = order.firstIndex(of: module) else { return nil }
         var shown = self
         var next = order.makeIterator()
         shown.tiles = tiles.map { tile in
-            guard tile.id != hero, !hidden.contains(tile.id), let id = next.next() else { return tile }
+            guard !hidden.contains(tile.id), let id = next.next() else { return tile }
             return tiles.first { $0.id == id } ?? tile
         }
         let place = placement(of: module)
@@ -204,12 +199,12 @@ public struct HomeLayout: Equatable, Sendable {
         placements.first { $0.id == module }
     }
 
-    /// Every tile's place: the big square first, then the rest in order, each in the first space it
-    /// fits. That lets a small tile fill a gap left beside an earlier small tile.
+    /// Every tile's place, in order, each in the first space it fits. That lets a small tile fill a gap
+    /// left beside an earlier small tile.
     public var placements: [TilePlacement] {
         var grid = TileGrid()
-        var placed = shownHero.map { [grid.place($0, columns: Self.columns, rows: Self.heroRows)] } ?? []
-        for tile in tiles where tile.id != hero && !hidden.contains(tile.id) {
+        var placed: [TilePlacement] = []
+        for tile in tiles where !hidden.contains(tile.id) {
             placed.append(grid.place(tile.id, columns: tile.size.columns, rows: tile.size.rows))
         }
         return placed
@@ -222,6 +217,7 @@ public struct HomeLayout: Equatable, Sendable {
         }
 
         let tiles: [Tile]
+        /// Only read, from layouts saved before the redesign. Never written.
         let hero: String?
     }
 }
@@ -245,7 +241,7 @@ private struct TileGrid {
 }
 
 /// Turns places into points. Two rows and the gap between them make a small tile's height, which is
-/// what keeps a small tile and the big square exactly square.
+/// what keeps an S tile and an L tile exactly square.
 public struct BentoMetrics: Equatable, Sendable {
     let gap: CGFloat
     let columnWidth: CGFloat

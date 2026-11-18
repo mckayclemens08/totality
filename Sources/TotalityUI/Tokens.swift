@@ -104,6 +104,20 @@ public enum Typeface {
     public static let code = Font.body.monospaced()
 }
 
+/// Fixed sizes of the shared controls in the redesign (owner approved the canvas on 2026-11-17).
+public enum Metric {
+    /// A round header button: the flower and search buttons on Home, and each screen's header.
+    public static let headerButton: CGFloat = 44
+    /// The accent round + at the bottom right of a screen.
+    public static let addButton: CGFloat = 56
+    /// The remove button on a tile while Home is being edited.
+    public static let removeButton: CGFloat = 26
+    /// A progress ring's stroke.
+    public static let ringStroke: CGFloat = 7
+    /// How far the chosen tile's outline stands off the tile while Home is being edited.
+    public static let selectionOutline: CGFloat = 2
+}
+
 public enum Motion {
     public static let instant = Animation.easeOut(duration: 0.12)
     public static let quick = Animation.spring(response: 0.3, dampingFraction: 0.8)

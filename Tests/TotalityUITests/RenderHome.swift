@@ -46,8 +46,8 @@ import TotalityCore
         }
         try write(grid(layout, isEditing: false), name: "bento.png", to: directory)
         try write(grid(layout, isEditing: true), name: "bento-edit.png", to: directory)
-        layout.makeHero(.calendar)
-        try write(grid(layout, isEditing: false), name: "bento-hero.png", to: directory)
+        layout.setSize(.large, of: .calendar)
+        try write(grid(layout, isEditing: false), name: "bento-large.png", to: directory)
     }
 }
 #endif

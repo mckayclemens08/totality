@@ -78,6 +78,18 @@ any source file.
 
 Generous radii are part of the neumorphic read. Nothing in the app is square-cornered.
 
+## Control sizes
+
+`Metric` in `Tokens.swift`. Fixed sizes of the shared controls from the 2026-11-17 redesign.
+
+| Token | Value | Use |
+|---|---|---|
+| `headerButton` | 44 | the raised round header button (`HeaderButton`) |
+| `addButton` | 56 | the accent round + at the bottom right (`AddButton`) |
+| `removeButton` | 26 | the minus on a tile while Home is edited |
+| `ringStroke` | 7 | a `ProgressRing`'s track (`highlight`) and its accent arc |
+| `selectionOutline` | 2 | the accent outline around the chosen tile while Home is edited |
+
 ## Spacing — 4pt base
 
 `space1` 4 · `space2` 8 · `space3` 12 · `space4` 16 · `space5` 24 · `space6` 32 · `space7` 48 · `space8` 64 · `hairline` 1

@@ -12,6 +12,7 @@ public struct HomeView: View {
     @Binding private var style: HomeStyle
     private let onOpen: (ModuleID) -> Void
     private let onSearch: () -> Void
+    private let onAccount: (() -> Void)?
     /// Modules taken off Home. Their data stays, and links to them still open them.
     private let removed: Set<ModuleID>
     private let onRemove: (ModuleID) -> Void
@@ -21,7 +22,7 @@ public struct HomeView: View {
     @State private var isEditing = false
     @State private var adding = false
 
-    private static let topBarHeight = Space.s4 + Space.s7
+    private static let topBarHeight = Space.s4 + Metric.headerButton
 
     public init(
         modules: [ModuleEntry] = ModuleEntry.all,
@@ -34,8 +35,10 @@ public struct HomeView: View {
         onRemove: @escaping (ModuleID) -> Void = { _ in },
         onRestore: @escaping (ModuleID) -> Void = { _ in },
         onOpen: @escaping (ModuleID) -> Void,
-        onSearch: @escaping () -> Void = {}
+        onSearch: @escaping () -> Void = {},
+        onAccount: (() -> Void)? = nil
     ) {
+        self.onAccount = onAccount
         self.removed = removed
         self.onRemove = onRemove
         self.onRestore = onRestore
@@ -76,6 +79,8 @@ public struct HomeView: View {
                     let width = min(proxy.size.width - Space.s4 * 2, Space.s8 * 8)
                     ScrollView {
                         VStack(spacing: Space.s4) {
+                            heading
+                                .frame(width: width)
                             if shown.isEmpty {
                                 EmptyHome(width: width) { adding = true }
                             } else {
@@ -83,9 +88,6 @@ public struct HomeView: View {
                                     layout: layout, modules: shown, glances: glances, bigTile: bigTile, lineLink: lineLink,
                                     width: width, isEditing: $isEditing, onOpen: onOpen, onRemove: onRemove
                                 )
-                                if isEditing, !takenOff.isEmpty {
-                                    AddModuleTile(width: width) { adding = true }
-                                }
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -108,32 +110,43 @@ public struct HomeView: View {
         .onChange(of: takenOff.isEmpty) { if takenOff.isEmpty { adding = false } }
     }
 
+    /// Today's date and a greeting, or while editing, how editing works.
+    @ViewBuilder
+    private var heading: some View {
+        if isEditing {
+            Text("Drag to move. Tap a tile to change its size.")
+                .font(Typeface.caption)
+                .foregroundStyle(Theme.current.textSecondary.color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Space.s1)
+        } else {
+            TimelineView(.everyMinute) { context in
+                ScreenTitle(HomeGreeting.title(at: context.date), subtitle: HomeGreeting.date(context.date))
+                    .padding(.horizontal, Space.s1)
+            }
+        }
+    }
+
     /// Floats over the page, so tiles fade out under it instead of stopping at a hard edge.
     private var topBar: some View {
         let background = Theme.current.bg.color
         return HStack(spacing: Space.s3) {
-            Spacer()
             if isEditing {
-                Button("Done") { isEditing = false }
-                    .font(Typeface.callout)
-                    .foregroundStyle(Theme.current.accent.color)
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, Space.s4)
-                    .frame(height: Space.s7)
-                    .neumorphic(.subtle, in: Capsule())
+                HeaderPill("Add a tile", systemImage: "plus") { adding = true }
+                Spacer()
+                HeaderPill("Done", isProminent: true) { isEditing = false }
             } else {
-                Button(action: onSearch) {
-                    TopBarIcon(systemImage: "magnifyingglass")
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Search")
-                Button {
+                HeaderButton(
+                    style == .tiles ? "Show flower" : "Show tiles",
+                    systemImage: style == .tiles ? "circle.hexagongrid.fill" : "square.grid.2x2.fill"
+                ) {
                     style = style == .tiles ? .flower : .tiles
-                } label: {
-                    TopBarIcon(systemImage: style == .tiles ? "circle.hexagongrid.fill" : "square.grid.2x2.fill")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(style == .tiles ? "Show flower" : "Show tiles")
+                Spacer()
+                HeaderButton("Search", systemImage: "magnifyingglass", action: onSearch)
+                if let onAccount {
+                    HeaderButton("Account", systemImage: "person.fill", action: onAccount)
+                }
             }
         }
         .padding(.horizontal, Space.s4)
@@ -146,16 +159,18 @@ public struct HomeView: View {
     }
 }
 
-/// The home page's own buttons, a little larger than a toolbar's but in the same look.
-private struct TopBarIcon: View {
-    let systemImage: String
+/// The words at the top of Home.
+enum HomeGreeting {
+    static func title(at date: Date, calendar: Calendar = .current) -> String {
+        switch calendar.component(.hour, from: date) {
+        case 5..<12: "Good morning"
+        case 12..<17: "Good afternoon"
+        default: "Good evening"
+        }
+    }
 
-    var body: some View {
-        Image(systemName: systemImage)
-            .font(Typeface.body.weight(.semibold))
-            .foregroundStyle(Theme.current.textSecondary.color)
-            .frame(width: Space.s7, height: Space.s7)
-            .neumorphic(.subtle, in: Circle())
+    static func date(_ date: Date) -> String {
+        date.formatted(.dateTime.weekday(.wide).month(.wide).day())
     }
 }
 
