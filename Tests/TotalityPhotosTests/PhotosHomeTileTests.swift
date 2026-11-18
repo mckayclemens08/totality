@@ -65,10 +65,9 @@ private func library(with photos: [Data], opened: Bool = true) async throws -> P
 
 /// The Photos tile inside the real home grid, at a big size, as the home page draws it.
 @MainActor
-private func grid(_ model: PhotosModel, size: TileSize, isHero: Bool = false) -> some View {
+private func grid(_ model: PhotosModel, size: TileSize) -> some View {
     var layout = HomeLayout(modules: [.photos])
     layout.setSize(size, of: .photos)
-    if isHero { layout.makeHero(.photos) }
     return BentoGrid(
         layout: .constant(layout), modules: ModuleEntry.all, glances: model.glance.map { [.photos: $0] } ?? [:],
         bigTile: { id, big in id == .photos ? AnyView(PhotosHomeTile(model: model, size: big)) : nil },
@@ -131,7 +130,6 @@ import AppKit
         guard let directory = ProcessInfo.processInfo.environment["TOTALITY_RENDER_DIR"] else { return }
         try write(grid(full, size: .medium), name: "photos-tile-medium.png", to: directory)
         try write(grid(full, size: .large), name: "photos-tile-large.png", to: directory)
-        try write(grid(full, size: .large, isHero: true), name: "photos-tile-square.png", to: directory)
         try write(grid(empty, size: .medium), name: "photos-tile-medium-empty.png", to: directory)
         try write(grid(closed, size: .medium), name: "photos-tile-medium-cant-open.png", to: directory)
         let opening = try await library(with: trip, opened: false)

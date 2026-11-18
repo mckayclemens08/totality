@@ -2,7 +2,8 @@ import SwiftUI
 import TotalityCore
 
 /// The home page's tiles. A tap opens what's under it, or else the module. Holding any tile enters edit
-/// mode and picks it up, so the same press can carry on into a drag.
+/// mode and picks it up, so the same press can carry on into a drag. While editing, a tap chooses a
+/// tile, which shows its S/M/L switch.
 struct BentoGrid: View {
     @Binding var layout: HomeLayout
     let modules: [ModuleEntry]
@@ -15,6 +16,8 @@ struct BentoGrid: View {
     let onOpen: (ModuleID) -> Void
     var onRemove: (ModuleID) -> Void = { _ in }
     @State private var drag: TileDrag?
+    /// The tile whose size switch shows while editing.
+    @State private var selected: ModuleID?
     /// The module waiting for the person to confirm it comes off Home.
     @State private var removing: ModuleEntry?
     @State private var holds = 0
@@ -70,12 +73,12 @@ struct BentoGrid: View {
                 ForEach(placements) { placement in
                     if let module = modules.first(where: { $0.id == placement.id }) {
                         let frame = metrics.frame(of: placement)
-                        TileMenu(module: module, layout: $layout)
-                            .frame(width: frame.width, height: frame.height, alignment: .topTrailing)
-                            .position(x: frame.midX, y: frame.midY)
                         RemoveTileButton(module: module) { removing = module }
-                            .frame(width: frame.width, height: frame.height, alignment: .topLeading)
-                            .position(x: frame.midX, y: frame.midY)
+                            .position(x: frame.minX + Space.s2, y: frame.minY + Space.s2)
+                        if selected == module.id {
+                            SizeSwitch(module: module, layout: $layout)
+                                .position(x: frame.midX, y: frame.maxY)
+                        }
                     }
                 }
                 .zIndex(3)
@@ -85,6 +88,7 @@ struct BentoGrid: View {
         .coordinateSpace(.named(Self.space))
         .animation(reduceMotion ? nil : Motion.standard, value: layout)
         .sensoryFeedback(.selection, trigger: holds)
+        .onChange(of: isEditing) { if !isEditing { selected = nil } }
         .confirmationDialog(
             "Remove \(removing?.name ?? "") from Home?",
             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
@@ -101,7 +105,7 @@ struct BentoGrid: View {
     private func tile(_ module: ModuleEntry, at frame: CGRect, metrics: BentoMetrics) -> some View {
         let dragged = drag?.id == module.id ? drag : nil
         return Button {
-            if !isEditing { onOpen(module.id) }
+            if isEditing { choose(module.id) } else { onOpen(module.id) }
         } label: {
             let size = layout.bigSize(of: module.id)
             TileLabel(
@@ -116,7 +120,27 @@ struct BentoGrid: View {
         .buttonStyle(TileButtonStyle(isEditing: isEditing, isDragged: dragged != nil, isTouched: false))
         .simultaneousGesture(mouseHold(metrics: metrics))
         #endif
+        .overlay {
+            if isEditing, selected == module.id, dragged == nil {
+                tileShape.inset(by: -Space.s1)
+                    .stroke(Theme.current.accent.color, lineWidth: Metric.selectionOutline)
+                    .allowsHitTesting(false)
+            }
+        }
         .accessibilityAction(named: "Edit home") { isEditing = true }
+        .accessibilityActions {
+            if isEditing {
+                ForEach(TileSize.allCases, id: \.self) { size in
+                    Button("Make \(size.name.lowercased())") { layout.setSize(size, of: module.id) }
+                }
+                if layout.canMove(module.id, by: -1) {
+                    Button("Move earlier") { layout.move(module.id, by: -1) }
+                }
+                if layout.canMove(module.id, by: 1) {
+                    Button("Move later") { layout.move(module.id, by: 1) }
+                }
+            }
+        }
         .frame(width: frame.width, height: frame.height)
         .position(dragged?.position ?? CGPoint(x: frame.midX, y: frame.midY))
         .zIndex(dragged == nil ? 0 : 1)
@@ -143,7 +167,10 @@ struct BentoGrid: View {
         return TileTouchArea { point in
             touched = point.flatMap(tile)
         } onTap: { point in
-            guard !isEditing else { return }
+            guard !isEditing else {
+                if let id = tile(point) { choose(id) }
+                return
+            }
             if let spot = spots.first(where: { $0.frame.contains(point) }) {
                 spot.link.action()
             } else if let id = tile(point) {
@@ -172,6 +199,11 @@ struct BentoGrid: View {
     }
     #endif
 
+    /// A second tap on the chosen tile puts its switch away.
+    private func choose(_ id: ModuleID) {
+        withAnimation(reduceMotion ? nil : Motion.quick) { selected = selected == id ? nil : id }
+    }
+
     private func held(_ event: TileHold, metrics: BentoMetrics) {
         let tiles = layout.placements
         switch event {
@@ -179,8 +211,7 @@ struct BentoGrid: View {
             guard let placement = metrics.placement(at: point, among: tiles) else { return }
             holds += 1
             isEditing = true
-            // The big square always sits at the top, so it can't be dragged.
-            guard placement.id != layout.hero else { return }
+            selected = placement.id
             let frame = metrics.frame(of: placement)
             drag = TileDrag(
                 id: placement.id, position: CGPoint(x: frame.midX, y: frame.midY),
@@ -189,7 +220,7 @@ struct BentoGrid: View {
         case .moved(let point):
             guard var current = drag else { return }
             current.position = CGPoint(x: point.x - current.grab.width, y: point.y - current.grab.height)
-            let others = tiles.filter { $0.id != current.id && $0.id != layout.hero }
+            let others = tiles.filter { $0.id != current.id }
             let target = metrics.placement(at: point, among: others)?.id
             // Tiles differ in size, so a swap can leave the finger over the same tile. Waiting for a
             // new one stops the two trading places over and over.
@@ -276,7 +307,7 @@ private final class TileTouchView: UIView {
 }
 #endif
 
-private let tileShape = RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
+private let tileShape = RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
 
 /// A link and where it landed in the grid.
 private struct LinkSpot {
@@ -313,9 +344,9 @@ struct TileLabel: View {
                 Text(module.name)
                     .lineLimit(1)
             }
-            // Clears the tile's menu and its remove button, which share the top corners.
-            .padding(.horizontal, isEditing ? Space.s6 : 0)
-            .font(Typeface.callout)
+            // Clears the remove button on the top corner.
+            .padding(.leading, isEditing ? Space.s3 : 0)
+            .font(Typeface.caption.weight(.semibold))
             .foregroundStyle(theme.textSecondary.color)
             if let content {
                 content
@@ -388,56 +419,38 @@ private struct TileButtonStyle: ButtonStyle {
     }
 }
 
-/// Sizes and moves. Moving from here is the route for anyone who can't drag.
-private struct TileMenu: View {
+/// S, M and L under the chosen tile while Home is edited. The chosen size is filled with the accent.
+private struct SizeSwitch: View {
     let module: ModuleEntry
     @Binding var layout: HomeLayout
 
     var body: some View {
-        let id = module.id
-        let isHero = layout.hero == id
-        Menu {
+        let theme = Theme.current
+        let current = layout.size(of: module.id)
+        HStack(spacing: Space.s1 / 2) {
             ForEach(TileSize.allCases, id: \.self) { size in
+                let isChosen = current == size
                 Button {
-                    layout.setSize(size, of: id)
+                    layout.setSize(size, of: module.id)
                 } label: {
-                    choice(size.name, isChosen: !isHero && layout.size(of: id) == size)
+                    Text(size.letter)
+                        .font(Typeface.caption.weight(.semibold))
+                        .foregroundStyle(isChosen ? theme.accentOn.color : theme.textSecondary.color)
+                        .padding(.horizontal, Space.s3)
+                        .padding(.vertical, Space.s2)
+                        .background {
+                            if isChosen {
+                                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous).fill(theme.accent.color)
+                            }
+                        }
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(SoftPress())
+                .accessibilityLabel("\(size.name) \(module.name) tile")
+                .accessibilityAddTraits(isChosen ? .isSelected : [])
             }
-            Button {
-                layout.makeHero(id)
-            } label: {
-                choice("Big square at top", isChosen: isHero)
-            }
-            if !isHero {
-                Divider()
-                Button("Move earlier") { layout.move(id, by: -1) }
-                    .disabled(!layout.canMove(id, by: -1))
-                Button("Move later") { layout.move(id, by: 1) }
-                    .disabled(!layout.canMove(id, by: 1))
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(Typeface.callout)
-                .foregroundStyle(Theme.current.textPrimary.color)
-                .frame(width: Space.s6, height: Space.s6)
-                .neumorphic(.raised, in: Circle())
-                .frame(width: Space.s7, height: Space.s7)
-                .contentShape(Rectangle())
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("Change \(module.name)")
-    }
-
-    @ViewBuilder
-    private func choice(_ name: String, isChosen: Bool) -> some View {
-        if isChosen {
-            Label(name, systemImage: "checkmark")
-        } else {
-            Text(name)
-        }
+        .padding(Space.s1)
+        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
     }
 }

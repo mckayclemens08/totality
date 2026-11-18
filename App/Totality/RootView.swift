@@ -89,8 +89,9 @@ struct RootView: View {
                 } onSearch: {
                     prepareContent()
                     showingSearch = true
+                } onAccount: {
+                    showingAccount = true
                 }
-                .overlay(alignment: .topLeading) { accountButton }
             case .reader:
                 if let reader {
                     ReaderHomeView(model: reader) { open = nil }
@@ -357,21 +358,6 @@ struct RootView: View {
     private func bringUp(_ module: ModuleID) {
         recentModule = module
         open = module
-    }
-
-    private var accountButton: some View {
-        Button {
-            showingAccount = true
-        } label: {
-            Image(systemName: "person.fill")
-                .font(Typeface.body.weight(.semibold))
-                .foregroundStyle(Theme.current.textSecondary.color)
-                .frame(width: Space.s7, height: Space.s7)
-                .neumorphic(.subtle, in: Circle())
-        }
-        .buttonStyle(.plain)
-        .padding(Space.s4)
-        .accessibilityLabel("Account")
     }
 
     private func contentMessage(onClose: @escaping () -> Void) -> some View {

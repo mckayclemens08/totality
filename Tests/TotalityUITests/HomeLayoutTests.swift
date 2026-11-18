@@ -9,16 +9,10 @@ struct HomeLayoutTests {
     private static let modules = ModuleID.allCases
     private static let metrics = BentoMetrics(width: 361)
 
-    /// A layout with no big square and exactly these tiles, in this order.
+    /// A layout with exactly these tiles, in this order.
     private func layout(_ tiles: [(ModuleID, TileSize)]) -> HomeLayout {
-        var layout = HomeLayout(modules: tiles.map(\.0))
-        layout.setSize(tiles[0].1, of: tiles[0].0)
-        for (index, tile) in tiles.enumerated() {
-            layout.setSize(tile.1, of: tile.0)
-            if index > 0 { layout.move(tile.0, to: layout.tiles[index].id) }
-        }
-        if let hero = layout.hero { layout.setSize(layout.size(of: hero) ?? .small, of: hero) }
-        return layout
+        let saved = tiles.map { #"{"module":"\#($0.0.rawValue)","size":"\#($0.1.rawValue)"}"# }.joined(separator: ",")
+        return HomeLayout(saved: Data(#"{"tiles":[\#(saved)]}"#.utf8), modules: tiles.map(\.0))
     }
 
     private func place(_ layout: HomeLayout, _ id: ModuleID) throws -> TilePlacement {
@@ -32,7 +26,7 @@ struct HomeLayoutTests {
         }
     }
 
-    @Test("Only a tile bigger than small gets a module's own view, and the big square says so")
+    @Test("Only a tile bigger than small gets a module's own view, and an L tile asks for the square one")
     func bigSizes() {
         var layout = HomeLayout(modules: [.reader, .calendar, .photos])
         layout.setSize(.small, of: .reader)
@@ -40,39 +34,32 @@ struct HomeLayoutTests {
         layout.setSize(.large, of: .photos)
         #expect(layout.bigSize(of: .reader) == nil)
         #expect(layout.bigSize(of: .calendar) == .medium)
-        #expect(layout.bigSize(of: .photos) == .large)
-        layout.makeHero(.reader)
-        #expect(layout.bigSize(of: .reader) == .square)
+        #expect(layout.bigSize(of: .photos) == .square)
         #expect(layout.bigSize(of: .mail) == nil)
     }
 
-    @Test("A new install has every module once, with the big square left as a choice")
+    @Test("A new install has every module once, with the Reader across the top")
     func starting() {
         let layout = HomeLayout(modules: Self.modules)
         #expect(layout.tiles.map(\.id).sorted { $0.rawValue < $1.rawValue } == Self.modules.sorted { $0.rawValue < $1.rawValue })
         #expect(layout.placements.count == Self.modules.count)
-        #expect(layout.hero == nil)
-        #expect(layout.tiles.first == HomeTile(id: .reader, size: .large))
+        #expect(layout.tiles.first == HomeTile(id: .reader, size: .medium))
         #expect(!overlaps(layout))
     }
 
-    @Test("A small tile is square, medium is 2:1, large is taller, and the big square is square")
+    @Test("S is one column and square, M is full width and as short as S, L is full width and square")
     func shapes() throws {
-        var layout = self.layout([(.reader, .small), (.mail, .medium), (.player, .large), (.money, .small)])
-        layout.makeHero(.money)
+        let layout = self.layout([(.reader, .small), (.mail, .medium), (.player, .large), (.money, .small)])
         let metrics = Self.metrics
-        let hero = metrics.frame(of: try place(layout, .money))
         let small = metrics.frame(of: try place(layout, .reader))
         let medium = metrics.frame(of: try place(layout, .mail))
         let large = metrics.frame(of: try place(layout, .player))
         #expect(small.width == small.height)
-        #expect(hero.width == hero.height)
-        #expect(hero.width == 361)
+        #expect(small.width < 361)
         #expect(medium.width == 361)
         #expect(medium.height == small.height)
         #expect(large.width == 361)
-        #expect(large.height > medium.height)
-        #expect(large.height < hero.height)
+        #expect(large.height == large.width)
     }
 
     @Test("Tiles never overlap and all stay inside the width, whatever the sizes")
@@ -83,7 +70,6 @@ struct HomeLayoutTests {
             for (index, module) in Self.modules.enumerated() {
                 layout.setSize(sizes[(seed * (index + 3) + seed / 7) % sizes.count], of: module)
             }
-            if seed % 3 == 0 { layout.makeHero(Self.modules[seed % Self.modules.count]) }
             #expect(layout.placements.count == Self.modules.count)
             #expect(!overlaps(layout))
             for placement in layout.placements {
@@ -108,48 +94,6 @@ struct HomeLayoutTests {
         #expect(layout.placements.map(\.id) == [.reader, .calendar, .mail, .player])
         #expect(layout.placements.map(\.row) == [0, 2, 2, 4])
         #expect(layout.placements.map(\.column) == [0, 0, 1, 0])
-    }
-
-    @Test("The big square sits at the top, wherever its tile is in the order")
-    func heroOnTop() throws {
-        var layout = layout([(.reader, .small), (.calendar, .small), (.mail, .medium)])
-        layout.makeHero(.mail)
-        let hero = try place(layout, .mail)
-        #expect(hero.row == 0)
-        #expect(hero.column == 0)
-        #expect(hero.columns == 2)
-        #expect(hero.rows == 4)
-        #expect(layout.placements.filter { $0.id == .mail }.count == 1)
-        #expect(try place(layout, .reader).row == 4)
-    }
-
-    @Test("A new big square releases the old one, at the size and place it had")
-    func oneHero() throws {
-        var layout = layout([(.reader, .large), (.calendar, .small), (.mail, .small)])
-        layout.makeHero(.reader)
-        layout.makeHero(.calendar)
-        #expect(layout.hero == .calendar)
-        #expect(layout.size(of: .reader) == .large)
-        #expect(try place(layout, .reader).rows == 3)
-        #expect(layout.placements.filter { $0.rows == 4 }.map(\.id) == [.calendar])
-    }
-
-    @Test("Choosing a size for the big square makes it an ordinary tile")
-    func sizeReleasesHero() {
-        var layout = layout([(.reader, .small), (.calendar, .small)])
-        layout.makeHero(.calendar)
-        layout.setSize(.medium, of: .calendar)
-        #expect(layout.hero == nil)
-        #expect(layout.size(of: .calendar) == .medium)
-        layout.setSize(.large, of: .reader)
-        #expect(layout.size(of: .reader) == .large)
-    }
-
-    @Test("A module that isn't on the page can't become the big square")
-    func heroMustExist() {
-        var layout = layout([(.reader, .small)])
-        layout.makeHero(.money)
-        #expect(layout.hero == nil)
     }
 
     @Test("Moving takes the target's place, in both directions")
@@ -178,7 +122,7 @@ struct HomeLayoutTests {
 
     @Test("It rises under a tile that isn't moving, too")
     func wideTileRisesUnderATile() throws {
-        var layout = HomeLayout(modules: [.reader, .messages, .mail, .ai])
+        var layout = layout([(.reader, .large), (.messages, .small), (.mail, .small), (.ai, .medium)])
         layout.move(.ai, to: .mail)
         #expect(layout.tiles.map(\.id) == [.reader, .ai, .messages, .mail])
     }
@@ -195,7 +139,7 @@ struct HomeLayoutTests {
 
     @Test("Passing tiles stops as soon as the tile has moved")
     func moveStopsWhenMoved() {
-        var layout = HomeLayout(modules: [.messages, .mail, .player, .photos])
+        var layout = layout([(.messages, .small), (.mail, .small), (.player, .small), (.photos, .small)])
         layout.move(.photos, to: .mail)
         #expect(layout.tiles.map(\.id) == [.messages, .photos, .mail, .player])
     }
@@ -236,30 +180,18 @@ struct HomeLayoutTests {
         #expect(try place(layout, .calendar).row == 2)
     }
 
-    @Test("Moving steps over the big square, which has no place in the order")
-    func stepsOverHero() {
-        var layout = layout([(.reader, .small), (.calendar, .small), (.mail, .small)])
-        layout.makeHero(.calendar)
-        #expect(!layout.canMove(.calendar, by: 1))
-        #expect(!layout.canMove(.calendar, by: -1))
-        layout.move(.mail, by: -1)
-        #expect(layout.placements.map(\.id).prefix(1) == [.calendar])
-        #expect(layout.placements.dropFirst().sorted { $0.column < $1.column }.map(\.id) == [.mail, .reader])
-    }
-
     @Test("An arrangement survives being saved")
     func roundTrip() {
         var layout = HomeLayout(modules: Self.modules)
         layout.setSize(.large, of: .money)
         layout.move(.money, to: .calendar)
-        layout.makeHero(.photos)
         #expect(HomeLayout(saved: layout.saved, modules: Self.modules) == layout)
     }
 
     @Test("What's saved is module names and sizes, nothing else")
     func savedHoldsNoContent() throws {
         let saved = try #require(try JSONSerialization.jsonObject(with: HomeLayout(modules: Self.modules).saved) as? [String: Any])
-        #expect(Set(saved.keys).subtracting(["hero"]) == ["tiles"])
+        #expect(Set(saved.keys) == ["tiles"])
     }
 
     @Test("Unreadable data gives the starting layout", arguments: [Data(), Data("not json".utf8), Data("{}".utf8), Data(#"{"tiles":[],"hero":null}"#.utf8)])
@@ -275,7 +207,6 @@ struct HomeLayoutTests {
         let updated = HomeLayout(saved: layout.saved, modules: Self.modules)
         #expect(updated.tiles.last == HomeTile(id: .web, size: .small))
         #expect(updated.tiles.dropLast() == layout.tiles[...])
-        #expect(updated.hero == layout.hero)
     }
 
     @Test("A removed or unknown module drops out, and a duplicate counts once")
@@ -283,17 +214,58 @@ struct HomeLayoutTests {
         let json = #"{"tiles":[{"module":"mail","size":"large"},{"module":"gone","size":"small"},{"module":"mail","size":"small"},{"module":"reader","size":"huge"}],"hero":"gone"}"#
         let layout = HomeLayout(saved: Data(json.utf8), modules: [.mail, .reader, .calendar])
         #expect(layout.tiles == [HomeTile(id: .mail, size: .large), HomeTile(id: .reader, size: .small), HomeTile(id: .calendar, size: .small)])
-        #expect(layout.hero == nil)
     }
 
-    @Test("A big square whose module is gone is released")
-    func heroGone() {
-        var layout = HomeLayout(modules: Self.modules)
-        layout.makeHero(.money)
-        let fewer = Self.modules.filter { $0 != .money }
-        let restored = HomeLayout(saved: layout.saved, modules: fewer)
-        #expect(restored.hero == nil)
-        #expect(!restored.tiles.contains { $0.id == .money })
+    @Test("A layout saved with a big square at the top keeps that tile first, now L")
+    func migratesBigSquare() throws {
+        let json = #"{"hero":"calendar","tiles":[{"module":"reader","size":"large"},{"module":"mail","size":"small"},{"module":"calendar","size":"small"},{"module":"photos","size":"medium"}]}"#
+        let layout = HomeLayout(saved: Data(json.utf8), modules: [.reader, .mail, .calendar, .photos])
+        #expect(layout.tiles == [
+            HomeTile(id: .calendar, size: .large), HomeTile(id: .reader, size: .large),
+            HomeTile(id: .mail, size: .small), HomeTile(id: .photos, size: .medium),
+        ])
+        let top = try place(layout, .calendar)
+        #expect(top.row == 0)
+        #expect(top.columns == 2)
+        #expect(top.rows == 4)
+    }
+
+    @Test("Every tile from an old layout survives, at its size, and the big square is never saved again")
+    func migrationKeepsEveryTile() throws {
+        let json = #"{"hero":"money","tiles":[{"module":"reader","size":"large"},{"module":"calendar","size":"medium"},{"module":"money","size":"small"},{"module":"mail","size":"small"}]}"#
+        let layout = HomeLayout(saved: Data(json.utf8), modules: Self.modules)
+        #expect(Set(layout.tiles.map(\.id)) == Set(Self.modules))
+        #expect(layout.size(of: .reader) == .large)
+        #expect(layout.size(of: .calendar) == .medium)
+        #expect(layout.size(of: .money) == .large)
+        #expect(layout.size(of: .mail) == .small)
+        let saved = try #require(try JSONSerialization.jsonObject(with: layout.saved) as? [String: Any])
+        #expect(saved["hero"] == nil)
+        #expect(HomeLayout(saved: layout.saved, modules: Self.modules) == layout)
+    }
+
+    @Test("An old big square whose module is gone is let go, and the rest keep their order")
+    func migrationHeroGone() {
+        let json = #"{"hero":"gone","tiles":[{"module":"mail","size":"small"},{"module":"reader","size":"medium"}]}"#
+        let layout = HomeLayout(saved: Data(json.utf8), modules: [.mail, .reader])
+        #expect(layout.tiles == [HomeTile(id: .mail, size: .small), HomeTile(id: .reader, size: .medium)])
+    }
+
+    @Test("Size letters on the switch")
+    func letters() {
+        #expect(TileSize.allCases.map(\.letter) == ["S", "M", "L"])
+    }
+
+    @Test("The greeting follows the time of day")
+    func greeting() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Denver"))
+        func at(_ hour: Int) throws -> Date {
+            try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 17, hour: hour)))
+        }
+        #expect(HomeGreeting.title(at: try at(8), calendar: calendar) == "Good morning")
+        #expect(HomeGreeting.title(at: try at(14), calendar: calendar) == "Good afternoon")
+        #expect(HomeGreeting.title(at: try at(21), calendar: calendar) == "Good evening")
     }
 
     @Test("Tiles are the default home page and Flower is the other choice")
@@ -332,18 +304,6 @@ struct HomeLayoutTests {
         home.hidden = []
         #expect(try place(home, .photos) == before)
         #expect(home.size(of: .photos) == .large)
-    }
-
-    @Test("A removed big square leaves the top free and comes back as the big square")
-    func removedHero() throws {
-        var home = HomeLayout(modules: Self.modules)
-        home.makeHero(.calendar)
-        home.hidden = [.calendar]
-        #expect(home.bigSize(of: .calendar) == nil)
-        #expect(!home.placements.contains { $0.id == .calendar })
-        #expect(try place(home, .reader).row == 0)
-        home.hidden = []
-        #expect(home.bigSize(of: .calendar) == .square)
     }
 
     @Test("Moving a tile steps over removed ones")

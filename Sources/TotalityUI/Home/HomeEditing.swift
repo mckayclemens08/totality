@@ -8,7 +8,7 @@ enum HomeRemoval {
     }
 }
 
-/// The minus in a tile's top corner while Home is being edited.
+/// The minus on a tile's top corner while Home is being edited. Small to look at, a full finger to hit.
 struct RemoveTileButton: View {
     let module: ModuleEntry
     let action: () -> Void
@@ -16,14 +16,14 @@ struct RemoveTileButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "minus")
-                .font(Typeface.callout.weight(.bold))
-                .foregroundStyle(Theme.current.textPrimary.color)
-                .frame(width: Space.s6, height: Space.s6)
-                .neumorphic(.raised, in: Circle())
+                .font(Typeface.caption.weight(.bold))
+                .foregroundStyle(Theme.current.textSecondary.color)
+                .frame(width: Metric.removeButton, height: Metric.removeButton)
+                .neumorphic(.subtle, in: Circle())
                 .frame(width: Space.s7, height: Space.s7)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SoftPress())
         .accessibilityLabel("Remove \(module.name) from Home")
     }
 }
@@ -78,6 +78,12 @@ struct AddModulesView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: Space.s3) {
+                    if modules.isEmpty {
+                        Text("Every module is already on Home.")
+                            .font(Typeface.body)
+                            .foregroundStyle(theme.textSecondary.color)
+                            .padding(.top, Space.s6)
+                    }
                     ForEach(modules) { module in
                         Button { onAdd(module.id) } label: {
                             HStack(spacing: Space.s3) {
