@@ -1,175 +1,48 @@
-# Totality — standing instructions
+# Totality — standing instructions (short form)
 
-Native iPhone + Mac super app. Owner: McKay Clemens. Spec: `docs/founding-brief-v6.pdf`.
-Architecture: `docs/phase-0-architecture-proposal.md`. Contracts: `docs/module-contracts.md` (created in Phase 0).
+iPhone super app, with a website planned in place of a Mac app. Owner: McKay Clemens. Full rules, owner quotes and dates: `docs/standing-rules.md`. Read the matching section there before touching auth, keys, mail, Google, the server or the gates. Architecture: `docs/phase-0-architecture-proposal.md`. Contracts: `docs/module-contracts.md`.
 
-**Read this file every session. Read the architecture proposal before touching anything structural.**
+## Non-negotiables (each fails review)
+1. Every user-data table has `owner_id`, `visibility`, RLS on and a mutation policy. Run `scripts/check-schema-invariants.sql` before adding a table.
+2. Private content, filenames and captions included, is encrypted on the device before upload. Outside email is the one exception (see the full rules).
+3. Passwords sign you in and do nothing else. They go only to the account server over HTTPS. The app never stores or logs them, and they never unlock or derive a key. Totality sends no sign-in email.
+4. No secrets in the repo, ever: not in code, tests, history or comments.
+5. Encryption labels must be literally true.
+6. The AI starts with access to nothing. Send, post, pay and delete always stop for approval.
+7. Modules never import each other. Cross-module work goes through `ContentRef` and `ModuleRegistry`.
+8. Plaid is read-only, and Google scopes are minimal, except Gmail `gmail.modify` and full Drive access for the Reader (see the full rules).
 
-## The gate
+## Gates
+Phases 0 and 1 are both being built, and Phase 2 is open starting with Messages. Phase 4 is closed. A module is done only when:
+- its spec is agreed
+- **a UI mockup the owner has seen comes before building** (owner, 2026-11-17)
+- it builds and the owner has run it on a real device
+- its unit tests and the two-user test pass, with its case in `TotalityTests/TwoUserTests`
+- its empty, loading and error states were looked at
+- anything touching auth, keys or user data had a security review
+- it's committed
 
-The owner waived the independent model review on 2026-10-30 ("Waive it, start building"), so Phase 0
-work may proceed against the proposal. The waiver covers that one review, nothing else: the build order,
-the two-user test, and security review of anything touching auth, keys, or user data all still apply.
-
-The owner overrode the Phase 1 gate on 2026-10-30 ("Override, start Phase 1"), so Phase 1 is being built
-before Phase 0 passes the two-user test. The override covers starting Phase 1 modules, nothing else:
-the remaining Phase 0 work still has to land, and no module is done until it meets the definition of
-done below, which needs the app target, a real device, and a real backend.
-
-The owner opened Phase 2 on 2026-11-05 ("Agree, open Phase 2"), starting with Messages, before the rest
-of Phase 1 (photos, money, player, AI basic) is built. That covers starting Phase 2 modules, nothing
-else: each still needs an agreed spec, and the definition of done still applies to every one.
-Phase 4 stays closed.
-
-## Non-negotiables
-
-These fail review, full stop. There is no "just for now" version of any of them.
-
-1. **Every user-data table has `owner_id`, `visibility`, RLS enabled, and a mutation policy.**
-   `scripts/check-schema-invariants.sql` is written at Phase 0 step 0.3 and then runs in CI. Do not add
-   a table without running it. Account and infrastructure tables are on an owner-approved allowlist.
-2. **Private content is encrypted client-side before upload.** A plaintext content column on a
-   private entity is an automatic rejection. Filenames and captions count as content. There is one
-   exception, which the owner agreed on 2026-11-02 (issue 37): outside email can't meet this, because
-   it arrives unsealed from the rest of the world and a sent message has to reach the sending service
-   readable. The mail server may hold outside mail unsealed for a moment, in memory only and out of
-   every log, and seals it to the recipient's public key before anything touches the disk. Nothing
-   else gets this exception.
-3. **Passwords sign you in and do nothing else.** The owner replaced email links with username and
-   password on 2026-10-30 ("I don't want to send them an external email ... change the sign up/sign in
-   to username/password only"). The password goes only to the account server over HTTPS, which keeps a
-   hash. The app never stores or logs it. A password must never unlock or derive a content key,
-   because the server receives it. Totality sends no sign-in email.
-4. **No secrets in the repo.** Not in code, not in tests, not in history, not in a commented-out line.
-   Environment and GitHub Secrets only. Assume anything committed is permanent and public.
-5. **Encryption labels must be literally true.** "End-to-end encrypted" in the UI only where the
-   server genuinely cannot read it. Group calls through an SFU without E2EE enabled are
-   "encrypted in transit." PSTN calls and outbound email are neither — label them honestly.
-6. **The AI starts with access to nothing.** Access comes from revocable per-module grants.
-   Outward-facing actions (send, post, pay, delete) always stop for explicit approval regardless
-   of grant scope.
-7. **Modules never import each other.** Cross-module anything goes through `ContentRef` and
-   `ModuleRegistry` in `TotalityCore`.
-8. **Plaid is read-only. Google scopes are minimal.** Gmail read is not Gmail send. There is one
-   exception, which the owner agreed on 2026-11-07 (issue 43, "Allow it, change the rule"). An outside
-   Gmail account asks for `gmail.modify`, so read state, stars, archiving and Trash made in Totality
-   reach Gmail, and Google lets that grant send. Totality's code still sends from Gmail only after that
-   account's Send switch is turned on and its own `gmail.send` request is allowed, and every send stops
-   for the person's press. A second exception, which the owner chose on 2026-11-13 ("Broad, change the
-   rule"): the Reader may ask for full Google Drive access, so the person can link Drive folders of their
-   choice and open, edit and import their files. Totality shows only the folders the person linked, the
-   device talks to Google directly, and Totality's server never sees Drive files or the sign-in.
-   Nothing else gets these exceptions.
-
-## Definition of done (every module)
-
-A module is done when all of these are true — not when it compiles, not when it works for the owner:
-
-- [ ] Spec written in plain English and agreed before building
-- [ ] Builds for **both** iPhone and Mac
-- [ ] Owner has run it on a real device
-- [ ] Unit tests pass
-- [ ] **Two-user test passes**: User 2 cannot see User 1's private content, can accept an invite,
-      can receive a message, can open something User 1 shared. A module that only works with one
-      account in the world is an A-only hack — reject it.
-- [ ] The module's own case is added to `TotalityTests/TwoUserTests`
-- [ ] Empty, loading, and error states exist and were looked at
-- [ ] Anything touching auth, keys, or user data went through security review
-- [ ] Committed
-
-Never start the next module on a broken previous one.
-
-## Build order
-
-Phase 0 foundation → Phase 1 solo modules (Reader+Listen, calendar, email, player, photos, money,
-AI basic) → Phase 2 network modules (Messages, calls, unified social) → Phase 3 hardening →
-Phase 4 commerce. Brief §7. One module at a time.
-
-## Architecture in one paragraph
-
-SwiftUI multiplatform client, three server planes. **Supabase** holds the account, the public handle
-directory, solo-module data, and ciphertext blobs. **Matrix** (Tuwunel) carries every private
-interpersonal thing — DMs, communities/channels, call signalling, device keys, private posts, shared
-docs — all E2E. **atproto** (Phase 2) carries public social posts only. A record's transport is chosen
-by its **visibility**, not by its module. Keys live on devices, backed up in Matrix SSSS under one
-recovery key. Large binaries go to Supabase Storage as ciphertext; Matrix holds the key and the
-membership. Mail is the exception, and stands apart from all three (owner, 2026-11-02): mailboxes live
-on the Oracle server as sealed files, and mail between accounts doesn't use Matrix.
+Never start the next module on a broken one.
 
 ## Design
+- Neumorphic, with soft dual shadows and no hard borders.
+- No sunken look anywhere, enforced by `NoSunkenLookTests`.
+- One accent colour, and text meets WCAG AA.
+- Use the tokens in `Sources/TotalityUI/Tokens.swift`, never hard-coded values.
+- Real content, never lorem ipsum.
+- The visual target is the approved canvases:
+  - redesign: https://claude.ai/artifact/TfyX6ksdt2RDkDRd3k94fd
+  - Social: https://claude.ai/artifact/8LBGndLQUGzYYSVrU1TeSi
+  - website: https://claude.ai/artifact/EPDH71EqdT2cz34HJxv1Dr
+- Tinted themes and a Graphite dark theme are approved but not built. Update `docs/design-tokens.md` before building them.
 
-- **Neumorphic and light only.** The owner removed dark mode on 2026-10-31, so there's one palette: white
-  and pale grey surfaces with dark grey text. Soft dual shadows; background and surface close in value.
-  No rainbow palette, no pure black, no hard borders or harsh drop shadows as the default treatment.
-  Elevation comes from the shadow pair, not from lines.
-- **No sunken look anywhere.** No inset, inner-shadowed or pressed-in surface, at rest, selected or
-  pressed (owner, 2026-11-15: "I just don't like the sunken-in look", "anywhere"; issue 132). Selected
-  gets an accent tint or `selectionWash`, a press gets a little scale or opacity, text boxes use
-  `raisedField()`. `NoSunkenLookTests` enforces it.
-- **One accent colour, used sparingly.**
-- Body text meets WCAG AA contrast. The look never wins over legibility.
-- Tokens in `Sources/TotalityUI/Tokens.swift` + `docs/design-tokens.md`. Read them before writing UI.
-  Never hard-code a colour, radius, spacing value, or duration.
-- **Figma is the visual source of truth once it arrives** and overrides these words where they conflict.
-  Until then the tokens are provisional placeholders, not brand decisions.
-- Real content in every mock and test. Never lorem ipsum — slop hides in fake content.
-- Note: brief §16's UI library list (shadcn, Radix, Origin UI, Magic UI, 21st.dev, Framer Motion,
-  Playwright screenshots) is from the superseded web-app plan and does not apply to SwiftUI.
-  Components are first-party in `TotalityUI`; visual verification is swift-snapshot-testing + XCUITest.
+## Cost
+Stages A and B cost $0. Flag anything that would cost money; don't decide it. The only exceptions are the domain (about $10 a year) and Cloudflare Workers Paid ($5 a month). Never upgrade Oracle to paid.
 
-## Cost rule
-
-Stages A and B cost nothing. Free tiers, open source, hardware already owned. If a feature cannot be
-done at $0, it waits or gets redesigned — it does not quietly start a subscription. Flag it, don't
-decide it. There are two named exceptions. The domain, `usetotality.com`, which the owner bought on
-2026-10-30 at roughly $10 a year (proposal §11-L). And Cloudflare Workers Paid at $5 a month plus usage,
-which the owner chose on 2026-11-02 to send mail to outside addresses ("just increase my cloudflare the
-$5 a month").
-
-## Running the app
-
-The app target is `App/Totality.xcodeproj`, one target for iPhone and Mac. Set
-`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` if `xcode-select` points at Command Line Tools.
-The project signs with the owner's free Personal Team, and command-line builds need
-`-allowProvisioningUpdates -allowProvisioningDeviceRegistration`. An ad-hoc Mac build gets `-34018` from
-the Keychain, so the Reader shows its key error by design: never fall back to a weaker keychain to get
-around that. `keychain-access-groups` is pinned in the entitlements so a team change cannot hide the key.
-The first app build on a Mac fetches Michael's voice pack from a GitHub release, so `gh` has to be signed in.
-
-## The server
-
-The Oracle Always Free box runs the Matrix server behind a Cloudflare tunnel. Its setup is in `server/`,
-copied to `~/totality` and started with `docker compose`. Reach it with
-`ssh -i ~/.ssh/totality_server ubuntu@158.101.16.156`. Secrets stay on the server and never enter the repo.
-The only public paths are the ones in `server/cloudflared.yml`, and the only open port is SSH.
-SearXNG runs there too, reachable only through the gateway in `server/gateway/`, and neither one logs searches.
-Mail arrives through `server/mail/`, from the Cloudflare Worker in `server/mail-worker/`, and is sealed before it reaches `~/totality/mailboxes`. Rspamd checks it first, on a network with no way out. Neither one logs anything.
-Sealed photos and Reader files go through `server/blobs/` to `~/totality/blobs-data`, one folder per account, and it logs nothing either.
-Never upgrade the Oracle account to paid: that's the owner's decision under the cost rule.
-
-## Working discipline
-
-- Work lands through pull requests; the PR is the review surface. GitHub may not enforce this on a
-  free private repo (proposal §11-J), so treat `main` as protected whether or not it is enforced.
-- Small conventional commits, one module-step each.
-- GitHub Issues hold the OPEN decisions and each module's spec.
-- Tags mark completed phases.
-- Red build blocks merge — for you exactly as for a human.
-
-## Decisions that are locked (do not relitigate)
-
-Name: Totality. Identity: username (the handle) + password, no email or phone (owner, 2026-10-30). v1 is a native iPhone app with a connected
-website in place of a Mac app (owner, 2026-11-15: "i think I like that idea better than a mac app"). The website gets
-an architecture proposal, agreed before any code, covering keys in the browser, Matrix E2EE on the web, sign-in, and
-$0 hosting. Social follows the website and is iPhone-only at first; Articles follow Social. Groups are Discord-shaped; DMs are Snapchat-shaped minus the clutter. Social is ONE module
-with a Lemon8-style discovery homepage. Docs are a content type inside the Reader — there is no Docs
-module. Listen is a button inside the Reader — there is no Speechify module. Shopping is
-Amazon-*like*, never an Amazon wrapper. Home is a two-column grid of tiles the person arranges, each showing live content (owner, 2026-10-31). The flower stays as the alternative, one button away, and a setting picks which opens first; tiles are the default. Holding a tile enters edit mode. Web search is a module; search inside Totality is a magnifying glass on the home page, not a module.
-Mail is Totality's own email: every account gets `username@usetotality.com`, and sign-up still asks for no email (owner, 2026-11-02, issue 37). Outside accounts (iCloud and Gmail first, Outlook later) can sit beside that address. The device connects to them directly, Totality's server never sees their mail or sign-in, and they never replace the Totality address (owner, 2026-11-05, issue 43).
-Federation and E2E are principles, not features. Pi self-hosting is the hosting direction. The Matrix
-server name is `usetotality.com`, and it cannot change.
-
-## Decisions that are OPEN — ask, do not guess
-
-Brief §17 plus the items in §11–12 of the architecture proposal. When you hit one: stop and ask.
-A guess here costs more than a question.
+## Working
+- Work lands through PRs, and `main` is treated as protected. Merge by hand only when every check passes.
+- Small conventional commits. Issues hold open decisions and specs.
+- Run one build at a time on this machine, with `-j 2`.
+- Build with `-quiet` and show only errors (`2>&1 | grep -E "error:|warning: unre|BUILD"`), never the full log.
+- For the app at `App/Totality.xcodeproj`, see the "Running the app" and "The server" sections of the full rules.
+- **Open decisions: ask, don't guess.**
