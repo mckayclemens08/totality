@@ -98,16 +98,20 @@ on the Oracle server as sealed files, and mail between accounts doesn't use Matr
 
 ## Design
 
-- **Neumorphic and light only.** The owner removed dark mode on 2026-10-31, so there's one palette: white
-  and pale grey surfaces with dark grey text. Soft dual shadows; background and surface close in value.
-  No rainbow palette, no pure black, no hard borders or harsh drop shadows as the default treatment.
-  Elevation comes from the shadow pair, not from lines.
+- **Neumorphic, with themes.** The owner removed dark mode on 2026-10-31, then on 2026-11-17 asked for
+  "not just a white background, but red, blue, green, etc as well" and said "add a gray theme for dark
+  mode", which reverses that removal. So there are six palettes, picked per device in Settings → Theme:
+  Light (white and pale grey, the default), Blush, Sky, Sage and Lilac (pale tinted surfaces, each with
+  its own matching accent) and Graphite (dark grey, light text, dark text on accent buttons). Every
+  screen follows the chosen theme. Soft dual shadows; background and surface close in value. No rainbow
+  palette within a theme, no pure black, no hard borders or harsh drop shadows as the default treatment.
+  Elevation comes from the shadow pair, not from lines. Values are in `docs/design-tokens.md`.
 - **No sunken look anywhere.** No inset, inner-shadowed or pressed-in surface, at rest, selected or
   pressed (owner, 2026-11-15: "I just don't like the sunken-in look", "anywhere"; issue 132). Selected
   gets an accent tint or `selectionWash`, a press gets a little scale or opacity, text boxes use
   `raisedField()`. `NoSunkenLookTests` enforces it.
-- **One accent colour, used sparingly.**
-- Body text meets WCAG AA contrast. The look never wins over legibility.
+- **One accent colour per theme, used sparingly.**
+- Body and muted text meet WCAG AA contrast in every theme (`TokenTests` computes it). The look never wins over legibility.
 - Tokens in `Sources/TotalityUI/Tokens.swift` + `docs/design-tokens.md`. Read them before writing UI.
   Never hard-code a colour, radius, spacing value, or duration.
 - **Figma is the visual source of truth once it arrives** and overrides these words where they conflict.

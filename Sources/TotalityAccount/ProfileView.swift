@@ -205,6 +205,8 @@ struct AccountSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
                 HomeStyleSetting()
+                NavigationLink("Theme · \(ThemeStore.shared.choice.name)") { ThemePickerView() }
+                    .font(Typeface.callout)
                 if case .signedIn(let username) = model.phase {
                     AccountDetail(text: "Signed in as \(username).")
                 }
