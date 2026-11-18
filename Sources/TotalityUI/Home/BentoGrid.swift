@@ -8,7 +8,7 @@ struct BentoGrid: View {
     @Binding var layout: HomeLayout
     let modules: [ModuleEntry]
     let glances: [ModuleID: ModuleGlance]
-    let bigTile: (ModuleID, BigTileSize) -> AnyView?
+    let bigTile: (ModuleID, TileSize) -> AnyView?
     /// What a line of a module's glance opens, if anything.
     var lineLink: (ModuleID, Int) -> (@MainActor () -> Void)? = { _, _ in nil }
     let width: CGFloat
@@ -43,6 +43,7 @@ struct BentoGrid: View {
             }
             .frame(width: width, height: metrics.height(of: placements), alignment: .topLeading)
             .environment(\.liftsTileControls, !isEditing)
+            .environment(\.isArrangingHome, isEditing)
             .overlayPreferenceValue(TileLinkKey.self) { links in
                 GeometryReader { proxy in
                     let spots = links.map { LinkSpot(link: $0, frame: proxy[$0.bounds]) }
@@ -76,8 +77,16 @@ struct BentoGrid: View {
                         RemoveTileButton(module: module) { removing = module }
                             .position(x: frame.minX + Space.s2, y: frame.minY + Space.s2)
                         if selected == module.id {
-                            SizeSwitch(module: module, layout: $layout)
-                                .position(x: frame.midX, y: frame.maxY)
+                            // Straddles the tile's bottom edge at its trailing side. Remove buttons sit
+                            // on leading corners, so the row below's never comes under it.
+                            Color.clear
+                                .frame(width: frame.width, height: frame.height)
+                                .overlay(alignment: .bottomTrailing) {
+                                    SizeSwitch(module: module, layout: $layout)
+                                        .alignmentGuide(.bottom) { $0[VerticalAlignment.center] }
+                                        .padding(.trailing, Space.s3)
+                                }
+                                .position(x: frame.midX, y: frame.midY)
                         }
                     }
                 }
@@ -107,7 +116,7 @@ struct BentoGrid: View {
         return Button {
             if isEditing { choose(module.id) } else { onOpen(module.id) }
         } label: {
-            let size = layout.bigSize(of: module.id)
+            let size = layout.contentSize(of: module.id)
             TileLabel(
                 module: module, glance: glances[module.id], size: size,
                 content: size.flatMap { bigTile(module.id, $0) }, isEditing: isEditing,
@@ -326,46 +335,42 @@ private struct TileDrag {
 struct TileLabel: View {
     let module: ModuleEntry
     let glance: ModuleGlance?
-    /// Nil on a small tile.
-    let size: BigTileSize?
-    /// The module's own view for a big tile. Without one, the tile shows its lines.
+    let size: TileSize?
+    /// The module's own view, which draws its own header with `TileHeader`. Without one, the tile shows
+    /// its icon, name and lines.
     let content: AnyView?
     let isEditing: Bool
     var lineLink: (Int) -> (@MainActor () -> Void)? = { _ in nil }
 
     var body: some View {
-        let theme = Theme.current
         let lines = glance?.lines ?? []
         let isQuiet = glance?.isQuiet ?? false
-        VStack(alignment: .leading, spacing: Space.s2) {
-            HStack(spacing: Space.s2) {
-                Image(systemName: module.systemImage)
-                    .accessibilityHidden(true)
-                Text(module.name)
-                    .lineLimit(1)
-            }
-            // Clears the remove button on the top corner.
-            .padding(.leading, isEditing ? Space.s3 : 0)
-            .font(Typeface.caption.weight(.semibold))
-            .foregroundStyle(theme.textSecondary.color)
+        Group {
             if let content {
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                ViewThatFits(in: .vertical) {
-                    ForEach(Array(stride(from: lines.count, to: 0, by: -1)), id: \.self) { count in
-                        GlanceLines(lines: Array(lines.prefix(count)), isQuiet: isQuiet, isHero: size == .square, link: lineLink)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                lineTile(lines: lines, isQuiet: isQuiet)
             }
         }
-        .padding(Space.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .clipped()
+        .clipShape(tileShape)
         .contentShape(tileShape)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(([module.name] + lines).joined(separator: ", "))
+    }
+
+    private func lineTile(lines: [String], isQuiet: Bool) -> some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            TileHeader(module.name, systemImage: module.systemImage)
+            ViewThatFits(in: .vertical) {
+                ForEach(Array(stride(from: lines.count, to: 0, by: -1)), id: \.self) { count in
+                    GlanceLines(lines: Array(lines.prefix(count)), isQuiet: isQuiet, isHero: size == .large, link: lineLink)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+        .tilePadding()
     }
 }
 

@@ -2,18 +2,21 @@ import SwiftUI
 import TotalityCore
 import TotalityUI
 
-/// Tasks' big home tile. Each size has its own job (issue 127): medium is a glance at today's ring, done
-/// against planned, and the next deadline, large is today's list with tick boxes that work on the tile, and the big square is a
-/// workspace, today's list plus an Add task button that opens quick add over the home page.
+/// Tasks' home tile at each size (redesign, 2026-11-17). Small is today's ring, centred, and the next
+/// task. Medium puts the ring beside today's first few tasks. Large has a smaller ring with how many are
+/// left, as many tasks as fit, and an Add a task button that opens quick add over the home page. The
+/// ticks work on the tile.
 public struct TasksHomeTile: View {
+    private static let mostRows = 8
+
     private let model: TasksModel
-    private let size: BigTileSize
+    private let size: TileSize
     private let onOpen: @MainActor () -> Void
     private let onQuickAdd: @MainActor () -> Void
 
     /// `onOpen` brings Tasks up after a task has been asked for. `onQuickAdd` shows quick add over the home page.
     public init(
-        model: TasksModel, size: BigTileSize, onOpen: @escaping @MainActor () -> Void = {},
+        model: TasksModel, size: TileSize, onOpen: @escaping @MainActor () -> Void = {},
         onQuickAdd: @escaping @MainActor () -> Void = {}
     ) {
         self.model = model
@@ -23,128 +26,169 @@ public struct TasksHomeTile: View {
     }
 
     public var body: some View {
-        switch size {
-        case .medium: glance
-        case .large: list(limit: 5)
-        case .square: workspace
+        Group {
+            switch size {
+            case .small: small
+            case .medium: medium
+            case .large: large
+            }
         }
-    }
-
-    // MARK: Medium: is there anything for me?
-
-    private var glance: some View {
-        let theme = Theme.current
-        let progress = model.progress
-        return VStack(alignment: .leading, spacing: Space.s1) {
-            Spacer(minLength: 0)
-            if progress.isEmpty {
-                Text("Nothing planned today")
-                    .font(Typeface.headline)
-                    .foregroundStyle(theme.textSecondary.color)
-            } else {
-                HStack(spacing: Space.s3) {
-                    ProgressRing(progress: progress, isWhole: true)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(progress.count)
-                            .font(Typeface.title)
-                            .monospacedDigit()
-                            .foregroundStyle(theme.textPrimary.color)
-                            .contentTransition(.numericText())
-                        Text("done today")
-                            .font(Typeface.caption)
-                            .foregroundStyle(theme.textSecondary.color)
-                    }
-                }
-                .accessibilityElement(children: .ignore)
-                .tileLink(progress.spoken) { onOpenToday() }
-            }
-            footer
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(Motion.standard, value: progress)
-    }
-
-    private func onOpenToday() {
-        if let first = model.tasks(in: .today).first { model.requestedTask = first.id }
-        onOpen()
-    }
-
-    // MARK: Large: what are the things?
-
-    private func list(limit: Int) -> some View {
-        let theme = Theme.current
-        let todays = model.tasks(in: .today)
-        return VStack(alignment: .leading, spacing: Space.s1) {
-            let progress = model.progress
-            if progress.isEmpty {
-                Text("Nothing planned today")
-                    .font(Typeface.headline)
-                    .foregroundStyle(theme.textSecondary.color)
-            } else {
-                HStack(spacing: Space.s2) {
-                    ProgressRing(progress: progress, diameter: Space.s5, lineWidth: Space.s1, isWhole: true)
-                    Text("\(progress.count) done today")
-                        .font(Typeface.headline)
-                        .monospacedDigit()
-                        .foregroundStyle(theme.textPrimary.color)
-                        .contentTransition(.numericText())
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(progress.spoken)
-                .animation(Motion.standard, value: progress)
-            }
-            ForEach(todays.prefix(limit)) { task in
-                TileTaskLine(model: model, task: task, onOpen: onOpen)
-                    .transition(.opacity)
-            }
-            if todays.count > limit {
-                Text("\(todays.count - limit) more")
-                    .font(Typeface.caption)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .tileLink("\(todays.count - limit) more today") { onOpenToday() }
-            }
-            Spacer(minLength: 0)
-            footer
-        }
-        .animation(Motion.standard, value: todays.map(\.id))
+        .tilePadding()
+        .animation(Motion.standard, value: model.progress)
         .sensoryFeedback(.success, trigger: model.completions)
     }
 
-    // MARK: Big square: do the next thing here.
-
-    private var workspace: some View {
-        let theme = Theme.current
-        return VStack(alignment: .leading, spacing: Space.s3) {
-            list(limit: 6)
-            // A plain button, never a field or a "type here" prompt: a tile holds no text input.
-            Label("Add task", systemImage: "plus")
-                .font(Typeface.callout.weight(.semibold))
-                .foregroundStyle(theme.accent.color)
-                .padding(.vertical, Space.s1)
-                .contentShape(Rectangle())
-                .tileLink("Add task") { onQuickAdd() }
-        }
+    private var todays: [TaskItem] {
+        model.tasks(in: .today)
     }
 
-    @ViewBuilder private var footer: some View {
+    /// Today's first task not done yet.
+    private var next: TaskItem? {
+        todays.first { !model.isDone($0.id) }
+    }
+
+    private func openToday() {
+        if let first = todays.first { model.requestedTask = first.id }
+        onOpen()
+    }
+
+    private func ring(diameter: CGFloat, caption: String?) -> some View {
         let theme = Theme.current
-        let overdue = model.overdue
-        VStack(alignment: .leading, spacing: Space.s1 / 2) {
-            if overdue > 0 {
-                Text(overdue == 1 ? "1 overdue" : "\(overdue) overdue")
-                    .font(Typeface.caption)
-                    .foregroundStyle(theme.danger.color)
+        let progress = model.progress
+        return TotalityUI.ProgressRing(progress: progress.fraction, diameter: diameter) {
+            VStack(spacing: 0) {
+                Text("\(progress.done)/\(progress.planned)")
+                    .font(size == .large ? Typeface.headline : Typeface.title)
+                    .monospacedDigit()
+                    .foregroundStyle(theme.textPrimary.color)
+                    .contentTransition(.numericText())
+                if let caption {
+                    Text(caption)
+                        .font(Typeface.micro)
+                        .foregroundStyle(theme.textSecondary.color)
+                }
             }
-            if let next = model.nextDeadline, let deadline = next.deadline {
-                Text("\(next.displayTitle) · \(TaskText.deadlinePhrase(deadline, today: model.today, in: model.calendar))")
-                    .font(Typeface.caption)
-                    .foregroundStyle(TaskRules.deadlineIsNear(next, today: model.today, in: model.calendar) ? theme.danger.color : theme.textSecondary.color)
+        }
+        .accessibilityElement(children: .ignore)
+        .tileLink(progress.spoken) { openToday() }
+    }
+
+    // MARK: Small
+
+    private var small: some View {
+        let theme = Theme.current
+        return VStack(spacing: Space.s1) {
+            TileHeader("Tasks", systemImage: "checklist")
+            if model.progress.isEmpty {
+                Spacer(minLength: 0)
+                Text("Nothing planned today")
+                    .font(Typeface.callout)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .multilineTextAlignment(.center)
+                Spacer(minLength: 0)
+            } else {
+                ring(diameter: Space.s8 + Space.s5, caption: "done")
+                    .frame(maxHeight: .infinity)
+                Text(next.map { "Next: \($0.displayTitle)" } ?? "All done today")
+                    .font(Typeface.caption.weight(.semibold))
+                    .foregroundStyle(theme.textPrimary.color)
                     .lineLimit(1)
-                    .tileLink(next.displayTitle) {
-                        model.requestedTask = next.id
+                    .tileLink(next?.displayTitle ?? "") {
+                        if let next { model.requestedTask = next.id }
                         onOpen()
                     }
             }
+        }
+    }
+
+    // MARK: Medium
+
+    private var medium: some View {
+        HStack(spacing: Space.s4) {
+            if !model.progress.isEmpty {
+                ring(diameter: Space.s8 + Space.s6, caption: "done today")
+            }
+            VStack(alignment: .leading, spacing: Space.s2) {
+                TileHeader("Tasks · Today", systemImage: "checklist")
+                lines(3)
+            }
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    // MARK: Large
+
+    private var large: some View {
+        let theme = Theme.current
+        let left = todays.filter { !model.isDone($0.id) }
+        return VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(spacing: Space.s3) {
+                if !model.progress.isEmpty {
+                    ring(diameter: Space.s8 + Space.s3, caption: nil)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    TileHeader("Tasks · Today", systemImage: "checklist")
+                    Text(left.isEmpty ? "All done today" : "\(left.count) left today")
+                        .font(Typeface.title)
+                        .foregroundStyle(theme.textPrimary.color)
+                        .padding(.top, Space.s1)
+                    if let footnote {
+                        Text(footnote.text)
+                            .font(Typeface.caption)
+                            .foregroundStyle(footnote.isUrgent ? theme.danger.color : theme.textSecondary.color)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            lines(Self.mostRows)
+                .frame(maxHeight: .infinity, alignment: .top)
+            addButton
+        }
+    }
+
+    /// Overdue first, then when the next one is due.
+    private var footnote: (text: String, isUrgent: Bool)? {
+        let overdue = model.overdue
+        if overdue > 0 { return (overdue == 1 ? "1 overdue" : "\(overdue) overdue", true) }
+        if let time = next?.time { return ("Next at \(TaskText.time(time, in: model.calendar))", false) }
+        if let deadline = model.nextDeadline, let date = deadline.deadline {
+            return ("\(deadline.displayTitle) · \(TaskText.deadlinePhrase(date, today: model.today, in: model.calendar))",
+                    TaskRules.deadlineIsNear(deadline, today: model.today, in: model.calendar))
+        }
+        return nil
+    }
+
+    /// A plain raised button, never a field or a "type here" prompt: a tile holds no text input.
+    private var addButton: some View {
+        let theme = Theme.current
+        return Label("Add a task", systemImage: "plus")
+            .font(Typeface.callout.weight(.semibold))
+            .foregroundStyle(theme.accent.color)
+            .padding(.horizontal, Space.s3)
+            .padding(.vertical, Space.s2 + Space.s1 / 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous))
+            .tileLink("Add a task") { onQuickAdd() }
+    }
+
+    /// Today's tasks, as many as fit up to `limit`.
+    @ViewBuilder private func lines(_ limit: Int) -> some View {
+        let shown = Array(todays.prefix(limit))
+        if shown.isEmpty {
+            Text("Nothing planned today")
+                .font(Typeface.callout)
+                .foregroundStyle(Theme.current.textSecondary.color)
+        } else {
+            ViewThatFits(in: .vertical) {
+                ForEach(Array(stride(from: shown.count, to: 0, by: -1)), id: \.self) { count in
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        ForEach(shown.prefix(count)) { task in
+                            TileTaskLine(model: model, task: task, onOpen: onOpen)
+                        }
+                    }
+                }
+            }
+            .animation(Motion.standard, value: shown.map(\.id))
         }
     }
 }
@@ -159,14 +203,14 @@ private struct TileTaskLine: View {
         let theme = Theme.current
         let isDone = model.isDone(task.id)
         HStack(spacing: Space.s2) {
-            TickMark(isDone: isDone, diameter: Space.s4 + Space.s1)
-                .frame(width: Space.s6, height: Space.s6)
+            TickMark(isDone: isDone, diameter: Space.s4 + Space.s1 / 2)
                 .contentShape(Rectangle())
                 .tileLink(isDone ? "Mark \(task.displayTitle) as not done" : "Complete \(task.displayTitle)") {
                     Task { await model.toggle(task.id) }
                 }
             Text(task.displayTitle)
                 .font(Typeface.callout.weight(.regular))
+                .strikethrough(isDone)
                 .foregroundStyle(isDone ? theme.textSecondary.color : theme.textPrimary.color)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -174,11 +218,14 @@ private struct TileTaskLine: View {
                     model.requestedTask = task.id
                     onOpen()
                 }
-            if let time = task.time {
+            if let time = task.time, !isDone {
                 Text(TaskText.time(time, in: model.calendar))
-                    .font(Typeface.caption)
+                    .font(Typeface.micro.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundStyle(theme.textSecondary.color)
+                    .foregroundStyle(theme.accent.color)
+                    .padding(.horizontal, Space.s2)
+                    .padding(.vertical, Space.s1 / 2)
+                    .background(theme.highlight.color, in: RoundedRectangle(cornerRadius: Radius.sm / 2, style: .continuous))
             }
         }
     }

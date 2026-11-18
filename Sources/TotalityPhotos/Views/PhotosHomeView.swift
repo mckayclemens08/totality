@@ -348,16 +348,31 @@ struct LibraryFooter: View {
 }
 
 /// One square in the grid, filled from the sealed thumbnail once it's opened.
+/// Square in a grid, or whatever frame it's given on the home tile.
+private struct CellShape: ViewModifier {
+    let fills: Bool
+
+    func body(content: Content) -> some View {
+        if fills {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            content.aspectRatio(1, contentMode: .fit)
+        }
+    }
+}
+
 struct PhotoCell: View {
     let model: PhotosModel
     let item: PhotoItem
     var showsDaysLeft = false
+    /// Fills whatever frame it's given, as on the home tile, rather than keeping square.
+    var fills = false
     @State private var image: CGImage?
 
     var body: some View {
         let theme = Theme.current
         Color.clear
-            .aspectRatio(1, contentMode: .fit)
+            .modifier(CellShape(fills: fills))
             .overlay {
                 if let image = image ?? model.cachedThumbnail(item) {
                     Image(decorative: image, scale: 1)

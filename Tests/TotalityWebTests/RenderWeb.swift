@@ -18,12 +18,12 @@ import Testing
         try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent(name))
     }
 
-    private func tile(_ model: WebModel, size: BigTileSize, height: CGFloat) -> some View {
+    private func tile(_ model: WebModel, size: TileSize, height: CGFloat) -> some View {
         TileLabel(
             module: ModuleEntry.all.first { $0.id == .web }!, glance: model.glance, size: size,
             content: AnyView(WebHomeTile(model: model, size: size)), isEditing: false
         )
-        .frame(width: 361, height: height)
+        .frame(width: size == .small ? 172 : 358, height: height)
         .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg))
     }
 
@@ -51,9 +51,9 @@ import Testing
 
         for (name, model) in [("empty", empty), ("full", full), ("few", few)] {
             try write(VStack(spacing: Space.s4) {
+                tile(model, size: .small, height: 172)
                 tile(model, size: .medium, height: 172)
-                tile(model, size: .large, height: 266)
-                tile(model, size: .square, height: 361)
+                tile(model, size: .large, height: 358)
             }, name: "web-tile-\(name).png", to: directory)
         }
         try write(HStack(spacing: Space.s4) {

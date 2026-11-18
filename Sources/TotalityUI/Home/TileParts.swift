@@ -136,3 +136,57 @@ public struct TilePress: ButtonStyle {
             .animation(Motion.instant, value: configuration.isPressed)
     }
 }
+
+private struct IsArrangingHome: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// True on Home's tiles while they're being arranged, when each has a remove button on its corner.
+    public var isArrangingHome: Bool {
+        get { self[IsArrangingHome.self] }
+        set { self[IsArrangingHome.self] = newValue }
+    }
+}
+
+/// The small icon and words at the top of a tile, like "Mail · 3 new". Tinted tiles show it in the
+/// accent. While Home is arranged it moves over to clear the remove button.
+public struct TileHeader: View {
+    let title: String
+    let systemImage: String
+    let isTinted: Bool
+    @Environment(\.isArrangingHome) private var isArranging
+
+    public init(_ title: String, systemImage: String, isTinted: Bool = false) {
+        self.title = title
+        self.systemImage = systemImage
+        self.isTinted = isTinted
+    }
+
+    public var body: some View {
+        let theme = Theme.current
+        HStack(spacing: Space.s1 + Space.s1 / 2) {
+            Image(systemName: systemImage)
+                .accessibilityHidden(true)
+            Text(title)
+                .lineLimit(1)
+        }
+        .font(Typeface.caption.weight(.semibold))
+        .foregroundStyle(isTinted ? theme.accent.color : theme.textSecondary.color)
+        .padding(.leading, isArranging ? Space.s3 : 0)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension View {
+    /// A tile's content inset from its edge, filling the tile from the top.
+    public func tilePadding() -> some View {
+        padding(Metric.tileGap)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// A tile drawn on the soft accent wash rather than the plain surface, like Reader while it listens.
+    public func tileTint() -> some View {
+        background(Theme.current.highlight.color)
+    }
+}

@@ -7,7 +7,7 @@ public struct HomeView: View {
     private let modules: [ModuleEntry]
     private let center: ModuleID
     private let glances: [ModuleID: ModuleGlance]
-    private let bigTile: (ModuleID, BigTileSize) -> AnyView?
+    private let bigTile: (ModuleID, TileSize) -> AnyView?
     private let lineLink: (ModuleID, Int) -> (@MainActor () -> Void)?
     @Binding private var style: HomeStyle
     private let onOpen: (ModuleID) -> Void
@@ -28,7 +28,7 @@ public struct HomeView: View {
         modules: [ModuleEntry] = ModuleEntry.all,
         center: ModuleID = .reader,
         glances: [ModuleID: ModuleGlance] = [:],
-        bigTile: @escaping (ModuleID, BigTileSize) -> AnyView? = { _, _ in nil },
+        bigTile: @escaping (ModuleID, TileSize) -> AnyView? = { _, _ in nil },
         lineLink: @escaping (ModuleID, Int) -> (@MainActor () -> Void)? = { _, _ in nil },
         style: Binding<HomeStyle> = .constant(.tiles),
         removed: Set<ModuleID> = [],

@@ -285,7 +285,7 @@ struct RootView: View {
     }
 
     /// A module's own view for a big tile. Nil falls back to the lines, which say why it's quiet.
-    private func bigTile(_ module: ModuleID, size: BigTileSize) -> AnyView? {
+    private func bigTile(_ module: ModuleID, size: TileSize) -> AnyView? {
         switch module {
         case .reader:
             guard let reader, reader.glance?.isQuiet == false else { return nil }

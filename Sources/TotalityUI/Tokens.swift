@@ -116,6 +116,10 @@ public enum Metric {
     public static let ringStroke: CGFloat = 7
     /// How far the chosen tile's outline stands off the tile while Home is being edited.
     public static let selectionOutline: CGFloat = 2
+    /// The gap between Home's tiles, and how far a tile's content stands in from its edge.
+    public static let tileGap: CGFloat = 14
+    /// How far a full-bleed tile's pictures stand in from its edge.
+    public static let tileBleed: CGFloat = 6
 }
 
 public enum Motion {
