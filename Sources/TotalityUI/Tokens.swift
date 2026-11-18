@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 
 /// One colour value. Kept as hex so contrast can be tested without a renderer.
@@ -37,7 +38,7 @@ extension ColorToken {
 }
 #endif
 
-/// Provisional until the Figma file arrives. Values and rules are in docs/design-tokens.md.
+/// One theme's palette. Values and rules are in docs/design-tokens.md.
 public struct Theme: Sendable, Equatable {
     public let bg, surface, surfaceSunken: ColorToken
     public let shadowLight, shadowDark: ColorToken
@@ -45,14 +46,121 @@ public struct Theme: Sendable, Equatable {
     public let accent, accentOn, danger, success: ColorToken
     public let highlight, highlightStrong: ColorToken
 
-    /// Totality has one look. The owner removed dark mode on 2026-10-31.
-    public static let current = Theme(
+    /// The palette of the theme chosen on this device. A view that reads it while drawing redraws when
+    /// the choice changes.
+    public static var current: Theme { ThemeStore.shared.choice.palette }
+
+    /// White and pale grey with a blue accent: the default.
+    public static let light = Theme(
         bg: .init(0xE8EBEF), surface: .init(0xEDEFF2), surfaceSunken: .init(0xE2E5EA),
         shadowLight: .init(0xFFFFFF, opacity: 0.9), shadowDark: .init(0xC3C9D3, opacity: 0.7),
         textPrimary: .init(0x15181D), textSecondary: .init(0x555C68), textTertiary: .init(0x7D8592),
         accent: .init(0x1F5FBF), accentOn: .init(0xFFFFFF), danger: .init(0xB3261E), success: .init(0x1E6F4C),
         highlight: .init(0xD3E0F4), highlightStrong: .init(0xA9C5EE)
     )
+
+    public static let blush = Theme(
+        bg: .init(0xF2E6E6), surface: .init(0xF7ECEC), surfaceSunken: .init(0xEADCDC),
+        shadowLight: .init(0xFFFFFF, opacity: 0.9), shadowDark: .init(0xD6BEBE, opacity: 0.7),
+        textPrimary: .init(0x15181D), textSecondary: .init(0x6A5555), textTertiary: .init(0x8A7272),
+        accent: .init(0xA83636), accentOn: .init(0xFFFFFF), danger: .init(0xB3261E), success: .init(0x1E6F4C),
+        highlight: .init(0xF3D3D3), highlightStrong: .init(0xE8B4B4)
+    )
+
+    public static let sky = Theme(
+        bg: .init(0xE3ECF5), surface: .init(0xEAF1F8), surfaceSunken: .init(0xD9E3EE),
+        shadowLight: .init(0xFFFFFF, opacity: 0.9), shadowDark: .init(0xBAC8DA, opacity: 0.7),
+        textPrimary: .init(0x15181D), textSecondary: .init(0x4F5D6E), textTertiary: .init(0x707D8D),
+        accent: .init(0x1F5FBF), accentOn: .init(0xFFFFFF), danger: .init(0xB3261E), success: .init(0x1E6F4C),
+        highlight: .init(0xCFE0F2), highlightStrong: .init(0xA9C5EE)
+    )
+
+    public static let sage = Theme(
+        bg: .init(0xE5EEE7), surface: .init(0xECF3EE), surfaceSunken: .init(0xDAE5DD),
+        shadowLight: .init(0xFFFFFF, opacity: 0.9), shadowDark: .init(0xBCCEC2, opacity: 0.7),
+        textPrimary: .init(0x15181D), textSecondary: .init(0x52625A), textTertiary: .init(0x728279),
+        accent: .init(0x2E6B47), accentOn: .init(0xFFFFFF), danger: .init(0xB3261E), success: .init(0x1E6F4C),
+        highlight: .init(0xD2E6D8), highlightStrong: .init(0xAFD2B9)
+    )
+
+    public static let lilac = Theme(
+        bg: .init(0xECE8F3), surface: .init(0xF1EEF7), surfaceSunken: .init(0xE1DCEB),
+        shadowLight: .init(0xFFFFFF, opacity: 0.9), shadowDark: .init(0xCBC4DB, opacity: 0.7),
+        textPrimary: .init(0x15181D), textSecondary: .init(0x5C5870), textTertiary: .init(0x7C7790),
+        accent: .init(0x5B45A8), accentOn: .init(0xFFFFFF), danger: .init(0xB3261E), success: .init(0x1E6F4C),
+        highlight: .init(0xE0D8F0), highlightStrong: .init(0xC7B8E6)
+    )
+
+    /// Dark grey, for dark mode. The shadow pair is a faint light edge and a deep dark one, and text on
+    /// an accent fill is dark.
+    public static let graphite = Theme(
+        bg: .init(0x2A2E34), surface: .init(0x30353C), surfaceSunken: .init(0x25292E),
+        shadowLight: .init(0xFFFFFF, opacity: 0.06), shadowDark: .init(0x000000, opacity: 0.45),
+        textPrimary: .init(0xE7E9ED), textSecondary: .init(0xA7AEB9), textTertiary: .init(0x8C939E),
+        accent: .init(0x8DB2EE), accentOn: .init(0x16191E), danger: .init(0xF2A39B), success: .init(0x7FCFA6),
+        highlight: .init(0x33405A), highlightStrong: .init(0x44577D)
+    )
+}
+
+/// The themes a person can pick. The owner asked for "not just a white background, but red, blue, green,
+/// etc as well" and to "add a gray theme for dark mode" (2026-11-17).
+public enum ThemeChoice: String, CaseIterable, Sendable, Identifiable {
+    case light = "default", blush, sky, sage, lilac, graphite
+
+    public var id: String { rawValue }
+
+    public var name: String {
+        switch self {
+        case .light: "Light"
+        case .blush: "Blush"
+        case .sky: "Sky"
+        case .sage: "Sage"
+        case .lilac: "Lilac"
+        case .graphite: "Graphite"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .light: "White and grey"
+        case .blush: "Red"
+        case .sky: "Blue"
+        case .sage: "Green"
+        case .lilac: "Purple"
+        case .graphite: "Dark grey"
+        }
+    }
+
+    public var palette: Theme {
+        switch self {
+        case .light: .light
+        case .blush: .blush
+        case .sky: .sky
+        case .sage: .sage
+        case .lilac: .lilac
+        case .graphite: .graphite
+        }
+    }
+
+    public var isDark: Bool { self == .graphite }
+}
+
+/// Which theme this device uses. Only the choice is kept, in this device's settings; it holds no content.
+@Observable
+public final class ThemeStore: @unchecked Sendable {
+    public static let shared = ThemeStore()
+    public static let defaultsKey = "app.theme"
+
+    @ObservationIgnored private let defaults: UserDefaults
+
+    public var choice: ThemeChoice {
+        didSet { defaults.set(choice.rawValue, forKey: Self.defaultsKey) }
+    }
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        choice = defaults.string(forKey: Self.defaultsKey).flatMap(ThemeChoice.init(rawValue:)) ?? .light
+    }
 }
 
 /// The writing page's type. The editor's stylesheet and a printed export read the same numbers, so an
@@ -134,6 +242,10 @@ public enum Metric {
     public static let tileGap: CGFloat = 14
     /// How far a full-bleed tile's pictures stand in from its edge.
     public static let tileBleed: CGFloat = 6
+    /// The accent dot on a theme's swatch in the theme setting.
+    public static let swatchDot: CGFloat = 14
+    /// The round check, or empty ring, that marks the chosen one of a list.
+    public static let choiceMark: CGFloat = 22
 }
 
 public enum Motion {

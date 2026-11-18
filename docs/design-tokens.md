@@ -4,11 +4,11 @@
 overrides everything here when it arrives (Brief §16, §17). Until then these exist so that no module is
 ever written against hard-coded values.
 
-These ship as `Sources/TotalityUI/Tokens.swift`, and `Tests/TotalityUITests/TokenTests.swift` checks the contrast rules on every surface in both themes.
+These ship as `Sources/TotalityUI/Tokens.swift`, and `Tests/TotalityUITests/TokenTests.swift` checks the contrast rules on every surface in every theme.
 
 ## Principle
 
-Neumorphic and light only: the owner removed dark mode on 2026-10-31. **Background and surface stay close in value — that closeness is the
+Neumorphic, in six themes (below). The owner removed dark mode on 2026-10-31 and brought it back as Graphite on 2026-11-17. **Background and surface stay close in value — that closeness is the
 effect.** Elevation and grouping come from the soft shadow pair, never from borders or hard drop
 shadows. Content contrast is carried by type weight, the single accent, and imagery.
 
@@ -16,6 +16,8 @@ The failure mode of neumorphism is unreadable text. Guardrail: **body text meets
 large text 3:1.** Every ratio below was computed, not estimated. The look never wins over legibility.
 
 ## Colour
+
+The table is the Light theme, the default. The other themes change the same tokens; see **Themes**.
 
 | Token | Hex | Use | Contrast vs `surface` |
 |---|---|---|---|
@@ -42,6 +44,36 @@ large text 3:1.** Every ratio below was computed, not estimated. The look never 
 `#3F5F8A`. A book or document with no cover of its own gets one, picked from its ID so it never changes,
 with a white icon on it. They're content, like a photo, not UI, so the one-accent rule doesn't cover
 them (owner, 2026-11-18: "randomize a color if there isn't a book cover").
+
+## Themes
+
+The owner, 2026-11-17: "not just a white background, but red, blue, green, etc as well", and "add a gray
+theme for dark mode", which reverses the 2026-10-31 dark-mode removal. Colours are from the Social
+canvas's Theme boards. A person picks one in Settings → Theme (`ThemePickerView`); `ThemeStore` keeps the
+choice on the device under `app.theme`, and `Theme.current` returns its palette, so every view that reads
+it redraws when it changes. The tinted themes stay pale and light with one matching accent; Graphite is
+dark grey and asks the system for dark controls. `danger` and `success` keep Light's values in the tinted
+themes.
+
+| Token | Blush | Sky | Sage | Lilac | Graphite |
+|---|---|---|---|---|---|
+| `bg` | `#F2E6E6` | `#E3ECF5` | `#E5EEE7` | `#ECE8F3` | `#2A2E34` |
+| `surface` | `#F7ECEC` | `#EAF1F8` | `#ECF3EE` | `#F1EEF7` | `#30353C` |
+| `surfaceSunken` (flat) | `#EADCDC` | `#D9E3EE` | `#DAE5DD` | `#E1DCEB` | `#25292E` |
+| `shadowLight` | `#FFFFFF` @ 90% | same | same | same | `#FFFFFF` @ 6% |
+| `shadowDark` | `#D6BEBE` @ 70% | `#BAC8DA` @ 70% | `#BCCEC2` @ 70% | `#CBC4DB` @ 70% | `#000000` @ 45% |
+| `textPrimary` | `#15181D` | `#15181D` | `#15181D` | `#15181D` | `#E7E9ED` |
+| `textSecondary` | `#6A5555` | `#4F5D6E` | `#52625A` | `#5C5870` | `#A7AEB9` |
+| `textTertiary` | `#8A7272` | `#707D8D` | `#728279` | `#7C7790` | `#8C939E` |
+| `accent` | `#A83636` | `#1F5FBF` | `#2E6B47` | `#5B45A8` | `#8DB2EE` |
+| `accentOn` | `#FFFFFF` | `#FFFFFF` | `#FFFFFF` | `#FFFFFF` | `#16191E` |
+| `highlight` | `#F3D3D3` | `#CFE0F2` | `#D2E6D8` | `#E0D8F0` | `#33405A` |
+| `highlightStrong` | `#E8B4B4` | `#A9C5EE` | `#AFD2B9` | `#C7B8E6` | `#44577D` |
+| `danger` | Light's | Light's | Light's | Light's | `#F2A39B` |
+| `success` | Light's | Light's | Light's | Light's | `#7FCFA6` |
+| lowest body/muted contrast | 4.6:1 | 4.7:1 | 4.7:1 | 4.6:1 | 5.5:1 |
+
+All computed by `TokenTests`, which runs every rule above against every theme.
 
 ## Shadow pair
 

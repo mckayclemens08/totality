@@ -1,6 +1,7 @@
 import SwiftUI
 import TotalityCore
 import TotalityPhotos
+import TotalityUI
 
 @main
 struct TotalityApp: App {
@@ -14,13 +15,13 @@ struct TotalityApp: App {
         #if os(macOS)
         Window("Totality", id: "main") {
             RootView()
-                .preferredColorScheme(.light)
+                .followsTheme()
         }
         .defaultSize(width: 430, height: 800)
         #else
         WindowGroup {
             RootView()
-                .preferredColorScheme(.light)
+                .followsTheme()
         }
         .backgroundTask(.appRefresh(AppRefresh.backgroundIdentifier)) {
             await AppRefresh.shared.runInBackground()

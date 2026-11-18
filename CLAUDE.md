@@ -34,7 +34,7 @@ Never start the next module on a broken one.
   - redesign: https://claude.ai/artifact/TfyX6ksdt2RDkDRd3k94fd
   - Social: https://claude.ai/artifact/8LBGndLQUGzYYSVrU1TeSi
   - website: https://claude.ai/artifact/EPDH71EqdT2cz34HJxv1Dr
-- Tinted themes and a Graphite dark theme are approved but not built. Update `docs/design-tokens.md` before building them.
+- Themes: Light (default), Blush, Sky, Sage, Lilac and Graphite, picked per device and followed by every screen. The owner wants "not just a white background, but red, blue, green, etc as well" and said "add a gray theme for dark mode" (2026-11-17), which reverses the 2026-10-31 dark-mode removal. Tinted themes stay pale, light and neumorphic with a matching accent; Graphite is dark grey. Every theme meets AA, checked by `TokenTests`. Colours come from `Theme.current` only.
 
 ## Cost
 Stages A and B cost $0. Flag anything that would cost money; don't decide it. The only exceptions are the domain (about $10 a year) and Cloudflare Workers Paid ($5 a month). Never upgrade Oracle to paid.
