@@ -191,7 +191,7 @@ struct JournalView: View {
             .onChange(of: shownDay) {
                 guard let day = shownDay else { return }
                 shownDay = nil
-                withAnimation(Motion.standard) { proxy.scrollTo(day == todayDay ? "today" : day, anchor: .top) }
+                withMotion(Motion.smooth) { proxy.scrollTo(day == todayDay ? "today" : day, anchor: .top) }
             }
             .onAppear {
                 if let showing, showing != todayDay { shownDay = showing }

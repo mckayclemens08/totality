@@ -95,7 +95,7 @@ public struct CalendarHomeView: View {
                 if !model.isShowingToday {
                     HeaderPill("Today") {
                         movingForward = model.selectedDay < model.today
-                        withAnimation(Motion.quick) { model.showToday() }
+                        withMotion(Motion.snappy) { model.showToday() }
                     }
                 }
                 HeaderMenu("View", systemImage: model.mode.toolbarImage) {
@@ -190,7 +190,7 @@ public struct CalendarHomeView: View {
     private func move(by steps: Int) {
         guard model.canMove else { return }
         movingForward = steps > 0
-        withAnimation(Motion.quick) { model.move(by: steps) }
+        withMotion(Motion.snappy) { model.move(by: steps) }
     }
 
     #if os(iOS)
@@ -298,7 +298,7 @@ struct WeekStrip: View {
         .accessibilityLabel(model.written(day, .dateTime.weekday(.wide).month(.wide).day()))
         .accessibilityValue(hasEvents ? "Has events" : "")
         .accessibilityAddTraits(isChosen ? .isSelected : [])
-        .tappable { withAnimation(Motion.quick) { model.select(day) } }
+        .tappable { withMotion(Motion.snappy) { model.select(day) } }
     }
 }
 

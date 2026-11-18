@@ -107,14 +107,14 @@ struct StorageTrack: View {
                         .fill(theme.surface.color)
                         .opacity(pulsing ? 0.9 : 0.3)
                         .onAppear {
-                            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulsing = true }
+                            withAnimation(Motion.pulse) { pulsing = true }
                         }
                 }
             }
         }
         .frame(height: Space.s3)
-        .animation(Motion.standard, value: fraction)
-        .animation(Motion.standard, value: level)
+        .motion(Motion.smooth, value: fraction)
+        .motion(Motion.smooth, value: level)
     }
 
     private var fill: Color {

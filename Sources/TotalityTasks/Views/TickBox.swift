@@ -18,7 +18,7 @@ struct TickMark: View {
                 if isDone { Circle().fill(theme.accent.color) }
             }
             .neumorphic(.subtle, in: Circle())
-            .animation(Motion.quick, value: isDone)
+            .motion(Motion.bouncy, value: isDone)
             .accessibilityHidden(true)
     }
 }

@@ -182,6 +182,8 @@ public enum Radius {
     public static let sm: CGFloat = 10
     public static let md: CGFloat = 18
     public static let lg: CGFloat = 28
+    /// Home's tiles, as on the approved canvas.
+    public static let tile: CGFloat = 20
     /// Text boxes and the composer: a capsule at one line, softly rounded as the text grows.
     public static let field: CGFloat = 24
 }
@@ -208,6 +210,12 @@ public enum Typeface {
     public static let callout = Font.callout.weight(.medium)
     public static let caption = Font.footnote
     public static let micro = Font.caption2.weight(.medium)
+    /// A tile's label row, like "Mail · 3 new" (12 pt semibold on the canvas).
+    public static let tileLabel = Font.caption.weight(.semibold)
+    /// A tile's second line under a name or title (12 pt on the canvas).
+    public static let tileDetail = Font.caption
+    /// A task or other one-line item on a tile (14 pt on the canvas, the nearest Dynamic Type size).
+    public static let tileRow = Font.subheadline
     /// Keys and codes, where every character has to be told apart.
     public static let code = Font.body.monospaced()
 }
@@ -240,6 +248,10 @@ public enum Metric {
     public static let selectionOutline: CGFloat = 2
     /// The gap between Home's tiles, and how far a tile's content stands in from its edge.
     public static let tileGap: CGFloat = 14
+    /// The space between rows inside a tile, and between its label row and the first one.
+    public static let tileRowGap: CGFloat = 11
+    /// The space between a row's picture or dot and its words inside a tile.
+    public static let tileItemGap: CGFloat = 10
     /// How far a full-bleed tile's pictures stand in from its edge.
     public static let tileBleed: CGFloat = 6
     /// The accent dot on a theme's swatch in the theme setting.
@@ -248,10 +260,63 @@ public enum Metric {
     public static let choiceMark: CGFloat = 22
 }
 
+/// Every animation in the app is one of these springs, so things move alike everywhere. Springs carry a
+/// finger's speed and never stop with a jolt, which is what made the old fixed curves feel abrupt.
 public enum Motion {
-    public static let instant = Animation.easeOut(duration: 0.12)
-    public static let quick = Animation.spring(response: 0.3, dampingFraction: 0.8)
-    public static let standard = Animation.spring(response: 0.4, dampingFraction: 0.82)
+    /// A press and its release: quick, with no overshoot.
+    public static let press = Animation.spring(response: 0.22, dampingFraction: 0.9)
+    /// Small controls: pills, ticks, switches and segments.
+    public static let snappy = Animation.spring(response: 0.3, dampingFraction: 0.86)
+    /// Things that change place or size: screens, sheets' contents, rows coming and going.
+    public static let smooth = Animation.spring(response: 0.42, dampingFraction: 1)
+    /// Something the person picked up or resized, which settles with a small give.
+    public static let bouncy = Animation.spring(response: 0.38, dampingFraction: 0.72)
+
+    /// A placeholder's slow breathing while something loads. It only fades, so it stays under Reduce Motion.
+    public static let pulse = Animation.easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+
+    /// How small a pressed control gets, and how faint. Nothing sinks in (issue 132).
+    public static let pressScale: CGFloat = 0.97
+    public static let pressOpacity: Double = 0.82
+
+    /// The animation to use, or a plain fade-speed one when Reduce Motion is on, so nothing slides or
+    /// springs for someone who's asked it not to.
+    public static func resolved(_ animation: Animation, reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeOut(duration: 0.18) : animation
+    }
+
+    /// Whether the person has asked for less motion, for code outside a view.
+    @MainActor public static var isReduced: Bool {
+        #if os(iOS)
+        UIAccessibility.isReduceMotionEnabled
+        #else
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        #endif
+    }
+}
+
+/// `withAnimation` with one of the `Motion` springs, which turns to a short fade under Reduce Motion.
+@MainActor
+@discardableResult
+public func withMotion<Result>(_ animation: Animation, _ body: () throws -> Result) rethrows -> Result {
+    try withAnimation(Motion.resolved(animation, reduceMotion: Motion.isReduced), body)
+}
+
+extension View {
+    /// `animation(_:value:)` with one of the `Motion` springs, honouring Reduce Motion.
+    public func motion<V: Equatable>(_ animation: Animation, value: V) -> some View {
+        modifier(MotionModifier(animation: animation, value: value))
+    }
+}
+
+private struct MotionModifier<V: Equatable>: ViewModifier {
+    let animation: Animation
+    let value: V
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(Motion.resolved(animation, reduceMotion: reduceMotion), value: value)
+    }
 }
 
 /// How far a surface stands off the page. There is no pressed or inset elevation: the owner doesn't want

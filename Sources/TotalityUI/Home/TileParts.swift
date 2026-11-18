@@ -117,23 +117,7 @@ public struct TileButton: View {
                 .padding(.vertical, Space.s2)
                 .neumorphic(.subtle, in: Capsule())
         }
-        .buttonStyle(TilePress())
-    }
-}
-
-/// Press feedback for anything on a tile: a little smaller and a little fainter, never pressed in. The
-/// owner doesn't want a sunken look anywhere (issue 132).
-public struct TilePress: ButtonStyle {
-    static let scale: CGFloat = 0.96
-    static let opacity: Double = 0.8
-
-    public init() {}
-
-    public func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? Self.scale : 1)
-            .opacity(configuration.isPressed ? Self.opacity : 1)
-            .animation(Motion.instant, value: configuration.isPressed)
+        .buttonStyle(SoftPress())
     }
 }
 
@@ -171,9 +155,10 @@ public struct TileHeader: View {
             Text(title)
                 .lineLimit(1)
         }
-        .font(Typeface.caption.weight(.semibold))
+        .font(Typeface.tileLabel)
         .foregroundStyle(isTinted ? theme.accent.color : theme.textSecondary.color)
         .padding(.leading, isArranging ? Space.s3 : 0)
+        .motion(Motion.snappy, value: isArranging)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -188,5 +173,40 @@ extension View {
     /// A tile drawn on the soft accent wash rather than the plain surface, like Reader while it listens.
     public func tileTint() -> some View {
         background(Theme.current.highlight.color)
+    }
+}
+
+/// A tile's list: as many rows as fit. When some are left out, the rows spread to the tile's bottom
+/// edge, so a large tile never ends in a gap a row didn't fit into. When all fit, they sit at the top
+/// like the canvas.
+public struct TileList<Item: Identifiable, Row: View>: View {
+    let items: [Item]
+    let spacing: CGFloat
+    let row: (Item) -> Row
+
+    public init(_ items: [Item], spacing: CGFloat = Metric.tileRowGap, @ViewBuilder row: @escaping (Item) -> Row) {
+        self.items = items
+        self.spacing = spacing
+        self.row = row
+    }
+
+    public var body: some View {
+        ViewThatFits(in: .vertical) {
+            ForEach(Array(stride(from: items.count, to: 0, by: -1)), id: \.self) { count in
+                rows(count, spreads: count < items.count)
+            }
+        }
+    }
+
+    private func rows(_ count: Int, spreads: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(items.prefix(count).enumerated()), id: \.element.id) { index, item in
+                if index > 0 {
+                    if spreads { Spacer(minLength: spacing) } else { Color.clear.frame(height: spacing) }
+                }
+                row(item)
+            }
+        }
+        .frame(maxHeight: spreads ? .infinity : nil, alignment: .top)
     }
 }

@@ -36,8 +36,8 @@ struct TaskListView: View {
         .scrollContentBackground(.hidden)
         .background(theme.bg.color)
         .environment(\.defaultMinListRowHeight, 0)
-        .animation(Motion.standard, value: model.tasks(in: bucket).map(\.id))
-        .animation(Motion.standard, value: expanded)
+        .motion(Motion.smooth, value: model.tasks(in: bucket).map(\.id))
+        .motion(Motion.smooth, value: expanded)
         .pullsToRefresh(with: model.refresher)
         .sheet(item: $scheduling) { target in
             ScheduleSheet(model: model, target: target) { scheduling = nil }

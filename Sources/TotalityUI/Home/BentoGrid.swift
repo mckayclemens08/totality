@@ -26,7 +26,6 @@ struct BentoGrid: View {
     #else
     @State private var isHolding = false
     #endif
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let space = "bento"
 
@@ -75,6 +74,7 @@ struct BentoGrid: View {
                     if let module = modules.first(where: { $0.id == placement.id }) {
                         let frame = metrics.frame(of: placement)
                         RemoveTileButton(module: module) { removing = module }
+                            .transition(.scale(scale: 0.6).combined(with: .opacity))
                             .position(x: frame.minX + Space.s2, y: frame.minY + Space.s2)
                         if selected == module.id {
                             // Straddles the tile's bottom edge at its trailing side. Remove buttons sit
@@ -83,6 +83,7 @@ struct BentoGrid: View {
                                 .frame(width: frame.width, height: frame.height)
                                 .overlay(alignment: .bottomTrailing) {
                                     SizeSwitch(module: module, layout: $layout)
+                                        .transition(.scale(scale: 0.85, anchor: .bottom).combined(with: .opacity))
                                         .alignmentGuide(.bottom) { $0[VerticalAlignment.center] }
                                         .padding(.trailing, Space.s3)
                                 }
@@ -95,7 +96,7 @@ struct BentoGrid: View {
         }
         .frame(width: width, height: metrics.height(of: placements), alignment: .topLeading)
         .coordinateSpace(.named(Self.space))
-        .animation(reduceMotion ? nil : Motion.standard, value: layout)
+        .motion(Motion.smooth, value: layout)
         .sensoryFeedback(.selection, trigger: holds)
         .onChange(of: isEditing) { if !isEditing { selected = nil } }
         .confirmationDialog(
@@ -151,7 +152,10 @@ struct BentoGrid: View {
             }
         }
         .frame(width: frame.width, height: frame.height)
+        .homeZoomSource(module.id)
         .position(dragged?.position ?? CGPoint(x: frame.midX, y: frame.midY))
+        // A carried tile stays under the finger; the rest spring aside, and it springs home when let go.
+        .transaction { if dragged != nil { $0.animation = nil } }
         .zIndex(dragged == nil ? 0 : 1)
     }
 
@@ -210,7 +214,7 @@ struct BentoGrid: View {
 
     /// A second tap on the chosen tile puts its switch away.
     private func choose(_ id: ModuleID) {
-        withAnimation(reduceMotion ? nil : Motion.quick) { selected = selected == id ? nil : id }
+        withMotion(Motion.snappy) { selected = selected == id ? nil : id }
     }
 
     private func held(_ event: TileHold, metrics: BentoMetrics) {
@@ -239,7 +243,7 @@ struct BentoGrid: View {
             }
             drag = current
         case .ended:
-            drag = nil
+            withMotion(Motion.bouncy) { drag = nil }
         }
     }
 }
@@ -316,7 +320,7 @@ private final class TileTouchView: UIView {
 }
 #endif
 
-private let tileShape = RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+private let tileShape = RoundedRectangle(cornerRadius: Radius.tile, style: .continuous)
 
 /// A link and where it landed in the grid.
 private struct LinkSpot {
@@ -360,8 +364,42 @@ struct TileLabel: View {
         .accessibilityLabel(([module.name] + lines).joined(separator: ", "))
     }
 
+    @ViewBuilder
     private func lineTile(lines: [String], isQuiet: Bool) -> some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
+        if isQuiet || lines.isEmpty {
+            quietTile(lines.first)
+        } else {
+            busyTile(lines: lines, isQuiet: isQuiet)
+        }
+    }
+
+    /// Nothing to show yet: the module's plain icon centred on its one line, so the tile isn't a label
+    /// over an empty middle.
+    private func quietTile(_ line: String?) -> some View {
+        let theme = Theme.current
+        return VStack(spacing: 0) {
+            TileHeader(module.name, systemImage: module.systemImage)
+            VStack(spacing: Space.s2) {
+                Image(systemName: module.systemImage)
+                    .font(Typeface.title)
+                    .foregroundStyle(theme.accent.color)
+                    .accessibilityHidden(true)
+                if let line {
+                    Text(line)
+                        .font(Typeface.tileDetail)
+                        .foregroundStyle(theme.textSecondary.color)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .tileLink(line, action: lineLink(0))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .tilePadding()
+    }
+
+    private func busyTile(lines: [String], isQuiet: Bool) -> some View {
+        VStack(alignment: .leading, spacing: Metric.tileRowGap) {
             TileHeader(module.name, systemImage: module.systemImage)
             ViewThatFits(in: .vertical) {
                 ForEach(Array(stride(from: lines.count, to: 0, by: -1)), id: \.self) { count in
@@ -407,6 +445,8 @@ private struct TileButtonStyle: ButtonStyle {
     let isDragged: Bool
     let isTouched: Bool
 
+    private static let lift: CGFloat = 1.03
+
     private var depth: Elevation {
         if isEditing { return isDragged ? .raised : .subtle }
         return .raised
@@ -418,9 +458,10 @@ private struct TileButtonStyle: ButtonStyle {
         let isPressed = (configuration.isPressed || isTouched) && !isEditing
         configuration.label
             .neumorphic(depth, in: tileShape)
-            .scaleEffect(isPressed ? TilePress.scale : 1)
-            .opacity(isPressed ? TilePress.opacity : 1)
-            .animation(Motion.instant, value: isPressed)
+            // Picked up, a tile lifts a little toward the finger.
+            .scaleEffect(isDragged ? Self.lift : 1)
+            .animation(Motion.bouncy, value: isDragged)
+            .softPressed(isPressed)
     }
 }
 
@@ -436,7 +477,7 @@ private struct SizeSwitch: View {
             ForEach(TileSize.allCases, id: \.self) { size in
                 let isChosen = current == size
                 Button {
-                    layout.setSize(size, of: module.id)
+                    withMotion(Motion.bouncy) { layout.setSize(size, of: module.id) }
                 } label: {
                     Text(size.letter)
                         .font(Typeface.caption.weight(.semibold))

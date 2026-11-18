@@ -83,7 +83,7 @@ public struct PhotosHomeView: View {
         .overlay {
             if let viewing {
                 PhotoViewer(model: model, scope: viewing.scope, start: viewing.start) {
-                    withAnimation(Motion.quick) { self.viewing = nil }
+                    withMotion(Motion.snappy) { self.viewing = nil }
                 }
                 .transition(.opacity)
             }
@@ -119,7 +119,7 @@ public struct PhotosHomeView: View {
     }
 
     private func open(_ item: PhotoItem, in scope: PhotosModel.Scope) {
-        withAnimation(Motion.quick) { viewing = Viewing(scope: scope, start: item.id) }
+        withMotion(Motion.snappy) { viewing = Viewing(scope: scope, start: item.id) }
     }
 
     private var noticeShown: Binding<Bool> {
@@ -300,7 +300,7 @@ struct PhotoGrid<Footer: View>: View {
             MagnifyGesture()
                 .onChanged { pinch = min(max($0.magnification, 0.85), 1.15) }
                 .onEnded { value in
-                    withAnimation(Motion.quick) {
+                    withMotion(Motion.snappy) {
                         pinch = 1
                         if value.magnification > 1.15 { model.change(columnsBy: -1) }
                         if value.magnification < 0.85 { model.change(columnsBy: 1) }

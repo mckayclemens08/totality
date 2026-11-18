@@ -56,7 +56,7 @@ public struct CalendarHomeTile: View {
                     .monospacedDigit()
                     .foregroundStyle(theme.textPrimary.color)
                 Text(model.written(model.today, .dateTime.weekday(.abbreviated)))
-                    .font(Typeface.callout)
+                    .font(Typeface.caption.weight(.semibold))
                     .foregroundStyle(theme.textSecondary.color)
             }
             .padding(.top, Space.s1)
@@ -75,7 +75,7 @@ public struct CalendarHomeTile: View {
                 .tileLink("Next: \(next.title)") { open(.entry(next)) }
             } else {
                 Text("Nothing coming up")
-                    .font(Typeface.caption)
+                    .font(Typeface.tileDetail)
                     .foregroundStyle(theme.textSecondary.color)
             }
         }
@@ -84,7 +84,7 @@ public struct CalendarHomeTile: View {
     // MARK: Medium: what's coming
 
     private var medium: some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
+        VStack(alignment: .leading, spacing: Metric.tileItemGap) {
             TileHeader("Calendar · \(model.written(model.today, .dateTime.weekday(.wide).day()))", systemImage: "calendar")
             fitting(3)
         }
@@ -93,7 +93,7 @@ public struct CalendarHomeTile: View {
     // MARK: Large: this week, then what's coming
 
     private var large: some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
+        VStack(alignment: .leading, spacing: Metric.tileItemGap) {
             TileHeader("Calendar · \(model.written(model.today, .dateTime.month(.wide)))", systemImage: "calendar")
             week
             fitting(Self.mostRows)
@@ -106,10 +106,9 @@ public struct CalendarHomeTile: View {
         if shown.isEmpty {
             events([])
         } else {
-            ViewThatFits(in: .vertical) {
-                ForEach(Array(stride(from: shown.count, to: 0, by: -1)), id: \.self) { count in
-                    events(Array(shown.prefix(count)))
-                }
+            let next = model.nextEntry
+            TileList(shown, spacing: Space.s2 + Space.s1 / 4) { entry in
+                card(entry, isNext: entry.id == next?.id)
             }
         }
     }
@@ -150,13 +149,17 @@ public struct CalendarHomeTile: View {
             let next = model.nextEntry
             VStack(spacing: Space.s2) {
                 ForEach(entries) { entry in
-                    EventCard(entry: entry, detail: detail(entry, isNext: entry.id == next?.id),
-                              time: entry.isAllDay ? "All day" : entry.start.formatted(date: .omitted, time: .shortened),
-                              isNext: entry.id == next?.id)
-                        .tileLink(entry.title) { open(.entry(entry)) }
+                    card(entry, isNext: entry.id == next?.id)
                 }
             }
         }
+    }
+
+    private func card(_ entry: CalendarEntry, isNext: Bool) -> some View {
+        EventCard(entry: entry, detail: detail(entry, isNext: isNext),
+                  time: entry.isAllDay ? "All day" : entry.start.formatted(date: .omitted, time: .shortened),
+                  isNext: isNext)
+            .tileLink(entry.title) { open(.entry(entry)) }
     }
 
     /// Under the title: where it is, and for the next one, how soon.
@@ -200,8 +203,8 @@ private struct EventCard: View {
 
     var body: some View {
         let theme = Theme.current
-        let shape = RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-        HStack(spacing: Space.s2) {
+        let shape = RoundedRectangle(cornerRadius: Radius.sm + Space.s1 / 2, style: .continuous)
+        HStack(spacing: Metric.tileItemGap) {
             Circle()
                 .fill(isNext ? theme.accent.color : theme.textTertiary.color)
                 .frame(width: Space.s2, height: Space.s2)
@@ -219,25 +222,14 @@ private struct EventCard: View {
             .lineLimit(1)
             Spacer(minLength: Space.s1)
             Text(time)
-                .font(Typeface.micro)
+                .font(Typeface.tileDetail)
                 .monospacedDigit()
                 .foregroundStyle(theme.textSecondary.color)
         }
-        .padding(.horizontal, Space.s3)
-        .padding(.vertical, Space.s2)
+        .padding(.horizontal, Metric.tileItemGap)
+        .padding(.vertical, Space.s2 + Space.s1 / 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            if isNext { shape.fill(theme.highlight.color) }
-        }
-        .modifier(RaisedUnlessNext(isNext: isNext, shape: shape))
-    }
-}
-
-private struct RaisedUnlessNext<S: Shape>: ViewModifier {
-    let isNext: Bool
-    let shape: S
-
-    func body(content: Content) -> some View {
-        if isNext { content } else { content.neumorphic(.subtle, in: shape) }
+        // A flat wash of the page colour, as on the canvas, or the accent wash for what's next.
+        .background(isNext ? theme.highlight.color : theme.bg.color, in: shape)
     }
 }

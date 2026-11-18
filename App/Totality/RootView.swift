@@ -14,6 +14,10 @@ import TotalityWeb
 /// after the person goes back to the home screen.
 struct RootView: View {
     @State private var open: ModuleID?
+    /// A module asked for from search, opened once the search sheet is gone.
+    @State private var pendingOpen: ModuleID?
+    /// Where a module zooms out of: its tile on Home.
+    @Namespace private var tileZoom
     // Only which module was last open, on this device. It holds no content.
     @AppStorage("home.recentModule") private var recentModule = ModuleID.reader
     @State private var reader: ReaderModel?
@@ -75,64 +79,7 @@ struct RootView: View {
     }
 
     var body: some View {
-        Group {
-            switch open {
-            case nil:
-                HomeView(
-                    center: recentModule, glances: glances, bigTile: bigTile, lineLink: lineLink, style: homeStyle,
-                    removed: homeChoices.removed,
-                    onRemove: { module in Task { await homeChoices.remove(module) } },
-                    onRestore: { module in Task { await homeChoices.restore(module) } }
-                ) { module in
-                    if [.reader, .calendar, .web, .mail, .photos, .tasks].contains(module) { prepareContent() }
-                    bringUp(module)
-                } onSearch: {
-                    prepareContent()
-                    showingSearch = true
-                } onAccount: {
-                    showingAccount = true
-                }
-            case .reader:
-                if let reader {
-                    ReaderHomeView(model: reader) { open = nil }
-                } else {
-                    contentMessage { open = nil }
-                }
-            case .calendar:
-                if let calendar {
-                    CalendarHomeView(model: calendar, onClose: { open = nil }, onOpen: show)
-                } else {
-                    contentMessage { open = nil }
-                }
-            case .web:
-                if let web {
-                    WebHomeView(model: web) { open = nil }
-                } else {
-                    contentMessage { open = nil }
-                }
-            case .tasks:
-                if let tasks {
-                    TasksHomeView(model: tasks) { open = nil }
-                } else {
-                    contentMessage { open = nil }
-                }
-            case .mail:
-                MailHomeView(model: mail.current, onClose: { open = nil }, onOpenLink: openInWeb)
-                    .id(ObjectIdentifier(mail.current))
-            case .messages:
-                MessagesHomeView(model: messages, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
-            case .photos:
-                PhotosHomeView(model: photos, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
-                    .id(ObjectIdentifier(photos))
-            case .some(let module):
-                ModuleMessage(
-                    systemImage: "hammer",
-                    title: ModuleEntry.all.first { $0.id == module }?.name ?? "This module",
-                    detail: "This isn't built yet. The Reader, Calendar, and Web are ready to use."
-                ) { open = nil }
-            }
-        }
-        .animation(Motion.standard, value: open)
+        screens
         .task {
             contentKeys.willMove = {
                 // Photos first, before any wait, so the home tile can't show the old key's photos meanwhile.
@@ -223,43 +170,145 @@ struct RootView: View {
                 await account?.sync?.syncNow()
             }
         }
-        .sheet(isPresented: $showingAccount) {
-            if let account {
-                AccountView(model: account) { showingAccount = false }
-            } else {
-                ModuleMessage(
-                    systemImage: "person.crop.circle.badge.exclamationmark",
-                    title: "Sign-in isn't set up",
-                    detail: "This build has no backend settings. Your notes aren't affected."
-                ) { showingAccount = false }
-            }
-        }
         .onOpenURL { url in
             if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
         }
-        .sheet(item: $linkedProfile) { linked in
-            if let account {
-                OtherProfileView(model: account, username: linked.username) { linkedProfile = nil }
-            } else {
-                ModuleMessage(
-                    systemImage: "person.crop.circle.badge.exclamationmark",
-                    title: "Sign-in isn't set up",
-                    detail: "This build has no backend settings, so profiles can't open."
-                ) { linkedProfile = nil }
+    }
+
+    /// Home, with the open module over it. On iPhone the module zooms out of its tile and Home stays
+    /// alive underneath, so going back lands where the person left it.
+    @ViewBuilder
+    private var screens: some View {
+        #if os(iOS)
+        rootSheets(home.environment(\.homeZoom, tileZoom), isTop: open == nil)
+            .fullScreenCover(item: Binding(get: { open.map(OpenModule.init) }, set: { open = $0?.id })) { item in
+                rootSheets(module(item.id), isTop: true)
+                    .zoomsFromHomeTile(item.id, in: tileZoom)
             }
+        #else
+        rootSheets(
+            ZStack {
+                if let open {
+                    module(open).transition(.opacity)
+                } else {
+                    home.transition(.opacity)
+                }
+            }
+            .motion(Motion.smooth, value: open),
+            isTop: true
+        )
+        #endif
+    }
+
+    private var home: some View {
+        HomeView(
+            center: recentModule, glances: glances, bigTile: bigTile, lineLink: lineLink, style: homeStyle,
+            removed: homeChoices.removed,
+            onRemove: { module in Task { await homeChoices.remove(module) } },
+            onRestore: { module in Task { await homeChoices.restore(module) } }
+        ) { module in
+            if [.reader, .calendar, .web, .mail, .photos, .tasks].contains(module) { prepareContent() }
+            bringUp(module)
+        } onSearch: {
+            prepareContent()
+            showingSearch = true
+        } onAccount: {
+            showingAccount = true
         }
-        .sheet(isPresented: $quickAddingTask) {
+    }
+
+    @ViewBuilder
+    private func module(_ id: ModuleID) -> some View {
+        switch id {
+        case .reader:
+            if let reader {
+                ReaderHomeView(model: reader) { open = nil }
+            } else {
+                contentMessage { open = nil }
+            }
+        case .calendar:
+            if let calendar {
+                CalendarHomeView(model: calendar, onClose: { open = nil }, onOpen: show)
+            } else {
+                contentMessage { open = nil }
+            }
+        case .web:
+            if let web {
+                WebHomeView(model: web) { open = nil }
+            } else {
+                contentMessage { open = nil }
+            }
+        case .tasks:
             if let tasks {
-                QuickAddView(model: tasks, bucket: .today) { quickAddingTask = false }
-            }
-        }
-        .sheet(isPresented: $showingSearch) {
-            if let registry {
-                SearchView(search: UniversalSearch(searchers: homeSearchers(registry)), onOpen: show) { showingSearch = false }
+                TasksHomeView(model: tasks) { open = nil }
             } else {
-                contentMessage { showingSearch = false }
+                contentMessage { open = nil }
             }
+        case .mail:
+            MailHomeView(model: mail.current, onClose: { open = nil }, onOpenLink: openInWeb)
+                .id(ObjectIdentifier(mail.current))
+        case .messages:
+            MessagesHomeView(model: messages, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
+        case .photos:
+            PhotosHomeView(model: photos, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
+                .id(ObjectIdentifier(photos))
+        default:
+            ModuleMessage(
+                systemImage: "hammer",
+                title: ModuleEntry.all.first { $0.id == id }?.name ?? "This module",
+                detail: "This isn't built yet. The Reader, Calendar, and Web are ready to use."
+            ) { open = nil }
         }
+    }
+
+    /// The sheets that can come up anywhere. Only the top screen presents them, since a screen under a
+    /// cover can't. Search opens only from Home.
+    private func rootSheets(_ content: some View, isTop: Bool) -> some View {
+        func gate(_ value: Binding<Bool>) -> Binding<Bool> {
+            Binding(get: { isTop && value.wrappedValue }, set: { value.wrappedValue = $0 })
+        }
+        return content
+            .sheet(isPresented: gate($showingAccount)) {
+                if let account {
+                    AccountView(model: account) { showingAccount = false }
+                } else {
+                    ModuleMessage(
+                        systemImage: "person.crop.circle.badge.exclamationmark",
+                        title: "Sign-in isn't set up",
+                        detail: "This build has no backend settings. Your notes aren't affected."
+                    ) { showingAccount = false }
+                }
+            }
+            .sheet(item: Binding(get: { isTop ? linkedProfile : nil }, set: { linkedProfile = $0 })) { linked in
+                if let account {
+                    OtherProfileView(model: account, username: linked.username) { linkedProfile = nil }
+                } else {
+                    ModuleMessage(
+                        systemImage: "person.crop.circle.badge.exclamationmark",
+                        title: "Sign-in isn't set up",
+                        detail: "This build has no backend settings, so profiles can't open."
+                    ) { linkedProfile = nil }
+                }
+            }
+            .sheet(isPresented: gate($quickAddingTask)) {
+                if let tasks {
+                    QuickAddView(model: tasks, bucket: .today) { quickAddingTask = false }
+                }
+            }
+            .sheet(isPresented: gate($showingSearch), onDismiss: openPending) {
+                if let registry {
+                    SearchView(search: UniversalSearch(searchers: homeSearchers(registry)), onOpen: show) { showingSearch = false }
+                } else {
+                    contentMessage { showingSearch = false }
+                }
+            }
+    }
+
+    /// Opens what search asked for, now its sheet is down. A cover can't come up while a sheet leaves.
+    private func openPending() {
+        guard let pendingOpen else { return }
+        self.pendingOpen = nil
+        open = pendingOpen
     }
 
     private var homeStyle: Binding<HomeStyle> {
@@ -357,7 +406,12 @@ struct RootView: View {
 
     private func bringUp(_ module: ModuleID) {
         recentModule = module
-        open = module
+        if showingSearch {
+            pendingOpen = module
+            showingSearch = false
+        } else {
+            open = module
+        }
     }
 
     private func contentMessage(onClose: @escaping () -> Void) -> some View {
@@ -552,7 +606,8 @@ struct RootView: View {
 
     /// Only the module that found a result knows what its ID means, so it goes back there to open.
     private func show(_ hit: SearchHit) {
-        showingSearch = false
+        // After bringUp, which waits for the sheet to go when it's still up.
+        defer { showingSearch = false }
         switch hit.module {
         case .reader:
             if DriveSearcher.parse(hit.itemID) != nil {
@@ -631,4 +686,9 @@ private struct ModuleMessage: View {
 private struct LinkedProfile: Identifiable {
     let username: String
     var id: String { username }
+}
+
+/// The open module, as a cover's item.
+private struct OpenModule: Identifiable {
+    let id: ModuleID
 }

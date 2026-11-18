@@ -52,8 +52,8 @@ public struct MailHomeView: View {
             }
             .tint(theme.accent.color)
             .overlay(alignment: .bottom) { bottomBar }
-            .animation(Motion.quick, value: model.undo)
-            .animation(Motion.quick, value: model.notice)
+            .motion(Motion.snappy, value: model.undo)
+            .motion(Motion.snappy, value: model.notice)
         }
         .sheet(isPresented: $showingFolders) {
             NavigationStack {
@@ -201,7 +201,7 @@ public struct MailHomeView: View {
                         HeaderButton("Select", systemImage: "checkmark") { model.beginSelecting() }
                     }
                     HeaderButton(searching ? "Close search" : "Search mail", systemImage: searching ? "xmark" : "magnifyingglass") {
-                        withAnimation(Motion.quick) {
+                        withMotion(Motion.snappy) {
                             if searching { model.query = "" }
                             searching.toggle()
                         }
@@ -217,7 +217,7 @@ public struct MailHomeView: View {
                     HStack(spacing: Space.s2) {
                         ForEach(Self.pillPlaces, id: \.self) { place in
                             FilterPill(model.mailbox.name(of: place), isSelected: model.place == place) {
-                                withAnimation(Motion.quick) { model.place = place }
+                                withMotion(Motion.snappy) { model.place = place }
                             }
                         }
                     }

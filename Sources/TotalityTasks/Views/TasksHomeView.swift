@@ -44,7 +44,7 @@ public struct TasksHomeView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(Motion.standard, value: model.lastCompleted)
+        .motion(Motion.smooth, value: model.lastCompleted)
         .sensoryFeedback(.success, trigger: model.completions)
         .sheet(item: $addingTo) { bucket in
             QuickAddView(model: model, bucket: bucket) { addingTo = nil }
@@ -103,7 +103,7 @@ public struct TasksHomeView: View {
                     HStack(spacing: Space.s2) {
                         ForEach(Self.pillOrder) { item in
                             FilterPill(pillTitle(item), isSelected: bucket == item) {
-                                withAnimation(Motion.quick) { bucket = item }
+                                withMotion(Motion.snappy) { bucket = item }
                             }
                             .accessibilityLabel(pillLabel(item))
                         }

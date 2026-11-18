@@ -33,7 +33,7 @@ struct TaskRow: View {
         .background {
             Color.clear.neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
         }
-        .animation(Motion.standard, value: isExpanded)
+        .motion(Motion.smooth, value: isExpanded)
     }
 
     private func summary(isDone: Bool) -> some View {

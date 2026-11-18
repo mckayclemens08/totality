@@ -100,6 +100,8 @@ public struct HomeView: View {
             }
             topBar
         }
+        // Entering and leaving edit mode, including from a hold on a tile.
+        .motion(Motion.smooth, value: isEditing)
         .sheet(isPresented: $adding) {
             AddModulesView(modules: takenOff) { module in
                 onRestore(module)
@@ -134,13 +136,13 @@ public struct HomeView: View {
             if isEditing {
                 HeaderPill("Add a tile", systemImage: "plus") { adding = true }
                 Spacer()
-                HeaderPill("Done", isProminent: true) { isEditing = false }
+                HeaderPill("Done", isProminent: true) { withMotion(Motion.smooth) { isEditing = false } }
             } else {
                 HeaderButton(
                     style == .tiles ? "Show flower" : "Show tiles",
                     systemImage: style == .tiles ? "circle.hexagongrid.fill" : "square.grid.2x2.fill"
                 ) {
-                    style = style == .tiles ? .flower : .tiles
+                    withMotion(Motion.smooth) { style = style == .tiles ? .flower : .tiles }
                 }
                 Spacer()
                 HeaderButton("Search", systemImage: "magnifyingglass", action: onSearch)
@@ -178,7 +180,6 @@ struct FlowerView: View {
     /// The first module is the centre.
     let modules: [ModuleEntry]
     let onOpen: (ModuleID) -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { proxy in
@@ -195,7 +196,7 @@ struct FlowerView: View {
                     .position(x: proxy.size.width / 2 + point.x, y: proxy.size.height / 2 + point.y)
                 }
             }
-            .animation(reduceMotion ? nil : Motion.standard, value: modules)
+            .motion(Motion.smooth, value: modules)
         }
     }
 }
@@ -219,8 +220,6 @@ private struct BubbleButtonStyle: ButtonStyle {
         configuration.label
             .neumorphic(.raised, in: Circle())
             .contentShape(Circle())
-            .scaleEffect(configuration.isPressed ? TilePress.scale : 1)
-            .opacity(configuration.isPressed ? TilePress.opacity : 1)
-            .animation(Motion.instant, value: configuration.isPressed)
+            .softPressed(configuration.isPressed)
     }
 }

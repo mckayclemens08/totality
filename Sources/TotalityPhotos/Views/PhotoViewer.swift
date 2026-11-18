@@ -345,7 +345,7 @@ struct ZoomablePhoto: View {
                 }
             }
             .onTapGesture(count: 2) {
-                withAnimation(Motion.quick) {
+                withMotion(Motion.snappy) {
                     if scale > 1 { reset() } else { scale = 2.5; settledScale = 2.5 }
                 }
             }
@@ -367,7 +367,7 @@ struct ZoomablePhoto: View {
             .onChanged { scale = min(max(settledScale * $0.magnification, 1), 6) }
             .onEnded { _ in
                 settledScale = scale
-                if scale <= 1.01 { withAnimation(Motion.quick) { reset() } }
+                if scale <= 1.01 { withMotion(Motion.snappy) { reset() } }
             }
     }
 
@@ -386,7 +386,7 @@ struct ZoomablePhoto: View {
                 } else if value.translation.height > 120, abs(value.translation.height) > abs(value.translation.width) {
                     onClose()
                 } else {
-                    withAnimation(Motion.quick) { offset = .zero }
+                    withMotion(Motion.snappy) { offset = .zero }
                 }
             }
     }

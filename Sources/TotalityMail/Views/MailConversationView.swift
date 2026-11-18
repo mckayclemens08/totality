@@ -103,7 +103,7 @@ struct MailConversationView: View {
     }
 
     private func toggle(_ message: MailMessage) {
-        withAnimation(Motion.quick) {
+        withMotion(Motion.snappy) {
             if open.remove(message.id) == nil { open.insert(message.id) }
         }
     }
