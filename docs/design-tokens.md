@@ -89,6 +89,8 @@ Generous radii are part of the neumorphic read. Nothing in the app is square-cor
 | `removeButton` | 26 | the minus on a tile while Home is edited |
 | `ringStroke` | 7 | a `ProgressRing`'s track (`highlight`) and its accent arc |
 | `selectionOutline` | 2 | the accent outline around the chosen tile while Home is edited |
+| `tileGap` | 14 | the gap between Home's tiles, and a tile's inner padding |
+| `tileBleed` | 6 | the inset of a full-bleed tile's pictures (Photos) |
 
 ## Spacing — 4pt base
 
