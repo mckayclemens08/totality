@@ -176,9 +176,8 @@ extension View {
     }
 }
 
-/// A tile's list: as many rows as fit. When some are left out, the rows spread to the tile's bottom
-/// edge, so a large tile never ends in a gap a row didn't fit into. When all fit, they sit at the top
-/// like the canvas.
+/// A tile's list: as many rows as fit, always at the same gap and from the top, like the canvas.
+/// Rows never spread to fill the tile: stretched gaps looked loose (owner, 2026-11-18).
 public struct TileList<Item: Identifiable, Row: View>: View {
     let items: [Item]
     let spacing: CGFloat
@@ -193,20 +192,17 @@ public struct TileList<Item: Identifiable, Row: View>: View {
     public var body: some View {
         ViewThatFits(in: .vertical) {
             ForEach(Array(stride(from: items.count, to: 0, by: -1)), id: \.self) { count in
-                rows(count, spreads: count < items.count)
+                rows(count)
             }
         }
     }
 
-    private func rows(_ count: Int, spreads: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(items.prefix(count).enumerated()), id: \.element.id) { index, item in
-                if index > 0 {
-                    if spreads { Spacer(minLength: spacing) } else { Color.clear.frame(height: spacing) }
-                }
+    private func rows(_ count: Int) -> some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            ForEach(Array(items.prefix(count))) { item in
                 row(item)
             }
         }
-        .frame(maxHeight: spreads ? .infinity : nil, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
