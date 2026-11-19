@@ -15,15 +15,27 @@ struct SocialProfileView: View {
     @State private var busy = false
     @State private var confirmingUnfollow = false
     @State private var editingCloseFriends = false
+    @State private var editingPrivacy = false
+    @State private var showingRequests = false
+    @State private var reporting = false
+    @State private var confirmingBlock = false
 
     var body: some View {
         let theme = Theme.current
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
-                HeaderButton("Back", systemImage: "chevron.left") { dismiss() }
+                HStack {
+                    HeaderButton("Back", systemImage: "chevron.left") { dismiss() }
+                    Spacer()
+                    if let profile { menu(profile) }
+                }
                 if let profile {
                     header(profile)
-                    if posts.isEmpty {
+                    if profile.isClosed && !isMe {
+                        EmptyFeed(systemImage: "lock", title: "This account is private",
+                                  detail: profile.requested ? "You asked to follow \(profile.name). Once they accept, you'll see their posts."
+                                                            : "Once \(profile.name) accepts your request, you'll see their posts.")
+                    } else if posts.isEmpty {
                         EmptyFeed(systemImage: "square.and.pencil", title: "No posts yet",
                                   detail: isMe ? "Your posts show here, whoever you share them with." : "When \(profile.name) posts, it shows here.")
                     } else {
@@ -49,6 +61,36 @@ struct SocialProfileView: View {
             Text("Their posts leave your Following. If you were friends, they stop getting your new Friends posts.")
         }
         .sheet(isPresented: $editingCloseFriends) { CloseFriendsView(model: model) { editingCloseFriends = false } }
+        .sheet(isPresented: $editingPrivacy) { PrivacySettingsView(model: model) { editingPrivacy = false; Task { await load() } } }
+        .sheet(isPresented: $showingRequests) { FollowRequestsView(model: model) { showingRequests = false; Task { await load() } } }
+        .sheet(isPresented: $reporting) { ReportSheet(model: model, username: username, post: nil, comment: nil) { reporting = false } }
+        .confirmationDialog("Block \(Handle.display(username))?", isPresented: $confirmingBlock, titleVisibility: .visible) {
+            Button("Block", role: .destructive) {
+                Task { if let profile, await model.setBlocked(true, profile) { dismiss() } }
+            }
+        } message: {
+            Text("Neither of you will see the other's posts, likes, comments or follows, here or in Messages. They aren't told.")
+        }
+    }
+
+    @ViewBuilder
+    private func menu(_ profile: SocialProfile) -> some View {
+        if isMe {
+            HeaderButton("Privacy", systemImage: "hand.raised") { editingPrivacy = true }
+        } else {
+            HeaderMenu("More", systemImage: "ellipsis") {
+                Button(profile.muted ? "Unmute" : "Mute", systemImage: profile.muted ? "speaker.wave.2" : "speaker.slash") {
+                    Task { if await model.setMuted(!profile.muted, profile) { await load() } }
+                }
+                if profile.followsMe {
+                    Button("Remove follower", systemImage: "person.badge.minus") {
+                        Task { if await model.removeFollower(username) { await load() } }
+                    }
+                }
+                Button("Report", systemImage: "flag") { reporting = true }
+                Button("Block", systemImage: "hand.raised", role: .destructive) { confirmingBlock = true }
+            }
+        }
     }
 
     private var isMe: Bool { username == model.me }
@@ -78,10 +120,19 @@ struct SocialProfileView: View {
                 if isMe {
                     HeaderPill("Close friends · \(model.closeFriends.count)", systemImage: "star.circle") { editingCloseFriends = true }
                         .disabled(model.privateReason != nil)
+                    if model.settings.privateAccount {
+                        HeaderPill("Requests · \(model.followRequests.count)", systemImage: "person.crop.circle.badge.questionmark") { showingRequests = true }
+                    }
                 } else if profile.iFollow {
                     HeaderPill("Following", systemImage: "checkmark") { confirmingUnfollow = true }.disabled(busy)
+                } else if profile.requested {
+                    HeaderPill("Requested", systemImage: "clock") { Task { await follow(false) } }.disabled(busy)
+                        .accessibilityHint("Takes back your request")
                 } else {
-                    HeaderPill(profile.followsMe ? "Follow back" : "Follow", isProminent: true) { Task { await follow(true) } }.disabled(busy)
+                    HeaderPill(profile.privateAccount ? "Request to follow" : profile.followsMe ? "Follow back" : "Follow", isProminent: true) {
+                        Task { await follow(true) }
+                    }
+                    .disabled(busy)
                 }
             }
             if isMe {
@@ -104,6 +155,7 @@ struct SocialProfileView: View {
         do {
             profile = try await model.profile(username)
             posts = try await model.posts(by: username)
+            model.remember(posts)
             problem = nil
         } catch {
             problem = SocialModel.message(error)

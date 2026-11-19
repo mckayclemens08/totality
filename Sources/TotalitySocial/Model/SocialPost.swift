@@ -62,6 +62,9 @@ public struct SocialPost: Identifiable, Hashable, Sendable {
     public var likes: Int
     public var comments: Int
     public var liked: Bool
+    /// The author hides like counts from everyone else (their setting), so `likes` is meaningless here.
+    public var likesHidden = false
+    public var saved = false
     /// For You's "Why am I seeing this?" line.
     public var reason: String?
     /// The encrypted room it lives in, for one that isn't public.
@@ -120,6 +123,8 @@ public struct SocialComment: Identifiable, Hashable, Sendable {
 
 /// Someone's profile as Social shows it. It's the one public profile (owner, 2026-11-17).
 public struct SocialProfile: Hashable, Sendable {
+    /// Their account ID, which blocking needs. Nil from search results.
+    public var id: UUID?
     public let username: String
     public let displayName: String?
     public let bio: String?
@@ -129,6 +134,13 @@ public struct SocialProfile: Hashable, Sendable {
     public var following: Int
     public var iFollow: Bool
     public var followsMe: Bool
+    /// You asked to follow their private account and they haven't answered.
+    public var requested = false
+    public var privateAccount = false
+    public var muted = false
+    /// Whether their settings let you comment on their posts, or message them.
+    public var canComment = true
+    public var canMessage = true
 
     public init(
         username: String, displayName: String?, bio: String?, photoKey: String? = nil, posts: Int = 0,
@@ -144,6 +156,9 @@ public struct SocialProfile: Hashable, Sendable {
         self.iFollow = iFollow
         self.followsMe = followsMe
     }
+
+    /// A private account you don't follow: its posts stay hidden.
+    public var isClosed: Bool { privateAccount && !iFollow }
 
     public var name: String {
         guard let displayName, !displayName.trimmingCharacters(in: .whitespaces).isEmpty else { return username }
@@ -203,4 +218,55 @@ public enum PostLimits {
         if body.count > Self.body { return "The post is \(body.count - Self.body) characters too long." }
         return nil
     }
+}
+
+/// Who may do something: comment on your posts, or message you (issue 149 §4 and §6).
+public enum Reach: String, Codable, Sendable, CaseIterable, Identifiable {
+    case anyone, followers, friends
+    case noOne = "no_one"
+
+    public var id: String { rawValue }
+
+    public var name: String {
+        switch self {
+        case .anyone: "Anyone"
+        case .followers: "Followers"
+        case .friends: "Friends"
+        case .noOne: "No one"
+        }
+    }
+
+    /// "No one" isn't offered for messages: that would be turning Messages off.
+    public static let forMessages: [Reach] = [.anyone, .followers, .friends]
+}
+
+/// Your Social settings. They're public to Totality, because others' devices and the server need them to
+/// decide what's allowed, but only you can change them.
+public struct SocialSettings: Equatable, Sendable {
+    public var whoCanComment: Reach = .anyone
+    public var whoCanMessage: Reach = .anyone
+    public var privateAccount = false
+    public var hideLikeCounts = false
+
+    public init(whoCanComment: Reach = .anyone, whoCanMessage: Reach = .anyone, privateAccount: Bool = false, hideLikeCounts: Bool = false) {
+        self.whoCanComment = whoCanComment
+        self.whoCanMessage = whoCanMessage
+        self.privateAccount = privateAccount
+        self.hideLikeCounts = hideLikeCounts
+    }
+}
+
+/// Why someone reported a post, a comment or a person. Reports go to Totality's moderator, who is the
+/// owner for now (issue 149, 2026-11-17).
+public enum ReportReason: String, CaseIterable, Identifiable, Sendable {
+    case spam = "Spam"
+    case harassment = "Harassment or bullying"
+    case hate = "Hate"
+    case violence = "Violence or threats"
+    case nudity = "Nudity or sexual content"
+    case selfHarm = "Self-harm"
+    case falseInfo = "False information"
+    case other = "Something else"
+
+    public var id: String { rawValue }
 }

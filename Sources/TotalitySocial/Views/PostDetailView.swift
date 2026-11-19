@@ -14,6 +14,11 @@ struct PostDetailView: View {
     @State private var replyingTo: SocialComment?
     @State private var sending = false
     @State private var confirmingDelete = false
+    @State private var reporting: SocialComment?
+    @State private var reportingPost = false
+    /// The author's settings that matter here: whether you may comment.
+    @State private var authorProfile: SocialProfile?
+    @AppStorage(LikeCountsPreference.key) private var hideEverywhere = false
 
     var body: some View {
         let theme = Theme.current
@@ -39,8 +44,23 @@ struct PostDetailView: View {
                     }
                     .padding(Space.s4)
                 }
-                .safeAreaInset(edge: .bottom) { commentBox(post) }
+                .safeAreaInset(edge: .bottom) {
+                    if post.audience == .everyone, let authorProfile, !authorProfile.canComment, post.author != model.me {
+                        Text("\(post.displayName) has turned comments off for you.")
+                            .font(Typeface.caption).foregroundStyle(Theme.current.textSecondary.color)
+                            .frame(maxWidth: .infinity).padding(Space.s3)
+                    } else {
+                        commentBox(post)
+                    }
+                }
                 .task(id: post.comments) { await loadComments(post) }
+                .task { if post.audience == .everyone { authorProfile = try? await model.profile(post.author) } }
+                .sheet(isPresented: $reportingPost) {
+                    ReportSheet(model: model, username: post.author, post: post, comment: nil) { reportingPost = false }
+                }
+                .sheet(item: $reporting) { comment in
+                    ReportSheet(model: model, username: comment.author, post: post, comment: comment) { reporting = nil }
+                }
                 .confirmationDialog("Delete this post?", isPresented: $confirmingDelete, titleVisibility: .visible) {
                     Button("Delete for everyone", role: .destructive) {
                         Task { await model.delete(post); dismiss() }
@@ -76,10 +96,13 @@ struct PostDetailView: View {
             HeaderMenu("More", systemImage: "ellipsis") {
                 if post.author == model.me {
                     Button("Delete post", systemImage: "trash", role: .destructive) { confirmingDelete = true }
-                } else if post.audience == .everyone {
-                    Button("Not interested", systemImage: "hand.thumbsdown") {
-                        Task { await model.notInterested(post); dismiss() }
+                } else {
+                    if post.audience == .everyone {
+                        Button("Not interested", systemImage: "hand.thumbsdown") {
+                            Task { await model.notInterested(post); dismiss() }
+                        }
                     }
+                    Button("Report post", systemImage: "flag") { reportingPost = true }
                 }
             }
         }
@@ -90,13 +113,22 @@ struct PostDetailView: View {
         return VStack(alignment: .leading, spacing: Space.s2) {
             HStack(spacing: Space.s3) {
                 Button { Task { await model.toggleLike(post) } } label: {
-                    Label("\(post.likes)", systemImage: post.liked ? "heart.fill" : "heart")
+                    Label(LikeText.count(post, hideEverywhere: hideEverywhere), systemImage: post.liked ? "heart.fill" : "heart")
                         .font(Typeface.callout)
                         .foregroundStyle(post.liked ? theme.accent.color : theme.textSecondary.color)
                         .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
                         .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                 }
-                .accessibilityLabel(post.liked ? "Unlike, \(post.likes) likes" : "Like, \(post.likes) likes")
+                .accessibilityLabel(post.liked ? "Unlike" : "Like")
+                if post.audience == .everyone {
+                    Button { Task { await model.toggleSaved(post) } } label: {
+                        Label(post.saved ? "Saved" : "Save", systemImage: post.saved ? "bookmark.fill" : "bookmark")
+                            .font(Typeface.callout)
+                            .foregroundStyle(post.saved ? theme.accent.color : theme.textSecondary.color)
+                            .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
+                            .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                    }
+                }
                 Text(post.comments == 1 ? "1 comment" : "\(post.comments) comments")
                     .font(Typeface.callout)
                     .foregroundStyle(theme.textSecondary.color)
@@ -127,6 +159,9 @@ struct PostDetailView: View {
                         Text(comment.date.formatted(.relative(presentation: .numeric)))
                         if comment.parent == nil {
                             Button("Reply") { replyingTo = comment }.foregroundStyle(theme.accent.color)
+                        }
+                        if comment.author != model.me {
+                            Button("Report") { reporting = comment }
                         }
                     }
                     .font(Typeface.caption)
@@ -179,5 +214,13 @@ struct PostDetailView: View {
         } catch {
             commentsProblem = "Comments didn't load. Pull down on the feed and try again."
         }
+    }
+}
+
+/// A like count as it should show: a number, or just "Like" when it's hidden by the author or on this phone.
+enum LikeText {
+    static func count(_ post: SocialPost, hideEverywhere: Bool) -> String {
+        if hideEverywhere || post.likesHidden { return post.liked ? "Liked" : "Like" }
+        return "\(post.likes)"
     }
 }
