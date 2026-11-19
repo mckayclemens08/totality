@@ -40,6 +40,8 @@ public final class AccountModel {
     public var storage: StorageModel?
     /// Adds a browser to the account. The app sets it, since it holds the content key.
     public var pairing: PairBrowserModel?
+    /// Opens your profile in Social, the one public profile. The app sets it, so Account never imports Social.
+    public var onOpenSocialProfile: (@MainActor () -> Void)?
     private let service: any AccountService
 
     public init(

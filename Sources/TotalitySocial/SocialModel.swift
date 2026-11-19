@@ -130,6 +130,15 @@ public final class SocialModel {
 
     public var posts: [SocialPost] { feed == .forYou ? forYou : following }
 
+    /// The home tile: the newest from people you follow, else what For You has. Nil until Social has
+    /// loaded, so the tile never claims it's empty while it's loading.
+    public var glance: ModuleGlance? {
+        guard phase == .ready || phase == .offline else { return nil }
+        let source = following.filter { $0.author != me }.isEmpty ? forYou : following.filter { $0.author != me }
+        guard !source.isEmpty else { return ModuleGlance(lines: ["Nothing new yet"], isQuiet: true) }
+        return ModuleGlance(lines: source.prefix(4).map { "\(Handle.display($0.author)): \($0.headline)" })
+    }
+
     /// For You never shows a post twice: what's been on screen is told to the server in batches.
     public func didShow(_ post: SocialPost) {
         guard post.audience == .everyone, feed == .forYou else { return }

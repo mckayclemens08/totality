@@ -48,7 +48,7 @@ public struct SocialHomeView: View {
         .overlay(alignment: .bottom) { NoticeBanner(text: $model.notice) }
         .task { if model.phase == .loading { await model.load() } }
         .onDisappear { Task { await model.flushShown() } }
-        .onChange(of: model.requestedProfile) { _, name in
+        .onChange(of: model.requestedProfile, initial: true) { _, name in
             guard let name else { return }
             model.requestedProfile = nil
             open(.profile(name))
