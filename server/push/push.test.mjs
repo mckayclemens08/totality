@@ -1,11 +1,11 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { generateKeyPairSync, randomUUID, verify } from 'node:crypto'
+import { generateKeyPairSync, randomUUID, sign, verify } from 'node:crypto'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
-import { APNs, DEVICE_DAYS, MAX_DEVICES, PushGate, PushStore, WAKE, accountFrom, apnsToken } from './push.mjs'
+import { APNs, DEVICE_DAYS, MAX_DEVICES, PushGate, PushStore, QUIET_SECONDS, WAKE, accountFrom, addressHash, apnsToken, googleKeys } from './push.mjs'
 
 const MCKAY = { name: 'mckayclemens', id: randomUUID() }
 const DANA = { name: 'dana_whitfield', id: randomUUID() }
@@ -161,5 +161,159 @@ describe("Apple's sign-in token", () => {
     assert.equal(apns.bearer(), first)
     now += 2 * 60_000
     assert.notEqual(apns.bearer(), first)
+  })
+})
+
+// Google's side, with a key made for the test.
+const google = generateKeyPairSync('rsa', { modulusLength: 2048 })
+const stranger = generateKeyPairSync('rsa', { modulusLength: 2048 })
+const CLIENT = '973899545310-test.apps.googleusercontent.com'
+const AUDIENCE = 'https://usetotality.com/push/gmail/notify'
+const SENDER = 'gmail-push@totality-test.iam.gserviceaccount.com'
+const ADDRESS_KEY = 'k'.repeat(48)
+const seconds = () => Math.floor(Date.now() / 1000)
+function jwt(claims, { key = google.privateKey, kid = 'g1', alg = 'RS256' } = {}) {
+  const part = (v) => Buffer.from(JSON.stringify(v)).toString('base64url')
+  const data = `${part({ alg, kid, typ: 'JWT' })}.${part({ iss: 'https://accounts.google.com', iat: seconds(), exp: seconds() + 3600, ...claims })}`
+  return `${data}.${sign('RSA-SHA256', Buffer.from(data), key).toString('base64url')}`
+}
+const idToken = (email, extra = {}) => jwt({ aud: CLIENT, email, email_verified: true, ...extra })
+const pubsubToken = (extra = {}) => jwt({ aud: AUDIENCE, email: SENDER, email_verified: true, ...extra })
+const note = (emailAddress, historyId = 9_876_543) => ({
+  message: { data: Buffer.from(JSON.stringify({ emailAddress, historyId })).toString('base64'), messageId: '1', publishTime: new Date().toISOString() },
+  subscription: 'projects/totality-test/subscriptions/gmail-push',
+})
+
+async function gmailGate({ clock = Date.now } = {}) {
+  const made = await newGate({ clock })
+  const timers = []
+  made.gate.gmail = { addressKey: ADDRESS_KEY, keys: async (kid) => (kid === 'g1' ? google.publicKey : null), clientIDs: [CLIENT], pubsubAudience: AUDIENCE, pubsubSender: SENDER }
+  made.gate.clock = clock
+  made.gate.later = (fn, ms) => timers.push({ fn, ms })
+  made.timers = timers
+  return made
+}
+const notify = async (gate, body, token = pubsubToken()) => {
+  const answer = await call(gate, '/push/gmail/notify', { token, body })
+  await gate.waking
+  return answer.status
+}
+
+describe('linking a Gmail address', () => {
+  test('needs a Totality sign-in and a Google ID token for that address', async () => {
+    const { gate, store } = await gmailGate()
+    assert.equal((await call(gate, '/push/gmail/link', { token: null, body: { idToken: idToken('mckay@gmail.com') } })).status, 401)
+    for (const bad of [
+      idToken('mckay@gmail.com', { email_verified: false }),
+      idToken('mckay@gmail.com', { aud: 'someone-else.apps.googleusercontent.com' }),
+      idToken('mckay@gmail.com', { iss: 'https://evil.example' }),
+      idToken('mckay@gmail.com', { exp: seconds() - 3600 }),
+      jwt({ aud: CLIENT, email: 'mckay@gmail.com', email_verified: true }, { key: stranger.privateKey }),
+      jwt({ aud: CLIENT, email: 'mckay@gmail.com', email_verified: true }, { kid: 'unknown' }),
+      jwt({ aud: CLIENT, email: 'mckay@gmail.com', email_verified: true }, { alg: 'none' }),
+      'not.a.jwt', undefined,
+    ]) {
+      assert.equal((await call(gate, '/push/gmail/link', { body: { idToken: bad } })).status, 403)
+    }
+    assert.equal((await call(gate, '/push/gmail/link', { body: { idToken: idToken('McKay@Gmail.com') } })).status, 204)
+    assert.deepEqual(await store.linked(addressHash(ADDRESS_KEY, 'mckay@gmail.com')), [MCKAY.id])
+  })
+
+  test('keeps only a keyed hash of the address', async () => {
+    const { gate, root } = await gmailGate()
+    await call(gate, '/push/gmail/link', { body: { idToken: idToken('mckay@gmail.com') } })
+    const text = await readFile(join(root, 'push.json'), 'utf8')
+    assert.ok(!text.toLowerCase().includes('mckay'), 'no address on disk')
+    assert.notEqual(addressHash(ADDRESS_KEY, 'mckay@gmail.com'), addressHash('other'.repeat(10), 'mckay@gmail.com'))
+  })
+
+  test('unlinking only removes your own link', async () => {
+    const { gate, store } = await gmailGate()
+    await call(gate, '/push/gmail/link', { body: { idToken: idToken('mckay@gmail.com') } })
+    await call(gate, '/push/gmail/unlink', { token: 'token-dana', body: { address: 'mckay@gmail.com' } })
+    assert.deepEqual(await store.linked(addressHash(ADDRESS_KEY, 'mckay@gmail.com')), [MCKAY.id])
+    await call(gate, '/push/gmail/unlink', { body: { address: 'mckay@gmail.com' } })
+    assert.deepEqual(await store.linked(addressHash(ADDRESS_KEY, 'mckay@gmail.com')), [])
+  })
+
+  test('is off until the server has its Gmail settings', async () => {
+    const { gate } = await newGate()
+    assert.equal((await call(gate, '/push/gmail/link', { body: { idToken: idToken('mckay@gmail.com') } })).status, 503)
+    assert.equal((await call(gate, '/push/gmail/notify', { token: pubsubToken(), body: note('mckay@gmail.com') })).status, 503)
+  })
+})
+
+describe("Google's Pub/Sub note", () => {
+  test('wakes the phones linked to that address, and only those', async () => {
+    const { gate, sent } = await gmailGate()
+    await call(gate, '/push/device', { body: { token: phone(1), sandbox: false } })
+    await call(gate, '/push/device', { token: 'token-dana', body: { token: phone(2), sandbox: false } })
+    await call(gate, '/push/gmail/link', { body: { idToken: idToken('mckay@gmail.com') } })
+    assert.equal(await notify(gate, note('mckay@gmail.com')), 204)
+    assert.deepEqual(sent.map((s) => s.token), [phone(1)])
+    assert.deepEqual(sent[0].body, WAKE)
+  })
+
+  test('has to be signed by Google for this endpoint, as the Gmail sender', async () => {
+    const { gate, sent } = await gmailGate()
+    await call(gate, '/push/device', { body: { token: phone(1), sandbox: false } })
+    await call(gate, '/push/gmail/link', { body: { idToken: idToken('mckay@gmail.com') } })
+    for (const bad of [
+      pubsubToken({ aud: 'https://elsewhere.example/push' }),
+      pubsubToken({ email: 'attacker@evil.iam.gserviceaccount.com' }),
+      pubsubToken({ email_verified: false }),
+      pubsubToken({ exp: seconds() - 3600 }),
+      jwt({ aud: AUDIENCE, email: SENDER, email_verified: true }, { key: stranger.privateKey }),
+      idToken('mckay@gmail.com'),
+    ]) {
+      assert.equal(await notify(gate, note('mckay@gmail.com'), bad), 401)
+    }
+    assert.equal((await call(gate, '/push/gmail/notify', { token: null, body: note('mckay@gmail.com') })).status, 401)
+    assert.equal(sent.length, 0)
+  })
+
+  test('answers the same for an unknown address or a broken note', async () => {
+    const { gate, sent } = await gmailGate()
+    assert.equal(await notify(gate, note('nobody@gmail.com')), 204)
+    assert.equal(await notify(gate, { message: { data: 'not base64 json' } }), 204)
+    assert.equal(await notify(gate, {}), 204)
+    assert.equal(sent.length, 0)
+  })
+
+  test('a burst of notes becomes one push now and one at the end of the quiet gap', async () => {
+    let now = Date.now()
+    const { gate, sent, timers } = await gmailGate({ clock: () => now })
+    await call(gate, '/push/device', { body: { token: phone(1), sandbox: false } })
+    await call(gate, '/push/gmail/link', { body: { idToken: idToken('mckay@gmail.com') } })
+    for (let i = 0; i < 5; i++) {
+      await notify(gate, note('mckay@gmail.com', 100 + i))
+      now += 1000
+    }
+    assert.equal(sent.length, 1)
+    assert.equal(timers.length, 1)
+    assert.ok(timers[0].ms > 0 && timers[0].ms <= QUIET_SECONDS * 1000)
+    now += QUIET_SECONDS * 1000
+    timers[0].fn()
+    await gate.waking
+    assert.equal(sent.length, 2)
+  })
+})
+
+describe("Google's keys", () => {
+  test('are fetched once, and again for a new key ID at most once a minute', async () => {
+    let now = 0
+    let loads = 0
+    const jwk = { ...google.publicKey.export({ format: 'jwk' }), kid: 'g1' }
+    const load = async () => { loads += 1; return { ok: true, headers: new Headers({ 'cache-control': 'public, max-age=20000' }), json: async () => ({ keys: [jwk] }) } }
+    const keys = googleKeys({ load, clock: () => now })
+    now = 100_000
+    assert.ok(await keys('g1'))
+    assert.ok(await keys('g1'))
+    assert.equal(loads, 1)
+    assert.equal(await keys('g2'), null)
+    assert.equal(loads, 1)
+    now += 61_000
+    assert.equal(await keys('g2'), null)
+    assert.equal(loads, 2)
   })
 })

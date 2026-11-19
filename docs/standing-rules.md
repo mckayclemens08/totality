@@ -65,7 +65,9 @@ These fail review, full stop. There is no "just for now" version of any of them.
    through Cloud Pub/Sub when the inbox changes, and the server wakes that person's phones through
    Apple's push service. The phone then fetches the new mail straight from Gmail with its own sign-in.
    - **The server sees** only that a Gmail address got mail, and when.
-   - **The server never sees** mail content, subjects, senders, or the Google sign-in or token.
+   - **The server never sees** mail content, subjects, senders, or any Google access or refresh token.
+   - **To link an address** the phone shows a Google ID token for it, which proves the address is that
+     person's and opens nothing in Gmail. The server checks Google's signature and drops it.
    - **It stores** a keyed hash of the address mapped to that person's push tokens, never the address
      in plain text, and it logs nothing.
    - The notification text is built on the phone, so the server never sees it either.
@@ -165,7 +167,7 @@ The only public paths are the ones in `server/cloudflared.yml`, and the only ope
 SearXNG runs there too, reachable only through the gateway in `server/gateway/`, and neither one logs searches.
 Mail arrives through `server/mail/`, from the Cloudflare Worker in `server/mail-worker/`, and is sealed before it reaches `~/totality/mailboxes`. Rspamd checks it first, on a network with no way out. Neither one logs anything.
 Sealed photos and Reader files go through `server/blobs/` to `~/totality/blobs-data`, one folder per account, and it logs nothing either.
-Push in `server/push/` keeps each account's phone push tokens in `~/totality/push-data` and wakes them with an empty silent push. Its Apple key file is in `~/totality/secrets/push/` (ignored by git), and it logs nothing.
+Push in `server/push/` keeps each account's phone push tokens in `~/totality/push-data` and wakes them with an empty silent push. For instant Gmail sync it keeps a keyed hash of each linked address (never the address) and checks Google's signature on every Pub/Sub note (`docs/gmail-push-security-review.md`). Its Apple key file is in `~/totality/secrets/push/` (ignored by git), and it logs nothing.
 Never upgrade the Oracle account to paid: that's the owner's decision under the cost rule.
 
 ## Working discipline
