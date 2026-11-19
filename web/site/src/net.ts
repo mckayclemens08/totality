@@ -73,7 +73,7 @@ export async function deleteSlot(token: string, id: string): Promise<void> {
   try { await call(`/rest/v1/pairing_slots?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: headers(token) }); } catch { /* it expires anyway */ }
 }
 
-// ---- This browser on the account's Devices list (supabase/migrations/20261119000001_web_browsers.sql) ----
+// ---- This browser on the account's Devices list (supabase/migrations/20261119000003_web_browsers.sql) ----
 async function rpc(token: string, name: string, args: Record<string, unknown>): Promise<unknown> {
   const res = await call(`/rest/v1/rpc/${name}`, { method: "POST", headers: headers(token), body: JSON.stringify(args) });
   if (res.status === 401) throw new NetError("wrongPassword");
