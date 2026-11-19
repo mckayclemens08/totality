@@ -41,6 +41,7 @@ struct EventDetailView: View {
         switch entry.source {
         case .own(let occurrence): occurrence.event.notes
         case .device(let event): event.notes
+        case .linked: ""
         }
     }
 

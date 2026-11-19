@@ -17,6 +17,9 @@ public final class MailAccountModel {
     @ObservationIgnored public var onSentToReader: (() -> Void)? {
         didSet { current.onSentToReader = onSentToReader }
     }
+    @ObservationIgnored public var taskMaker: (any TaskMaker)? {
+        didSet { current.taskMaker = taskMaker }
+    }
     @ObservationIgnored private let makeStore: (String?) -> any MailStore
 
     public init(makeStore: @escaping (String?) -> any MailStore) {
@@ -35,6 +38,7 @@ public final class MailAccountModel {
     /// The key is about to move, and what it opened goes with it.
     public func keyChanged() {
         receiver = nil
+        taskMaker = nil
         startOver()
     }
 
@@ -42,6 +46,7 @@ public final class MailAccountModel {
         let model = MailModel(store: makeStore(account))
         model.receiver = receiver
         model.onSentToReader = onSentToReader
+        model.taskMaker = taskMaker
         current = model
     }
 }

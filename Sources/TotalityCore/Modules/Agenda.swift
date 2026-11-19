@@ -10,13 +10,20 @@ public struct AgendaItem: Identifiable, Sendable, Hashable {
     /// For an all-day item, the start of the day after its last day.
     public let end: Date
     public let isAllDay: Bool
+    /// The module it comes from, when it isn't an event, like a task given a time. The Calendar draws
+    /// these lighter than its events and hands them back to their module to open.
+    public let module: ModuleID?
+    /// The quiet line, like the task's project.
+    public let detail: String?
 
-    public init(id: String, title: String, start: Date, end: Date, isAllDay: Bool) {
+    public init(id: String, title: String, start: Date, end: Date, isAllDay: Bool, module: ModuleID? = nil, detail: String? = nil) {
         self.id = id
         self.title = title
         self.start = start
         self.end = end
         self.isAllDay = isAllDay
+        self.module = module
+        self.detail = detail
     }
 
     /// Whether any of it falls between these two moments.

@@ -706,6 +706,39 @@ The home tile is `TasksHomeTile`. Its tick boxes, its titles, the next deadline 
 so they work on the tile itself. Home search finds tasks by title, notes, checklist items and tags, including
 done ones, and its `itemID` is the task's UUID, which opens the task in its list, expanded.
 
+### Tasks step 4: connections
+
+Mockup approved 2026-11-18 (redesign canvas, row "Tasks step 4"); decisions on issue 123. Every connection goes
+through `TotalityCore/Modules/TaskLinks.swift`, so no module imports Tasks and Tasks imports none of them.
+
+- `TaskMaker` (`ModuleRegistry.taskMaker`): a module hands over a `TaskDraft`, a title plus a `TaskSource`, and
+  gets back `TaskMade`. `TasksModule` makes it in the Inbox (decision 7), sealed with the rest of the task. The
+  app gives each module the registry's maker; a module with none hides Add to Tasks.
+- `TaskSource` is the link back: module, an `itemID` that means what a `SearchHit`'s does, the source's name and
+  quiet line, an optional Reader quote (cut at 600 characters), and `waiting` for Mail. It's a new sealed part
+  of `TaskItem` (`Field.link`), merged like the others. `blockMinutes` joins the schedule part.
+- Opening a link: `TaskSource.hit` is a `SearchHit`, and the app opens it exactly as it opens a search result.
+  Whether a source is gone is asked of its module by the app (`sourceGone`); a gone link says so with Remove and
+  the task keeps its title (decision 6).
+- Mail: Add to Tasks (subject as title) and Add as waiting for reply, from the conversation menu. Waiting tasks
+  sit in the built-in Waiting list and stay in their own project (decision 1). `ReplyWatcher` (`MailReplyWatcher`,
+  made by the app like `MailSearcher`) answers, from mail already on the device, the first message after the
+  wait began that isn't in Sent or Drafts and isn't from the person. Tasks asks on every load, ticks the task
+  off quietly and shows the 5-second Undo (decision 2). Undo starts the wait again from now. The sender's name
+  is for the banner only and isn't stored.
+- Messages: long-press, Add to Tasks. Only the typed title and a link to the chat are kept; the message's words
+  are never copied (decision 4).
+- Reader: Add to Tasks from the selection menu of books (EPUB/HTML pages) and PDFs, with the words as the quote,
+  and from the More menu of any item without one. Docs, notes and plain reading text have only the More menu
+  for now, and the link opens the item where the person last stopped rather than at the quote.
+- Photos: Add to Tasks in the viewer; the title is typed (decision 5, no OCR).
+- Web: Add to Tasks from the page menu adds straight to the Inbox, titled from the page. Not offered in private tabs.
+- Calendar: `TasksModule` is an `AgendaPlanner`. Timed, open tasks show on the Day and Week timelines only,
+  lighter than events with a ring, and open in Tasks. The Day view's tray lists the day's tasks with no time
+  (Today's include overdue ones); dropping one on an hour gives it that time, snapped to 15 minutes, for 30
+  minutes. Nothing is written to Google or the device's calendars (decision 3). The home tile, schedule and
+  search still show events only. Tasks' Upcoming leaves its own items out (`agenda(from:to:except:)`).
+
 ## Tasks: sharing (step 6)
 
 Issue 123, step 6; mockup approved 2026-11-18, decisions in the issue. Each shared list or project is its

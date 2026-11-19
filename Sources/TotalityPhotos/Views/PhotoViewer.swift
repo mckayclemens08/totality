@@ -13,6 +13,8 @@ struct PhotoViewer: View {
     /// The photos when the viewer opened, so one moved out of this scope doesn't jump the pages.
     @State private var shown: [UUID] = []
     @State private var showingInfo = false
+    /// A photo being added to Tasks (step 4). The title is typed; nothing reads the photo (decision 5).
+    @State private var taskDraft: TaskDraft?
     @State private var confirmingSave = false
     @State private var confirmingDelete = false
     @State private var isSaving = false
@@ -56,6 +58,7 @@ struct PhotoViewer: View {
         .sheet(item: $sharingItem) { item in
             ShareSheet(model: model, items: [item], albumName: nil)
         }
+        .addToTasksSheet($taskDraft, maker: model.taskMaker) { made in model.notice = made.line }
         .sheet(isPresented: $showingInfo) {
             if let item = items.first(where: { $0.id == current }) {
                 PhotoInfoSheet(model: model, item: item)
@@ -150,6 +153,18 @@ struct PhotoViewer: View {
                         }
                         if !item.details.isVideo {
                             actionButton("Info", systemImage: "info.circle") { showingInfo = true }
+                        }
+                        if model.taskMaker != nil {
+                            actionButton("Add to Tasks", systemImage: "checkmark.circle") {
+                                let when = item.date.formatted(date: .abbreviated, time: .shortened)
+                                taskDraft = TaskDraft(
+                                    title: "",
+                                    source: TaskSource(
+                                        module: .photos, itemID: item.id.uuidString,
+                                        title: item.details.isVideo ? "Video" : "Photo", detail: when
+                                    )
+                                )
+                            }
                         }
                         albumMenu(item)
                         if model.sender != nil {

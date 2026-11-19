@@ -65,6 +65,15 @@ struct MailActionButtons: View {
         let place = model.place
         let anyUnread = conversations.contains(where: \.isUnread)
         let anyStarred = conversations.contains(where: \.isStarred)
+        if model.canAddToTasks, conversations.count == 1, let conversation = conversations.first, !conversation.isUnreadable {
+            Button("Add to Tasks", systemImage: "checkmark.circle") {
+                Task { await model.addToTasks(conversation, waiting: false) }
+            }
+            Button("Add as waiting for reply", systemImage: "hourglass") {
+                Task { await model.addToTasks(conversation, waiting: true) }
+            }
+            Divider()
+        }
         if MailActions.canArchive(in: place) {
             Button("Archive", systemImage: "archivebox") { run(.archive) }
         }

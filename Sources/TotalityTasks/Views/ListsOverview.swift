@@ -11,6 +11,8 @@ struct ListsOverview: View {
     let onNew: (TaskList.Kind) -> Void
     var shared: SharedListsModel? = nil
     var onShared: (String) -> Void = { _ in }
+    /// The built-in Waiting list (step 4).
+    var onWaiting: () -> Void = {}
 
     private static let tiles: [[TaskBucket]] = [[.inbox, .today, .upcoming], [.anytime, .someday, .logbook]]
 
@@ -89,6 +91,7 @@ struct ListsOverview: View {
         let others = all.filter { !$0.isPinned }
         groupHeading("Smart lists", trailing: pinned.isEmpty ? nil : "Pinned")
         VStack(spacing: 0) {
+            waitingRow
             if all.isEmpty {
                 Button { onNew(.smart) } label: {
                     Label("Make a smart list from tags, areas, dates and more", systemImage: "line.3.horizontal.decrease")
@@ -106,6 +109,34 @@ struct ListsOverview: View {
         .padding(.horizontal, Space.s3)
         .padding(.vertical, Space.s1)
         .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.tile, style: .continuous))
+    }
+
+    /// Waiting for a reply: built in, always first (decision 1).
+    private var waitingRow: some View {
+        let theme = Theme.current
+        let count = model.waitingList.open.count
+        return Button(action: onWaiting) {
+            HStack(spacing: Space.s3) {
+                Image(systemName: "hourglass")
+                    .font(Typeface.callout)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .accessibilityHidden(true)
+                Text("Waiting")
+                    .font(Typeface.body)
+                    .foregroundStyle(theme.textPrimary.color)
+                Spacer(minLength: Space.s2)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(Typeface.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(theme.textSecondary.color)
+                }
+            }
+            .padding(.vertical, Space.s2 + Space.s1 / 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SoftPress())
+        .accessibilityLabel(count > 0 ? "Waiting for a reply, \(count) tasks" : "Waiting for a reply")
     }
 
     private func smartRow(_ list: TaskList) -> some View {

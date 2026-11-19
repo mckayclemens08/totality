@@ -1,5 +1,6 @@
 import PDFKit
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// Opens one item: an editor for docs, real pages for PDFs, EPUBs and web pages, reading text for the rest.
@@ -44,7 +45,13 @@ struct ReaderItemView: View {
             model.listenWhenOpened = false
             await model.startListening(to: item.id)
         }
+        .addToTasksSheet(Bindable(model).taskDraft, maker: model.taskMaker) { made in model.notice = made.line }
         .toolbar {
+            if model.taskMaker != nil {
+                ToolbarItem(placement: .secondaryAction) {
+                    Button("Add to Tasks", systemImage: "checkmark.circle") { model.addToTasks(item, quote: nil) }
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 ToolbarIcon("Listen", systemImage: "headphones") {
                     Task { await model.startListening(to: item.id) }
@@ -260,7 +267,10 @@ private struct PDFReader: View {
             model.remember(.pdf(page: page), listen: listen, for: item.id)
         }
         if let document {
-            PDFPages(document: document, follow: follow, startPage: startPage, onPage: onPage)
+            PDFPages(
+                document: document, follow: follow, startPage: startPage, onPage: onPage,
+                onAddToTasks: model.taskMaker == nil ? nil : { model.addToTasks(item, quote: $0) }
+            )
         } else if let large {
             LargePDFPages(pdf: large, follow: follow, startPage: startPage, onPage: onPage)
         }
@@ -406,16 +416,29 @@ private final class PDFLinks: NSObject, @preconcurrency PDFViewDelegate {
 }
 
 #if canImport(UIKit)
+/// A PDF view whose selection menu also offers Add to Tasks (step 4).
+final class ReaderPDFView: PDFView {
+    var onAddToTasks: ((String) -> Void)?
+
+    override func buildMenu(with builder: any UIMenuBuilder) {
+        super.buildMenu(with: builder)
+        guard builder.system == .context, let onAddToTasks, let words = currentSelection?.string, !words.isEmpty else { return }
+        let add = UIAction(title: "Add to Tasks", image: UIImage(systemName: "checkmark.circle")) { _ in onAddToTasks(words) }
+        builder.insertChild(UIMenu(options: .displayInline, children: [add]), atEndOfMenu: .root)
+    }
+}
+
 private struct PDFPages: UIViewRepresentable {
     let document: PDFDocument
     let follow: PDFFollow?
     let startPage: Int?
     let onPage: (Int) -> Void
+    var onAddToTasks: ((String) -> Void)?
 
     func makeCoordinator() -> PDFLinks { PDFLinks() }
 
     func makeUIView(context: Context) -> PDFView {
-        let view = PDFView()
+        let view = ReaderPDFView()
         view.delegate = context.coordinator
         view.autoScales = true
         view.displayMode = .singlePageContinuous
@@ -429,6 +452,7 @@ private struct PDFPages: UIViewRepresentable {
     }
 
     func updateUIView(_ view: PDFView, context: Context) {
+        (view as? ReaderPDFView)?.onAddToTasks = onAddToTasks
         context.coordinator.open = context.environment.openURL
         if view.document !== document { view.document = document }
         context.coordinator.onPage = onPage
@@ -454,6 +478,7 @@ private struct PDFPages: NSViewRepresentable {
     let follow: PDFFollow?
     let startPage: Int?
     let onPage: (Int) -> Void
+    var onAddToTasks: ((String) -> Void)?
 
     func makeCoordinator() -> PDFLinks { PDFLinks() }
 

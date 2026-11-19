@@ -70,6 +70,8 @@ public final class MailModel {
     @ObservationIgnored public let store: any MailStore
     /// The module that keeps a saved attachment. It needs the content key, so it arrives after the key does.
     @ObservationIgnored public var receiver: (any ContentReceiver)?
+    /// Makes tasks from mail, through the registry (issue 123, step 4).
+    @ObservationIgnored public var taskMaker: (any TaskMaker)?
     @ObservationIgnored public var onSentToReader: (() -> Void)?
     @ObservationIgnored public let rules = MailRules()
     /// Outside accounts beside the Totality address, when the store can keep them.

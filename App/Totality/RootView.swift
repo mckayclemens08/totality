@@ -104,6 +104,7 @@ struct RootView: View {
                 registry = nil
                 homeChoices.close()
                 messages.people.directory = nil
+                messages.taskMaker = nil
                 AppRefresh.shared.registry = nil
                 syncAreas = []
                 contentProblem = nil
@@ -463,6 +464,7 @@ struct RootView: View {
             mail.onSentToReader = { Task { await reader?.load() } }
             registry = content.registry
             messages.people.directory = content.registry.profiles
+            connectTasks(content.registry)
             AppRefresh.shared.registry = content.registry
             syncAreas = content.areas
             Task { await homeChoices.open(content.home) }
@@ -510,6 +512,7 @@ struct RootView: View {
         if turn == photosTurn, await photosWiring.use(account: canSync ? owner : nil), turn == photosTurn {
             let model = PhotosModel(library: photosWiring.library, unavailable: photosReason())
             model.sender = photosSender()
+            model.taskMaker = registry?.taskMaker
             model.googleAccounts = ContentSetup.googleAccounts()
             photos = model
             await model.load()
@@ -518,6 +521,7 @@ struct RootView: View {
             // The model on screen must always be the current library's, or none.
             let model = PhotosModel(library: photosWiring.library, unavailable: photosReason())
             model.sender = photosSender()
+            model.taskMaker = registry?.taskMaker
             model.googleAccounts = ContentSetup.googleAccounts()
             photos = model
             await model.load()
@@ -604,6 +608,33 @@ struct RootView: View {
         prepareContent()
         web?.open(url)
         bringUp(.web)
+    }
+
+    /// Step 4 of issue 123: every module can hand Tasks a task through the registry, Mail tells it about
+    /// replies, and a task's link opens its source the way a search result does. Only the app sees every
+    /// module, so the wiring lives here.
+    private func connectTasks(_ registry: ModuleRegistry) {
+        let maker = registry.taskMaker
+        mail.taskMaker = maker
+        messages.taskMaker = maker
+        photos.taskMaker = maker
+        reader?.taskMaker = maker
+        web?.taskMaker = maker
+        tasks?.replyWatchers = [MailReplyWatcher(model: mail)]
+        tasks?.onOpenSource = { source in show(source.hit) }
+        tasks?.sourceGone = { source in
+            switch source.module {
+            case .mail: mail.current.hasConversation(source.itemID) == false
+            case .photos: photos.hasItem(source.itemID) == false
+            case .reader: reader?.hasItem(source.itemID) == false
+            case .messages: !messages.chats.isEmpty && !messages.chats.contains { $0.id == source.itemID }
+            default: false
+            }
+        }
+        calendar?.onOpenLinked = { item in
+            guard item.module == .tasks else { return }
+            show(SearchHit(module: .tasks, itemID: item.id, title: item.title))
+        }
     }
 
     /// Only the Reader's content can be attached so far, so that's where a ref opens.

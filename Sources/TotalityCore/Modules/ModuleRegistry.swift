@@ -36,7 +36,7 @@ public enum ModuleRegistryError: Error, Equatable {
 /// Resolves a `ContentRef` to the module that handles it. Built once at launch and never changed.
 public struct ModuleRegistry: Sendable {
     private let byKind: [ContentKind: any ContentHandler]
-    private let handlers: [any ContentHandler]
+    let handlers: [any ContentHandler]
     /// Public profiles, which Account looks up. Account isn't a content module, so it has its own slot.
     public let profiles: (any ProfileDirectory)?
 
