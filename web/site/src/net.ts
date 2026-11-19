@@ -3,7 +3,7 @@
 import { config } from "./config";
 import { b64, toHex } from "./pairing/protocol";
 
-export interface Session { accessToken: string; refreshToken: string; expiresAt: number }
+export interface Session { accessToken: string; refreshToken: string; expiresAt: number; userId: string; username: string }
 export class NetError extends Error {
   constructor(readonly kind: "wrongPassword" | "offline" | "rateLimited" | "failed") { super(kind); }
 }
@@ -22,8 +22,8 @@ async function call(path: string, init: RequestInit): Promise<Response> {
   }
 }
 
-function toSession(body: { access_token: string; refresh_token: string; expires_in: number }): Session {
-  return { accessToken: body.access_token, refreshToken: body.refresh_token, expiresAt: Date.now() + body.expires_in * 1000 };
+function toSession(body: { access_token: string; refresh_token: string; expires_in: number; user: { id: string; email?: string } }): Session {
+  return { accessToken: body.access_token, refreshToken: body.refresh_token, expiresAt: Date.now() + body.expires_in * 1000, userId: body.user.id.toLowerCase(), username: (body.user.email ?? "").replace(config.domain, "") };
 }
 
 export async function signIn(username: string, password: string): Promise<Session> {
@@ -71,6 +71,35 @@ export async function pollSlot(token: string, id: string): Promise<{ phonePub: s
 
 export async function deleteSlot(token: string, id: string): Promise<void> {
   try { await call(`/rest/v1/pairing_slots?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: headers(token) }); } catch { /* it expires anyway */ }
+}
+
+export interface ObjectRow { id: string; kind: string; meta_cipher: string | null; storage_key: string | null; byte_size: number | null }
+
+/** The signed-in account's live docs and files, a page at a time (the server stops at its own page size). */
+export async function listObjects(token: string): Promise<ObjectRow[]> {
+  const rows: ObjectRow[] = [];
+  const page = 500;
+  for (let from = 0; ; from += page) {
+    const res = await call("/rest/v1/content_objects?select=id,kind,meta_cipher,storage_key,byte_size&kind=in.(note,file)&deleted_at=is.null&order=id", {
+      headers: { ...headers(token), "range-unit": "items", range: `${from}-${from + page - 1}` },
+    });
+    if (res.status === 401) throw new NetError("wrongPassword");
+    if (!res.ok && res.status !== 206) throw new NetError("failed");
+    const got = (await res.json()) as ObjectRow[];
+    rows.push(...got);
+    if (got.length < page || rows.length > 50_000) return rows;
+  }
+}
+
+/** One sealed blob's bytes, or null when the store doesn't have it. It is ciphertext; the caller opens it. */
+export async function getBlob(token: string, id: string): Promise<Uint8Array | null> {
+  let res: Response;
+  try {
+    res = await fetch(config.blobUrl + id, { headers: { authorization: `Bearer ${token}` }, credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" });
+  } catch { throw new NetError("offline"); }
+  if (res.status === 404) return null;
+  if (!res.ok) throw new NetError(res.status === 401 ? "wrongPassword" : "failed");
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 export { b64 };

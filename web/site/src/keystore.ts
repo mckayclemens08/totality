@@ -28,6 +28,7 @@ async function idb<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBR
   } finally { db.close(); }
 }
 
+export class LockedError extends Error {}
 let memoryKey: CryptoKey | null = null;
 
 /** Takes the raw key, makes it non-extractable, and wipes the raw bytes. */
@@ -47,7 +48,7 @@ export async function loadContentKey(): Promise<CryptoKey | null> {
 /** Derives one object's key the way ContentRootKey.objectKey does: HKDF-SHA256, empty salt, info = "totality/<purpose>/v1" + id. */
 export async function objectKeyBytes(purpose: string, objectId: Uint8Array): Promise<Uint8Array> {
   const key = await loadContentKey();
-  if (!key) throw new Error("locked");
+  if (!key) throw new LockedError("locked");
   const info = new Uint8Array([...te.encode(`totality/${purpose}/v1`), ...objectId]);
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info }, key, 256));
 }

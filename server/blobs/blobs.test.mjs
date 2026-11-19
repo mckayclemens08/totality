@@ -378,3 +378,39 @@ describe('Blob store two-user test (issue 54)', () => {
     await answer.arrayBuffer()
   })
 })
+
+describe('browser access (issue 150)', () => {
+  const site = 'https://app.usetotality.com'
+  let server, base, root
+  before(async () => {
+    ;({ root } = await newGate())
+    const { gate } = await newGate()
+    server = serve(gate, 0, '127.0.0.1', [site])
+    await new Promise((resolve) => server.once('listening', resolve))
+    base = `http://127.0.0.1:${server.address().port}`
+  })
+  after(async () => {
+    await new Promise((resolve) => server.close(resolve))
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the website may ask, and everyone else is refused', async () => {
+    const ok = await fetch(`${base}/blobs/${randomUUID()}`, { method: 'OPTIONS', headers: { Origin: site } })
+    assert.equal(ok.status, 204)
+    assert.equal(ok.headers.get('access-control-allow-origin'), site)
+    assert.match(ok.headers.get('access-control-allow-headers'), /Authorization/)
+    for (const origin of ['https://evil.example', 'https://app.usetotality.com.evil.example', 'null']) {
+      const no = await fetch(`${base}/blobs/${randomUUID()}`, { method: 'OPTIONS', headers: { Origin: origin } })
+      assert.equal(no.status, 403)
+      assert.equal(no.headers.get('access-control-allow-origin'), null)
+    }
+  })
+
+  test('a real answer carries the website, and still needs a sign-in', async () => {
+    const res = await fetch(`${base}/blobs/${randomUUID()}`, { headers: { Origin: site } })
+    assert.equal(res.status, 401)
+    assert.equal(res.headers.get('access-control-allow-origin'), site)
+    const other = await fetch(`${base}/blobs/${randomUUID()}`, { headers: { Origin: 'https://evil.example' } })
+    assert.equal(other.headers.get('access-control-allow-origin'), null)
+  })
+})

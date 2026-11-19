@@ -6,6 +6,7 @@ import * as net from "./net";
 import * as vault from "./keystore";
 import { IdleLock } from "./idle";
 import { qrElement } from "./qr";
+import { renderShell, teardownShell } from "./shell";
 import { newBrowserKeys, openSealed, pairingCode, qrText, unb64, fromHex, PairingFailure } from "./pairing/protocol";
 
 // Signed out → (sign in) → pairing with the iPhone → unlocked. "Locked" is signed in with no key in memory.
@@ -26,7 +27,7 @@ function applyStoredTheme(): void {
   } catch { /* storage can be blocked */ }
 }
 
-function show(screen: Node): void { pairingRun++; app.replaceChildren(screen); }
+function show(screen: Node): void { pairingRun++; teardownShell(); app.replaceChildren(screen); }
 
 const lockIcon = (stroke = "currentColor") =>
   svg("svg", { width: "15", height: "15", viewBox: "0 0 24 24", "stroke-width": "2.2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", stroke, fill: "none" },
@@ -74,7 +75,7 @@ function signInScreen(message = ""): Node {
     go.disabled = true; status.textContent = "Signing in…";
     try {
       session = await net.signIn(user.value, pass.value);
-      pass.value = "";
+            pass.value = "";
       startPairing();
     } catch (err) {
       pass.value = "";
@@ -101,6 +102,7 @@ function modeChoice(): HTMLElement {
 }
 
 function startPairing(): void {
+  teardownShell();
   const run = ++pairingRun;
   const keys = newBrowserKeys();
   const body = h("div", { class: "card pair" }, h("div", { class: "step" }, "Step 2 of 2"), h("h2", {}, "Add this browser from your iPhone"),
@@ -154,10 +156,9 @@ function startPairing(): void {
 
 function unlocked(): void {
   if (!ownComputer) idle.start(); else idle.stop();
-  show(h("main", { class: "stage" }, h("div", { class: "card" }, h("h2", {}, "This browser is added"),
-    h("p", { class: "lede small" }, ownComputer ? "It stays unlocked until you sign out or remove it under Devices on your iPhone." : "It locks when you close this tab, or after 30 minutes with no activity."),
-    h("p", { class: "lede small" }, "Your modules arrive here one at a time, starting with the Reader."),
-    h("button", { type: "button", class: "quiet", onclick: () => signOutNow() }, "Sign out"))));
+  pairingRun++;
+  if (!session) { show(signInScreen()); return; }
+  renderShell(app, { token: freshToken, userId: session.userId }, session.username, () => void signOutNow());
 }
 
 function lockedScreen(): Node {

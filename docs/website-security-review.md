@@ -35,3 +35,12 @@ Further review is required for pairing code (step 3), the mail renderer (step 5)
 - Session storage (review #5): the account server isn't on `usetotality.com`, so no cookie. The access token stays in memory; on "my computer" the refresh token is kept sealed under a non-extractable key; on a shared computer nothing is written.
 - Shared-computer lock after 30 idle minutes drops the key from memory. Residual: a page script could have copied derived object keys while open (review #4).
 - Still open for later steps: removing a browser from Devices on the iPhone (the list and remove button), and root-key rotation (review #3).
+
+## Reader on the web, first slice (issue 150, step 4)
+
+- **Reads only.** The website lists the account's docs and files and opens notes. It writes nothing, so it can't corrupt a sealed copy. Files, PDFs, EPUBs, Journal, Drive, Listen and editing come in later PRs.
+- **Same formats, proven.** `docs/reader-vectors.json` is made by the real `ReaderVault` (`WebVectorsTests.makeVectors`). `web/site/test/reader.test.mjs` opens it with the website's code, so what the iPhone seals is what the browser reads. If the Swift format changes, the Swift test fails until the vector is remade, which fails the website test unless it still opens.
+- **Untrusted content.** A note is Markdown text, turned into a tree and drawn with `textContent` only. Nothing in a note is parsed as HTML. It is drawn in a frame with `sandbox="allow-same-origin"` and no `allow-scripts`, so it can't run script or reach the page's key or session. Only `http(s)` links are kept, with `noopener noreferrer nofollow`. Mail (HTML) will need its own review before it ships (review #6).
+- **Blob store from a browser.** `server/blobs/blobs.mjs` now answers CORS for `https://app.usetotality.com` only (`ALLOWED_ORIGINS` changes it). It still needs a sign-in for every blob, and answers other origins' preflights with 403. This is a change to the Oracle server, which the owner has to redeploy.
+- **Keys.** Object keys are derived from the non-extractable root key with `deriveBits`. The page holds each derived key only while it opens one blob.
+- **Residual:** every opened note is decrypted text in page memory. XSS in the page could read it (review #4); the CSP and Trusted Types are what stand in the way.

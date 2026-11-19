@@ -499,8 +499,34 @@ function liveGate() {
   })
 }
 
-export function serve(gate, port, host = '0.0.0.0') {
+/** Websites that may read blobs from a browser. A request names its origin, and only these get an answer
+ *  a page can use. The sign-in still decides who sees what; this only lets the browser through. */
+export const WEBSITE_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'https://app.usetotality.com').split(',').map((o) => o.trim()).filter(Boolean)
+
+export function corsHeaders(origin, allowed = WEBSITE_ORIGINS) {
+  if (!origin || !allowed.includes(origin)) return {}
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Upload-Offset, Blob-State',
+    Vary: 'Origin',
+  }
+}
+
+export function serve(gate, port, host = '0.0.0.0', allowed = WEBSITE_ORIGINS) {
   const server = createServer(async (request, response) => {
+    const cors = corsHeaders(request.headers.origin, allowed)
+    if (request.method === 'OPTIONS') {
+      // A browser's question before a request with an Authorization header. Nothing is read or stored.
+      response.writeHead(Object.keys(cors).length ? 204 : 403, {
+        ...cors,
+        'Access-Control-Allow-Methods': 'GET, HEAD, PATCH, POST, DELETE',
+        'Access-Control-Allow-Headers': 'Authorization, Range, Content-Type, Upload-Offset',
+        'Access-Control-Max-Age': '600',
+        'Cache-Control': 'no-store',
+      })
+      response.end()
+      return
+    }
     let answer
     try {
       const path = new URL(request.url ?? '/', 'http://local').pathname
@@ -516,6 +542,7 @@ export function serve(gate, port, host = '0.0.0.0') {
     response.writeHead(status, {
       'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
+      ...cors,
       ...(Buffer.isBuffer(body) && { 'Content-Length': String(body.length) }),
       ...headers,
     })

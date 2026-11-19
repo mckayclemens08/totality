@@ -19,7 +19,9 @@ test("everything loads from our own domain, with integrity", () => {
   }
   for (const f of readdirSync("dist").filter((f) => /\.(js|css)$/.test(f))) {
     const body = readFileSync(`dist/${f}`, "utf8");
-    const hit = body.match(/https?:\/\/(?!www\.w3\.org)[a-z0-9][^"'`\s)]{0,60}/);
+    const own = (process.env.SUPABASE_URL ?? "").replace(/^https?:\/\//, "");
+    const allowed = ["www\\.w3\\.org", "usetotality\\.com/blobs/"].concat(own ? [own.replace(/\./g, "\\.")] : []).join("|");
+    const hit = body.match(new RegExp("https?://(?!" + allowed + ")[a-z0-9][^\"'`\\s)]{0,60}"));
     assert.equal(hit, null, `${f} reaches another host: ${hit && hit[0]}`);
   }
 });
@@ -29,7 +31,11 @@ test("CSP is strict", () => {
   for (const needed of ["default-src 'none'", "script-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'", "require-trusted-types-for 'script'"]) {
     assert.ok(csp.includes(needed), needed);
   }
-  assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval|\*|https?:/);
+  assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval|\*/);
+  // The page may talk to its own domain, the account server (when built with one) and the blob store. Nothing else.
+  const hosts = [...csp.matchAll(/https?:\/\/[^\s;]+/g)].map((m) => m[0]);
+  assert.deepEqual(hosts.filter((h) => h !== "https://usetotality.com"), process.env.SUPABASE_URL ? [process.env.SUPABASE_URL] : []);
+  assert.doesNotMatch(csp.replace(/connect-src[^;]*/, ""), /https?:/, "only connect-src names another host");
 });
 
 test("security headers are present", () => {
