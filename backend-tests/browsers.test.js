@@ -33,6 +33,8 @@ describe('paired browsers (Devices on the iPhone)', () => {
     assert.equal(await checkIn(web), 'removed')
     assert.equal((await list(phone)).length, 0)
     assert.equal(await remove(phone, row.id), null, 'removing twice does nothing')
+    await as(db, web, (q) => q('select public.browser_forget()'))
+    assert.equal(await checkIn(web), 'removed', 'a removed browser can\'t clear its marker and come back')
   })
 
   test('two-user: user 2 cannot see, remove or change user 1\'s browsers', async () => {
@@ -78,6 +80,7 @@ describe('paired browsers (Devices on the iPhone)', () => {
     assert.deepEqual((await list(phone)).map((r) => r.device_label), ['Chrome on Windows'])
     await db.query('delete from auth.sessions where id = $1', [b.session])
     assert.equal((await list(phone)).length, 0)
+    assert.equal(await checkIn(b), 'removed', 'an ended session never checks in again')
     const c = await signIn(db, u)
     await checkIn(c, 'Firefox on Linux')
     assert.equal((await db.query('select count(*)::int as n from public.web_browsers where owner_id = $1', [u.id])).rows[0].n, 1)

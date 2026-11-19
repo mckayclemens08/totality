@@ -171,7 +171,11 @@ async function checkIn(): Promise<void> {
   if (!session) return;
   try {
     if ((await net.browserCheckIn(await freshToken(), deviceLabel())) === "removed") await signOutNow("This browser was removed from your iPhone, so it was signed out and cleared.");
-  } catch { /* offline or signed out: the next check or the next sign-in settles it */ }
+  } catch (e) {
+    // The account server refused this sign-in (removed, or ended elsewhere): clear this browser now, not at reload.
+    if (e instanceof net.NetError && e.kind === "wrongPassword") await signOutNow("This browser was signed out, so it was cleared. Sign in again to use it.");
+    // Offline: the next check settles it.
+  }
 }
 
 function lockedScreen(): Node {

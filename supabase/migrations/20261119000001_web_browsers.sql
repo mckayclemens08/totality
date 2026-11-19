@@ -50,6 +50,8 @@ begin
   if me is null or sess is null then raise exception 'not signed in' using errcode = '42501'; end if;
   select * into b from public.web_browsers where owner_id = me and session_id = sess;
   if found and b.removed_at is not null then return 'removed'; end if;
+  -- A session that has ended (removed from the iPhone, or signed out) never adds itself back.
+  if not exists (select 1 from auth.sessions s where s.id = sess and s.user_id = me) then return 'removed'; end if;
   if found then
     update public.web_browsers set last_seen_at = now() where id = b.id and last_seen_at < now() - interval '1 minute';
     return 'ok';
@@ -79,7 +81,8 @@ end $$;
 create function public.browser_forget() returns void
 language plpgsql security definer set search_path = public as $$
 begin
-  delete from public.web_browsers where owner_id = auth.uid() and session_id = public.current_session_id();
+  -- A removed browser keeps its marker, so it can't clear it and check in afresh.
+  delete from public.web_browsers where owner_id = auth.uid() and session_id = public.current_session_id() and removed_at is null;
 end $$;
 
 -- The iPhone's list: browsers still signed in, newest activity first.

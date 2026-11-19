@@ -192,3 +192,26 @@ describe('Messages two-user test', () => {
     assert.equal(anonymous.status, 401)
   })
 })
+
+// Remove on the iPhone (Devices › Browsers): a fresh sign-in pass confirms deleting a website device, and
+// someone else's pass can't, so a browser's Matrix device goes without any password.
+describe('removing a website device', () => {
+  test('a fresh pass confirms the delete; another person\'s pass does not', async () => {
+    const handle = `rm_${randomUUID().slice(0, 8)}`, other = `rm_${randomUUID().slice(0, 8)}`
+    await signIn(other)
+    const web = await call(null, 'POST', '/login', { type: 'org.matrix.login.jwt', token: pass(handle), initial_device_display_name: 'Totality web' })
+    assert.equal(web.status, 200)
+    const phone = await signIn(handle)
+    const path = `/devices/${encodeURIComponent(web.json.device_id)}`
+    assert.equal((await call(phone.token, 'GET', path)).json.display_name, 'Totality web')
+    const challenge = await call(phone.token, 'DELETE', path, {})
+    assert.equal(challenge.status, 401)
+    assert.ok(challenge.json.flows.some((f) => f.stages.includes('org.matrix.login.jwt')), JSON.stringify(challenge.json.flows))
+    const wrong = await call(phone.token, 'DELETE', path, { auth: { type: 'org.matrix.login.jwt', token: pass(other), session: challenge.json.session } })
+    assert.notEqual(wrong.status, 200)
+    const again = await call(phone.token, 'DELETE', path, {})
+    const done = await call(phone.token, 'DELETE', path, { auth: { type: 'org.matrix.login.jwt', token: pass(handle), session: again.json.session } })
+    assert.equal(done.status, 200, JSON.stringify(done.json))
+    assert.equal((await call(web.json.access_token, 'GET', '/account/whoami')).status, 401, 'the browser\'s token stops working')
+  })
+})
