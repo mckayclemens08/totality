@@ -51,6 +51,17 @@ jobs:
           cache-dependency-path: web/site/package-lock.json
       - run: npm ci
       - run: npm test
+  public-site-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
   gateway-tests:
     runs-on: ubuntu-latest
     defaults:

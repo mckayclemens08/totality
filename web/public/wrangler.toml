@@ -1,0 +1,4 @@
+# Cloudflare Pages, free tier. Static files only: no Functions, no Workers, no paid services.
+name = "totality-public"
+pages_build_output_dir = "site"
+compatibility_date = "2026-11-01"

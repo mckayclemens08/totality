@@ -1,0 +1,10 @@
+{
+  "name": "totality-public",
+  "private": true,
+  "description": "usetotality.com, the signed-out public site. Static files for Cloudflare Pages, no build step, no dependencies.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "test": "node --check site/main.js && node --test test/*.test.mjs"
+  }
+}
