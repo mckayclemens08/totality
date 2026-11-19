@@ -19,6 +19,8 @@ struct SocialProfileView: View {
     @State private var showingRequests = false
     @State private var reporting = false
     @State private var confirmingBlock = false
+    /// On your own profile: your posts, or the public posts you saved. Only you see your saves.
+    @State private var showingSaved = false
 
     var body: some View {
         let theme = Theme.current
@@ -31,10 +33,22 @@ struct SocialProfileView: View {
                 }
                 if let profile {
                     header(profile)
+                    if isMe {
+                        HStack(spacing: Space.s2) {
+                            FilterPill("Posts", isSelected: !showingSaved) { showingSaved = false }
+                            FilterPill("Saved", isSelected: showingSaved) { showingSaved = true; Task { await model.loadSaved() } }
+                        }
+                    }
                     if profile.isClosed && !isMe {
                         EmptyFeed(systemImage: "lock", title: "This account is private",
                                   detail: profile.requested ? "You asked to follow \(profile.name). Once they accept, you'll see their posts."
                                                             : "Once \(profile.name) accepts your request, you'll see their posts.")
+                    } else if isMe && showingSaved {
+                        if model.saved.isEmpty {
+                            EmptyFeed(systemImage: "bookmark", title: "Nothing saved yet", detail: "Tap Save on a public post to keep it here. Only you can see what you saved.")
+                        } else {
+                            PostGrid(posts: model.saved, photos: model.photos, onShow: { _ in }) { open(.post($0.id)) }
+                        }
                     } else if posts.isEmpty {
                         EmptyFeed(systemImage: "square.and.pencil", title: "No posts yet",
                                   detail: isMe ? "Your posts show here, whoever you share them with." : "When \(profile.name) posts, it shows here.")
