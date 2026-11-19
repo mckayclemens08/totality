@@ -1,0 +1,1090 @@
+{
+  "cases" : [
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 813786600,
+          "id" : "85EDE855-79D5-4DA7-9B46-AC7AF56720F9",
+          "isAllDay" : false,
+          "location" : "Room 210",
+          "notes" : "Bring the reading\n",
+          "reminderMinutes" : 15,
+          "repeatRule" : {
+            "frequency" : "weekly",
+            "until" : {
+              "day" : 10,
+              "month" : 12,
+              "year" : 2026
+            }
+          },
+          "skipped" : [
+
+          ],
+          "start" : 813783600,
+          "timeZoneID" : "America\/Denver",
+          "title" : "PHIL 4410",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "a weekly class with an end and a reminder",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813786600,
+            "frequency" : "weekly",
+            "isAllDay" : false,
+            "location" : " Room 210 ",
+            "notes" : "Bring the reading\n",
+            "reminderMinutes" : 15,
+            "start" : 813783600,
+            "title" : "  PHIL 4410  ",
+            "until" : {
+              "day" : 10,
+              "month" : 12,
+              "year" : 2026
+            }
+          },
+          "op" : "create",
+          "saved" : true
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 814320000,
+          "id" : "B7281131-2DFF-4800-BB8C-FE797E73069D",
+          "isAllDay" : true,
+          "location" : "",
+          "notes" : "",
+          "skipped" : [
+
+          ],
+          "start" : 814147200,
+          "timeZoneID" : "GMT",
+          "title" : "Conference",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "an all-day event over three days",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 814374000,
+            "isAllDay" : true,
+            "location" : "",
+            "notes" : "",
+            "start" : 814201200,
+            "title" : "Conference"
+          },
+          "op" : "create",
+          "saved" : true
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 813772800,
+          "id" : "FCB51D82-D249-4F45-8AD5-3B6E5F7DDADA",
+          "isAllDay" : false,
+          "location" : "",
+          "notes" : "",
+          "repeatRule" : {
+            "frequency" : "daily"
+          },
+          "skipped" : [
+            813855600
+          ],
+          "start" : 813769200,
+          "timeZoneID" : "America\/Denver",
+          "title" : "Standup",
+          "updatedAt" : 813767400
+        },
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 813861000,
+          "id" : "2B00908A-8128-4792-A7E7-E904DD211CD7",
+          "isAllDay" : false,
+          "location" : "",
+          "notes" : "",
+          "skipped" : [
+
+          ],
+          "start" : 813859200,
+          "timeZoneID" : "America\/Denver",
+          "title" : "Standup with Sam",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "one repeat changed on its own",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813772800,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813769200,
+            "title" : "Standup"
+          },
+          "op" : "create",
+          "saved" : true
+        },
+        {
+          "day" : 16,
+          "draft" : {
+            "end" : 813861000,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813859200,
+            "title" : "Standup with Sam"
+          },
+          "draftFor" : {
+            "end" : 813859200,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813855600,
+            "title" : "Standup"
+          },
+          "occurrenceStart" : 813855600,
+          "op" : "update",
+          "saved" : true,
+          "scope" : "this"
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 813776400,
+          "id" : "DE1F0A16-CB44-4094-9336-ACF2559D9662",
+          "isAllDay" : false,
+          "location" : "",
+          "notes" : "",
+          "repeatRule" : {
+            "frequency" : "daily"
+          },
+          "skipped" : [
+
+          ],
+          "start" : 813772800,
+          "timeZoneID" : "America\/Denver",
+          "title" : "Team standup",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "all repeats moved from a later one",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813772800,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813769200,
+            "title" : "Standup"
+          },
+          "op" : "create",
+          "saved" : true
+        },
+        {
+          "day" : 20,
+          "draft" : {
+            "end" : 814208400,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 814204800,
+            "title" : "Team standup"
+          },
+          "draftFor" : {
+            "end" : 814204800,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 814201200,
+            "title" : "Standup"
+          },
+          "occurrenceStart" : 814201200,
+          "op" : "update",
+          "saved" : true,
+          "scope" : "all"
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 813780000,
+          "id" : "3554D95E-3AA2-4D2E-8976-C4EADCBA250D",
+          "isAllDay" : false,
+          "location" : "",
+          "notes" : "",
+          "repeatRule" : {
+            "frequency" : "daily"
+          },
+          "skipped" : [
+            813949200
+          ],
+          "start" : 813776400,
+          "timeZoneID" : "America\/Denver",
+          "title" : "Standup",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "a skipped day stays skipped when the series moves",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813772800,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813769200,
+            "title" : "Standup"
+          },
+          "op" : "create",
+          "saved" : true
+        },
+        {
+          "day" : 17,
+          "occurrenceStart" : 813942000,
+          "op" : "delete",
+          "scope" : "this"
+        },
+        {
+          "day" : 15,
+          "draft" : {
+            "end" : 813780000,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813776400,
+            "title" : "Standup"
+          },
+          "draftFor" : {
+            "end" : 813772800,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813769200,
+            "title" : "Standup"
+          },
+          "occurrenceStart" : 813769200,
+          "op" : "update",
+          "saved" : true,
+          "scope" : "all"
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 813974400,
+          "id" : "771C130A-6E29-4E7A-990D-C56010AAE078",
+          "isAllDay" : true,
+          "location" : "",
+          "notes" : "",
+          "repeatRule" : {
+            "frequency" : "daily"
+          },
+          "skipped" : [
+
+          ],
+          "start" : 813974400,
+          "timeZoneID" : "GMT",
+          "title" : "Standup",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "a series switched to all day starts again from there",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813772800,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813769200,
+            "title" : "Standup"
+          },
+          "op" : "create",
+          "saved" : true
+        },
+        {
+          "day" : 16,
+          "occurrenceStart" : 813855600,
+          "op" : "delete",
+          "scope" : "this"
+        },
+        {
+          "day" : 18,
+          "draft" : {
+            "end" : 814028400,
+            "frequency" : "daily",
+            "isAllDay" : true,
+            "location" : "",
+            "notes" : "",
+            "start" : 814028400,
+            "title" : "Standup"
+          },
+          "draftFor" : {
+            "end" : 814032000,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 814028400,
+            "title" : "Standup"
+          },
+          "occurrenceStart" : 814028400,
+          "op" : "update",
+          "saved" : true,
+          "scope" : "all"
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 814834800,
+          "id" : "DA923DAC-CBC8-49DD-AB44-0BE94CF1E126",
+          "isAllDay" : false,
+          "location" : "",
+          "notes" : "",
+          "repeatRule" : {
+            "frequency" : "weekly"
+          },
+          "skipped" : [
+
+          ],
+          "start" : 814806000,
+          "timeZoneID" : "America\/Denver",
+          "title" : "Conference",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "an all-day series switched back to timed",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 814374000,
+            "frequency" : "weekly",
+            "isAllDay" : true,
+            "location" : "",
+            "notes" : "",
+            "start" : 814201200,
+            "title" : "Conference"
+          },
+          "op" : "create",
+          "saved" : true
+        },
+        {
+          "day" : 27,
+          "draft" : {
+            "end" : 814834800,
+            "frequency" : "weekly",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 814806000,
+            "title" : "Conference"
+          },
+          "draftFor" : {
+            "end" : 814946400,
+            "frequency" : "weekly",
+            "isAllDay" : true,
+            "location" : "",
+            "notes" : "",
+            "start" : 814773600,
+            "title" : "Conference"
+          },
+          "occurrenceStart" : 814752000,
+          "op" : "update",
+          "saved" : true,
+          "scope" : "all"
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 813772800,
+          "id" : "AFADB0DF-2579-4764-ACFD-9B0191030845",
+          "isAllDay" : false,
+          "location" : "",
+          "notes" : "",
+          "repeatRule" : {
+            "frequency" : "daily"
+          },
+          "skipped" : [
+            813855600
+          ],
+          "start" : 813769200,
+          "timeZoneID" : "America\/Denver",
+          "title" : "Standup",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "one repeat deleted",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813772800,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813769200,
+            "title" : "Standup"
+          },
+          "op" : "create",
+          "saved" : true
+        },
+        {
+          "day" : 16,
+          "occurrenceStart" : 813855600,
+          "op" : "delete",
+          "scope" : "this"
+        }
+      ]
+    },
+    {
+      "events" : [
+
+      ],
+      "name" : "the whole series deleted",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813772800,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813769200,
+            "title" : "Standup"
+          },
+          "op" : "create",
+          "saved" : true
+        },
+        {
+          "day" : 16,
+          "occurrenceStart" : 813855600,
+          "op" : "delete",
+          "scope" : "all"
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 813877200,
+          "id" : "C8CE6F20-D83C-4054-B719-2B7865B45C33",
+          "isAllDay" : false,
+          "location" : "",
+          "notes" : "Floss first",
+          "repeatRule" : {
+            "frequency" : "yearly"
+          },
+          "skipped" : [
+
+          ],
+          "start" : 813873600,
+          "timeZoneID" : "America\/Denver",
+          "title" : "Dentist",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "a single event edited, its repeat and reminder changed",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813877200,
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "reminderMinutes" : 1440,
+            "start" : 813873600,
+            "title" : "Dentist"
+          },
+          "op" : "create",
+          "saved" : true
+        },
+        {
+          "day" : 16,
+          "draft" : {
+            "end" : 813877200,
+            "frequency" : "yearly",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "Floss first",
+            "start" : 813873600,
+            "title" : "Dentist"
+          },
+          "draftFor" : {
+            "end" : 813877200,
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "reminderMinutes" : 1440,
+            "start" : 813873600,
+            "title" : "Dentist"
+          },
+          "occurrenceStart" : 813873600,
+          "op" : "update",
+          "saved" : true,
+          "scope" : "all"
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 813786600,
+          "id" : "EEB00801-E59A-4228-BA1A-A13995A18246",
+          "isAllDay" : false,
+          "location" : "Room 210",
+          "notes" : "Bring the reading\n",
+          "reminderMinutes" : 15,
+          "skipped" : [
+
+          ],
+          "start" : 813783600,
+          "timeZoneID" : "America\/Denver",
+          "title" : "PHIL 4410",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "a repeat stopped",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813786600,
+            "frequency" : "weekly",
+            "isAllDay" : false,
+            "location" : " Room 210 ",
+            "notes" : "Bring the reading\n",
+            "reminderMinutes" : 15,
+            "start" : 813783600,
+            "title" : "  PHIL 4410  ",
+            "until" : {
+              "day" : 10,
+              "month" : 12,
+              "year" : 2026
+            }
+          },
+          "op" : "create",
+          "saved" : true
+        },
+        {
+          "day" : 22,
+          "draft" : {
+            "end" : 814391400,
+            "isAllDay" : false,
+            "location" : "Room 210",
+            "notes" : "Bring the reading\n",
+            "reminderMinutes" : 15,
+            "start" : 814388400,
+            "title" : "PHIL 4410"
+          },
+          "draftFor" : {
+            "end" : 814391400,
+            "frequency" : "weekly",
+            "isAllDay" : false,
+            "location" : "Room 210",
+            "notes" : "Bring the reading\n",
+            "reminderMinutes" : 15,
+            "start" : 814388400,
+            "title" : "PHIL 4410",
+            "until" : {
+              "day" : 10,
+              "month" : 12,
+              "year" : 2026
+            }
+          },
+          "occurrenceStart" : 814388400,
+          "op" : "update",
+          "saved" : true,
+          "scope" : "all"
+        }
+      ]
+    },
+    {
+      "events" : [
+
+      ],
+      "name" : "a repeat that ends before it starts is refused",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813772800,
+            "frequency" : "daily",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 813769200,
+            "title" : "Standup",
+            "until" : {
+              "day" : 1,
+              "month" : 10,
+              "year" : 2026
+            }
+          },
+          "notice" : "A repeat can't end before the event starts.",
+          "op" : "create",
+          "saved" : false
+        }
+      ]
+    },
+    {
+      "events" : [
+
+      ],
+      "name" : "an event that ends before it starts is refused",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 813873540,
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "reminderMinutes" : 1440,
+            "start" : 813873600,
+            "title" : "Dentist"
+          },
+          "notice" : "An event can't end before it starts.",
+          "op" : "create",
+          "saved" : false
+        }
+      ]
+    },
+    {
+      "events" : [
+        {
+          "attachments" : [
+
+          ],
+          "createdAt" : 813767400,
+          "end" : 815151600,
+          "id" : "793E6AEA-131D-4170-A633-97577A51B083",
+          "isAllDay" : false,
+          "location" : "",
+          "notes" : "",
+          "repeatRule" : {
+            "frequency" : "monthly"
+          },
+          "skipped" : [
+
+          ],
+          "start" : 815148000,
+          "timeZoneID" : "America\/Denver",
+          "title" : "Rent",
+          "updatedAt" : 813767400
+        }
+      ],
+      "name" : "monthly on the 31st",
+      "steps" : [
+        {
+          "draft" : {
+            "end" : 815151600,
+            "frequency" : "monthly",
+            "isAllDay" : false,
+            "location" : "",
+            "notes" : "",
+            "start" : 815148000,
+            "title" : "Rent"
+          },
+          "op" : "create",
+          "saved" : true
+        }
+      ]
+    }
+  ],
+  "conflicts" : [
+    {
+      "copy" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 816764793.01709998,
+        "end" : 814302000,
+        "id" : "8EE2E877-4ACC-4123-B1EA-89DC1A7F5605",
+        "isAllDay" : false,
+        "location" : "Cafe Rio",
+        "notes" : "",
+        "skipped" : [
+
+        ],
+        "start" : 814298400,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Lunch with Ana and Sam (conflict copy)",
+        "updatedAt" : 816764793.01709998
+      },
+      "keep" : "theirs",
+      "mine" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 812527200,
+        "end" : 814302000,
+        "id" : "6C1A4B53-2F0E-4C83-9E7B-3D2A1F0E5C11",
+        "isAllDay" : false,
+        "location" : "Cafe Rio",
+        "notes" : "",
+        "skipped" : [
+
+        ],
+        "start" : 814298400,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Lunch with Ana and Sam",
+        "updatedAt" : 812700000
+      },
+      "mineHash" : "4f58d723f12cad6ac2ee9d33c168621cbb582e0a43b8f0b185c97a5df3ef7ddb",
+      "theirs" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 812527200,
+        "end" : 814302000,
+        "id" : "6C1A4B53-2F0E-4C83-9E7B-3D2A1F0E5C11",
+        "isAllDay" : false,
+        "location" : "Bakery",
+        "notes" : "",
+        "skipped" : [
+
+        ],
+        "start" : 814298400,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Lunch with Ana",
+        "updatedAt" : 812786400
+      },
+      "theirsHash" : "fa4abc4a8263d09161bdd557ad67096b2fa682b982d7f2e3c07f65ba945548f0"
+    },
+    {
+      "copy" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 816764793.01862097,
+        "end" : 814302000,
+        "id" : "F94BDEEC-A328-410B-909F-0DC9BF830D19",
+        "isAllDay" : false,
+        "location" : "Cafe Rio",
+        "notes" : "",
+        "skipped" : [
+
+        ],
+        "start" : 814298400,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Lunch with Ana and Sam (conflict copy)",
+        "updatedAt" : 816764793.01862097
+      },
+      "keep" : "mine",
+      "mine" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 812527200,
+        "end" : 814302000,
+        "id" : "6C1A4B53-2F0E-4C83-9E7B-3D2A1F0E5C11",
+        "isAllDay" : false,
+        "location" : "Bakery",
+        "notes" : "",
+        "skipped" : [
+
+        ],
+        "start" : 814298400,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Lunch with Ana",
+        "updatedAt" : 812786400
+      },
+      "mineHash" : "c42bc9c94d85a4eb9ae729dd1a08b64b26f5b4a35d9ea02ca75688664bfac4ae",
+      "theirs" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 812527200,
+        "end" : 814302000,
+        "id" : "6C1A4B53-2F0E-4C83-9E7B-3D2A1F0E5C11",
+        "isAllDay" : false,
+        "location" : "Cafe Rio",
+        "notes" : "",
+        "skipped" : [
+
+        ],
+        "start" : 814298400,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Lunch with Ana and Sam",
+        "updatedAt" : 812700000
+      },
+      "theirsHash" : "86cb5a539ffcd706fc84d4460617336ebdee2bc182a125bab8d368ef51888765"
+    },
+    {
+      "copy" : null,
+      "keep" : "theirs",
+      "mine" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 812527200,
+        "end" : 814302000,
+        "id" : "6C1A4B53-2F0E-4C83-9E7B-3D2A1F0E5C11",
+        "isAllDay" : false,
+        "location" : "Cafe Rio",
+        "notes" : "",
+        "skipped" : [
+
+        ],
+        "start" : 814298400,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Lunch with Ana",
+        "updatedAt" : 812613600
+      },
+      "mineHash" : "d55ba155be159b00667f61c229fd53778826114060e7a772c5bdfa9630b4b965",
+      "theirs" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 812527200,
+        "end" : 814302000,
+        "id" : "6C1A4B53-2F0E-4C83-9E7B-3D2A1F0E5C11",
+        "isAllDay" : false,
+        "location" : "Cafe Rio",
+        "notes" : "",
+        "skipped" : [
+
+        ],
+        "start" : 814298400,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Lunch with Ana",
+        "updatedAt" : 812872800
+      },
+      "theirsHash" : "f35f72dedc49c35b7a94c60872be0006426ef6fa8a5171e74df8063d7d81bcb2"
+    }
+  ],
+  "display" : "America\/Denver",
+  "note" : "Made by CalendarWebEditVectorsTests.makeModelVectors from the real CalendarModel and CalendarVault, America\/Denver.",
+  "now" : 813767400,
+  "occurrences" : [
+    {
+      "event" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 816764793.01498795,
+        "end" : 791568000,
+        "id" : "DA54C747-1277-49E4-A1C2-6717D94C3313",
+        "isAllDay" : false,
+        "location" : "",
+        "notes" : "",
+        "repeatRule" : {
+          "frequency" : "monthly"
+        },
+        "skipped" : [
+
+        ],
+        "start" : 791564400,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Rent",
+        "updatedAt" : 816764793.01498795
+      },
+      "from" : {
+        "day" : 1,
+        "month" : 1,
+        "year" : 2026
+      },
+      "starts" : [
+        791564400,
+        796658400,
+        801928800,
+        807199200,
+        809877600,
+        815148000,
+        820422000
+      ],
+      "through" : {
+        "day" : 31,
+        "month" : 12,
+        "year" : 2026
+      }
+    },
+    {
+      "event" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 816764793.01499498,
+        "end" : 814118400,
+        "id" : "56950F0A-EE6D-4349-A38C-242136FE2215",
+        "isAllDay" : false,
+        "location" : "",
+        "notes" : "",
+        "repeatRule" : {
+          "frequency" : "weekly",
+          "until" : {
+            "day" : 16,
+            "month" : 11,
+            "year" : 2026
+          }
+        },
+        "skipped" : [
+          815328000
+        ],
+        "start" : 814114800,
+        "timeZoneID" : "America\/Denver",
+        "title" : "Class",
+        "updatedAt" : 816764793.01499498
+      },
+      "from" : {
+        "day" : 1,
+        "month" : 10,
+        "year" : 2026
+      },
+      "starts" : [
+        814114800,
+        814719600,
+        815932800,
+        816537600
+      ],
+      "through" : {
+        "day" : 31,
+        "month" : 12,
+        "year" : 2026
+      }
+    },
+    {
+      "event" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 816764793.01520503,
+        "end" : 814150800,
+        "id" : "68F42E36-FF74-42FE-82D5-9CDD9523AB47",
+        "isAllDay" : false,
+        "location" : "",
+        "notes" : "",
+        "repeatRule" : {
+          "frequency" : "daily"
+        },
+        "skipped" : [
+
+        ],
+        "start" : 814147200,
+        "timeZoneID" : "Asia\/Tokyo",
+        "title" : "Call Kenji",
+        "updatedAt" : 816764793.01520503
+      },
+      "from" : {
+        "day" : 18,
+        "month" : 10,
+        "year" : 2026
+      },
+      "starts" : [
+        814147200,
+        814233600,
+        814320000,
+        814406400
+      ],
+      "through" : {
+        "day" : 22,
+        "month" : 10,
+        "year" : 2026
+      }
+    },
+    {
+      "event" : {
+        "attachments" : [
+
+        ],
+        "createdAt" : 816764793.01520896,
+        "end" : 730857600,
+        "id" : "00CF28E3-8F85-40F5-AD41-2F38ECD558E5",
+        "isAllDay" : true,
+        "location" : "",
+        "notes" : "",
+        "repeatRule" : {
+          "frequency" : "yearly"
+        },
+        "skipped" : [
+
+        ],
+        "start" : 730857600,
+        "timeZoneID" : "GMT",
+        "title" : "Leap",
+        "updatedAt" : 816764793.01520896
+      },
+      "from" : {
+        "day" : 1,
+        "month" : 1,
+        "year" : 2024
+      },
+      "starts" : [
+        730857600,
+        857088000,
+        983318400
+      ],
+      "through" : {
+        "day" : 31,
+        "month" : 12,
+        "year" : 2032
+      }
+    }
+  ]
+}

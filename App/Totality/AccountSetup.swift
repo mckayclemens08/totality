@@ -51,6 +51,7 @@ enum AccountSetup {
             service: service, rootKey: { try await content.rootKey() },
             keyIsBackedUp: { if case .ready = backup.phase { true } else { false } }
         )
+        model.browsers = BrowsersModel(service: service)
         return model
     }
 

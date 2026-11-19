@@ -40,6 +40,8 @@ public final class AccountModel {
     public var storage: StorageModel?
     /// Adds a browser to the account. The app sets it, since it holds the content key.
     public var pairing: PairBrowserModel?
+    /// Browsers paired with the website, listed under Devices with Remove.
+    public var browsers: BrowsersModel?
     private let service: any AccountService
 
     public init(

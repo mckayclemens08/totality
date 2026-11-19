@@ -7,6 +7,7 @@ import * as vault from "./keystore";
 import { IdleLock } from "./idle";
 import { qrElement } from "./qr";
 import { renderShell, teardownShell } from "./shell";
+import { signOutMessages } from "./messages/session";
 import { newBrowserKeys, openSealed, pairingCode, qrText, unb64, fromHex, PairingFailure } from "./pairing/protocol";
 
 // Signed out → (sign in) → pairing with the iPhone → unlocked. "Locked" is signed in with no key in memory.
@@ -18,6 +19,7 @@ const app = document.getElementById("app")!;
 let session: net.Session | null = null;
 let ownComputer = true; // the canvas's default; the person can change it while pairing
 let pairingRun = 0;
+let checkInTimer: ReturnType<typeof setInterval> | null = null;
 const idle = new IdleLock(() => { vault.lockMemory(); show(lockedScreen()); });
 
 function applyStoredTheme(): void {
@@ -158,7 +160,22 @@ function unlocked(): void {
   if (!ownComputer) idle.start(); else idle.stop();
   pairingRun++;
   if (!session) { show(signInScreen()); return; }
-  renderShell(app, { token: freshToken, userId: session.userId }, session.username, () => void signOutNow());
+  renderShell(app, { token: freshToken, userId: session.userId, ownComputer }, session.username, () => void signOutNow());
+  void checkIn();
+  if (checkInTimer) clearInterval(checkInTimer);
+  checkInTimer = setInterval(() => void checkIn(), 5 * 60_000);
+}
+
+/** Tells the account this browser is still here, and finds out if it was removed from the iPhone's Devices. */
+async function checkIn(): Promise<void> {
+  if (!session) return;
+  try {
+    if ((await net.browserCheckIn(await freshToken(), deviceLabel())) === "removed") await signOutNow("This browser was removed from your iPhone, so it was signed out and cleared.");
+  } catch (e) {
+    // The account server refused this sign-in (removed, or ended elsewhere): clear this browser now, not at reload.
+    if (e instanceof net.NetError && e.kind === "wrongPassword") await signOutNow("This browser was signed out, so it was cleared. Sign in again to use it.");
+    // Offline: the next check settles it.
+  }
 }
 
 function lockedScreen(): Node {
@@ -171,13 +188,17 @@ function lockedScreen(): Node {
     h("p", { class: "fineprint" }, "Shared computer mode is on. Mark it as your own computer to stay unlocked.")));
 }
 
-async function signOutNow(): Promise<void> {
+async function signOutNow(message = ""): Promise<void> {
   idle.stop();
+  if (checkInTimer) clearInterval(checkInTimer);
+  checkInTimer = null;
   const token = session?.accessToken;
   session = null;
+  teardownShell();
+  await signOutMessages(); // logs this browser's Matrix device out and deletes its keys here
   await vault.wipe();
-  if (token) await net.signOut(token);
-  show(signInScreen());
+  if (token) { await net.browserForget(token); await net.signOut(token); }
+  show(signInScreen(message));
 }
 
 async function boot(): Promise<void> {
