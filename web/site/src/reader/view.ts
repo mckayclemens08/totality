@@ -5,6 +5,7 @@ import { fromByteaLiteral, openBlob, OpenFailure } from "../sealed";
 import { uuidBytes } from "../pairing/protocol";
 import { blobIdFromKey, displayTitle, inLibrary, parseItem, typeName, type ReaderItem } from "./item";
 import { isMarkdown, parse, plain, type Block, type Run } from "./markdown";
+import { register } from "../registry";
 
 export interface Ctx { token: () => Promise<string>; userId: string }
 interface Entry { item: ReaderItem; row: net.ObjectRow }
@@ -33,6 +34,12 @@ async function loadLibrary(ctx: Ctx): Promise<{ entries: Entry[]; unreadable: nu
   entries.sort((a, b) => b.item.updatedAt - a.item.updatedAt);
   return { entries, unreadable };
 }
+
+// The Reader lends its notes and files to the Calendar's "Attach from Reader", as ReaderModule.attachable does.
+// The journal is private, so it is never offered.
+register({ module: "reader", for: ["calendar"], attachable: async (ctx) => (await loadLibrary(ctx)).entries.map(({ item }) => ({
+  module: "reader", kind: item.kind === "note" ? "note" : "file", id: item.id.toUpperCase(), keyRef: `crk:${item.id}`, preview: { title: displayTitle(item) },
+})) });
 
 // ---- drawing a note: elements built from the tree with textContent only ----
 

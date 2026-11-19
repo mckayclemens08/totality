@@ -10,7 +10,7 @@ import { parseLines } from "./quickadd";
 import { appleNow, newID, type Raw } from "./edit";
 import { renderEditor, scheduleSheet } from "./editor";
 import { localToday, LINGER_MS, TasksStore, UNDO_MS, type Destination } from "./store";
-import { dayFrom, dayValue, field, input, onSettled, plural, select, seg, sheet } from "./ui";
+import { dayFrom, dayValue, field, input, onSettled, plural, select, seg, sheet } from "../ui";
 
 const BUCKETS: { id: Bucket; name: string }[] = [
   { id: "inbox", name: "Inbox" }, { id: "today", name: "Today" }, { id: "upcoming", name: "Upcoming" },
