@@ -121,3 +121,81 @@ export async function mailMessage(token: string, id: string): Promise<Uint8Array
 }
 
 export { b64 };
+
+// ---- Writes (website editing). The row holds only ciphertext and its hash, as SupabaseSyncRemote writes it.
+// Every change names the hash it expects, so two devices can't overwrite each other unseen. Row-level
+// security limits every query to the signed-in account; inserts name the owner, which the policy checks.
+
+export interface SealedRow { id: string; kind: string; meta: string | null; hash: string | null; deleted: boolean }
+const hashHex = (literal: string | null): string | null => (literal && literal.startsWith("\\x") ? literal.slice(2) : null);
+const rowOf = (r: { id: string; kind: string; meta_cipher: string | null; content_hash: string | null; deleted_at: string | null }): SealedRow =>
+  ({ id: r.id.toLowerCase(), kind: r.kind, meta: r.meta_cipher, hash: hashHex(r.content_hash), deleted: r.deleted_at !== null });
+
+/** Live rows of some kinds with their hashes, a page at a time. */
+export async function listSealed(token: string, kinds: string[]): Promise<SealedRow[]> {
+  const rows: SealedRow[] = [];
+  const page = 500;
+  for (let from = 0; ; from += page) {
+    const res = await call(`/rest/v1/content_objects?select=id,kind,meta_cipher,content_hash,deleted_at&kind=in.(${kinds.join(",")})&deleted_at=is.null&order=id`, {
+      headers: { ...headers(token), "range-unit": "items", range: `${from}-${from + page - 1}` },
+    });
+    if (res.status === 401) throw new NetError("wrongPassword");
+    if (!res.ok && res.status !== 206) throw new NetError("failed");
+    const got = (await res.json()) as Parameters<typeof rowOf>[0][];
+    rows.push(...got.map(rowOf));
+    if (got.length < page || rows.length > 50_000) return rows;
+  }
+}
+
+/** One row as the server has it now, tombstones included, or null when there is none. */
+export async function fetchSealed(token: string, id: string): Promise<SealedRow | null> {
+  const res = await call(`/rest/v1/content_objects?select=id,kind,meta_cipher,content_hash,deleted_at&id=eq.${encodeURIComponent(id)}`, { headers: headers(token) });
+  if (res.status === 401) throw new NetError("wrongPassword");
+  if (!res.ok) throw new NetError("failed");
+  const [row] = (await res.json()) as Parameters<typeof rowOf>[0][];
+  return row ? rowOf(row) : null;
+}
+
+/** The server's copy isn't the one the change was made from. Fetch it and try again. */
+export class ChangedOnServer extends Error { constructor() { super("changedOnServer"); } }
+
+async function changed(res: Response): Promise<void> {
+  if (res.status === 401) throw new NetError("wrongPassword");
+  if (res.status === 409) throw new ChangedOnServer();
+  if (!res.ok) throw new NetError("failed");
+  const rows = (await res.json()) as unknown[];
+  if (!rows.length) throw new ChangedOnServer();
+}
+
+const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/**
+ * Saves sealed details with no body. `expected` is the hash the change was made from: null for a new row,
+ * "deleted" to bring back a row another device deleted (an edit beats a delete, as SyncEngine has it).
+ */
+export async function putSealed(token: string, owner: string, row: { id: string; kind: string; meta: string; hash: string; size: number }, expected: string | null | "deleted"): Promise<void> {
+  if (!uuidRe.test(row.id) || !/^[0-9a-f]{64}$/.test(row.hash) || !/^[a-z_]+$/.test(row.kind)) throw new NetError("failed");
+  const body: Record<string, unknown> = { storage_key: null, byte_size: row.size, content_hash: "\\x" + row.hash, meta_cipher: row.meta, deleted_at: null };
+  let res: Response;
+  if (expected === null) {
+    res = await call("/rest/v1/content_objects?select=id", {
+      method: "POST", headers: { ...headers(token), prefer: "return=representation" },
+      body: JSON.stringify({ ...body, id: row.id, kind: row.kind, owner_id: owner, key_ref: `crk:${row.id}` }),
+    });
+  } else {
+    const match = expected === "deleted" ? "deleted_at=not.is.null" : `content_hash=eq.${encodeURIComponent("\\x" + expected)}`;
+    res = await call(`/rest/v1/content_objects?id=eq.${row.id}&kind=eq.${row.kind}&${match}&select=id`, {
+      method: "PATCH", headers: { ...headers(token), prefer: "return=representation" }, body: JSON.stringify(body),
+    });
+  }
+  await changed(res);
+}
+
+/** Marks a row deleted, only if it's still the version the person saw. */
+export async function tombstoneSealed(token: string, id: string, expected: string): Promise<void> {
+  if (!uuidRe.test(id) || !/^[0-9a-f]{64}$/.test(expected)) throw new NetError("failed");
+  const res = await call(`/rest/v1/content_objects?id=eq.${id}&content_hash=eq.${encodeURIComponent("\\x" + expected)}&select=id`, {
+    method: "PATCH", headers: { ...headers(token), prefer: "return=representation" },
+    body: JSON.stringify({ deleted_at: new Date().toISOString(), meta_cipher: null, storage_key: null, content_hash: null, byte_size: 0 }),
+  });
+  await changed(res);
+}

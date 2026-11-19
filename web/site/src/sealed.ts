@@ -6,7 +6,7 @@
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { fromHex, uuidBytes } from "./pairing/protocol";
+import { fromHex, toHex, uuidBytes } from "./pairing/protocol";
 
 const te = new TextEncoder();
 export type Purpose = "content" | "metadata";
@@ -28,6 +28,26 @@ export function openBlob(sealed: Uint8Array, key: Uint8Array, id: string): Uint8
     throw new OpenFailure("authentication");
   }
 }
+
+/** Seals the way ContentCipher.seal does. The nonce is random unless a test passes one. */
+export function sealBlob(plain: Uint8Array, key: Uint8Array, id: string, nonce: Uint8Array = crypto.getRandomValues(new Uint8Array(24))): Uint8Array {
+  if (key.length !== 32 || nonce.length !== 24) throw new OpenFailure("key");
+  const ad = new Uint8Array([...te.encode("totality/blob/v1"), ...uuidBytes(id)]);
+  const box = xchacha20poly1305(key, nonce, ad).encrypt(plain);
+  const out = new Uint8Array(1 + 24 + box.length);
+  out[0] = 1; out.set(nonce, 1); out.set(box, 25);
+  return out;
+}
+
+/** SealedObject.hash for an item with no body: SHA-256 of (SHA-256 of the sealed details, SHA-256 of nothing). */
+export function metaOnlyHash(meta: Uint8Array): string {
+  const inner = new Uint8Array(64);
+  inner.set(sha256(meta), 0); inner.set(sha256(new Uint8Array(0)), 32);
+  return toHex(sha256(inner));
+}
+
+/** Postgres takes and hands back bytea as `\x…`. */
+export const toByteaLiteral = (b: Uint8Array): string => "\\x" + toHex(b);
 
 /** Postgres hands bytea back as `\x…`. */
 export function fromByteaLiteral(s: string): Uint8Array {
