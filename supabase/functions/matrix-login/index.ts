@@ -7,6 +7,9 @@ const publicKey = Deno.env.get("SUPABASE_ANON_KEY");
 const signingKey = Deno.env.get("MATRIX_JWT_KEY");
 
 const lifetimeSeconds = 60;
+// The website (app.usetotality.com) asks for a pass from the browser, so it gets a CORS answer. Only the
+// listed origins do; ALLOWED_ORIGINS (comma-separated) can add a preview site while testing.
+const allowedOrigins = (Deno.env.get("ALLOWED_ORIGINS") ?? "https://app.usetotality.com").split(",").map((o) => o.trim()).filter(Boolean);
 const handleRule = /^[a-z0-9_]{3,24}$/;
 
 const encoder = new TextEncoder();
@@ -33,14 +36,30 @@ async function sign(handle: string): Promise<string> {
   return `${body}.${base64url(new Uint8Array(signature))}`;
 }
 
-function reply(status: number, body?: unknown): Response {
-  return new Response(body === undefined ? null : JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-  });
+function cors(origin: string | null): Record<string, string> {
+  if (!origin || !allowedOrigins.includes(origin)) return {};
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "POST",
+    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+    "Access-Control-Max-Age": "600",
+    Vary: "Origin",
+  };
+}
+
+function answer(origin: string | null) {
+  return (status: number, body?: unknown): Response =>
+    new Response(body === undefined ? null : JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...cors(origin) },
+    });
 }
 
 Deno.serve(async (request) => {
+  const origin = request.headers.get("Origin");
+  const reply = answer(origin);
+  // Preflight: answered for the listed origins only. Anyone else's browser refuses to send the request.
+  if (request.method === "OPTIONS") return new Response(null, { status: cors(origin)["Access-Control-Allow-Origin"] ? 204 : 403, headers: cors(origin) });
   if (!supabaseURL || !publicKey || !signingKey) return reply(500);
   if (request.method !== "POST") return reply(405);
   const authorization = request.headers.get("Authorization");

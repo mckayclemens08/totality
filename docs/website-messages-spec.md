@@ -16,7 +16,7 @@ The Matrix server is **Tuwunel** (`server/tuwunel.toml`, behind Cloudflare Tunne
 | Size, measured | JS 1.10 MB minified (274 KB gzip). WASM 7.8 MB (2.0 MB gzip), under Pages' 25 MB per-file limit. |
 
 - Messages is its own esbuild chunk (`splitting: true`), loaded only when Messages is opened. Other modules don't get bigger. The WASM file is served from our own origin with a hashed name and `immutable` caching, so it downloads once.
-- I checked the bundle: no `eval`, `new Function`, `innerHTML`, workers or `importScripts`. It does contain `localStorage` code (old stores we won't use); a test fails if anything is written to `localStorage` or `sessionStorage`.
+- I checked the bundle: no `eval`, `new Function`, `innerHTML`, workers or `importScripts`. It does contain `localStorage` code (old stores we don't use). Our own code writes only two per-browser choices there, the same ones the iPhone keeps in its settings (share read receipts, and how far each chat was read); a test holds it to those.
 - Not used: calls (WebRTC), widgets, threads UI, the legacy Olm crypto. Calls need their own review later.
 - Upgrades follow review row 8: exact versions, reviewed one at a time, never newer than two weeks.
 - Alternatives: none real. Olm-in-JS is retired, and other clients use this same crypto crate.
@@ -27,8 +27,10 @@ Two tokens in `web/site/public/_headers` (and `build.mjs`):
 
 - `script-src 'self' 'wasm-unsafe-eval'`. This lets the page compile WebAssembly. It doesn't allow JS `eval` or any script from elsewhere. The only WASM the page can fetch is our own, since `connect-src` decides where `fetch` may go.
 - `connect-src` gains `https://matrix.usetotality.com`.
+- `media-src blob:`, so a video this page decrypted can play. Like images, every `blob:` URL is made in one file (`messages/media.ts`), tracked and revoked.
+- Chunks the app loads at start get `modulepreload` with integrity; Messages' own chunks and the WASM are fetched later from this site only.
 
-Everything else stays: `default-src 'none'`, Trusted Types with the one `mail-frame` policy, `img-src 'self' blob: data:`, `frame-ancestors 'none'`. A test checks `'wasm-unsafe-eval'` appears once and `script-src` has nothing else.
+Everything else stays: `default-src 'none'`, Trusted Types with the one `mail-frame` policy, `img-src 'self' blob: data:`, `frame-ancestors 'none'`. A test checks `script-src` is exactly `'self' 'wasm-unsafe-eval'`.
 
 ## 4. Signing in and becoming a verified device
 

@@ -7,6 +7,7 @@ import * as vault from "./keystore";
 import { IdleLock } from "./idle";
 import { qrElement } from "./qr";
 import { renderShell, teardownShell } from "./shell";
+import { signOutMessages } from "./messages/session";
 import { newBrowserKeys, openSealed, pairingCode, qrText, unb64, fromHex, PairingFailure } from "./pairing/protocol";
 
 // Signed out → (sign in) → pairing with the iPhone → unlocked. "Locked" is signed in with no key in memory.
@@ -158,7 +159,7 @@ function unlocked(): void {
   if (!ownComputer) idle.start(); else idle.stop();
   pairingRun++;
   if (!session) { show(signInScreen()); return; }
-  renderShell(app, { token: freshToken, userId: session.userId }, session.username, () => void signOutNow());
+  renderShell(app, { token: freshToken, userId: session.userId, ownComputer }, session.username, () => void signOutNow());
 }
 
 function lockedScreen(): Node {
@@ -175,6 +176,8 @@ async function signOutNow(): Promise<void> {
   idle.stop();
   const token = session?.accessToken;
   session = null;
+  teardownShell();
+  await signOutMessages(); // logs this browser's Matrix device out and deletes its keys here
   await vault.wipe();
   if (token) await net.signOut(token);
   show(signInScreen());
