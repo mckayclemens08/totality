@@ -67,3 +67,16 @@ test("the content key is never made extractable or written out", () => {
   assert.match(ks, /importKey\("raw", raw[^,]*, "HKDF", false/);
   assert.doesNotMatch(ks, /exportKey|extractable: true/);
 });
+
+test("blob: is allowed for images only, and every blob URL is tracked and revoked", () => {
+  const csp = headers.match(/Content-Security-Policy: (.+)/)[1];
+  assert.match(csp, /img-src 'self' blob:;/);
+  assert.equal((csp.match(/blob:/g) ?? []).length, 1);
+  const files = readdirSync("src", { recursive: true }).filter((f) => /\.ts$/.test(f));
+  const makers = files.filter((f) => /createObjectURL/.test(readFileSync(`src/${f}`, "utf8")));
+  assert.deepEqual(makers.map((f) => f.replaceAll("\\", "/")), ["photos/view.ts"]);
+  const src = readFileSync("src/photos/view.ts", "utf8");
+  assert.match(src, /urls\.add\(url\)/);
+  assert.match(src, /revokeObjectURL/);
+  assert.match(src, /stopPhotos = \(\): void => \{ run\+\+; revokeAll\(\)/);
+});
