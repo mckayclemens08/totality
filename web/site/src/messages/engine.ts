@@ -107,6 +107,9 @@ export class Engine {
         throw translate(e);
       }
       live();
+      // So Remove on the iPhone can delete this browser's Matrix device too.
+      const device = session.deviceId;
+      void supabaseToken().then((t) => net.browserMatrixDevice(t, device)).catch(() => {});
       const storageKey = await vault.deriveSeed("totality/web-matrix-store/v1");
       try {
         await client.initRustCrypto({ cryptoDatabasePrefix: cryptoPrefix(session.userId), storageKey });

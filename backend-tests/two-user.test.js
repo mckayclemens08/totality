@@ -195,8 +195,10 @@ describe('contact requests', () => {
       select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`)).rows.map((r) => r.proname)
-    assert.deepEqual(names, ['accept_contact', 'block_contact', 'claim_handle', 'export_my_data',
-                             'redeem_invite', 'request_contact'])
+    // The browser_* and *_browser(s) functions touch only the caller's own browsers, never anyone else's.
+    assert.deepEqual(names, ['accept_contact', 'block_contact', 'browser_check_in', 'browser_forget',
+                             'browser_set_matrix_device', 'claim_handle', 'export_my_data', 'my_browsers',
+                             'redeem_invite', 'remove_browser', 'request_contact'])
   })
 
   // Issue 118: Messages shows the other person's photo and name, read the way the app reads them.

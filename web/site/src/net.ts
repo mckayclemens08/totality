@@ -73,6 +73,25 @@ export async function deleteSlot(token: string, id: string): Promise<void> {
   try { await call(`/rest/v1/pairing_slots?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: headers(token) }); } catch { /* it expires anyway */ }
 }
 
+// ---- This browser on the account's Devices list (supabase/migrations/20261119000001_web_browsers.sql) ----
+async function rpc(token: string, name: string, args: Record<string, unknown>): Promise<unknown> {
+  const res = await call(`/rest/v1/rpc/${name}`, { method: "POST", headers: headers(token), body: JSON.stringify(args) });
+  if (res.status === 401) throw new NetError("wrongPassword");
+  if (!res.ok) throw new NetError("failed");
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+/** "ok", or "removed" when this browser was removed from the iPhone. Adds it to the list the first time. */
+export async function browserCheckIn(token: string, label: string): Promise<"ok" | "removed"> {
+  return (await rpc(token, "browser_check_in", { p_label: label })) === "removed" ? "removed" : "ok";
+}
+export async function browserMatrixDevice(token: string, device: string | null): Promise<void> {
+  await rpc(token, "browser_set_matrix_device", { p_device: device });
+}
+export async function browserForget(token: string): Promise<void> {
+  try { await rpc(token, "browser_forget", {}); } catch { /* the session ends anyway */ }
+}
+
 export interface ObjectRow { id: string; kind: string; meta_cipher: string | null; storage_key: string | null; byte_size: number | null }
 
 /** The signed-in account's live docs and files, a page at a time (the server stops at its own page size). */

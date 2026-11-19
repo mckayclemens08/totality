@@ -152,3 +152,11 @@ test("the account-key guard matches exactly the names the iPhone writes", () => 
   for (const t of ["m.cross_signing.master", "m.cross_signing.self_signing", "m.cross_signing.user_signing", "m.secret_storage.default_key", "m.secret_storage.key.abc", "m.megolm_backup.v1"]) assert.ok(re.test(t), t);
   for (const t of ["m.direct", "m.push_rules", "m.megolm_backup.v1x", "app.totality.after_viewing"]) assert.ok(!re.test(t), t);
 });
+
+test("a browser removed on the iPhone signs itself out and clears itself", () => {
+  const main = readFileSync("src/main.ts", "utf8"), engine = readFileSync("src/messages/engine.ts", "utf8");
+  assert.match(main, /browserCheckIn\(await freshToken\(\), deviceLabel\(\)\)\) === "removed"\) await signOutNow\(/);
+  assert.match(main, /setInterval\(\(\) => void checkIn\(\), 5 \* 60_000\)/);
+  assert.match(main, /await signOutMessages\(\);[^]*await vault\.wipe\(\);[^]*net\.browserForget\(token\); await net\.signOut\(token\);/);
+  assert.match(engine, /net\.browserMatrixDevice\(t, device\)/);
+});

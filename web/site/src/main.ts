@@ -19,6 +19,7 @@ const app = document.getElementById("app")!;
 let session: net.Session | null = null;
 let ownComputer = true; // the canvas's default; the person can change it while pairing
 let pairingRun = 0;
+let checkInTimer: ReturnType<typeof setInterval> | null = null;
 const idle = new IdleLock(() => { vault.lockMemory(); show(lockedScreen()); });
 
 function applyStoredTheme(): void {
@@ -160,6 +161,17 @@ function unlocked(): void {
   pairingRun++;
   if (!session) { show(signInScreen()); return; }
   renderShell(app, { token: freshToken, userId: session.userId, ownComputer }, session.username, () => void signOutNow());
+  void checkIn();
+  if (checkInTimer) clearInterval(checkInTimer);
+  checkInTimer = setInterval(() => void checkIn(), 5 * 60_000);
+}
+
+/** Tells the account this browser is still here, and finds out if it was removed from the iPhone's Devices. */
+async function checkIn(): Promise<void> {
+  if (!session) return;
+  try {
+    if ((await net.browserCheckIn(await freshToken(), deviceLabel())) === "removed") await signOutNow("This browser was removed from your iPhone, so it was signed out and cleared.");
+  } catch { /* offline or signed out: the next check or the next sign-in settles it */ }
 }
 
 function lockedScreen(): Node {
@@ -172,15 +184,17 @@ function lockedScreen(): Node {
     h("p", { class: "fineprint" }, "Shared computer mode is on. Mark it as your own computer to stay unlocked.")));
 }
 
-async function signOutNow(): Promise<void> {
+async function signOutNow(message = ""): Promise<void> {
   idle.stop();
+  if (checkInTimer) clearInterval(checkInTimer);
+  checkInTimer = null;
   const token = session?.accessToken;
   session = null;
   teardownShell();
   await signOutMessages(); // logs this browser's Matrix device out and deletes its keys here
   await vault.wipe();
-  if (token) await net.signOut(token);
-  show(signInScreen());
+  if (token) { await net.browserForget(token); await net.signOut(token); }
+  show(signInScreen(message));
 }
 
 async function boot(): Promise<void> {
