@@ -46,6 +46,15 @@ export function metaOnlyHash(meta: Uint8Array): string {
   return toHex(sha256(inner));
 }
 
+/** SealedObject.hash for an item with a body: SHA-256 of (SHA-256 of the details, SHA-256 of the sealed body). */
+export function itemHash(meta: Uint8Array, body: Uint8Array): string {
+  const inner = new Uint8Array(64);
+  inner.set(sha256(meta), 0); inner.set(sha256(body), 32);
+  return toHex(sha256(inner));
+}
+/** SealedObject.bodyHash: the sealed body's SHA-256, which names where it's stored. */
+export const bodyHash = (body: Uint8Array): string => toHex(sha256(body));
+
 /** Postgres takes and hands back bytea as `\x…`. */
 export const toByteaLiteral = (b: Uint8Array): string => "\\x" + toHex(b);
 

@@ -1,0 +1,31 @@
+/* Shared by every screen that edits: raised fields, sheets, the save line. Never inset. */
+.grow { flex: 1; }
+.segs.wrap { flex-wrap: wrap; }
+.row-field { flex-direction: row; align-items: center; gap: 10px; color: var(--text-primary); }
+.save-status { font-size: 13px; color: var(--text-secondary); }
+.save-status.bad { color: var(--danger, var(--text-primary)); font-weight: 600; }
+.danger { color: var(--danger, var(--text-primary)); }
+button.quiet.danger { color: var(--danger, var(--text-primary)); }
+.sheet input { font-size: 15px; padding: 12px 14px; min-width: 0; }
+
+/* fields (raised like inputs, never inset) */
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+select, textarea {
+  font: inherit; font-size: 15px; border: 0; outline: 0; padding: 12px 14px; border-radius: 16px; min-width: 0;
+  background: var(--surface); color: var(--text-primary);
+  box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light);
+}
+select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+textarea { resize: vertical; line-height: 1.5; }
+/* sheets: a native dialog lifted off a dimmed page */
+dialog.sheet {
+  border: 0; padding: 22px; border-radius: 24px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
+  background: var(--surface); color: var(--text-primary); box-sizing: border-box;
+  box-shadow: 8px 8px 18px var(--shadow-dark), -8px -8px 18px var(--shadow-light);
+}
+dialog.sheet[open] { display: flex; flex-direction: column; gap: 14px; }
+dialog.sheet h2 { margin: 0; font-size: 20px; }
+dialog.sheet::backdrop { background: rgba(20, 24, 30, 0.35); }
+.sheet-foot { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+

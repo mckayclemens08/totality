@@ -269,6 +269,9 @@ private struct DevicesScreen: View {
                 AccountDetail(text: "Signed in as \(username).")
             }
             AccountDetail(text: model.deviceRegistered ? "This device is added to your account." : "This device isn't added to your account yet.")
+            if let browsers = model.browsers {
+                BrowsersSection(model: browsers)
+            }
             if let pairing = model.pairing {
                 NavigationLink { PairBrowserScreen(model: pairing) } label: {
                     SettingsRow("Pair a browser", value: nil)
@@ -276,6 +279,77 @@ private struct DevicesScreen: View {
                 .buttonStyle(.plain)
             }
         }
+        .refreshable { await model.browsers?.load() }
+    }
+}
+
+/// Devices › Browsers: every browser paired with the website, each with Remove (mockup approved direction, 2026-11-19).
+private struct BrowsersSection: View {
+    let model: BrowsersModel
+    @State private var confirming: WebBrowser?
+
+    var body: some View {
+        let theme = Theme.current
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text("Browsers")
+                .font(Typeface.caption)
+                .foregroundStyle(theme.textSecondary.color)
+                .padding(.horizontal, Space.s1)
+                .accessibilityAddTraits(.isHeader)
+            switch model.phase {
+            case .loading:
+                ProgressView().frame(maxWidth: .infinity).padding(Space.s4)
+            case .failed(let text):
+                AccountDetail(text: text)
+            case .loaded(let list) where list.isEmpty:
+                AccountDetail(text: "No browsers are signed in. Pair one to use Totality on a computer.")
+            case .loaded(let list):
+                VStack(spacing: 0) {
+                    ForEach(list) { browser in row(browser) }
+                }
+                .padding(.horizontal, Space.s4)
+                .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                AccountDetail(text: "Every browser you paired. Removing one signs it out of the website and ends Messages there.")
+            }
+            if let message = model.message { AccountDetail(text: message) }
+        }
+        .task { await model.load() }
+        .confirmationDialog(confirming.map { "Remove \($0.label)?" } ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), titleVisibility: .visible, presenting: confirming) { browser in
+            Button("Remove browser", role: .destructive) { Task { await model.remove(browser) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { browser in
+            Text("\(BrowsersModel.lastActive(browser.lastSeen)). It's signed out of the website and Messages within 5 minutes, or the next time it opens, and its message keys are deleted from your account. To use it again, sign in and pair it with this iPhone. Removing can't make a browser forget what it already opened.")
+        }
+    }
+
+    private func row(_ browser: WebBrowser) -> some View {
+        let theme = Theme.current
+        return HStack(spacing: Space.s3) {
+            Image(systemName: "laptopcomputer")
+                .font(.system(size: 22))
+                .foregroundStyle(theme.accent.color)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(browser.label).font(Typeface.body.weight(.semibold)).foregroundStyle(theme.textPrimary.color)
+                Text(BrowsersModel.lastActive(browser.lastSeen) + (browser.matrixDevice == nil ? "" : " · Messages on"))
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+            }
+            Spacer(minLength: Space.s2)
+            if model.removing == browser.id {
+                ProgressView()
+            } else {
+                Button("Remove") { confirming = browser }
+                    .font(Typeface.callout.weight(.semibold))
+                    .foregroundStyle(theme.accent.color)
+                    .padding(.horizontal, Space.s3)
+                    .padding(.vertical, Space.s2)
+                    .neumorphic(.subtle, in: Capsule())
+                    .disabled(model.removing != nil)
+                    .accessibilityLabel("Remove \(browser.label)")
+            }
+        }
+        .padding(.vertical, Space.s3)
     }
 }
 
