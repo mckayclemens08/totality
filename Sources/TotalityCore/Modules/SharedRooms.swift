@@ -147,3 +147,19 @@ public protocol SharedRooms: AnyObject {
     /// Sends a plain chat message to someone, in your encrypted chat with them.
     func message(_ text: String, to username: String) async throws
 }
+
+/// How a shared room is told apart from a chat. The room's name and topic aren't end-to-end encrypted, so
+/// they are fixed words that say only that it's a shared list, never which one: the list's own name
+/// travels inside the encrypted room.
+public enum SharedRoomMarker {
+    public static let name = "Totality shared list"
+    public static let topic = "app.totality.tasks.v1"
+    /// The message type a module's posts go out as, inside `m.room.message`, so they're encrypted like a chat message.
+    public static let messageType = "app.totality.tasks"
+
+    /// A room Messages leaves out of its chats and requests. The name alone is enough, since an invite
+    /// may not carry the topic.
+    public static func isSharedRoom(name: String?, topic: String?) -> Bool {
+        name == Self.name || topic == Self.topic
+    }
+}

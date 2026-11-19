@@ -73,6 +73,9 @@ public final class MessagesModel {
 
     public var userID: String? { service?.userID }
 
+    /// The live connection, for the app's own adapters such as shared task lists. Nil until connected.
+    public var connectedService: (any MessagesService)? { phase == .ready ? service : nil }
+
     /// Connects for the signed-in account, or reconnects when the account has changed.
     public func connect() async {
         if let unavailableReason {

@@ -10,6 +10,10 @@ public struct TasksHomeView: View {
     static let pillOrder: [TaskBucket] = [.today, .inbox, .upcoming, .anytime, .someday, .logbook]
 
     @Bindable private var model: TasksModel
+    /// Shared lists and projects (step 6), where Messages runs.
+    private let shared: SharedListsModel?
+    @State private var openShared: SharedOpen?
+    @State private var sharing: TaskList?
     private let onClose: (() -> Void)?
     @State private var bucket: TaskBucket = .today
     @State private var expanded: UUID?
@@ -23,8 +27,9 @@ public struct TasksHomeView: View {
     @State private var selectionSheet: SelectionSheet?
     @AppStorage("tasks.splitToday") private var splitToday = false
 
-    public init(model: TasksModel, onClose: (() -> Void)? = nil) {
+    public init(model: TasksModel, shared: SharedListsModel? = nil, onClose: (() -> Void)? = nil) {
         self.model = model
+        self.shared = shared
         self.onClose = onClose
     }
 
@@ -58,13 +63,42 @@ public struct TasksHomeView: View {
         }
         .overlay {
             if let id = openList {
-                ListScreen(model: model, listID: id, onBack: closeList, onOpen: { openList = $0 })
+                ListScreen(model: model, listID: id, onBack: closeList, onOpen: { openList = $0 }, onShare: shared?.isAvailable == true ? { startSharing($0) } : nil)
                     .id(id)
                     .transition(.move(edge: .trailing))
                     .zIndex(1)
             }
         }
         .motion(Motion.smooth, value: openList)
+        .overlay {
+            if let open = openShared, let shared {
+                SharedListScreen(shared: shared, model: model, room: open.room, onBack: { openShared = nil }, openTask: open.task)
+                    .id(open)
+                    .transition(.move(edge: .trailing))
+                    .zIndex(2)
+            }
+        }
+        .motion(Motion.smooth, value: openShared)
+        .sheet(item: $sharing) { list in
+            if let shared {
+                ShareSheet(shared: shared, target: .list(list, model.tasks.filter { $0.listID == list.id })) { room in
+                    sharing = nil
+                    guard let room else { return }
+                    openList = nil
+                    openShared = SharedOpen(room: room, task: nil)
+                    // The list now lives in its encrypted room; the private copy goes.
+                    Task {
+                        await model.delete(tasks: [], lists: [list.id])
+                        await model.finishPendingDelete()
+                    }
+                }
+            }
+        }
+        .alert("Shared lists", isPresented: sharedNoticeShown) {
+            Button("OK", role: .cancel) { shared?.notice = nil }
+        } message: {
+            Text(shared?.notice ?? "")
+        }
         .overlay(alignment: .top) {
             if selection.isOn {
                 SelectionHeader(selection: selection, visible: visibleIDs)
@@ -138,6 +172,10 @@ public struct TasksHomeView: View {
         .task {
             await model.load()
             takeRequests()
+            if let shared {
+                model.refresher.add("shared lists") { await shared.refresh(); return .done }
+                await shared.refresh()
+            }
         }
         .onChange(of: model.requestedTask) { takeRequests() }
         .onChange(of: model.requestedQuickAdd) { takeRequests() }
@@ -150,6 +188,20 @@ public struct TasksHomeView: View {
         .onDisappear {
             Task { await model.finishPendingDelete() }
         }
+    }
+
+    private var sharedNoticeShown: Binding<Bool> {
+        Binding(get: { shared?.notice != nil }, set: { if !$0 { shared?.notice = nil } })
+    }
+
+    /// Opens the Share sheet for a project, or an area with no projects in it.
+    private func startSharing(_ id: UUID) {
+        guard let list = model.list(id) else { return }
+        if list.kind == .area, !model.projects(in: id, status: nil).isEmpty {
+            model.notice = "Move this area's projects out first, or share each project on its own."
+            return
+        }
+        sharing = list
     }
 
     private func closeList() {
@@ -271,10 +323,14 @@ public struct TasksHomeView: View {
                     model: model,
                     onBucket: { item in withMotion(Motion.snappy) { showsLists = false; bucket = item } },
                     onList: { openList = $0 },
-                    onNew: { making = $0 }
+                    onNew: { making = $0 },
+                    shared: shared,
+                    onShared: { openShared = SharedOpen(room: $0, task: nil) }
                 )
             } else {
-                TaskListView(model: model, bucket: bucket, expanded: $expanded)
+                TaskListView(model: model, bucket: bucket, expanded: $expanded, shared: shared) { room, task in
+                    openShared = SharedOpen(room: room, task: task)
+                }
                     .id(bucket)
             }
         }
@@ -333,4 +389,10 @@ struct TasksMessage: View {
             .padding(.top, Space.s8)
         }
     }
+}
+
+/// A shared list open over Tasks, maybe at one of its tasks.
+struct SharedOpen: Hashable {
+    let room: String
+    let task: UUID?
 }

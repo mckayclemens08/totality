@@ -23,6 +23,8 @@ struct RootView: View {
     @State private var calendar: CalendarModel?
     @State private var web: WebModel?
     @State private var tasks: TasksModel?
+    /// Shared task lists, over Messages' Matrix connection (step 6).
+    @State private var sharedLists: SharedListsModel?
     /// Quick add from the Tasks tile, over the home page.
     @State private var quickAddingTask = false
     @State private var messages: MessagesModel
@@ -93,6 +95,7 @@ struct RootView: View {
                 calendar = nil
                 web = nil
                 tasks = nil
+                sharedLists = nil
                 await mailWiring.disconnect()
                 mail.keyChanged()
                 photosTurn += 1
@@ -243,7 +246,7 @@ struct RootView: View {
             }
         case .tasks:
             if let tasks {
-                TasksHomeView(model: tasks) { open = nil }
+                TasksHomeView(model: tasks, shared: sharedLists) { open = nil }
             } else {
                 contentMessage { open = nil }
             }
@@ -437,6 +440,7 @@ struct RootView: View {
             calendar = content.calendar
             web = content.web
             tasks = content.tasks
+            sharedLists = makeSharedLists(directory: content.registry.profiles)
             refreshers[.reader] = content.reader.refresher
             refreshers[.tasks] = content.tasks.refresher
             refreshers[.calendar] = content.calendar.refresher
@@ -519,6 +523,17 @@ struct RootView: View {
             await model.load()
         }
         await web?.use(account: owner)
+    }
+
+    /// Shared lists travel in Matrix rooms, which run only where the Matrix SDK is linked.
+    private func makeSharedLists(directory: (any ProfileDirectory)?) -> SharedListsModel? {
+        #if canImport(MatrixRustSDK)
+        let model = SharedListsModel(rooms: MatrixTaskRooms(messages: messages))
+        model.directory = directory
+        return model
+        #else
+        return nil
+        #endif
     }
 
     /// Photos shares through Messages, which runs only where the Matrix SDK is linked.

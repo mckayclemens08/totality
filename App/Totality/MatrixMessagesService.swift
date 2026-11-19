@@ -13,7 +13,8 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
 
     let account: String
     let userID: String
-    private let client: Client
+    /// Shared task lists reach it from `MatrixTaskRooms`, in the app.
+    let client: Client
     private let sync: SyncService
     private let lock = NSLock()
     private var handles: [TaskHandle] = []
@@ -128,6 +129,8 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
 
     private static func summary(of room: Room) async -> ChatSummary? {
         guard let info = try? await room.roomInfo(), !info.isSpace else { return nil }
+        // A shared task list's room belongs to Tasks, never to the chat list or requests.
+        if SharedRoomMarker.isSharedRoom(name: info.rawName, topic: info.topic) { return nil }
         switch info.membership {
         case .invited:
             let inviter = info.inviter?.userId
@@ -345,6 +348,8 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
                 }
             }
             // The name and photo are outside Matrix's encryption, which the screen says where they're set.
+            // A group can't take the shared-list marker as its name, or it would vanish from Messages.
+            let name = name == SharedRoomMarker.name ? nil : name
             let id = try await client.createRoom(request: CreateRoomParameters(
                 name: name, isEncrypted: true, isDirect: false, visibility: .private, preset: .privateChat, invite: people
             ))
