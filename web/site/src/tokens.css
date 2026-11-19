@@ -1,0 +1,38 @@
+/* Mirrors Sources/TotalityUI/Tokens.swift. Change both together; test/tokens.test.mjs checks they agree. */
+:root,
+:root[data-theme="default"] {
+  --bg: #e8ebef; --surface: #edeff2;
+  --shadow-light: rgba(255, 255, 255, 0.9); --shadow-dark: rgba(195, 201, 211, 0.7);
+  --text-primary: #15181d; --text-secondary: #555c68; --text-tertiary: #7d8592;
+  --accent: #1f5fbf; --accent-on: #ffffff; --danger: #b3261e; --success: #1e6f4c;
+}
+:root[data-theme="blush"] {
+  --bg: #f2e6e6; --surface: #f7ecec;
+  --shadow-light: rgba(255, 255, 255, 0.9); --shadow-dark: rgba(214, 190, 190, 0.7);
+  --text-primary: #15181d; --text-secondary: #6a5555; --text-tertiary: #8a7272;
+  --accent: #a83636; --accent-on: #ffffff; --danger: #b3261e; --success: #1e6f4c;
+}
+:root[data-theme="sky"] {
+  --bg: #e3ecf5; --surface: #eaf1f8;
+  --shadow-light: rgba(255, 255, 255, 0.9); --shadow-dark: rgba(186, 200, 218, 0.7);
+  --text-primary: #15181d; --text-secondary: #4f5d6e; --text-tertiary: #707d8d;
+  --accent: #1f5fbf; --accent-on: #ffffff; --danger: #b3261e; --success: #1e6f4c;
+}
+:root[data-theme="sage"] {
+  --bg: #e5eee7; --surface: #ecf3ee;
+  --shadow-light: rgba(255, 255, 255, 0.9); --shadow-dark: rgba(188, 206, 194, 0.7);
+  --text-primary: #15181d; --text-secondary: #52625a; --text-tertiary: #728279;
+  --accent: #2e6b47; --accent-on: #ffffff; --danger: #b3261e; --success: #1e6f4c;
+}
+:root[data-theme="lilac"] {
+  --bg: #ece8f3; --surface: #f1eef7;
+  --shadow-light: rgba(255, 255, 255, 0.9); --shadow-dark: rgba(203, 196, 219, 0.7);
+  --text-primary: #15181d; --text-secondary: #5c5870; --text-tertiary: #7c7790;
+  --accent: #5b45a8; --accent-on: #ffffff; --danger: #b3261e; --success: #1e6f4c;
+}
+:root[data-theme="graphite"] {
+  --bg: #2a2e34; --surface: #30353c;
+  --shadow-light: rgba(255, 255, 255, 0.06); --shadow-dark: rgba(0, 0, 0, 0.45);
+  --text-primary: #e7e9ed; --text-secondary: #a7aeb9; --text-tertiary: #8c939e;
+  --accent: #8db2ee; --accent-on: #16191e; --danger: #f2a39b; --success: #7fcfa6;
+}
