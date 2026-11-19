@@ -76,11 +76,11 @@ export async function deleteSlot(token: string, id: string): Promise<void> {
 export interface ObjectRow { id: string; kind: string; meta_cipher: string | null; storage_key: string | null; byte_size: number | null }
 
 /** The signed-in account's live docs and files, a page at a time (the server stops at its own page size). */
-export async function listObjects(token: string): Promise<ObjectRow[]> {
+export async function listObjects(token: string, kinds: string[] = ["note", "file"]): Promise<ObjectRow[]> {
   const rows: ObjectRow[] = [];
   const page = 500;
   for (let from = 0; ; from += page) {
-    const res = await call("/rest/v1/content_objects?select=id,kind,meta_cipher,storage_key,byte_size&kind=in.(note,file)&deleted_at=is.null&order=id", {
+    const res = await call(`/rest/v1/content_objects?select=id,kind,meta_cipher,storage_key,byte_size&kind=in.(${kinds.join(",")})&deleted_at=is.null&order=id`, {
       headers: { ...headers(token), "range-unit": "items", range: `${from}-${from + page - 1}` },
     });
     if (res.status === 401) throw new NetError("wrongPassword");

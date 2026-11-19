@@ -1,0 +1,31 @@
+{
+  "entries" : [
+    {
+      "allDay" : false,
+      "end" : 785003000,
+      "id" : "96a76b8f-1015-4594-8319-f2c062d3b69d",
+      "meta" : "AQ26grOIb2cbSAa6IP6w6OLyTxsWH1kI1WLN\/ylQU1\/xhE0v9JyFR3jg+W3B2QCHvEphXBqNKinjt\/wJ\/MTfoZFJCqc1Lw2NZ9zupivs\/VB60+tetmgo679sXPzpT1n9\/yzVx9PIMkP\/vkFAqmaUAQVzD9hh4bTxK4rXgC0w2BqrylXL+3Ym3vDvqw3pKz+01HEr65+e5I588jXFC6HYvvVN5Tt6qFeo8W4+mM3+J1vbb89rmf1CIRBWTRnHuGd3yHzWBsWA9TekPLjFSlaIGNUe4krijgCEvr1DqPh4XdhFZuFsGNSV3DNzdGP1WHvYA6SKjDog+G7JVClmO6iRJRNy4glKw2fZRJKEHv6XcgFXBAaUrJgVmvUuKh61TtO0QgIxHjkdjON9dSx0uEvmXaNbxzUE5q16HyGzSGNBCb4nablsXTIoh04gNauLZmWQLiKrbcGb9vf1m86Q8SDi8y8zUDoaTrFlO7nFprJ8wV8YnblMX2gyInCqtcll2CUOqA==",
+      "repeats" : "weekly",
+      "start" : 785000000,
+      "title" : "PHIL 4410"
+    },
+    {
+      "allDay" : false,
+      "end" : 785176400,
+      "id" : "7beaee83-67c1-4aa2-9bfa-7a359a9e6614",
+      "meta" : "ATM9zjiilDwuYovk6jrgqqmssg5l6rMgupANI8Q8d0wsPNFtonAbgn9LCk34O59AN+b0G+lHqZJCPYBxb30VTi+myuCwfWFVULYrPwMVfohMu9xM9DPYYATfHq8ECgJowGd89Qto+nP3LutxZBEJfjldFyz13CNQyKZ2jz9PNQKWAIzMfZsSzYHJ1acFD6+B6H2ilp1V5hE0XvWj0wnFBapPod959lZOdjv+6o36M4adimekWINEgAobSFeG+5Ejx1R+hqyXOOlE8wRbsO3Ew+544vE88MiJfRSrBmRSB26gnaVLbUcB6A4TCVyDyhWWiC\/P07TKZAG44uwa\/VQo\/b12vFi2fwzk3UwFpUse+xJw0gxbGc48YK0qf2va0v5Ejie1FeyR+pl6yo5fpgJPrpa6Vk3JcyKyLM3MWjHCBQImfT1sdYEi",
+      "start" : 785172800,
+      "title" : "Office hours <b>x<\/b>"
+    },
+    {
+      "allDay" : true,
+      "end" : 785116800,
+      "id" : "b1a133cb-5172-4c22-b6ee-fa4cbdb531dc",
+      "meta" : "AVKVIR\/UZrr\/FlfkxS7Jzo7QIzk34ISTc0zERYX\/iOamzU4kSCmo5syTMoric7R0vqQNOaB8B0O8AlLDbxCkYuK4wJpxxK9O3yZL0LVKOvypa8KOtGG2rIntuPNWvvrrg3ciSDlluS1ttCYsIJVOnhbDoLaTWoktQl3uTLFGGc6Ti6dve3KZC1uuXqhMK5ecUg5K90AeK7tnjkQKZe8\/xhDHpFI4PsSvzVW+GVyHCcAJPhgJoGbKvtg6GiU6XyQx+qsvMy+a4FwZk08ZANNWDBId4269iD1V2Y7xKzUgNtxxLAiBieKlKlLS3atOR787DwdCC26EyPtodHekohznd9DzAJMfhgT4\/hUm6NohSmDgT871qQMQyrnt3plrE9gxIA==",
+      "start" : 785030400,
+      "title" : "Conference"
+    }
+  ],
+  "note" : "Made by CalendarWebVectorsTests.makeVectors from the real CalendarVault. Test key only.",
+  "rootKey" : "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283"
+}
