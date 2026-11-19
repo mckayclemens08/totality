@@ -90,7 +90,8 @@ Phase 4 commerce. Brief §7. One module at a time.
 SwiftUI multiplatform client, three server planes. **Supabase** holds the account, the public handle
 directory, solo-module data, and ciphertext blobs. **Matrix** (Tuwunel) carries every private
 interpersonal thing — DMs, communities/channels, call signalling, device keys, private posts, shared
-docs — all E2E. **atproto** (Phase 2) carries public social posts only. A record's transport is chosen
+docs — all E2E. **Public social posts** are Supabase rows, readable so For You can rank them: Social is native,
+not Bluesky or atproto (owner, 2026-11-17: "Native now, maybe later", issue 149). A record's transport is chosen
 by its **visibility**, not by its module. Keys live on devices, backed up in Matrix SSSS under one
 recovery key. Large binaries go to Supabase Storage as ciphertext; Matrix holds the key and the
 membership. Mail is the exception, and stands apart from all three (owner, 2026-11-02): mailboxes live
@@ -170,7 +171,10 @@ with a Lemon8-style discovery homepage. Docs are a content type inside the Reade
 module. Listen is a button inside the Reader — there is no Speechify module. Shopping is
 Amazon-*like*, never an Amazon wrapper. Home is a two-column grid of tiles the person arranges, each showing live content (owner, 2026-10-31). The flower stays as the alternative, one button away, and a setting picks which opens first; tiles are the default. Holding a tile enters edit mode. Web search is a module; search inside Totality is a magnifying glass on the home page, not a module.
 Mail is Totality's own email: every account gets `username@usetotality.com`, and sign-up still asks for no email (owner, 2026-11-02, issue 37). Outside accounts (iCloud and Gmail first, Outlook later) can sit beside that address. The device connects to them directly, Totality's server never sees their mail or sign-in, and they never replace the Totality address (owner, 2026-11-05, issue 43).
-Federation and E2E are principles, not features. Pi self-hosting is the hosting direction. The Matrix
+E2E is a principle, not a feature. Federation was one too, until the owner chose a native Social on 2026-11-17:
+"I don't want to use bluesky", "not using bluesky, i want it native", and for federation **"Native now, maybe
+later"** (issue 149). Social is Totality's own network with no outside server, and federating public posts stays
+possible later but isn't committed to. Pi self-hosting is the hosting direction. The Matrix
 server name is `usetotality.com`, and it cannot change.
 
 ## Decisions that are OPEN — ask, do not guess
