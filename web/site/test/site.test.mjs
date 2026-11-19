@@ -49,6 +49,7 @@ test("the password only goes to net.signIn, and nothing is logged or stored by i
   for (const f of files) {
     const src = readFileSync(`src/${f}`, "utf8");
     assert.doesNotMatch(src, /console\./, `${f} logs`);
+    assert.doesNotMatch(src, /setAttribute\(\s*["']style["']|cssText/, `${f} sets a style attribute, which the CSP forbids`);
     assert.doesNotMatch(src, /sendBeacon|WebSocket|XMLHttpRequest|eval\(|new Function|innerHTML|outerHTML|insertAdjacentHTML|document\.write/, f);
     if (f !== "net.ts") assert.doesNotMatch(src, /fetch\(/, `${f} calls the network directly`);
     if (!["net.ts", "main.ts"].includes(f)) assert.doesNotMatch(src, /password/i, `${f} touches the password`);

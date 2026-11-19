@@ -124,3 +124,35 @@ body.doc h1, body.doc h2, body.doc h3 { font-family: Georgia, serif; line-height
 body.doc p { margin: 0 0 1em; }
 body.doc pre { overflow-x: auto; padding: 12px 14px; border-radius: 12px; background: var(--surface); font-size: 15px; }
 body.doc a { color: var(--accent); }
+
+/* ---- calendar ---- */
+.cal-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cal-head h1 { flex: 1 1 auto; min-width: 200px; }
+.segs { display: inline-flex; gap: 6px; }
+button.seg { background: var(--surface); color: var(--text-secondary); padding: 8px 14px; font-size: 13px; box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light); }
+button.seg.on { background: var(--accent); color: var(--accent-on); box-shadow: none; }
+.calpanel { flex: 999 1 640px; padding: 12px; }
+.detail { flex: 1 1 260px; max-width: 340px; display: flex; flex-direction: column; gap: 8px; }
+.doc-title.small { font-size: 22px; margin: 0; }
+.plain-notes { white-space: pre-wrap; font-size: 14px; line-height: 1.55; margin: 0; }
+.weekgrid { display: flex; flex-direction: column; }
+.grid-head { display: grid; gap: 0; align-items: end; }
+.dayhead { display: flex; flex-direction: column; align-items: center; padding: 6px 0; gap: 2px; }
+.dayhead.today b { color: var(--accent-on); background: var(--accent); border-radius: 12px; padding: 0 8px; }
+.alldaycell { display: flex; flex-direction: column; gap: 2px; padding: 2px; min-height: 24px; }
+.allday { border-bottom: 1px solid transparent; padding-bottom: 6px; }
+.grid-scroll { max-height: 62vh; overflow-y: auto; border-radius: 14px; }
+.grid-body { display: grid; position: relative; height: calc(24 * 48px); }
+.hours { display: flex; flex-direction: column; }
+.hour { height: 48px; text-align: right; padding-right: 8px; box-sizing: border-box; }
+.daycol { position: relative; background-image: repeating-linear-gradient(to bottom, transparent 0 47px, var(--shadow-dark) 47px 48px); background-size: 100% 48px; opacity: 1; }
+button.ev { all: unset; box-sizing: border-box; cursor: pointer; font-size: 12px; font-weight: 600; line-height: 1.25; color: var(--accent); background: var(--bg); border-radius: 8px; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.ev.block { position: absolute; white-space: normal; box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light); }
+button.ev:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button.ev.pill { display: block; }
+.monthgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.mhead { text-align: center; padding: 4px 0; }
+.mcell { min-height: 92px; padding: 6px; border-radius: 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mcell.out { opacity: 0.55; }
+.mcell.today .mnum { color: var(--accent-on); background: var(--accent); border-radius: 10px; padding: 0 7px; align-self: flex-start; }
+.mnum { font-size: 13px; font-weight: 600; }
