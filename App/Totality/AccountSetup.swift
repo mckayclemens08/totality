@@ -21,9 +21,12 @@ enum AccountSetup {
     private(set) static var storageUsage: (@Sendable () async throws -> SealedStoreUsage)?
     /// Other people's public profiles, which Messages reaches through the `ModuleRegistry`.
     private(set) static var profiles: (any ProfileDirectory)?
+    /// Where Social's public side is: the backend and its publishable key, never a secret.
+    private(set) static var config: AccountConfig?
 
     static func makeModel(content: any ContentKeyAccess) -> AccountModel? {
         guard let config = AccountConfig.fromBundle() else { return nil }
+        self.config = config
         let service = SupabaseAccountService(
             config: config,
             sessionStore: KeychainKeyStore(service: "app.totality.session"),
