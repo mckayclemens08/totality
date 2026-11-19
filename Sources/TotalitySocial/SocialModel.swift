@@ -1,0 +1,285 @@
+import Foundation
+import Observation
+import TotalityCore
+
+/// Social on this device: the two feeds, profiles, and what the person does. Public things go to
+/// `SocialServer`; Friends and Close-friends things go to `PrivatePosts`, end-to-end encrypted. Posting,
+/// deleting and unfollowing happen only from the person's own press on a button (non-negotiable 6).
+@MainActor
+@Observable
+public final class SocialModel {
+    public enum Phase: Equatable {
+        case loading
+        case ready
+        /// Showing what was loaded before, with a note.
+        case offline
+        case failed(String)
+        case unavailable(String)
+    }
+
+    public enum Feed: String, CaseIterable, Identifiable {
+        case forYou, following
+        public var id: String { rawValue }
+        public var name: String { self == .forYou ? "For You" : "Following" }
+    }
+
+    public private(set) var phase: Phase = .loading
+    public var feed: Feed = .forYou
+    public private(set) var forYou: [SocialPost] = []
+    public private(set) var following: [SocialPost] = []
+    public private(set) var tags: [String] = []
+    public var tag: String? {
+        didSet { if tag != oldValue { Task { await loadForYou() } } }
+    }
+    public private(set) var me: String?
+    /// A short note after something didn't go through, shown over the screen.
+    public var notice: String?
+    /// Whether Friends and Close-friends posts can be read and made right now, and why not.
+    public var privateReason: String? {
+        guard let privatePosts else { return "Friends and Close-friends posts need Messages, which isn't on this device." }
+        return privatePosts.unavailableReason
+    }
+    public private(set) var closeFriends: Set<String> = []
+    public private(set) var friends: Set<String> = []
+    /// Who you follow, for the Following feed and for which rooms' invites to accept.
+    public private(set) var followingSet: Set<String> = []
+    public var requestedProfile: String?
+
+    let server: any SocialServer
+    let privatePosts: PrivatePosts?
+    let profiles: (any ProfileDirectory)?
+    public private(set) var photos: [String: Data] = [:]
+    private var privateFeed: [SocialPost] = []
+    /// What For You has put on screen and hasn't told the server about yet.
+    private var shown: Set<UUID> = []
+
+    public init(server: any SocialServer, privateRooms: (any SharedRooms)? = nil, profiles: (any ProfileDirectory)? = nil) {
+        self.server = server
+        privatePosts = privateRooms.map(PrivatePosts.init)
+        self.profiles = profiles
+    }
+
+    // MARK: Loading
+
+    public func load() async {
+        if forYou.isEmpty && following.isEmpty { phase = .loading }
+        do {
+            let me = try await server.me()
+            self.me = me
+            followingSet = Set(try await server.followed(by: me))
+            tags = (try? await server.topTags()) ?? tags
+            await loadForYou()
+            try await loadFollowing()
+            phase = .ready
+        } catch let error as SocialError {
+            switch error {
+            case .offline: phase = forYou.isEmpty && following.isEmpty ? .failed(error.message) : .offline
+            case .signedOut: phase = .unavailable(error.message)
+            default: phase = .failed(error.message)
+            }
+        } catch {
+            phase = .failed("Social didn't open. Pull down to try again.")
+        }
+        await loadPhotos()
+    }
+
+    func loadForYou() async {
+        do {
+            forYou = try await server.forYou(tag: tag)
+        } catch {
+            if case .ready = phase { notice = (error as? SocialError)?.message }
+        }
+    }
+
+    func loadFollowing() async throws {
+        let publicPosts = try await server.following(before: nil)
+        if let privatePosts, privatePosts.unavailableReason == nil, let me {
+            do {
+                let timelines = try await privatePosts.refresh(following: followingSet)
+                privateFeed = timelines.flatMap(\.posts)
+                friends = Set(try await server.friends())
+                closeFriends = (try? await privatePosts.members(.closeFriends)) ?? closeFriends
+                // Your Friends room follows who your friends are now. Anyone no longer one stops getting new posts.
+                if timelines.contains(where: { $0.owner == me && $0.audience == .friends }) {
+                    try? await privatePosts.setMembers(friends, of: .friends)
+                }
+            } catch {
+                notice = "Friends posts didn't load: \((error as? SharedRoomError)?.message ?? "try again")."
+            }
+        }
+        following = (publicPosts + privateFeed).sorted { $0.date > $1.date }
+    }
+
+    public func refresh() async { await load() }
+
+    private func loadPhotos() async {
+        guard let profiles else { return }
+        let people = Set((forYou + following).map(\.author) + [me].compactMap { $0 })
+        if let found = try? await profiles.profiles(of: Array(people), photos: [:]) {
+            for (name, profile) in found { if let photo = profile.photo { photos[name] = photo } }
+        }
+    }
+
+    public var posts: [SocialPost] { feed == .forYou ? forYou : following }
+
+    /// For You never shows a post twice: what's been on screen is told to the server in batches.
+    public func didShow(_ post: SocialPost) {
+        guard post.audience == .everyone, feed == .forYou else { return }
+        shown.insert(post.id)
+    }
+
+    public func flushShown() async {
+        let batch = Array(shown)
+        shown = []
+        try? await server.markSeen(batch, notInterested: false)
+    }
+
+    public func notInterested(_ post: SocialPost) async {
+        forYou.removeAll { $0.id == post.id }
+        do { try await server.markSeen([post.id], notInterested: true) } catch { notice = (error as? SocialError)?.message }
+    }
+
+    // MARK: Posting
+
+    /// Posts after the person pressed Post. Public goes to the server; the rest into their encrypted room.
+    public func publish(_ audience: Audience, title: String, body: String) async -> Bool {
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let problem = PostLimits.problem(title: cleanTitle, body: cleanBody) {
+            notice = problem
+            return false
+        }
+        let tags = PostTags.find(in: cleanTitle + " " + cleanBody)
+        do {
+            switch audience {
+            case .everyone:
+                _ = try await server.publish(title: cleanTitle.isEmpty ? nil : cleanTitle, body: cleanBody, tags: tags)
+            case .friends, .closeFriends:
+                guard let privatePosts, privateReason == nil else { throw SocialError.failed(privateReason ?? "") }
+                if audience == .friends { try await privatePosts.setMembers(Set(try await server.friends()), of: .friends) }
+                _ = try await privatePosts.publish(audience, title: cleanTitle.isEmpty ? nil : cleanTitle, body: cleanBody, tags: tags)
+            }
+            try? await loadFollowing()
+            return true
+        } catch {
+            notice = Self.message(error)
+            return false
+        }
+    }
+
+    public func delete(_ post: SocialPost) async {
+        do {
+            if post.audience == .everyone { try await server.delete(post.id) } else { try await privatePosts?.delete(post) }
+            forYou.removeAll { $0.id == post.id }
+            following.removeAll { $0.id == post.id }
+        } catch {
+            notice = Self.message(error)
+        }
+    }
+
+    // MARK: Likes and comments
+
+    public func toggleLike(_ post: SocialPost) async {
+        let liked = !post.liked
+        update(post.id) { $0.liked = liked; $0.likes += liked ? 1 : -1 }
+        do {
+            if post.audience == .everyone { try await server.setLiked(liked, post: post.id) } else { try await privatePosts?.setLiked(liked, post) }
+        } catch {
+            update(post.id) { $0.liked = !liked; $0.likes += liked ? -1 : 1 }
+            notice = Self.message(error)
+        }
+    }
+
+    public func comments(on post: SocialPost) async throws -> [SocialComment] {
+        if post.audience == .everyone { return try await server.comments(on: post.id) }
+        return privatePosts?.comments(on: post) ?? []
+    }
+
+    public func comment(_ text: String, on post: SocialPost, replyingTo parent: UUID?) async -> Bool {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty, body.count <= PostLimits.comment else {
+            notice = body.isEmpty ? "Write a comment first." : "That comment is too long."
+            return false
+        }
+        do {
+            if post.audience == .everyone {
+                try await server.comment(body, on: post.id, replyingTo: parent)
+            } else {
+                try await privatePosts?.comment(body, on: post, replyingTo: parent)
+                try? await loadFollowing()
+            }
+            update(post.id) { $0.comments += 1 }
+            return true
+        } catch {
+            notice = Self.message(error)
+            return false
+        }
+    }
+
+    private func update(_ id: UUID, _ change: (inout SocialPost) -> Void) {
+        if let i = forYou.firstIndex(where: { $0.id == id }) { change(&forYou[i]) }
+        if let i = following.firstIndex(where: { $0.id == id }) { change(&following[i]) }
+    }
+
+    public func post(_ id: UUID) -> SocialPost? {
+        forYou.first { $0.id == id } ?? following.first { $0.id == id }
+    }
+
+    // MARK: People
+
+    public func profile(_ username: String) async throws -> SocialProfile {
+        guard let profile = try await server.profile(username) else { throw SocialError.noSuchPerson(username) }
+        if photos[username] == nil, let found = try? await profiles?.profile(of: username), let photo = found.photo {
+            photos[username] = photo
+        }
+        return profile
+    }
+
+    public func posts(by username: String) async throws -> [SocialPost] {
+        let publicPosts = try await server.posts(by: username, before: nil)
+        let privateOnes = privateFeed.filter { $0.author == username }
+        return (publicPosts + privateOnes).sorted { $0.date > $1.date }
+    }
+
+    public func setFollowing(_ follow: Bool, _ username: String) async -> Bool {
+        do {
+            try await server.setFollowing(follow, username)
+            if follow { followingSet.insert(username) } else { followingSet.remove(username) }
+            friends = Set((try? await server.friends()) ?? Array(friends))
+            return true
+        } catch {
+            notice = Self.message(error)
+            return false
+        }
+    }
+
+    public func followers(of username: String) async -> [String] { (try? await server.followers(of: username)) ?? [] }
+    public func followed(by username: String) async -> [String] { (try? await server.followed(by: username)) ?? [] }
+
+    public func search(_ query: String) async -> [SocialProfile] {
+        guard query.trimmingCharacters(in: .whitespaces).count >= 1 else { return [] }
+        return (try? await server.searchPeople(query)) ?? []
+    }
+
+    /// Close friends are chosen from the people you follow. They're the members of your Close-friends room.
+    public func setCloseFriends(_ people: Set<String>) async -> Bool {
+        guard let privatePosts, privateReason == nil else {
+            notice = privateReason
+            return false
+        }
+        do {
+            try await privatePosts.setMembers(people, of: .closeFriends)
+            closeFriends = people
+            return true
+        } catch {
+            notice = Self.message(error)
+            return false
+        }
+    }
+
+    static func message(_ error: any Error) -> String {
+        if let error = error as? SocialError { return error.message }
+        if let error = error as? SharedRoomError { return error.message }
+        return "That didn't go through. Try again."
+    }
+}

@@ -13,9 +13,12 @@ import TotalityMessages
 @MainActor
 final class MatrixTaskRooms: SharedRooms {
     private let messages: MessagesModel
+    /// Whose rooms these are: Tasks' shared lists, or Social's posts. Each only ever sees its own.
+    private let marker: RoomMarker
 
-    init(messages: MessagesModel) {
+    init(messages: MessagesModel, marker: RoomMarker = SharedRoomMarker.tasks) {
         self.messages = messages
+        self.marker = marker
     }
 
     var unavailableReason: String? {
@@ -70,7 +73,7 @@ final class MatrixTaskRooms: SharedRooms {
     private func sharedRooms(_ membership: Membership) async throws -> [(Room, RoomInfo)] {
         var found: [(Room, RoomInfo)] = []
         for room in try await service().client.rooms() where room.membership() == membership {
-            guard let info = try? await room.roomInfo(), SharedRoomMarker.isSharedRoom(name: info.rawName, topic: info.topic) else { continue }
+            guard let info = try? await room.roomInfo(), marker.matches(name: info.rawName, topic: info.topic) else { continue }
             found.append((room, info))
         }
         return found
@@ -98,7 +101,7 @@ final class MatrixTaskRooms: SharedRooms {
                 notifications: nil, users: [service.userID: Int32(SharedRole.owner.rawValue)], events: [:]
             )
             let id = try await service.client.createRoom(request: CreateRoomParameters(
-                name: SharedRoomMarker.name, topic: SharedRoomMarker.topic, isEncrypted: true, isDirect: false,
+                name: marker.name, topic: marker.topic, isEncrypted: true, isDirect: false,
                 visibility: .private, preset: .privateChat, invite: nil, powerLevelContentOverride: levels
             ))
             for _ in 0..<50 {
@@ -206,7 +209,7 @@ final class MatrixTaskRooms: SharedRooms {
                 case .msgLike(let like):
                     switch like.kind {
                     case .message(let content):
-                        if case .other(let type, let body) = content.msgType, type == SharedRoomMarker.messageType {
+                        if case .other(let type, let body) = content.msgType, type == marker.messageType {
                             events.append(.post(id: eventID, sender: sender, date: date, body: body))
                         }
                     case .unableToDecrypt:
@@ -248,7 +251,7 @@ final class MatrixTaskRooms: SharedRooms {
         let room = try await room(id)
         // A post goes only into an encrypted room, so the label stays true.
         guard await room.isEncrypted() else { throw SharedRoomError.notEncrypted }
-        let content: [String: String] = ["msgtype": SharedRoomMarker.messageType, "body": body]
+        let content: [String: String] = ["msgtype": marker.messageType, "body": body]
         let json = String(decoding: try JSONSerialization.data(withJSONObject: content), as: UTF8.self)
         do {
             _ = try await room.sendRaw(eventType: "m.room.message", content: json)

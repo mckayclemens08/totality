@@ -1,0 +1,293 @@
+import Foundation
+
+public enum SocialError: Error, Equatable, Sendable {
+    case signedOut
+    case offline
+    case noSuchPerson(String)
+    case refused(String)
+    case failed(String)
+
+    public var message: String {
+        switch self {
+        case .signedOut: "Sign in to use Social."
+        case .offline: "You're offline. Showing what's on this phone."
+        case .noSuchPerson(let name): "There's no one called @\(name)."
+        case .refused(let reason): reason
+        case .failed(let reason): reason
+        }
+    }
+}
+
+/// Social's public side on Totality's server: public posts, follows, likes and comments (issue 149). It
+/// never carries a Friends or Close-friends post: those go through `PrivatePosts`.
+public protocol SocialServer: Sendable {
+    func me() async throws -> String
+    func forYou(tag: String?) async throws -> [SocialPost]
+    func following(before: Date?) async throws -> [SocialPost]
+    func posts(by username: String, before: Date?) async throws -> [SocialPost]
+    func post(_ id: UUID) async throws -> SocialPost?
+    func publish(title: String?, body: String, tags: [String]) async throws -> UUID
+    func delete(_ id: UUID) async throws
+    func setLiked(_ liked: Bool, post: UUID) async throws
+    func comments(on post: UUID) async throws -> [SocialComment]
+    func comment(_ body: String, on post: UUID, replyingTo parent: UUID?) async throws
+    func profile(_ username: String) async throws -> SocialProfile?
+    func setFollowing(_ follow: Bool, _ username: String) async throws
+    /// People you follow who follow you back.
+    func friends() async throws -> [String]
+    func followers(of username: String) async throws -> [String]
+    func followed(by username: String) async throws -> [String]
+    func markSeen(_ posts: [UUID], notInterested: Bool) async throws
+    func topTags() async throws -> [String]
+    func searchPeople(_ query: String) async throws -> [SocialProfile]
+}
+
+/// `SocialServer` over Supabase's REST interface. Everything is a call to one of the `social_*` functions
+/// or a write the row rules allow, made with the signed-in person's own token, so the server decides what
+/// they may see. Nothing here logs.
+public struct RestSocialServer: SocialServer {
+    let base: URL
+    let key: String
+    let token: @Sendable () async throws -> String
+    let username: @Sendable () async -> String?
+    let session: URLSession
+
+    public init(
+        base: URL, publishableKey: String, session: URLSession = .shared,
+        token: @escaping @Sendable () async throws -> String, username: @escaping @Sendable () async -> String?
+    ) {
+        self.base = base
+        key = publishableKey
+        self.token = token
+        self.username = username
+        self.session = session
+    }
+
+    // MARK: Rows as the server sends them
+
+    struct PostRow: Decodable {
+        let id: UUID
+        let handle: String
+        let display_name: String?
+        let title: String?
+        let body: String
+        let tags: [String]
+        let created_at: String
+        let edited_at: String?
+        let likes: Int
+        let comments: Int
+        let liked: Bool
+        let reason: String?
+
+        var post: SocialPost {
+            SocialPost(
+                id: id, author: handle, authorName: display_name, audience: .everyone, title: title, body: body, tags: tags,
+                date: RestSocialServer.date(created_at) ?? .distantPast, edited: edited_at != nil, likes: likes,
+                comments: comments, liked: liked, reason: (reason?.isEmpty ?? true) ? nil : reason
+            )
+        }
+    }
+
+    struct CommentRow: Decodable {
+        let id: UUID
+        let parent_id: UUID?
+        let handle: String
+        let display_name: String?
+        let body: String
+        let created_at: String
+    }
+
+    struct ProfileRow: Decodable {
+        let handle: String
+        let display_name: String?
+        let bio: String?
+        let avatar_key: String?
+        let posts: Int
+        let followers: Int
+        let following: Int
+        let i_follow: Bool
+        let follows_me: Bool
+    }
+
+    struct HandleRow: Decodable {
+        let handle: String
+        let display_name: String?
+    }
+
+    struct TagRow: Decodable { let tag: String }
+    struct IDRow: Decodable { let id: UUID }
+
+    static func date(_ text: String) -> Date? {
+        let full = ISO8601DateFormatter()
+        full.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = full.date(from: text) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        if let date = plain.date(from: text) { return date }
+        // Postgres sends microseconds, which the formatter may not take: drop the fraction and try again.
+        let trimmed = text.replacingOccurrences(of: " ", with: "T")
+            .replacingOccurrences(of: "\\.[0-9]+", with: "", options: .regularExpression)
+        return plain.date(from: trimmed) ?? plain.date(from: trimmed.replacingOccurrences(of: "+00$", with: "Z", options: .regularExpression))
+    }
+
+    static func text(_ date: Date) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.string(from: date)
+    }
+
+    // MARK: Requests
+
+    func request(_ path: String, method: String = "POST", query: [URLQueryItem] = [], body: Any? = nil, prefer: String? = nil) async throws -> Data {
+        var components = URLComponents(url: base.appendingPathComponent("rest/v1/" + path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { components.queryItems = query }
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = method
+        request.timeoutInterval = 20
+        let token: String
+        do { token = try await self.token() } catch { throw SocialError.signedOut }
+        request.setValue(key, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let prefer { request.setValue(prefer, forHTTPHeaderField: "Prefer") }
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError where [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost, .dataNotAllowed].contains(error.code) {
+            throw SocialError.offline
+        } catch {
+            throw SocialError.failed("Social didn't answer. Try again.")
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else { throw Self.error(status: status, data: data) }
+        return data
+    }
+
+    /// The server's refusal in plain words. Its own text is only matched, never shown, so nothing it says
+    /// reaches the screen unchecked.
+    static func error(status: Int, data: Data) -> SocialError {
+        let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String ?? ""
+        if status == 401 { return .signedOut }
+        if message.contains("too many posts") { return .refused("That's a lot of posts this hour. Try again later.") }
+        if message.contains("too many comments") { return .refused("That's a lot of comments this hour. Try again later.") }
+        if message.contains("too many follows") { return .refused("You've followed a lot of people today. Try again tomorrow.") }
+        if message.contains("no such user") { return .refused("That person isn't on Totality.") }
+        if message.contains("yourself") { return .refused("You can't follow yourself.") }
+        if message.contains("duplicate") { return .refused("Already done.") }
+        if message.contains("row-level security") { return .refused("That post isn't available any more.") }
+        return .failed("Social couldn't do that just now. Try again.")
+    }
+
+    func rpc<Row: Decodable>(_ name: String, _ args: [String: Any] = [:], as: Row.Type) async throws -> [Row] {
+        let data = try await request("rpc/" + name, body: args)
+        do { return try JSONDecoder().decode([Row].self, from: data) } catch {
+            throw SocialError.failed("Social sent something this version can't read.")
+        }
+    }
+
+    func call(_ name: String, _ args: [String: Any] = [:]) async throws {
+        _ = try await request("rpc/" + name, body: args)
+    }
+
+    // MARK: SocialServer
+
+    public func me() async throws -> String {
+        guard let name = await username() else { throw SocialError.signedOut }
+        return name
+    }
+
+    public func forYou(tag: String?) async throws -> [SocialPost] {
+        try await rpc("social_for_you", ["p_limit": 30, "p_tag": tag ?? NSNull()], as: PostRow.self).map(\.post)
+    }
+
+    public func following(before: Date?) async throws -> [SocialPost] {
+        try await rpc("social_following_feed", ["p_before": before.map(Self.text) ?? NSNull(), "p_limit": 30], as: PostRow.self).map(\.post)
+    }
+
+    public func posts(by username: String, before: Date?) async throws -> [SocialPost] {
+        try await rpc("social_posts_by", ["p_handle": username, "p_before": before.map(Self.text) ?? NSNull(), "p_limit": 30], as: PostRow.self).map(\.post)
+    }
+
+    public func post(_ id: UUID) async throws -> SocialPost? {
+        try await rpc("social_post", ["p_id": id.uuidString.lowercased()], as: PostRow.self).first?.post
+    }
+
+    public func publish(title: String?, body: String, tags: [String]) async throws -> UUID {
+        let data = try await request("social_posts", query: [URLQueryItem(name: "select", value: "id")],
+                                     body: ["title": title ?? NSNull(), "body": body, "tags": tags], prefer: "return=representation")
+        guard let row = try? JSONDecoder().decode([IDRow].self, from: data).first else {
+            throw SocialError.failed("The post went up but its address didn't come back. Pull to refresh.")
+        }
+        return row.id
+    }
+
+    public func delete(_ id: UUID) async throws {
+        _ = try await request("social_posts", method: "DELETE", query: [URLQueryItem(name: "id", value: "eq.\(id.uuidString.lowercased())")])
+    }
+
+    public func setLiked(_ liked: Bool, post: UUID) async throws {
+        let id = post.uuidString.lowercased()
+        if liked {
+            do {
+                _ = try await request("social_likes", body: ["post_id": id])
+            } catch SocialError.refused("Already done.") {}
+        } else {
+            _ = try await request("social_likes", method: "DELETE", query: [URLQueryItem(name: "post_id", value: "eq.\(id)")])
+        }
+    }
+
+    public func comments(on post: UUID) async throws -> [SocialComment] {
+        try await rpc("social_comments_of", ["p_post": post.uuidString.lowercased()], as: CommentRow.self).map {
+            SocialComment(id: $0.id, parent: $0.parent_id, author: $0.handle, authorName: $0.display_name, body: $0.body, date: Self.date($0.created_at) ?? .distantPast)
+        }
+    }
+
+    public func comment(_ body: String, on post: UUID, replyingTo parent: UUID?) async throws {
+        _ = try await request("social_comments", body: [
+            "post_id": post.uuidString.lowercased(), "parent_id": parent?.uuidString.lowercased() ?? NSNull(), "body": body,
+        ])
+    }
+
+    public func profile(_ username: String) async throws -> SocialProfile? {
+        try await rpc("social_profile", ["p_handle": username], as: ProfileRow.self).first.map {
+            SocialProfile(username: $0.handle, displayName: $0.display_name, bio: $0.bio, photoKey: $0.avatar_key, posts: $0.posts,
+                          followers: $0.followers, following: $0.following, iFollow: $0.i_follow, followsMe: $0.follows_me)
+        }
+    }
+
+    public func setFollowing(_ follow: Bool, _ username: String) async throws {
+        try await call(follow ? "social_follow" : "social_unfollow", ["p_handle": username])
+    }
+
+    public func friends() async throws -> [String] {
+        try await rpc("social_friends", as: HandleRow.self).map(\.handle)
+    }
+
+    public func followers(of username: String) async throws -> [String] {
+        try await rpc("social_people", ["p_handle": username, "p_followers": true], as: HandleRow.self).map(\.handle)
+    }
+
+    public func followed(by username: String) async throws -> [String] {
+        try await rpc("social_people", ["p_handle": username, "p_followers": false], as: HandleRow.self).map(\.handle)
+    }
+
+    public func markSeen(_ posts: [UUID], notInterested: Bool) async throws {
+        guard !posts.isEmpty else { return }
+        try await call("social_mark_seen", ["p_posts": posts.map { $0.uuidString.lowercased() }, "p_not_interested": notInterested])
+    }
+
+    public func topTags() async throws -> [String] {
+        try await rpc("social_top_tags", as: TagRow.self).map(\.tag)
+    }
+
+    public func searchPeople(_ query: String) async throws -> [SocialProfile] {
+        try await rpc("social_search_people", ["p_query": query], as: HandleRow.self).map {
+            SocialProfile(username: $0.handle, displayName: $0.display_name, bio: nil)
+        }
+    }
+}
