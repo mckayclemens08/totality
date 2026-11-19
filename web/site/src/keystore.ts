@@ -77,3 +77,10 @@ export async function wipe(): Promise<void> {
   memoryKey = null;
   try { await idb("readwrite", (s) => s.clear()); } catch { /* nothing to clear */ }
 }
+
+/** 32 bytes derived from the content key for one purpose, the way ContentRootKey does it (HKDF-SHA256, empty salt). */
+export async function deriveSeed(info: string): Promise<Uint8Array> {
+  const key = await loadContentKey();
+  if (!key) throw new LockedError("locked");
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: te.encode(info) }, key, 256));
+}

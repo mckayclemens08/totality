@@ -828,8 +828,26 @@ export async function readBody(request, limit) {
   return body
 }
 
-export function serve(arrivals, port) {
+/** Websites that may read a mailbox from a browser (issue 150). Reading only: a preflight for anything but GET
+ *  is refused, so a page can't delete, send or keep mail. The sign-in still decides whose mail is whose. */
+export const WEBSITE_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'https://app.usetotality.com').split(',').map((o) => o.trim()).filter(Boolean)
+
+export function corsHeaders(origin, allowed = WEBSITE_ORIGINS) {
+  return origin && allowed.includes(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}
+}
+
+export function serve(arrivals, port, allowed = WEBSITE_ORIGINS) {
   const server = createServer(async (request, response) => {
+    const cors = corsHeaders(request.headers.origin, allowed)
+    if (request.method === 'OPTIONS') {
+      const ok = Object.keys(cors).length > 0 && request.headers['access-control-request-method'] === 'GET'
+      response.writeHead(ok ? 204 : 403, {
+        ...(ok && { ...cors, 'Access-Control-Allow-Methods': 'GET', 'Access-Control-Allow-Headers': 'Authorization', 'Access-Control-Max-Age': '600' }),
+        'Cache-Control': 'no-store',
+      })
+      response.end()
+      return
+    }
     let tooBig = false
     const { status, body, type } = await arrivals.respond(request.method, request.url, request.headers.authorization,
       request.headers['x-mail-to'], async (limit) => {
@@ -840,6 +858,7 @@ export function serve(arrivals, port) {
     response.writeHead(status, {
       'Content-Length': body?.length ?? 0,
       'Cache-Control': 'no-store',
+      ...cors,
       ...(type && { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff' }),
       ...(tooBig && { Connection: 'close' }),
     })

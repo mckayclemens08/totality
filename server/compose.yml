@@ -97,6 +97,8 @@ services:
       # Outside sending stays off until both are set in .env.
       MAIL_SEND_URL: ${MAIL_SEND_URL:-}
       MAIL_SEND_SECRET: ${MAIL_SEND_SECRET:-}
+      # Websites that may read a mailbox from a browser (read-only). Exact origins only, no wildcard.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://app.usetotality.com,https://web-next.totality-site.pages.dev}
     command: node /app/mail.mjs
     depends_on: [rspamd]
     networks: [default, spam]
@@ -157,6 +159,8 @@ services:
       SUPABASE_URL: ${SUPABASE_URL:?}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?}
       BLOB_LARGE_ACCOUNTS: ${BLOB_LARGE_ACCOUNTS:-}
+      # Websites that may read blobs from a browser. Exact origins only, no wildcard.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://app.usetotality.com,https://web-next.totality-site.pages.dev}
     command: node /app/blobs.mjs
     logging:
       driver: none

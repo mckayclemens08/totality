@@ -3,12 +3,15 @@
 declare const __SUPABASE_URL__: string;
 declare const __SUPABASE_KEY__: string;
 declare const __BLOB_URL__: string;
+declare const __MAIL_URL__: string;
 
 export const config = {
   url: __SUPABASE_URL__,
   key: __SUPABASE_KEY__,
   /** The sealed blob store (docs: issue 54). Holds ciphertext only. */
   blobUrl: __BLOB_URL__,
+  /** The mail server, which holds only mail sealed to this account's key. */
+  mailUrl: __MAIL_URL__,
   /** The account's sign-in address, the same one the iPhone app makes from a username. */
   domain: "@totality.invalid",
 };

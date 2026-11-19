@@ -20,7 +20,7 @@ test("everything loads from our own domain, with integrity", () => {
   for (const f of readdirSync("dist").filter((f) => /\.(js|css)$/.test(f))) {
     const body = readFileSync(`dist/${f}`, "utf8");
     const own = (process.env.SUPABASE_URL ?? "").replace(/^https?:\/\//, "");
-    const allowed = ["www\\.w3\\.org", "usetotality\\.com/blobs/"].concat(own ? [own.replace(/\./g, "\\.")] : []).join("|");
+    const allowed = ["www\\.w3\\.org", "usetotality\\.com/(blobs|mail)/"].concat(own ? [own.replace(/\./g, "\\.")] : []).join("|");
     const hit = body.match(new RegExp("https?://(?!" + allowed + ")[a-z0-9][^\"'`\\s)]{0,60}"));
     assert.equal(hit, null, `${f} reaches another host: ${hit && hit[0]}`);
   }
@@ -31,7 +31,9 @@ test("CSP is strict", () => {
   for (const needed of ["default-src 'none'", "script-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'", "require-trusted-types-for 'script'"]) {
     assert.ok(csp.includes(needed), needed);
   }
-  assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval|\*/);
+  assert.doesNotMatch(csp, /unsafe-eval|\*/);
+  assert.doesNotMatch(csp.match(/script-src[^;]*/)[0], /unsafe/, "script stays strict");
+  assert.match(csp, /style-src 'self' 'unsafe-inline';/, "inline styles only, for mail frames (owner, 2026-11-18)");
   // The page may talk to its own domain, the account server (when built with one) and the blob store. Nothing else.
   const hosts = [...csp.matchAll(/https?:\/\/[^\s;]+/g)].map((m) => m[0]);
   assert.deepEqual(hosts.filter((h) => h !== "https://usetotality.com"), process.env.SUPABASE_URL ? [process.env.SUPABASE_URL] : []);
@@ -66,4 +68,30 @@ test("the content key is never made extractable or written out", () => {
   const ks = readFileSync("src/keystore.ts", "utf8");
   assert.match(ks, /importKey\("raw", raw[^,]*, "HKDF", false/);
   assert.doesNotMatch(ks, /exportKey|extractable: true/);
+});
+
+test("blob: is allowed for images only, and every blob URL is tracked and revoked", () => {
+  const csp = headers.match(/Content-Security-Policy: (.+)/)[1];
+  assert.match(csp, /img-src 'self' blob: data:;/);
+  assert.equal((csp.match(/blob:/g) ?? []).length, 1);
+  const files = readdirSync("src", { recursive: true }).filter((f) => /\.ts$/.test(f));
+  const makers = files.filter((f) => /createObjectURL/.test(readFileSync(`src/${f}`, "utf8")));
+  assert.deepEqual(makers.map((f) => f.replaceAll("\\", "/")), ["photos/view.ts"]);
+  const src = readFileSync("src/photos/view.ts", "utf8");
+  assert.match(src, /urls\.add\(url\)/);
+  assert.match(src, /revokeObjectURL/);
+  assert.match(src, /stopPhotos = \(\): void => \{ run\+\+; revokeAll\(\)/);
+});
+
+test("untrusted mail is framed with no powers, through the single allowed Trusted Types policy", () => {
+  const csp = headers.match(/Content-Security-Policy: (.+)/)[1];
+  assert.match(csp, /require-trusted-types-for 'script'; trusted-types mail-frame;/);
+  const files = readdirSync("src", { recursive: true }).filter((f) => /\.ts$/.test(f));
+  assert.deepEqual(files.filter((f) => /\.srcdoc\s*=/.test(readFileSync(`src/${f}`, "utf8"))).map((f) => f.replaceAll("\\", "/")), ["mail/view.ts"]);
+  const view = readFileSync("src/mail/view.ts", "utf8");
+  assert.match(view, /sandbox: ""/, "an empty sandbox: no scripts, same-origin, forms, popups or navigation");
+  assert.match(view, /default-src 'none'; img-src data:; style-src 'unsafe-inline'/);
+  assert.match(view, /createPolicy\("mail-frame"/);
+  assert.doesNotMatch(view, /allow-/, "no sandbox powers are granted");
+  assert.match(view, /rel: "noopener noreferrer nofollow"/);
 });
