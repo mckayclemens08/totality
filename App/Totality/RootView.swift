@@ -464,6 +464,17 @@ struct RootView: View {
             refreshers[.calendar] = content.calendar.refresher
             refreshers[.web] = content.web.refresher
             refreshers[.messages] = messages.refresher
+            #if os(iOS)
+            // Instant Gmail sync: a push fetches and notifies, and the watches renew on the refresh beat.
+            PushSetup.shared.onWake = { [mail] in
+                await mail.current.refreshForPush(details: GmailPushSettings.shared.showsDetails)
+            }
+            PushSetup.shared.keepWatching = { [mail] in
+                if let plan = PushSetup.plan() { await mail.current.keepGmailWatching(plan) }
+            }
+            AppRefresh.shared.extras["gmailPush"] = { await PushSetup.shared.renew() }
+            PushSetup.shared.start()
+            #endif
             // A pull also brings in the person's other devices. The app already syncs with them on
             // opening and on coming back, so the minute-by-minute refresh leaves it out.
             for refresher in [content.reader.refresher, content.calendar.refresher, content.web.refresher, content.tasks.refresher] {

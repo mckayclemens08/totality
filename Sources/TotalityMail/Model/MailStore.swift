@@ -92,6 +92,8 @@ public protocol MailStore: Sendable {
     /// What's already on this device, read without the network, so Mail shows it at once. Nil when
     /// nothing can be read yet.
     func cached() async -> Mailbox?
+    /// Keeps instant Gmail sync's watches going, or stops them while it's off. Nothing without Gmail.
+    func keepGmailWatching(_ plan: GmailPushPlan) async
 }
 
 extension MailStore {
@@ -99,6 +101,7 @@ extension MailStore {
     public func address() async -> String? { nil }
     public func downloadOutside(progress: @escaping @Sendable (OutsideDownload) -> Void) async -> OutsideDownloadResult? { nil }
     public func searchOutside(_ query: String) async -> OutsideDownloadResult? { nil }
+    public func keepGmailWatching(_ plan: GmailPushPlan) async {}
 }
 
 /// A mailbox that can't be reached at all, for the reason it gives. Every call says the same thing.

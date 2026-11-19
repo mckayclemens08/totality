@@ -30,6 +30,9 @@ struct OutsideAccountsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.s4) {
                     content
+                    if model.phase == .ready, model.accounts.contains(where: { $0.provider == .gmail }) {
+                        GmailPushSettingsView()
+                    }
                     if let notice = model.notice {
                         Text(notice)
                             .font(Typeface.caption)

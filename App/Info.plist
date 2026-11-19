@@ -41,6 +41,8 @@
 	<string>$(TOTALITY_SEALED_STORE_URL)</string>
 	<key>TotalityGoogleClientID</key>
 	<string>$(TOTALITY_GOOGLE_CLIENT_ID)</string>
+	<key>TotalityGmailPushTopic</key>
+	<string>$(TOTALITY_GMAIL_PUSH_TOPIC)</string>
 	<key>UIUserInterfaceStyle</key>
 	<string>Light</string>
 	<key>UIBackgroundModes</key>
