@@ -40,6 +40,20 @@ public protocol SocialServer: Sendable {
     func markSeen(_ posts: [UUID], notInterested: Bool) async throws
     func topTags() async throws -> [String]
     func searchPeople(_ query: String) async throws -> [SocialProfile]
+
+    // Safety (issue 149 §6)
+    func settings() async throws -> SocialSettings
+    func save(_ settings: SocialSettings) async throws
+    func followRequests() async throws -> [String]
+    func approveFollower(_ username: String) async throws
+    func removeFollower(_ username: String) async throws
+    func setMuted(_ muted: Bool, _ person: UUID) async throws
+    func setBlocked(_ blocked: Bool, _ person: UUID) async throws
+    func report(_ username: String, post: UUID?, comment: UUID?, reason: String) async throws
+
+    // Saves
+    func setSaved(_ saved: Bool, post: UUID) async throws
+    func saved() async throws -> [SocialPost]
 }
 
 /// `SocialServer` over Supabase's REST interface. Everything is a call to one of the `social_*` functions
@@ -74,17 +88,21 @@ public struct RestSocialServer: SocialServer {
         let tags: [String]
         let created_at: String
         let edited_at: String?
-        let likes: Int
+        let likes: Int?
         let comments: Int
         let liked: Bool
         let reason: String?
+        let saved: Bool?
 
         var post: SocialPost {
-            SocialPost(
+            var post = SocialPost(
                 id: id, author: handle, authorName: display_name, audience: .everyone, title: title, body: body, tags: tags,
-                date: RestSocialServer.date(created_at) ?? .distantPast, edited: edited_at != nil, likes: likes,
+                date: RestSocialServer.date(created_at) ?? .distantPast, edited: edited_at != nil, likes: likes ?? 0,
                 comments: comments, liked: liked, reason: (reason?.isEmpty ?? true) ? nil : reason
             )
+            post.likesHidden = likes == nil
+            post.saved = saved ?? false
+            return post
         }
     }
 
@@ -98,6 +116,7 @@ public struct RestSocialServer: SocialServer {
     }
 
     struct ProfileRow: Decodable {
+        let id: UUID?
         let handle: String
         let display_name: String?
         let bio: String?
@@ -107,6 +126,18 @@ public struct RestSocialServer: SocialServer {
         let following: Int
         let i_follow: Bool
         let follows_me: Bool
+        let requested: Bool?
+        let private_account: Bool?
+        let muted: Bool?
+        let can_comment: Bool?
+        let can_message: Bool?
+    }
+
+    struct SettingsRow: Decodable {
+        let who_can_comment: String
+        let who_can_message: String
+        let private_account: Bool
+        let hide_like_counts: Bool
     }
 
     struct HandleRow: Decodable {
@@ -255,8 +286,15 @@ public struct RestSocialServer: SocialServer {
 
     public func profile(_ username: String) async throws -> SocialProfile? {
         try await rpc("social_profile", ["p_handle": username], as: ProfileRow.self).first.map {
-            SocialProfile(username: $0.handle, displayName: $0.display_name, bio: $0.bio, photoKey: $0.avatar_key, posts: $0.posts,
-                          followers: $0.followers, following: $0.following, iFollow: $0.i_follow, followsMe: $0.follows_me)
+            var p = SocialProfile(username: $0.handle, displayName: $0.display_name, bio: $0.bio, photoKey: $0.avatar_key, posts: $0.posts,
+                                  followers: $0.followers, following: $0.following, iFollow: $0.i_follow, followsMe: $0.follows_me)
+            p.id = $0.id
+            p.requested = $0.requested ?? false
+            p.privateAccount = $0.private_account ?? false
+            p.muted = $0.muted ?? false
+            p.canComment = $0.can_comment ?? true
+            p.canMessage = $0.can_message ?? true
+            return p
         }
     }
 
@@ -289,5 +327,72 @@ public struct RestSocialServer: SocialServer {
         try await rpc("social_search_people", ["p_query": query], as: HandleRow.self).map {
             SocialProfile(username: $0.handle, displayName: $0.display_name, bio: nil)
         }
+    }
+
+    // MARK: Safety
+
+    public func settings() async throws -> SocialSettings {
+        guard let row = try await rpc("social_my_settings", as: SettingsRow.self).first else { return SocialSettings() }
+        return SocialSettings(
+            whoCanComment: Reach(rawValue: row.who_can_comment) ?? .anyone, whoCanMessage: Reach(rawValue: row.who_can_message) ?? .anyone,
+            privateAccount: row.private_account, hideLikeCounts: row.hide_like_counts
+        )
+    }
+
+    public func save(_ settings: SocialSettings) async throws {
+        try await call("social_set_settings", [
+            "p_who_can_comment": settings.whoCanComment.rawValue, "p_who_can_message": settings.whoCanMessage.rawValue,
+            "p_private_account": settings.privateAccount, "p_hide_like_counts": settings.hideLikeCounts,
+        ])
+    }
+
+    public func followRequests() async throws -> [String] {
+        try await rpc("social_follow_requests", as: HandleRow.self).map(\.handle)
+    }
+
+    public func approveFollower(_ username: String) async throws { try await call("social_approve_follower", ["p_handle": username]) }
+    public func removeFollower(_ username: String) async throws { try await call("social_remove_follower", ["p_handle": username]) }
+
+    public func setMuted(_ muted: Bool, _ person: UUID) async throws {
+        let id = person.uuidString.lowercased()
+        if muted {
+            do { _ = try await request("social_mutes", body: ["muted_id": id]) } catch SocialError.refused("Already done.") {}
+        } else {
+            _ = try await request("social_mutes", method: "DELETE", query: [URLQueryItem(name: "muted_id", value: "eq.\(id)")])
+        }
+    }
+
+    /// Blocking is Totality's one block (`block_contact`), so it also covers Messages and sharing.
+    public func setBlocked(_ blocked: Bool, _ person: UUID) async throws {
+        let id = person.uuidString.lowercased()
+        if blocked {
+            try await call("block_contact", ["p_peer": id])
+        } else {
+            _ = try await request("contacts", method: "DELETE", query: [
+                URLQueryItem(name: "peer_id", value: "eq.\(id)"), URLQueryItem(name: "state", value: "eq.blocked"),
+            ])
+        }
+    }
+
+    public func report(_ username: String, post: UUID?, comment: UUID?, reason: String) async throws {
+        try await call("social_report", [
+            "p_handle": username, "p_post": post?.uuidString.lowercased() ?? NSNull(),
+            "p_comment": comment?.uuidString.lowercased() ?? NSNull(), "p_reason": reason,
+        ])
+    }
+
+    // MARK: Saves
+
+    public func setSaved(_ saved: Bool, post: UUID) async throws {
+        let id = post.uuidString.lowercased()
+        if saved {
+            do { _ = try await request("social_saves", body: ["post_id": id]) } catch SocialError.refused("Already done.") {}
+        } else {
+            _ = try await request("social_saves", method: "DELETE", query: [URLQueryItem(name: "post_id", value: "eq.\(id)")])
+        }
+    }
+
+    public func saved() async throws -> [SocialPost] {
+        try await rpc("social_saved", as: PostRow.self).map(\.post)
     }
 }

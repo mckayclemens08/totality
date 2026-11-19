@@ -10,6 +10,20 @@ final class FakeSocialWorld: @unchecked Sendable {
     var follows: Set<[String]> = []
     var people: Set<String> = []
     var seen: [String: Set<UUID>] = [:]
+    var settings: [String: SocialSettings] = [:]
+    var saves: [String: Set<UUID>] = [:]
+    var mutes: [String: Set<UUID>] = [:]
+    var blocks: [String: Set<UUID>] = [:]
+    var reports: [(from: String, about: String, post: UUID?, comment: UUID?, reason: String)] = []
+    var requests: [String: Set<String>] = [:]
+    var ids: [String: UUID] = [:]
+
+    func id(_ name: String) -> UUID {
+        if let id = ids[name] { return id }
+        let id = UUID()
+        ids[name] = id
+        return id
+    }
     var clock = Date(timeIntervalSince1970: 1_795_000_000)
 
     func person(_ name: String) -> FakeSocial {
@@ -85,20 +99,32 @@ struct FakeSocial: SocialServer {
     func profile(_ username: String) async throws -> SocialProfile? {
         world.lock.withLock {
             guard world.people.contains(username) else { return nil }
-            return SocialProfile(
+            var p = SocialProfile(
                 username: username, displayName: nil, bio: nil,
                 posts: world.posts.values.filter { $0.post.author == username }.count,
                 followers: world.follows.filter { $0[1] == username }.count,
                 following: world.follows.filter { $0[0] == username }.count,
                 iFollow: world.follows.contains([me, username]), followsMe: world.follows.contains([username, me])
             )
+            p.id = world.id(username)
+            p.muted = world.mutes[me]?.contains(world.id(username)) ?? false
+            p.privateAccount = world.settings[username]?.privateAccount ?? false
+            p.requested = world.requests[username]?.contains(me) ?? false
+            return p
         }
     }
 
     func setFollowing(_ follow: Bool, _ username: String) async throws {
         try world.lock.withLock {
             guard world.people.contains(username) else { throw SocialError.refused("That person isn't on Totality.") }
-            if follow { world.follows.insert([me, username]) } else { world.follows.remove([me, username]) }
+            if follow, world.settings[username]?.privateAccount == true {
+                world.requests[username, default: []].insert(me)
+            } else if follow {
+                world.follows.insert([me, username])
+            } else {
+                world.follows.remove([me, username])
+                world.requests[username]?.remove(me)
+            }
         }
     }
 
@@ -117,5 +143,37 @@ struct FakeSocial: SocialServer {
 
     func searchPeople(_ query: String) async throws -> [SocialProfile] {
         world.lock.withLock { world.people.filter { $0.contains(query.lowercased()) }.sorted().map { SocialProfile(username: $0, displayName: nil, bio: nil) } }
+    }
+
+    func settings() async throws -> SocialSettings { world.lock.withLock { world.settings[me] ?? SocialSettings() } }
+    func save(_ settings: SocialSettings) async throws { world.lock.withLock { world.settings[me] = settings } }
+    func followRequests() async throws -> [String] { world.lock.withLock { (world.requests[me] ?? []).sorted() } }
+    func approveFollower(_ username: String) async throws {
+        world.lock.withLock {
+            if world.requests[me]?.remove(username) != nil { world.follows.insert([username, me]) }
+        }
+    }
+    func removeFollower(_ username: String) async throws {
+        world.lock.withLock { world.requests[me]?.remove(username); world.follows.remove([username, me]) }
+    }
+    func setMuted(_ muted: Bool, _ person: UUID) async throws {
+        world.lock.withLock { if muted { world.mutes[me, default: []].insert(person) } else { world.mutes[me]?.remove(person) } }
+    }
+    func setBlocked(_ blocked: Bool, _ person: UUID) async throws {
+        world.lock.withLock {
+            if blocked {
+                world.blocks[me, default: []].insert(person)
+                if let name = world.ids.first(where: { $0.value == person })?.key { world.follows.remove([me, name]); world.follows.remove([name, me]) }
+            } else { world.blocks[me]?.remove(person) }
+        }
+    }
+    func report(_ username: String, post: UUID?, comment: UUID?, reason: String) async throws {
+        world.lock.withLock { world.reports.append((me, username, post, comment, reason)) }
+    }
+    func setSaved(_ saved: Bool, post: UUID) async throws {
+        world.lock.withLock { if saved { world.saves[me, default: []].insert(post) } else { world.saves[me]?.remove(post) } }
+    }
+    func saved() async throws -> [SocialPost] {
+        world.lock.withLock { (world.saves[me] ?? []).compactMap { world.posts[$0].map(view) }.map { var p = $0; p.saved = true; return p } }
     }
 }

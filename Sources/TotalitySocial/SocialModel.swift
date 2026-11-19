@@ -44,6 +44,12 @@ public final class SocialModel {
     /// Who you follow, for the Following feed and for which rooms' invites to accept.
     public private(set) var followingSet: Set<String> = []
     public var requestedProfile: String?
+    /// Your own Social settings, once loaded.
+    public private(set) var settings = SocialSettings()
+    /// People waiting for you to approve their follow, while your account is private.
+    public private(set) var followRequests: [String] = []
+    /// Your saved public posts, newest first.
+    public private(set) var saved: [SocialPost] = []
 
     let server: any SocialServer
     let privatePosts: PrivatePosts?
@@ -68,6 +74,8 @@ public final class SocialModel {
             self.me = me
             followingSet = Set(try await server.followed(by: me))
             tags = (try? await server.topTags()) ?? tags
+            settings = (try? await server.settings()) ?? settings
+            if settings.privateAccount { followRequests = (try? await server.followRequests()) ?? followRequests }
             await loadForYou()
             try await loadFollowing()
             phase = .ready
@@ -219,10 +227,19 @@ public final class SocialModel {
     private func update(_ id: UUID, _ change: (inout SocialPost) -> Void) {
         if let i = forYou.firstIndex(where: { $0.id == id }) { change(&forYou[i]) }
         if let i = following.firstIndex(where: { $0.id == id }) { change(&following[i]) }
+        if let i = saved.firstIndex(where: { $0.id == id }) { change(&saved[i]) }
+        if var p = opened[id] { change(&p); opened[id] = p }
     }
 
     public func post(_ id: UUID) -> SocialPost? {
-        forYou.first { $0.id == id } ?? following.first { $0.id == id }
+        forYou.first { $0.id == id } ?? following.first { $0.id == id } ?? saved.first { $0.id == id } ?? opened[id]
+    }
+
+    /// Posts opened from a profile, which aren't in either feed.
+    private var opened: [UUID: SocialPost] = [:]
+
+    public func remember(_ posts: [SocialPost]) {
+        for post in posts { opened[post.id] = post }
     }
 
     // MARK: People
@@ -275,6 +292,109 @@ public final class SocialModel {
             notice = Self.message(error)
             return false
         }
+    }
+
+    // MARK: Safety
+
+    public func save(_ new: SocialSettings) async -> Bool {
+        do {
+            try await server.save(new)
+            settings = new
+            followRequests = new.privateAccount ? ((try? await server.followRequests()) ?? []) : []
+            return true
+        } catch {
+            notice = Self.message(error)
+            return false
+        }
+    }
+
+    public func answerRequest(_ username: String, approve: Bool) async {
+        do {
+            if approve { try await server.approveFollower(username) } else { try await server.removeFollower(username) }
+            followRequests.removeAll { $0 == username }
+        } catch {
+            notice = Self.message(error)
+        }
+    }
+
+    /// Stops someone following you. They aren't told; they just stop seeing a private account's posts.
+    public func removeFollower(_ username: String) async -> Bool {
+        do { try await server.removeFollower(username); return true } catch { notice = Self.message(error); return false }
+    }
+
+    /// Muting hides their posts from your feeds. They aren't told.
+    public func setMuted(_ muted: Bool, _ profile: SocialProfile) async -> Bool {
+        guard let id = profile.id else { return false }
+        do {
+            try await server.setMuted(muted, id)
+            if muted {
+                forYou.removeAll { $0.author == profile.username }
+                following.removeAll { $0.author == profile.username }
+            }
+            return true
+        } catch {
+            notice = Self.message(error)
+            return false
+        }
+    }
+
+    /// Blocking is Totality-wide: neither of you sees the other's posts, likes, comments or follows, and it
+    /// covers Messages too. They aren't told. Blocking also takes them out of your encrypted rooms.
+    public func setBlocked(_ blocked: Bool, _ profile: SocialProfile) async -> Bool {
+        guard let id = profile.id else { return false }
+        do {
+            try await server.setBlocked(blocked, id)
+            if blocked {
+                followingSet.remove(profile.username)
+                forYou.removeAll { $0.author == profile.username }
+                following.removeAll { $0.author == profile.username }
+                if let privatePosts, privateReason == nil {
+                    if closeFriends.contains(profile.username) { _ = await setCloseFriends(closeFriends.subtracting([profile.username])) }
+                    try? await privatePosts.setMembers(Set(try await server.friends()), of: .friends)
+                }
+            }
+            return true
+        } catch {
+            notice = Self.message(error)
+            return false
+        }
+    }
+
+    /// Sends a report to Totality's moderator. It names the person, and the post or comment when there is one.
+    /// Friends and Close-friends posts are end-to-end encrypted, so the moderator gets only the person's
+    /// name and the reason, never the post.
+    public func report(_ username: String, post: SocialPost?, comment: SocialComment?, reason: ReportReason) async -> Bool {
+        let publicPost = post?.audience == .everyone ? post?.id : nil
+        do {
+            try await server.report(username, post: publicPost, comment: publicPost == nil ? nil : comment?.id, reason: reason.rawValue)
+            notice = "Thanks. Your report went to Totality's moderator."
+            return true
+        } catch {
+            notice = Self.message(error)
+            return false
+        }
+    }
+
+    // MARK: Saves
+
+    public func toggleSaved(_ post: SocialPost) async {
+        guard post.audience == .everyone else {
+            notice = "Friends and Close-friends posts can't be saved yet."
+            return
+        }
+        let on = !post.saved
+        update(post.id) { $0.saved = on }
+        do {
+            try await server.setSaved(on, post: post.id)
+            if on { if !saved.contains(where: { $0.id == post.id }) { var p = post; p.saved = true; saved.insert(p, at: 0) } } else { saved.removeAll { $0.id == post.id } }
+        } catch {
+            update(post.id) { $0.saved = !on }
+            notice = Self.message(error)
+        }
+    }
+
+    public func loadSaved() async {
+        do { saved = try await server.saved() } catch { notice = Self.message(error) }
     }
 
     static func message(_ error: any Error) -> String {

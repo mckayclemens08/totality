@@ -183,6 +183,7 @@ struct PostGrid: View {
 struct GridCard: View {
     let post: SocialPost
     let action: () -> Void
+    @AppStorage(LikeCountsPreference.key) private var hideEverywhere = false
 
     var body: some View {
         let theme = Theme.current
@@ -200,7 +201,7 @@ struct GridCard: View {
                 HStack {
                     Text(Handle.display(post.author)).lineLimit(1)
                     Spacer(minLength: Space.s1)
-                    Label("\(post.likes)", systemImage: post.liked ? "heart.fill" : "heart")
+                    Label(LikeText.count(post, hideEverywhere: hideEverywhere), systemImage: post.liked ? "heart.fill" : "heart")
                         .labelStyle(.titleAndIcon)
                 }
                 .font(Typeface.micro)
@@ -224,6 +225,7 @@ struct FollowingCard: View {
     let onAuthor: () -> Void
     let onOpen: () -> Void
     let onLike: () -> Void
+    @AppStorage(LikeCountsPreference.key) private var hideEverywhere = false
 
     var body: some View {
         let theme = Theme.current
@@ -254,10 +256,10 @@ struct FollowingCard: View {
             .buttonStyle(SoftPress())
             HStack(spacing: Space.s5) {
                 Button(action: onLike) {
-                    Label("\(post.likes)", systemImage: post.liked ? "heart.fill" : "heart")
+                    Label(LikeText.count(post, hideEverywhere: hideEverywhere), systemImage: post.liked ? "heart.fill" : "heart")
                         .foregroundStyle(post.liked ? theme.accent.color : theme.textSecondary.color)
                 }
-                .accessibilityLabel(post.liked ? "Unlike, \(post.likes) likes" : "Like, \(post.likes) likes")
+                .accessibilityLabel(post.liked ? "Unlike" : "Like")
                 Button(action: onOpen) {
                     Text(post.comments == 1 ? "1 comment" : "\(post.comments) comments").foregroundStyle(theme.textSecondary.color)
                 }
