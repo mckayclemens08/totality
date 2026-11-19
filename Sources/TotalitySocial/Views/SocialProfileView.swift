@@ -139,6 +139,7 @@ struct SocialProfileView: View {
                     }
                 } else if profile.iFollow {
                     HeaderPill("Following", systemImage: "checkmark") { confirmingUnfollow = true }.disabled(busy)
+                    messageButton(profile)
                 } else if profile.requested {
                     HeaderPill("Requested", systemImage: "clock") { Task { await follow(false) } }.disabled(busy)
                         .accessibilityHint("Takes back your request")
@@ -147,12 +148,21 @@ struct SocialProfileView: View {
                         Task { await follow(true) }
                     }
                     .disabled(busy)
+                    messageButton(profile)
                 }
             }
             if isMe {
                 Text("Your profile is public: anyone on Totality can see your photo, name, bio and public posts. Edit them from Account.")
                     .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
             }
+        }
+    }
+
+    /// Opens your chat with them in Messages, when their "Who can message me" lets you.
+    @ViewBuilder
+    private func messageButton(_ profile: SocialProfile) -> some View {
+        if let onMessage = model.onMessage, profile.canMessage {
+            HeaderPill("Message", systemImage: "bubble.left") { onMessage(profile.username) }
         }
     }
 

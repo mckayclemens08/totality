@@ -101,3 +101,44 @@ import TotalityCore
         #expect(model.glance?.lines == ["@maya: Sunrise on Timpanogos"])
     }
 }
+
+@MainActor
+@Suite struct SocialLinkTests {
+    final class Reader: ContentReceiver, @unchecked Sendable {
+        let module = ModuleID.reader
+        let kinds: Set<ContentKind> = [.note]
+        var notes: [(String, String)] = []
+        func attachable() async throws -> [ContentRef] { [] }
+        func current(_ ref: ContentRef) async throws -> ContentRef? { ref }
+        func receive(noteTitled title: String, body: String) async throws -> ContentRef {
+            notes.append((title, body))
+            return ContentRef(module: .reader, kind: .note, id: UUID(), keyRef: .plain, preview: .init(title: title))
+        }
+        func receive(file data: Data, named filename: String) async throws -> ContentRef { throw CancellationError() }
+    }
+
+    @Test func aPostBecomesAReaderNoteAndATaskDraft() async throws {
+        let world = FakeSocialWorld()
+        _ = try await world.person("maya").publish(title: "Kyoto ramen list", body: "Ichiran, Menbaka Fire. #food", tags: ["food"])
+        let model = SocialModel(server: world.person("jonah"))
+        let reader = Reader()
+        model.receiver = reader
+        await model.load()
+        let post = try #require(model.forYou.first)
+        await model.saveToReader(post)
+        #expect(reader.notes.first?.0 == "Kyoto ramen list")
+        #expect(reader.notes.first?.1.contains("@maya") == true)
+        let draft = model.taskDraft(post)
+        #expect(draft.title == "Kyoto ramen list")
+        #expect(draft.source.module == .social && draft.source.itemID == post.id.uuidString)
+    }
+
+    @Test func aLinkedPostLoadsWhenItIsNotInAFeed() async throws {
+        let world = FakeSocialWorld()
+        let id = try await world.person("maya").publish(title: nil, body: "Old post.", tags: [])
+        let model = SocialModel(server: world.person("jonah"))
+        #expect(model.post(id) == nil)
+        await model.fetchPost(id)
+        #expect(model.post(id)?.body == "Old post.")
+    }
+}
