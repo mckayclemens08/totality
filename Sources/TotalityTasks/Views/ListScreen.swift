@@ -16,6 +16,8 @@ struct ListScreen: View {
     let listID: UUID
     let onBack: () -> Void
     let onOpen: (UUID) -> Void
+    /// Shares the list, where shared lists can run (step 6).
+    var onShare: ((UUID) -> Void)? = nil
     @State private var expanded: UUID?
     @State private var scheduling: ScheduleTarget?
     @State private var adding: AddTarget?
@@ -128,6 +130,9 @@ struct ListScreen: View {
             Button(list.isPinned ? "Unpin from Lists" : "Pin to Lists", systemImage: list.isPinned ? "pin.slash" : "pin") {
                 Task { await model.changeList(list.id) { $0.isPinned.toggle() } }
             }
+        }
+        if let onShare, list.kind != .smart {
+            Button("Share", systemImage: "person.badge.plus") { onShare(list.id) }
         }
         Divider()
         Button(deleteTitle(list), systemImage: "trash", role: .destructive) {

@@ -9,6 +9,8 @@ struct ListsOverview: View {
     let onBucket: (TaskBucket) -> Void
     let onList: (UUID) -> Void
     let onNew: (TaskList.Kind) -> Void
+    var shared: SharedListsModel? = nil
+    var onShared: (String) -> Void = { _ in }
     /// The built-in Waiting list (step 4).
     var onWaiting: () -> Void = {}
 
@@ -24,6 +26,7 @@ struct ListsOverview: View {
                         ForEach(row) { bucket in tile(bucket) }
                     }
                 }
+                if let shared { SharedListsSection(shared: shared, onOpen: onShared) }
                 smartLists
                 areasAndProjects
                 Color.clear.frame(height: Metric.addButton + Space.s5)

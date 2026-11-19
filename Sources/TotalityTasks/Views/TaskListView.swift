@@ -7,6 +7,9 @@ struct TaskListView: View {
     @Bindable var model: TasksModel
     let bucket: TaskBucket
     @Binding var expanded: UUID?
+    /// Shared lists, for Assigned to me at the top of Today (step 6).
+    var shared: SharedListsModel? = nil
+    var onOpenShared: (String, UUID) -> Void = { _, _ in }
     // Set from the Today options menu in the header.
     @AppStorage("tasks.splitToday") private var splitToday = false
     @State private var scheduling: ScheduleTarget?
@@ -59,6 +62,11 @@ struct TaskListView: View {
     @ViewBuilder private var today: some View {
         let tasks = model.tasks(in: .today)
         let progress = model.progress
+        if let shared, !shared.assignedToMe.isEmpty {
+            AssignedToMeSection(shared: shared, model: model, onOpen: onOpenShared)
+                .padding(.bottom, Space.s3)
+                .plainRow()
+        }
         if !progress.isEmpty {
             TodayProgressView(progress: progress)
                 .padding(.bottom, Space.s4)

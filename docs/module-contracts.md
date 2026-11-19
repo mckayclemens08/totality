@@ -13,6 +13,7 @@ A new contract is recorded here before it is implemented.
 | Social | Messages | social DMs are Messages threads | not built |
 | Calendar | Tasks | each day's events for Upcoming, through `AgendaProvider` | built |
 | Home | Tasks | search, refresh, the big tile with working tick boxes | built |
+| Tasks | Messages | shared lists in end-to-end encrypted Matrix rooms, through `SharedRooms` | built, live two-user run waits |
 
 ## Reader
 
@@ -737,6 +738,43 @@ through `TotalityCore/Modules/TaskLinks.swift`, so no module imports Tasks and T
   (Today's include overdue ones); dropping one on an hour gives it that time, snapped to 15 minutes, for 30
   minutes. Nothing is written to Google or the device's calendars (decision 3). The home tile, schedule and
   search still show events only. Tasks' Upcoming leaves its own items out (`agenda(from:to:except:)`).
+
+## Tasks: sharing (step 6)
+
+Issue 123, step 6; mockup approved 2026-11-18, decisions in the issue. Each shared list or project is its
+own end-to-end encrypted Matrix room. A list that isn't shared stays in `TaskVault` until it is shared; then
+its list and tasks are posted into the new room and the private copy is deleted.
+
+- **Contract.** `SharedRooms` in `TotalityCore` (`Modules/SharedRooms.swift`). The app implements it as
+  `MatrixTaskRooms` on Messages' Matrix connection and hands it to `SharedListsModel`, the way Photos gets
+  `PersonSender`. Tasks never imports Messages, and nothing imports Tasks but the app. Matrix is iPhone-only,
+  so on the Mac build there are no shared lists.
+- **What the server sees.** A room named `Totality shared list` with a fixed topic (`SharedRoomMarker`),
+  who is in it at which power level, and when each post was sent. The list's name, tasks, headings,
+  assignments and comments travel inside encrypted `m.room.message` events of msgtype `app.totality.tasks`.
+  Messages leaves rooms with the marker out of its chats and requests, and won't give a group that name.
+- **Roles are power levels.** Can view 0, Can edit 50, Owner 100. Only the owner (100) may invite, kick,
+  change roles or change room state: the server enforces that. The server can't tell an edit from a
+  comment, so every device replays the room's history and checks each post against the sender's role as of
+  that point (`SharedListState.build`). A viewer's edit, or an assignment to a viewer, is dropped everywhere.
+  Viewers can read and comment. A post's author is the room's sender, never a name in the post.
+- **Conflicts.** A task post carries the whole task with its per-part edit times and merges with
+  `TaskItem.merged`, as between a person's devices. Assignment is last-writer-wins by its own time. Removing
+  a task wins over later edits. A list's own post keeps the newer whole. Reminders, nagging and snoozes are
+  each person's own and are stripped from shared tasks.
+- **People.** Owner leaving: hand over to someone who can edit first (one power-level change sets them to
+  100 and you to 50), or delete for everyone (owner posts `closeList`, removes everyone, leaves). Declining is
+  quiet. Removing someone says plainly they keep what they already saw. Someone who left, was removed or can
+  only view no longer holds tasks: they show as unassigned with no post needed.
+- **Invitations** can't show the list's name or tasks before joining, because they're inside the encrypted
+  room (a change from the mockup, which showed them). The card names who invited you.
+- **Assigned to me** sits at the top of Today. "Message them about it" (off by default) sends one line in
+  your encrypted chat with them.
+- **Refused.** A room that isn't encrypted is never read, posted to, or shown, and is left.
+- **Two-user test.** `SharingTwoUserTests` runs against a stand-in server. The live run, on two iPhones,
+  waits for the owner's friend's account: user 1 shares a project with user 2 as Can edit; user 2 sees no
+  other list of user 1's, accepts, sees a task user 1 assigns them under Assigned to me, and comments; user 1
+  sees the comment; user 1 removes user 2, whose Tasks no longer shows the list.
 
 ## Storage in settings
 
