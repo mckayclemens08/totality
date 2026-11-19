@@ -1,6 +1,6 @@
 # Totality — standing instructions (short form)
 
-iPhone super app, with a website planned in place of a Mac app. Owner: McKay Clemens. Full rules, owner quotes and dates: `docs/standing-rules.md`. Read the matching section there before touching auth, keys, mail, Google, the server or the gates. Architecture: `docs/phase-0-architecture-proposal.md`. Contracts: `docs/module-contracts.md`.
+iPhone super app, with a website planned in place of a Mac app (owner, 2026-11-15: "i think I like that idea better than a mac app"; architecture: `docs/website-architecture-proposal.md`). Owner: McKay Clemens. Full rules, owner quotes and dates: `docs/standing-rules.md`. Read the matching section there before touching auth, keys, mail, Google, the server or the gates. Architecture: `docs/phase-0-architecture-proposal.md`. Contracts: `docs/module-contracts.md`.
 
 ## Non-negotiables (each fails review)
 1. Every user-data table has `owner_id`, `visibility`, RLS on and a mutation policy. Run `scripts/check-schema-invariants.sql` before adding a table.
