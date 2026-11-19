@@ -1,7 +1,10 @@
-// Small pieces the Tasks screens share: sheets, raised fields, day and time inputs. Everything is built with
+// Small pieces the screens share: sheets, raised fields, day and time inputs. Everything is built with
 // textContent through h(), so nothing typed is ever parsed as markup.
-import { h } from "../dom";
-import type { Day } from "./repeat";
+import { h } from "./dom";
+import "./ui.css";
+
+/** A date with no time or zone. */
+export interface Day { year: number; month: number; day: number }
 
 type Attrs = Record<string, string | boolean | ((e: Event) => void)>;
 

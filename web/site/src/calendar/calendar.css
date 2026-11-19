@@ -1,0 +1,16 @@
+/* Calendar editing (mockup v2). Raised and soft; the picked event is lifted, never pressed in. */
+.scroll-x { overflow-x: auto; }
+.weekgrid.wide { min-width: 460px; }
+.daycol { cursor: copy; }
+button.ev.on { background: var(--accent); color: var(--accent-on); }
+.mcell .mnum { all: unset; box-sizing: border-box; cursor: pointer; font-size: 13px; font-weight: 600; align-self: flex-start; padding: 0 7px; border-radius: 10px; }
+.mcell .mnum:hover { background: var(--bg); }
+.mcell .mnum:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mcell.today .mnum { color: var(--accent-on); background: var(--accent); }
+button.more { all: unset; cursor: pointer; font-size: 12px; color: var(--text-secondary); }
+button.more:focus-visible { outline: 2px solid var(--accent); }
+.schedule { display: flex; flex-direction: column; gap: 2px; }
+button.sched-row { flex-direction: row; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.attach-link { color: var(--accent); font-size: 14px; overflow-wrap: anywhere; }
+.status.bad { color: var(--danger); font-weight: 600; }
+@media (max-width: 860px) { .detail { max-width: none; flex-basis: 100%; } }
