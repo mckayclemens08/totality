@@ -1,6 +1,6 @@
 # Website architecture proposal
 
-Draft for the owner to agree. Document only; no code until it is agreed and security-reviewed. Spec: issue 150. Canvas: the approved website canvas. Rules: `docs/standing-rules.md`.
+Owner answers recorded in section 9; still to be agreed as a whole and security-reviewed. Document only; no code until it is agreed and security-reviewed. Spec: issue 150. Canvas: the approved website canvas. Rules: `docs/standing-rules.md`.
 
 ## 1. Stack and $0 hosting
 
@@ -87,12 +87,12 @@ Google (Drive, Gmail) is called directly from the browser with its own sign-in; 
 - The one possible cost: a hosted Michael's-voice model file, size permitting free-tier static hosting (Pages allows 25 MB per file). A bigger model would need R2 storage (free tier 10 GB, but flag if it would pass it). **Flagged, not decided.**
 - Watch Cloudflare billing whenever it is touched.
 
-## 9. Open decisions for the owner
+## 9. Decisions (owner answers, 2026-11-18)
 
-1. Pairing from the iPhone (QR) as the everyday way to unlock the browser, with the recovery key only as a fallback. Yes?
-2. Should the browser keep the key after the tab closes? Re-lock after 30 minutes idle by default, with a "trusted computer" toggle?
-3. Is noble (pure JS) acceptable for sealing, with libsodium WASM only if videos prove too slow?
-4. If Michael's voice is too slow in the browser, may Listen fall back to the browser's built-in voices?
-5. If Michael's voice model is too large for free hosting, is R2 (still free tier) acceptable, or should the model be left out?
-6. Is a signed-in browser also a Matrix device that verifies with the phone, with Messages and calls last?
-7. Mail HTML and documents shown in a sandboxed no-script frame, so some rich mail may look plainer than on the phone. OK?
+1. **Sign in once, then everything works, like adding a device.** Agreed in this shape: the first time on a computer you sign in and pair once from the phone (the "add a device" step). After that that browser stays signed in and unlocked across restarts with no further prompts. The recovery key stays as a fallback only.
+2. **Key lifetime (my judgement):** follows from 1. A paired browser keeps its key until you sign out or remove it from Devices in the app. A "this is a shared computer" choice at sign-in instead re-locks when the tab closes or after 30 minutes idle. Sign-out wipes the key and local data.
+3. **Sealing library:** noble (pure JS), libsodium WASM only if large videos prove too slow. Agreed.
+4. **Voice fallback:** if Michael's voice is too slow in the browser, Listen falls back to the browser's built-in voices. Agreed.
+5. **Voice model hosting (my judgement):** no R2 and no new spend. Ship the model only if it fits free Pages hosting (25 MB per file, split into pieces if needed). If it doesn't, the web uses built-in voices (4).
+6. **Matrix:** tentatively yes, decided by me: the browser is a verified Matrix device, with Messages and calls last.
+7. **Mail HTML:** not accepted as plainer. Mail renders with full formatting. The sandboxed frame blocks only scripts, forms and navigation, which does not change how mail looks. Remote images follow the same rule as the phone. Mail and documents get the isolated frame; this is a security control, not a visual downgrade.
