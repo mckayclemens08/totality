@@ -73,6 +73,25 @@ export async function deleteSlot(token: string, id: string): Promise<void> {
   try { await call(`/rest/v1/pairing_slots?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers: headers(token) }); } catch { /* it expires anyway */ }
 }
 
+// ---- This browser on the account's Devices list (supabase/migrations/20261119000001_web_browsers.sql) ----
+async function rpc(token: string, name: string, args: Record<string, unknown>): Promise<unknown> {
+  const res = await call(`/rest/v1/rpc/${name}`, { method: "POST", headers: headers(token), body: JSON.stringify(args) });
+  if (res.status === 401) throw new NetError("wrongPassword");
+  if (!res.ok) throw new NetError("failed");
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+/** "ok", or "removed" when this browser was removed from the iPhone. Adds it to the list the first time. */
+export async function browserCheckIn(token: string, label: string): Promise<"ok" | "removed"> {
+  return (await rpc(token, "browser_check_in", { p_label: label })) === "removed" ? "removed" : "ok";
+}
+export async function browserMatrixDevice(token: string, device: string | null): Promise<void> {
+  await rpc(token, "browser_set_matrix_device", { p_device: device });
+}
+export async function browserForget(token: string): Promise<void> {
+  try { await rpc(token, "browser_forget", {}); } catch { /* the session ends anyway */ }
+}
+
 export interface ObjectRow { id: string; kind: string; meta_cipher: string | null; storage_key: string | null; byte_size: number | null; content_hash?: string | null }
 
 /** The signed-in account's live docs and files, a page at a time (the server stops at its own page size). */
@@ -118,6 +137,72 @@ export async function mailMessage(token: string, id: string): Promise<Uint8Array
   if (res.status === 404) return null;
   if (!res.ok) throw new NetError(res.status === 401 ? "wrongPassword" : "failed");
   return new Uint8Array(await res.arrayBuffer());
+}
+
+// ---- Messages: the Matrix server (matrix.usetotality.com). Bearer tokens only, never cookies. ----
+const MATRIX = "https://matrix.usetotality.com";
+async function matrix(path: string, init: RequestInit & { token?: string }): Promise<Response> {
+  const { token, ...rest } = init;
+  try {
+    return await fetch(MATRIX + path, {
+      ...rest, credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store",
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(rest.body ? { "content-type": "application/json" } : {}) },
+    });
+  } catch { throw new NetError("offline"); }
+}
+
+/** A one-minute pass for the Matrix server, from the account server's matrix-login function. */
+export async function matrixPass(token: string): Promise<string> {
+  const res = await call("/functions/v1/matrix-login", { method: "POST", headers: headers(token), body: "{}" });
+  if (res.status === 401) throw new NetError("wrongPassword");
+  if (!res.ok) throw new NetError("failed");
+  const body = (await res.json()) as { token?: unknown };
+  if (typeof body.token !== "string") throw new NetError("failed");
+  return body.token;
+}
+
+/** Signs a new Matrix device in with that pass. */
+export async function matrixLogin(pass: string, deviceName: string): Promise<{ userId: string; deviceId: string; accessToken: string }> {
+  const res = await matrix("/_matrix/client/v3/login", { method: "POST", body: JSON.stringify({ type: "org.matrix.login.jwt", token: pass, initial_device_display_name: deviceName }) });
+  if (res.status === 429) throw new NetError("rateLimited");
+  if (!res.ok) throw new NetError(res.status === 401 || res.status === 403 ? "wrongPassword" : "failed");
+  const b = (await res.json()) as { user_id?: unknown; device_id?: unknown; access_token?: unknown };
+  if (typeof b.user_id !== "string" || typeof b.device_id !== "string" || typeof b.access_token !== "string") throw new NetError("failed");
+  return { userId: b.user_id, deviceId: b.device_id, accessToken: b.access_token };
+}
+
+/** Logs a Matrix device out; the server deletes it and its keys. Best effort, a few seconds at most. */
+export async function matrixLogout(token: string): Promise<void> {
+  const quit = new AbortController();
+  const timer = setTimeout(() => quit.abort(), 4000);
+  try { await matrix("/_matrix/client/v3/logout", { method: "POST", token, body: "{}", signal: quit.signal }); } catch { /* best effort */ }
+  clearTimeout(timer);
+}
+
+/** One file from this server's media store (signed in). Callers pass only mxc://usetotality.com/ addresses. */
+export async function matrixMedia(token: string, mxc: string, max: number): Promise<Uint8Array> {
+  const m = /^mxc:\/\/usetotality\.com\/([A-Za-z0-9_-]+)$/.exec(mxc);
+  if (!m) throw new NetError("failed");
+  const res = await matrix(`/_matrix/client/v1/media/download/usetotality.com/${m[1]}`, { token });
+  if (!res.ok) throw new NetError(res.status === 401 ? "wrongPassword" : "failed");
+  const size = Number(res.headers.get("content-length") ?? "0");
+  if (size > max) throw new NetError("failed");
+  // Read in pieces and stop past the limit, so a server that sends no length can't fill memory.
+  const reader = res.body?.getReader();
+  if (!reader) throw new NetError("failed");
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > max) { await reader.cancel().catch(() => {}); throw new NetError("failed"); }
+    parts.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) { bytes.set(p, at); at += p.length; }
+  return bytes;
 }
 
 export { b64 };
