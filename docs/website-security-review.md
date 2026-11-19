@@ -24,3 +24,14 @@ Reviews `docs/website-architecture-proposal.md`. Design changes below are folded
 No finding needs an owner decision. Changes: slot secret and key-hash commitment in pairing (1), phone-side "Add a device" gating (2), remove-device wording (3), cookie-or-memory choice at step 3 (5), no `allow-same-origin` for mail frames (6). Step 1 carries the headers in (4) and (9).
 
 Further review is required for pairing code (step 3), the mail renderer (step 5) and Matrix (step 7).
+
+## Pairing implementation notes (PR for issue 150, step 3)
+
+- Protocol, in order: sign in; the browser makes a one-time X25519 key and slot secret, and creates a `pairing_slots` row (public key and a browser name only); the QR holds the slot ID, the slot secret and a hash of the browser's public key; the iPhone reads the row, refuses unless the hash matches, seals the content key (XChaCha20-Poly1305, key from X25519 + HKDF salted with the slot secret, bound to the slot ID) and fills the slot once; the browser opens it, deletes the slot and keeps the key non-extractable.
+- The six-digit code is derived from the slot ID and the browser's public key, so it shows the person the iPhone scanned this screen's code. It is not a secret.
+- The iPhone sends nothing unless the recovery key is set up, so a browser is only ever given a key the recovery key can also restore.
+- Slots: 2-minute server-set expiry, one fill, at most five open, owner-only rows, no client-set expiry. Row policies are tested in `backend-tests/pairing.test.js`.
+- Not in the mockup: the "Near Provo, Utah" line is left out, because a location needs an IP lookup service. The iPhone shows the website and browser name instead.
+- Session storage (review #5): the account server isn't on `usetotality.com`, so no cookie. The access token stays in memory; on "my computer" the refresh token is kept sealed under a non-extractable key; on a shared computer nothing is written.
+- Shared-computer lock after 30 idle minutes drops the key from memory. Residual: a page script could have copied derived object keys while open (review #4).
+- Still open for later steps: removing a browser from Devices on the iPhone (the list and remove button), and root-key rotation (review #3).

@@ -3,14 +3,22 @@ import { build } from "esbuild";
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 
+const supabaseUrl = (process.env.SUPABASE_URL ?? "").replace(/\/+$/, "");
+if (supabaseUrl && !/^https:\/\/[a-z0-9.-]+$/i.test(supabaseUrl)) throw new Error("SUPABASE_URL must be an https origin");
+
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist", { recursive: true });
 await build({
   entryPoints: { app: "src/main.ts" },
   bundle: true, minify: true, format: "esm", target: "es2022",
   outdir: "dist", entryNames: "[name]", legalComments: "none",
+  // Supabase's public URL and publishable key (the same two the iPhone app is built with). Not secrets.
+  define: { __SUPABASE_URL__: JSON.stringify(supabaseUrl), __SUPABASE_KEY__: JSON.stringify(process.env.SUPABASE_PUBLISHABLE_KEY ?? "") },
 });
 await cp("public", "dist", { recursive: true });
+// The page may talk to the account server and nowhere else.
+const headersFile = (await readFile("dist/_headers", "utf8")).replace("connect-src 'self'", `connect-src 'self'${supabaseUrl ? " " + supabaseUrl : ""}`);
+await writeFile("dist/_headers", headersFile);
 
 const sri = (bytes) => "sha384-" + createHash("sha384").update(bytes).digest("base64");
 const hashed = {};

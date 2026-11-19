@@ -266,6 +266,12 @@ private struct DevicesScreen: View {
                 AccountDetail(text: "Signed in as \(username).")
             }
             AccountDetail(text: model.deviceRegistered ? "This device is added to your account." : "This device isn't added to your account yet.")
+            if let pairing = model.pairing {
+                NavigationLink { PairBrowserScreen(model: pairing) } label: {
+                    SettingsRow("Pair a browser", value: nil)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }

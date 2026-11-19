@@ -44,10 +44,14 @@ enum AccountSetup {
                   let key = try? await content.rootKey() else { return nil }
             return key.matrixRecoverySecret()
         }
-        return AccountModel(
-            service: service, backup: BackupModel(service: service, content: content),
-            sync: SyncModel(), syncRemote: service.syncRemote
+        let backup = BackupModel(service: service, content: content)
+        let model = AccountModel(service: service, backup: backup, sync: SyncModel(), syncRemote: service.syncRemote)
+        // A browser is only ever given a key the recovery key can also restore.
+        model.pairing = PairBrowserModel(
+            service: service, rootKey: { try await content.rootKey() },
+            keyIsBackedUp: { if case .ready = backup.phase { true } else { false } }
         )
+        return model
     }
 
     /// Messages for whoever is signed in. The Matrix SDK is linked for iPhone only.
