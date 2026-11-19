@@ -12,6 +12,8 @@ iPhone super app, with a website planned in place of a Mac app (owner, 2026-11-1
 7. Modules never import each other. Cross-module work goes through `ContentRef` and `ModuleRegistry`.
 8. Plaid is read-only, and Google scopes are minimal, except Gmail `gmail.modify` and full Drive access for the Reader (see the full rules).
 
+Social is native: Totality's own network, not Bluesky or atproto. On federation the owner chose "Native now, maybe later" (2026-11-17, issue 149). Public posts are readable Supabase rows so For You can rank them; Friends and Close-friends posts go through Matrix, end-to-end encrypted.
+
 ## Gates
 Phases 0 and 1 are both being built, and Phase 2 is open starting with Messages. Phase 4 is closed. A module is done only when:
 - its spec is agreed

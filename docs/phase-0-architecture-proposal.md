@@ -10,13 +10,13 @@
 
 | # | Question the brief left to Phase 0 | This proposal's answer |
 |---|---|---|
-| 1 | The Supabase ↔ protocol-server seam (§5 "tension Claude Code must resolve") | Three-plane split: **Supabase = account + private ciphertext + solo modules**, **Matrix = all private interpersonal traffic**, **atproto = public social only**. §3 below. |
-| 2 | Federation protocol for social: ActivityPub vs AT Protocol (§14, §17) | **AT Protocol**, with public-only scope. Private/contacts posts do *not* go on atproto — they ride Matrix. §4. |
+| 1 | The Supabase ↔ protocol-server seam (§5 "tension Claude Code must resolve") | Three-plane split: **Supabase = account + private ciphertext + solo modules**, **Matrix = all private interpersonal traffic**, **Supabase also holds public social posts**, readable, on Totality's own network (it was atproto until 2026-11-17, see §3.3). §3 below. |
+| 2 | Federation protocol for social: ActivityPub vs AT Protocol (§14, §17) | **Neither, for now.** The owner chose a native network on 2026-11-17: "Native now, maybe later". Public posts live in Supabase, readable, so For You can rank them; Friends and Close-friends posts ride Matrix, end-to-end encrypted. Federating public posts stays possible later and isn't committed to. §3.3, §4. |
 | 3 | E2E key recovery design (§14, §17) | **Matrix SSSS as the single key-backup substrate** for Matrix keys *and* Totality content keys. One recovery key for everything. §6. |
 | 4 | AI inference + permission design (§15) | Capability-grant table + client-side decryption + hosted-inference disclosure gate. Default local. §7. |
 | 5 | Data model with `owner_id` + `visibility` on every entity, RLS sketch (§6) | §5. |
 | 6 | Module-boundary contracts (§6) | One `ContentRef` envelope; modules never import each other. §8. |
-| 7 | Federated identity / contacts / invites (§6) | One Totality identity binding four names (handle, email, DID, MXID). §4.3, §9. |
+| 7 | Federated identity / contacts / invites (§6) | One Totality identity: the handle and the MXID derived from it. No DID is made now (§4.3). §4.3, §9. |
 
 Plus, in §11, **twelve conflicts and blockers** that need owner decisions. A blocks all building; K blocks stage B.
 
@@ -40,24 +40,24 @@ The right seam: **a record's transport is chosen by its visibility, not by the m
                        └───────┬──────────┬──────────────┬─────────┘
              private, interpersonal │     │ private, solo │ public
                        ┌───────────▼──┐ ┌─▼────────────┐ ┌▼──────────────┐
-                       │ MATRIX       │ │ SUPABASE     │ │ ATPROTO PDS   │
-                       │ homeserver   │ │ (Postgres,   │ │ (public       │
-                       │ (Synapse/    │ │  Storage,    │ │  records,     │
-                       │  Tuwunel)    │ │  Auth, RT)   │ │  signed)      │
+                       │ MATRIX       │ │ SUPABASE     │ │ SUPABASE      │
+                       │ homeserver   │ │ (Postgres,   │ │ social_*      │
+                       │ (Synapse/    │ │  Storage,    │ │ tables (was   │
+                       │  Tuwunel)    │ │  Auth, RT)   │ │  atproto)     │
                        ├──────────────┤ ├──────────────┤ ├───────────────┤
                        │ DMs          │ │ account      │ │ public posts  │
                        │ communities  │ │ handle dir   │ │ follows       │
                        │ channels     │ │ ciphertext   │ │ likes/reposts │
                        │ call signal  │ │  blobs       │ │ public profile│
-                       │ device keys  │ │ calendar     │ │ feed gens     │
-                       │ private posts│ │ money view   │ └───────────────┘
+                       │ device keys  │ │ calendar     │ │ For You rank  │
+                       │ friends posts│ │ money view   │ └───────────────┘
                        │ shared docs  │ │              │
                        │ SSSS backup  │ │ audit log    │
                        └──────────────┘ │ push routing │
                                         └──────────────┘
 ```
 
-**Everything in the Matrix column and every blob in Supabase is ciphertext the server cannot read.** Supabase holds plaintext for exactly four things: the account row, the public handle directory, the audit log, and push-notification routing metadata. That list is the thing the owner approves line by line (§14 bullet 7); it is reproduced as an explicit table in §5.4 and nothing may be added to it without owner sign-off.
+**Everything in the Matrix column and every blob in Supabase is ciphertext the server cannot read.** Supabase holds plaintext for exactly five things: the account row, the public handle directory, the audit log, push-notification routing metadata, and, since Social became native (2026-11-17, §3.3), public social posts with their likes, comments and follows. That list is the thing the owner approves line by line (§14 bullet 7); it is reproduced as an explicit table in §5.4 and nothing may be added to it without owner sign-off.
 
 ### Why Matrix carries private *posts* and *docs*, not just chat
 
@@ -81,7 +81,7 @@ Large binaries never go through Matrix (its media repo on a Pi is a bad idea). P
 |---|---|---|---|---|
 | Account/data | Supabase | Supabase free tier | self-hosted on Pi (Docker) | $0 |
 | Private traffic | Matrix **Tuwunel** (not Synapse) | Oracle Cloud Always-Free ARM, behind a Cloudflare tunnel | Pi | $0 |
-| Public social | atproto PDS (`bluesky-social/pds`) | **deferred to Phase 2** | Pi | $0 |
+| Public social | Supabase (`social_*` tables), no separate server | Supabase free tier | Pi | $0 |
 | Calls | LiveKit Cloud free tier | cloud | self-host on Pi (later) | $0 |
 | AI inference | Ollama on the owner's Mac | Mac (LAN + Tailscale) | Pi or Mac | $0 |
 | Private network | Tailscale free tier | — | — | $0 |
@@ -90,7 +90,7 @@ Large binaries never go through Matrix (its media repo on a Pi is a bad idea). P
 
 The server runs with registration and federation off. Cloudflare's tunnel means no inbound ports, but Cloudflare ends TLS, so it handles traffic in the clear. Matrix's E2E content and the key backup stay ciphertext there. Sign-in tokens don't.
 
-**atproto is deferred, not dropped.** Phase 1 ships no social module (§7), so running a PDS in Phase 0/1 buys nothing but a second identity system to keep alive. What Phase 0 *does* do is reserve the DID in the identity model (§4.3) so adding it in Phase 2 is additive.
+**atproto is dropped for now (owner, 2026-11-17).** This paragraph used to say atproto was deferred to Phase 2. The owner then said "I don't want to use bluesky" and "not using bluesky, i want it native", and, asked whether that changes the federation principle, chose **"Native now, maybe later"** (issue 149). Social is Totality's own network with no outside server. Public posts are rows in Supabase. The `did` column stays in `profiles`, empty, so federating later remains additive, but nothing reserves or publishes a DID now.
 
 ---
 
@@ -112,16 +112,22 @@ One homeserver, domain `totality.<owner-domain>`. Room types:
 |---|---|---|
 | `m.room` (DM) | 1:1 chat | standard, E2E via Megolm |
 | `m.space` + child rooms | a community and its channels | Discord-shaped, §13 |
-| `app.totality.timeline` | one per user: their private/contacts posts | members = contacts with `canSeePrivatePosts` |
+| `app.totality.timeline` | two per user, made when first needed: their Friends posts and their Close-friends posts (§3.3) | Friends = people they follow who follow them back; Close friends = a list they choose |
 | `app.totality.doc` | one per shared document | Yjs update events |
 | `app.totality.album` | one per shared album/collection | media key events |
 | `app.totality.keystore` | the user's own SSSS account data | not a room — `account_data`, §6 |
 
 Calls: Matrix carries signalling (`m.call.*`); LiveKit carries media. 1:1 calls use WebRTC's DTLS-SRTP with the key fingerprint exchanged over the E2E Matrix channel — that is genuinely E2E and may be labelled so. **Group calls through a LiveKit SFU are not E2E** unless LiveKit's E2EE insertable-streams mode is enabled; if it isn't, the UI says "encrypted in transit" (§11, encryption-claims rule).
 
-### 3.3 atproto plane (Phase 2)
+### 3.3 Public social plane (native, changed 2026-11-17)
 
-Self-hosted PDS. Holds only `visibility == .public` posts, the follow graph, likes, reposts, and the public profile. Lexicon: start from `app.bsky.*` rather than inventing `app.totality.*`, so the owner's posts are visible to the existing Bluesky network from day one — which is the entire point of federating. Totality-specific fields go in a sidecar record type that Bluesky clients ignore.
+**This section was the atproto plane.** It planned a self-hosted PDS speaking `app.bsky.*` so public posts would reach Bluesky. On 2026-11-17 the owner said "I don't want to use bluesky" and "not using bluesky, i want it native", and chose **"Native now, maybe later"** for federation (issue 149). So:
+
+- **Public posts** are rows in Supabase (`social_posts`), readable by anyone signed in to Totality, because For You ranks them on the server. Their likes, comments and the follow graph are Supabase rows too. Every table still has `owner_id`, `visibility`, RLS and a mutation policy. The public tables are pinned to `visibility = 'public'` by a check constraint, which is what lets them hold readable text (§5.1, §5.4).
+- **Friends and Close-friends posts** never touch those tables. Each author has one end-to-end encrypted Matrix room per audience (§3.2's `app.totality.timeline`, now two rooms): Friends (people you follow who follow you back) and Close friends (a list you choose). Likes and replies on those posts travel in the same room, so they're encrypted too. The server sees who is in each room, and so does everyone in it.
+- **A post is one thing, whatever its visibility.** The client's `SocialPost` is the same type for both, and moving a public post to Friends deletes the readable row.
+- **For You** is Totality's own ranking (issue 149 §5), a Postgres function reading public posts only, at $0 on the free tier.
+- **Federation is a principle we may come back to, not a feature we're building.** Nothing in the schema stops a later bridge from publishing `social_posts` outward, and the handle is already the stable public name.
 
 ---
 
@@ -147,7 +153,7 @@ struct TotalityIdentity {
     let handle: String        // "mckay" — the public identity, unique, immutable after 30 days
     let email: String         // credential + recovery anchor
     let mxid: String          // "@mckay:totality.example" — derived from handle
-    let did: String?          // "did:plc:..." — nil until Phase 2
+    let did: String?          // unused since 2026-11-17: Social is native (§3.3)
     let phone: String?        // optional, never identity
 }
 ```
@@ -155,7 +161,7 @@ struct TotalityIdentity {
 Binding rules:
 
 - `mxid` is **derived** from `handle`, not independently chosen. Handle changes rename the Matrix account (Matrix does not support rename → this is why handles are immutable after a 30-day grace window; see §11-F).
-- `did` is `did:plc` with the handle verified via `_atproto` DNS TXT or `/.well-known/atproto-did` on the owner's domain. DID is the durable identifier; handle is a human-readable alias that can be re-pointed.
+- `did` was going to be `did:plc`, verified through `_atproto` DNS or `/.well-known/atproto-did`. Social became native on 2026-11-17 ("Native now, maybe later", §3.3), so no DID is made or published. The column stays empty in case federation comes back.
 - The binding is published at `https://totality.<domain>/.well-known/totality-identity/<handle>` as a JSON document signed by the user's identity key, so another server can verify that the MXID and the DID belong to the same person. **This is the one piece of this design with no upstream precedent** and should get specific attention in the independent review.
 
 ### 4.4 Single sign-on across planes
@@ -164,9 +170,9 @@ The user signs in once to Supabase. The client then:
 
 1. Gets a Supabase JWT.
 2. Exchanges it at the Matrix homeserver via JWT login. **Unverified:** the only documentation found describes statically configured keys, not a JWKS URL, so expect to configure Supabase's public signing key by hand. Spike this at step 0.4 before depending on it.
-3. (Phase 2) Signs atproto records with a device-held signing key registered to the DID; no session exchange needed because atproto auth is key-based.
+3. Social needs nothing extra: public posts use the same Supabase session, and Friends and Close-friends posts the same Matrix session. (This step used to sign atproto records; dropped 2026-11-17, §3.3.)
 
-One sign-in, three planes. The password reaches the account server and nothing else.
+One sign-in, two planes. The password reaches the account server and nothing else.
 
 ---
 
@@ -353,6 +359,7 @@ Three notes that matter more than the SQL:
 |---|---|---|---|
 | Email, auth metadata | `auth.users` | Supabase Auth needs it to authenticate | who has an account |
 | Handle, display name, avatar, bio | `profiles` | it's the public directory; that's its job | nothing — public by design |
+| Public posts, their likes and comments, who follows whom | `social_posts`, `social_likes`, `social_comments`, `social_follows` (issue 149, owner agreed 2026-11-17) | For You ranks public posts on the server; follower lists are public | nothing beyond what's public by design. Friends and Close-friends posts are never here: they're in Matrix |
 | MXID, DID | `profiles` | must be resolvable by other servers | the federation addresses |
 | Contact graph (who ↔ who, state) | `contacts` | RLS needs it to evaluate `contacts` visibility | **the social graph** |
 | Device names, platform, last-seen | `devices` | key management UI needs it | device inventory, activity times |
