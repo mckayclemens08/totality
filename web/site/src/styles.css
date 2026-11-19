@@ -156,3 +156,19 @@ button.ev.pill { display: block; }
 .mcell.out { opacity: 0.55; }
 .mcell.today .mnum { color: var(--accent-on); background: var(--accent); border-radius: 10px; padding: 0 7px; align-self: flex-start; }
 .mnum { font-size: 13px; font-weight: 600; }
+
+/* ---- tasks ---- */
+.tasknav { flex: 1 1 200px; max-width: 240px; padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+.tasklist { flex: 999 1 420px; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+button.navrow { flex-direction: row; align-items: center; justify-content: space-between; }
+button.taskrow { flex-direction: row; align-items: center; gap: 12px; padding: 13px 14px; border-radius: 16px; }
+.task-title { flex: 1; font-size: 15px; }
+.task-title.done { color: var(--text-secondary); text-decoration: line-through; }
+.circle { flex: none; width: 18px; height: 18px; border-radius: 9px; box-sizing: border-box; border: 2px solid var(--shadow-dark); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--accent-on); }
+.circle.done { background: var(--accent); border-color: var(--accent); }
+.chip { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 8px; background: var(--bg); color: var(--text-secondary); }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
+.chip.big { font-size: 12px; padding: 5px 10px; border-radius: 10px; box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light); }
+.step-row { display: flex; align-items: center; gap: 9px; font-size: 14px; margin-top: 8px; }
+.spaced { margin-top: 14px; }
+.count { margin-left: auto; }

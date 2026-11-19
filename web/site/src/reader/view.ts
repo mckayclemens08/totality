@@ -58,7 +58,7 @@ export function drawBlocks(doc: Document, into: Element, blocks: Block[]): void 
 
 /** A frame that can run no script and sends no request of its own. The page fills it in; nothing in the
  *  note is ever parsed as HTML, and the frame has no way to reach the page's key or session. */
-function noteFrame(blocks: Block[]): HTMLIFrameElement {
+export function noteFrame(blocks: Block[]): HTMLIFrameElement {
   const frame = h("iframe", { class: "note-frame", sandbox: "allow-same-origin", title: "Note", referrerpolicy: "no-referrer" });
   frame.addEventListener("load", () => {
     const doc = frame.contentDocument;
