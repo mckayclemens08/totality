@@ -28,6 +28,13 @@ from tables t
 join pg_attribute a on a.attrelid = t.oid and a.attnum > 0 and not a.attisdropped
 where t.relname not in (select name from allowlist)
   and a.attname in ('title', 'filename', 'file_name', 'name', 'body', 'content', 'caption', 'text')
+  -- A table that can only ever hold public rows may hold readable text: Social's public posts and
+  -- comments (owner, 2026-11-17, issue 149). It must say so with a check pinning visibility to 'public'.
+  and not exists (
+    select 1 from pg_constraint k
+    where k.conrelid = t.oid and k.contype = 'c'
+      and pg_get_constraintdef(k.oid) ~ '^CHECK \(\(visibility = ''public''::(public\.)?visibility_t\)\)$'
+  )
 union all
 select p.proname, 'anon can execute this function'
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
