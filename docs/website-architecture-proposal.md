@@ -1,6 +1,6 @@
 # Website architecture proposal
 
-Owner answers recorded in section 9; still to be agreed as a whole and security-reviewed. Document only; no code until it is agreed and security-reviewed. Spec: issue 150. Canvas: the approved website canvas. Rules: `docs/standing-rules.md`.
+Agreed by the owner, 2026-11-18 (answers in section 9). Security review is still required before code. Document only; no code until it is agreed and security-reviewed. Spec: issue 150. Canvas: the approved website canvas. Rules: `docs/standing-rules.md`.
 
 ## 1. Stack and $0 hosting
 
