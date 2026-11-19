@@ -1003,7 +1003,11 @@ extension ServerMailStore: OutsideAccountStore {
             do {
                 let fresh = try await google.signIn.refreshed(refreshToken: grant.refreshToken)
                 // Linked first, so the first note after the watch starts has somewhere to go.
-                guard let idToken = fresh.idToken else { continue }
+                guard let idToken = fresh.idToken else {
+                    plan.book.setNeedsAllow(account.id, true)
+                    continue
+                }
+                plan.book.setNeedsAllow(account.id, false)
                 try await plan.push.linkGmail(idToken: idToken)
                 let expiry = try await google.watch(topic: plan.topic, accessToken: fresh.accessToken)
                 plan.book.set(account.id, expiry: expiry)
@@ -1014,6 +1018,7 @@ extension ServerMailStore: OutsideAccountStore {
         // Watches recorded for accounts no longer here.
         let here = Set(gmail.map(\.id))
         for id in plan.book.watched() where !here.contains(id) { plan.book.set(id, expiry: nil) }
+        for account in gmail where !plan.settings.isOn { plan.book.setNeedsAllow(account.id, false) }
     }
 
     private func stopGmailPush(_ id: UUID, address: String, grant: GoogleGrant, google: GoogleOAuth, plan: GmailPushPlan) async {

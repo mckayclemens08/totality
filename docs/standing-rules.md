@@ -67,7 +67,9 @@ These fail review, full stop. There is no "just for now" version of any of them.
    - **The server sees** only that a Gmail address got mail, and when.
    - **The server never sees** mail content, subjects, senders, or any Google access or refresh token.
    - **To link an address** the phone shows a Google ID token for it, which proves the address is that
-     person's and opens nothing in Gmail. The server checks Google's signature and drops it.
+     person's and opens nothing in Gmail. The server checks Google's signature and drops it. For that,
+     Gmail's sign-in also asks for `openid email` (owner, 2026-11-19: "Yes, option A"), and an account
+     added before then is asked once, with one tap, from Outside Accounts.
    - **It stores** a keyed hash of the address mapped to that person's push tokens, never the address
      in plain text, and it logs nothing.
    - The notification text is built on the phone, so the server never sees it either.

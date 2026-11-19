@@ -43,6 +43,7 @@ public struct GmailWatchBook: @unchecked Sendable {
 
     private let defaults: UserDefaults
     private static let prefix = "mail.gmailPush.watch."
+    private static let allowPrefix = "mail.gmailPush.allow."
 
     public init(defaults: UserDefaults) {
         self.defaults = defaults
@@ -60,6 +61,17 @@ public struct GmailWatchBook: @unchecked Sendable {
     public func needsRenewal(_ account: UUID, now: Date) -> Bool {
         guard let expiry = expiry(account) else { return true }
         return expiry.timeIntervalSince(now) < Self.renewWithin
+    }
+
+    /// A Gmail account added before instant sync, whose sign-in gives no ID token yet. One tap on
+    /// Google's page allows it.
+    public func needsAllow(_ account: UUID) -> Bool {
+        defaults.bool(forKey: Self.allowPrefix + account.uuidString)
+    }
+
+    public func setNeedsAllow(_ account: UUID, _ needs: Bool) {
+        if needs { defaults.set(true, forKey: Self.allowPrefix + account.uuidString) }
+        else { defaults.removeObject(forKey: Self.allowPrefix + account.uuidString) }
     }
 
     /// Accounts with a watch recorded, for turning them all off.

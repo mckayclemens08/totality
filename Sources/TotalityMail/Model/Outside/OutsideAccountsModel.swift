@@ -115,6 +115,21 @@ public final class OutsideAccountsModel {
         }
     }
 
+    /// Asks Google once more for a Gmail account added before instant sync, so its sign-in carries the ID
+    /// token push needs. Sending stays as it was.
+    public func allowInstant(_ account: OutsideAccount, signingIn web: @escaping OutsideWebSignIn) async {
+        await change(account) {
+            let request = try await self.store.googleSignIn(for: account.id, sending: account.canSend)
+            let callback = try await web(request.url, request.callbackScheme)
+            if account.canSend {
+                try await self.store.allowGoogleSending(account.id, request, callback: callback)
+            } else {
+                try await self.store.allowGoogleChanges(account.id, request, callback: callback)
+            }
+            GmailWatchBook.shared.setNeedsAllow(account.id, false)
+        }
+    }
+
     /// Nil for a closed sign-in page, which isn't a problem to show.
     static func accountError(_ error: any Error) -> OutsideAccountError? {
         if let error = error as? OutsideAccountError { return error == .cancelled ? nil : error }

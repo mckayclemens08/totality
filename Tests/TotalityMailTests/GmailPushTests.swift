@@ -83,6 +83,11 @@ private func defaults() -> UserDefaults {
         #expect(book.watched() == [account])
         book.set(account, expiry: nil)
         #expect(book.watched().isEmpty)
+        #expect(!book.needsAllow(account))
+        book.setNeedsAllow(account, true)
+        #expect(book.needsAllow(account))
+        book.setNeedsAllow(account, false)
+        #expect(!book.needsAllow(account))
     }
 
     @Test func onlyAGoogleTopicNameTurnsItOn() {

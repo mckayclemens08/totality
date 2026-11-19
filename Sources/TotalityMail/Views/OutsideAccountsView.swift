@@ -139,6 +139,20 @@ struct OutsideAccountsView: View {
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .fixedSize(horizontal: false, vertical: true)
+            if account.provider == .gmail, GmailPushSettings.shared.isOn, GmailWatchBook.shared.needsAllow(account.id) {
+                Text(OutsideWording.instantNeedsAllow)
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Allow Instant Gmail") {
+                    let signIn = webSignIn(webAuthenticationSession)
+                    Task { await model.allowInstant(account, signingIn: signIn) }
+                }
+                .font(Typeface.callout)
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.accent.color)
+                .disabled(isBusy)
+            }
             if !account.keepsInStep {
                 Text(OutsideWording.readOnly)
                     .font(Typeface.caption)

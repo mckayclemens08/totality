@@ -294,7 +294,7 @@ private struct NoMailServer: MailServer {
         let url = try #require(URLComponents(url: request.url, resolvingAgainstBaseURL: false))
         #expect(url.scheme == "https" && url.host == "accounts.google.com" && url.path == "/o/oauth2/v2/auth")
         let items = Dictionary((url.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { $1 })
-        #expect(items["scope"] == "https://www.googleapis.com/auth/gmail.modify")
+        #expect(items["scope"] == "https://www.googleapis.com/auth/gmail.modify openid email")
         #expect(items["response_type"] == "code" && items["code_challenge_method"] == "S256")
         #expect(items["code_challenge"] == GoogleOAuth.base64URL(Data(SHA256.hash(data: Data(request.verifier.utf8)))))
         #expect(items["state"] == request.state && request.state.count >= 43)
@@ -309,7 +309,7 @@ private struct NoMailServer: MailServer {
         let google = try #require(GoogleOAuth(clientID: clientID, http: FakeGoogle()))
         let items = URLComponents(url: google.request(.send("mckay.clemens+news@gmail.com")).url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
-        #expect(value("scope") == "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send")
+        #expect(value("scope") == "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send openid email")
         #expect(value("login_hint") == "mckay.clemens+news@gmail.com")
         #expect(google.request(.send("mckay.clemens+news@gmail.com")).url.absoluteString.contains("mckay.clemens%2Bnews"))
     }
@@ -454,7 +454,7 @@ private struct NoMailServer: MailServer {
         added = try #require(try await store.outsideAccounts().first)
         #expect(!added.keepsInStep)
         let request = try await store.googleSignIn(for: added.id, sending: false)
-        #expect(request.scopes == [GoogleOAuth.changeScope])
+        #expect(request.scopes == [GoogleOAuth.changeScope, "openid", "email"])
         try await store.allowGoogleChanges(added.id, request, callback: fake.page(request.url, request.callbackScheme))
         #expect(try await store.outsideAccounts().first?.keepsInStep == true)
         #expect(try await store.outsideAccounts().first?.canSend == false)
