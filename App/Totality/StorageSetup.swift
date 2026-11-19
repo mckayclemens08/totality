@@ -50,19 +50,22 @@ enum StorageSetup {
 
     /// The sealed copy a module keeps on this device, which is what it syncs.
     private nonisolated static func folderSize(_ name: String) async -> Int {
-        await Task.detached(priority: .utility) {
-            guard let base = try? FileManager.default
-                .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-                .appendingPathComponent("Totality/\(name)", isDirectory: true),
-                let files = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey])
-            else { return 0 }
-            var total = 0
-            for case let file as URL in files {
-                let values = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-                if values?.isRegularFile == true { total += values?.fileSize ?? 0 }
-            }
-            return total
-        }.value
+        await Task.detached(priority: .utility) { folderSizeNow(name) }.value
+    }
+
+    /// Synchronous, because newer SDKs forbid iterating a directory enumerator in async code.
+    private nonisolated static func folderSizeNow(_ name: String) -> Int {
+        guard let base = try? FileManager.default
+            .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+            .appendingPathComponent("Totality/\(name)", isDirectory: true),
+            let files = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey])
+        else { return 0 }
+        var total = 0
+        for case let file as URL in files {
+            let values = try? file.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            if values?.isRegularFile == true { total += values?.fileSize ?? 0 }
+        }
+        return total
     }
 }
 
