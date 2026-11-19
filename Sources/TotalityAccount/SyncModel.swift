@@ -18,9 +18,12 @@ public final class SyncModel {
     private static let warningShare = 0.8
 
     private static let lastSuccessKey = "sync.lastSuccess"
+    private static let lastRunKey = "sync.lastRun"
 
     public private(set) var status = Status.idle
     public private(set) var lastSynced: Date?
+    /// When a sync last finished at all, even with some items stuck.
+    public private(set) var lastRun: Date?
     public private(set) var lastReport: SyncReport?
     /// True once this device can sync at all, which is when its status is worth showing.
     public private(set) var isAvailable = false
@@ -40,6 +43,7 @@ public final class SyncModel {
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         lastSynced = defaults.object(forKey: Self.lastSuccessKey) as? Date
+        lastRun = defaults.object(forKey: Self.lastRunKey) as? Date
     }
 
     public var isNearlyFull: Bool {
@@ -67,7 +71,13 @@ public final class SyncModel {
         }
         if let lastReport {
             if lastReport.failed > 0 {
-                text += " \(lastReport.failed) items didn't sync. They're safe here and will be tried again."
+                if let lastRun, lastRun != lastSynced {
+                    text += " Last tried \(lastRun.formatted(.relative(presentation: .named)))."
+                }
+                let items = lastReport.failed == 1 ? "1 item" : "\(lastReport.failed) items"
+                text += " \(items) didn't sync. They're safe here and will be tried again."
+                let reasons = Array(Set(lastReport.failures)).sorted().prefix(3)
+                if !reasons.isEmpty { text += " (\(reasons.joined(separator: "; ")))" }
             }
             if lastReport.rejected > 0 {
                 text += " \(lastReport.rejected) items couldn't be opened, so they were left as they are."
@@ -105,6 +115,9 @@ public final class SyncModel {
                 }
                 isAvailable = true
                 lastReport = report
+                let ran = Date()
+                lastRun = ran
+                defaults.set(ran, forKey: Self.lastRunKey)
                 status = report.failed > 0 ? .failed : .idle
                 if report.failed == 0, report.rejected == 0 {
                     let now = Date()

@@ -193,6 +193,8 @@ public struct SyncReport: Sendable, Equatable {
     public var conflicts = 0
     /// Items that couldn't sync this time. They're untouched here and tried again next time.
     public var failed = 0
+    /// Why each failed item failed: its kind and the error's type and code, never content.
+    public var failures: [String] = []
     /// Items here or from the server that this device's key doesn't open. They're left as they are.
     public var rejected = 0
     /// Removals not applied, because one sync shouldn't empty a library without the person agreeing.
@@ -354,7 +356,16 @@ public actor SyncEngine {
             report.rejected += 1
         } catch {
             report.failed += 1
+            let kinds = area.kinds.map(\.rawValue).sorted().joined(separator: "/")
+            report.failures.append("\(kinds): \(Self.reason(error))")
         }
+    }
+
+    /// The error's type and code only, because a server's message could carry anything.
+    static func reason(_ error: Error) -> String {
+        if let sync = error as? SyncError { return "\(sync)" }
+        let ns = error as NSError
+        return "\(type(of: error)) \(ns.domain) \(ns.code)"
     }
 
     private func push(_ id: UUID, in area: any SyncArea, expected: String?, replacingDeleted: Bool) async throws -> String {
