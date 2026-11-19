@@ -31,7 +31,9 @@ test("CSP is strict", () => {
   for (const needed of ["default-src 'none'", "script-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'", "require-trusted-types-for 'script'"]) {
     assert.ok(csp.includes(needed), needed);
   }
-  assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval|\*/);
+  assert.doesNotMatch(csp, /unsafe-eval|\*/);
+  assert.doesNotMatch(csp.match(/script-src[^;]*/)[0], /unsafe/, "script stays strict");
+  assert.match(csp, /style-src 'self' 'unsafe-inline';/, "inline styles only, for mail frames (owner, 2026-11-18)");
   // The page may talk to its own domain, the account server (when built with one) and the blob store. Nothing else.
   const hosts = [...csp.matchAll(/https?:\/\/[^\s;]+/g)].map((m) => m[0]);
   assert.deepEqual(hosts.filter((h) => h !== "https://usetotality.com"), process.env.SUPABASE_URL ? [process.env.SUPABASE_URL] : []);
@@ -70,7 +72,7 @@ test("the content key is never made extractable or written out", () => {
 
 test("blob: is allowed for images only, and every blob URL is tracked and revoked", () => {
   const csp = headers.match(/Content-Security-Policy: (.+)/)[1];
-  assert.match(csp, /img-src 'self' blob:;/);
+  assert.match(csp, /img-src 'self' blob: data:;/);
   assert.equal((csp.match(/blob:/g) ?? []).length, 1);
   const files = readdirSync("src", { recursive: true }).filter((f) => /\.ts$/.test(f));
   const makers = files.filter((f) => /createObjectURL/.test(readFileSync(`src/${f}`, "utf8")));
