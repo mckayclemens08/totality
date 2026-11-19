@@ -5,8 +5,15 @@ export interface Task {
   id: string; title: string; notes: string; place: "inbox" | "anytime" | "someday"; when: Day | null; time: { hour: number; minute: number } | null;
   deadline: Day | null; checklist: { title: string; done: boolean }[]; tags: string[]; priority: number; listID: string | null;
   order: number; createdAt: number; completedAt: number | null; repeats: boolean; isEvening: boolean;
+  checklistIDs: string[]; headingID: string | null; deadlineTime: { hour: number; minute: number } | null;
+  snoozedUntil: number | null; blockMinutes: number | null; reminderCount: number; hasNagging: boolean;
+  source: { title: string; module: string } | null;
 }
-export interface TaskList { id: string; name: string; kind: "area" | "project" | "smart"; areaID: string | null; status: string; order: number; createdAt: number }
+export interface Heading { id: string; title: string }
+export interface TaskList {
+  id: string; name: string; kind: "area" | "project" | "smart"; areaID: string | null; status: string; order: number; createdAt: number;
+  headings: Heading[]; deadline: Day | null; isPinned: boolean; updatedAt: number;
+}
 export type Bucket = "inbox" | "today" | "upcoming" | "anytime" | "someday" | "logbook";
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -17,11 +24,20 @@ const day = (v: unknown): Day | null => {
   return o && typeof o.year === "number" && typeof o.month === "number" && typeof o.day === "number" ? { year: o.year, month: o.month, day: o.day } : null;
 };
 const uuid = (v: unknown): string | null => (typeof v === "string" ? v.toLowerCase() : null);
+const clock = (v: unknown): { hour: number; minute: number } | null => {
+  const t = v as { hour?: number; minute?: number } | null;
+  return t && typeof t.hour === "number" ? { hour: t.hour, minute: num(t.minute) } : null;
+};
+function sourceOf(v: unknown): { title: string; module: string } | null {
+  const o = v as Record<string, unknown> | null;
+  return o && typeof o === "object" ? { title: str(o.title), module: str(o.module) } : null;
+}
 
 export function parseTask(id: string, raw: unknown): Task | null {
   const o = raw as Record<string, unknown> | null;
   if (!o || typeof o.title !== "string") return null;
   const t = o.time as { hour?: number; minute?: number } | null | undefined;
+  if (typeof o.id !== "string") return null;
   const place = o.place === "anytime" || o.place === "someday" ? o.place : "inbox";
   return {
     id, title: o.title, notes: str(o.notes), place, when: day(o.when), isEvening: o.isEvening === true,
@@ -29,13 +45,21 @@ export function parseTask(id: string, raw: unknown): Task | null {
     checklist: Array.isArray(o.checklist) ? (o.checklist as Record<string, unknown>[]).map((c) => ({ title: str(c.title), done: c.isDone === true })) : [],
     tags: Array.isArray(o.tags) ? (o.tags as unknown[]).filter((x): x is string => typeof x === "string") : [], priority: num(o.priority),
     listID: uuid(o.listID), order: num(o.order), createdAt: ms(o.createdAt), completedAt: o.completedAt == null ? null : ms(o.completedAt), repeats: !!o.repeatRule,
+    checklistIDs: Array.isArray(o.checklist) ? (o.checklist as Record<string, unknown>[]).map((c) => str(c.id)) : [],
+    headingID: uuid(o.headingID), deadlineTime: clock(o.deadlineTime), snoozedUntil: typeof o.snoozedUntil === "number" ? ms(o.snoozedUntil) : null,
+    blockMinutes: typeof o.blockMinutes === "number" ? o.blockMinutes : null, reminderCount: Array.isArray(o.reminders) ? o.reminders.length : 0,
+    hasNagging: !!o.nagging, source: sourceOf(o.source),
   };
 }
 
 export function parseList(id: string, raw: unknown): TaskList | null {
   const o = raw as Record<string, unknown> | null;
   if (!o || (o.kind !== "area" && o.kind !== "project" && o.kind !== "smart")) return null;
-  return { id, name: str(o.name), kind: o.kind, areaID: uuid(o.areaID), status: str(o.status) || "active", order: num(o.order), createdAt: ms(o.createdAt) };
+  return {
+    id, name: str(o.name), kind: o.kind, areaID: uuid(o.areaID), status: str(o.status) || "active", order: num(o.order), createdAt: ms(o.createdAt),
+    headings: Array.isArray(o.headings) ? (o.headings as Record<string, unknown>[]).filter((x) => typeof x.id === "string").map((x) => ({ id: str(x.id).toLowerCase(), title: str(x.title) })) : [],
+    deadline: day(o.deadline), isPinned: o.isPinned === true, updatedAt: ms(o.updatedAt ?? o.createdAt),
+  };
 }
 
 export const cmp = (a: Day, b: Day): number => a.year - b.year || a.month - b.month || a.day - b.day;

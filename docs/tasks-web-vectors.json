@@ -1,0 +1,132 @@
+{
+  "note": "Made by web/site/test/make-tasks-vectors.mjs from the website's own code. Test key only.",
+  "rootKey": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+  "items": [
+    {
+      "id": "c0ffee00-0000-4000-8000-0000000000a1",
+      "kind": "task",
+      "meta": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAaCWJpN1jQWbhOknkNxw+mYaGX7TJN6O65a8ST5oMliSOUMkcVtHccguR5i1DLCHlFJnjB8F76EZIEpu0CAcqxcYi08gnfQ5zIYynBcQWA/FR8uwF2pPqCjrVoejijk/qDe8pK2dr4X6q8k3u0PGvYHWlsXpm4wRTjZ9j7m4GTF6+/vTQ9DrTkorTlI1JYxq/ZXszqK5U4Ge5K+Tj14w3BwrhSLDDa4iBJ8rXKGzvDEXtE8nkTPUX+Hky90Qui3J6Q/xCce8wjZNZJf7VRBdN4ZkHNu5sZkiU4n0uWMNgFQSI6KkFbIkKLqLr63oOU6xuaaqlQBmP+UQxxS6jo2Ek1q3xqApAYUmSMZMXRCyHWY+VxA9EQd9w9G2/1feRJ7hhfbTQLlmYGrpj9wXQS/q6NOJiOZG6w4mA5wvdqc7dbLhjZWGvRHZkNUH1LV4fgye4uw=",
+      "hash": "91a135b82df0e8db493b898224808ebe0d201519fe74505958909e76a028fcee",
+      "expect": {
+        "title": "Book campsite sat",
+        "when": "2026-11-18",
+        "time": "16:0",
+        "tags": "trail-crew",
+        "priority": "3",
+        "place": "anytime",
+        "done": "false",
+        "edited": ""
+      }
+    },
+    {
+      "id": "6f1c3a52-0b7e-4d1a-9c33-2e5b8a1d4f60",
+      "kind": "task",
+      "meta": "AQICAgICAgICAgICAgICAgICAgICAgICAgBaFPyzsGeatvuf9J4Sf7/7mIHj63HtrJfVwrqo01AaB6xZKow9gSvoDJuzN5yhhKfT5PdrAIXJEb2Z4LHCYj4pPzAxTvcTDGTXBr50csWYGvWRe4HKtzPM8R5waFQ3dZGLdjTtPCn4vOtV2ruP07tLtlW5k5ItJAb0/YT19aHgWSL2xo5Npxn7R+RSRJwSNp11qFX8cG6+WwbX1hcktKi+tdoM4NxqaGNwBnqyN/vmUt7BM7p+9HCcnXXUVliQdHjyAUf1Ab9MH2IqSKijFv0b8KdAJksz3cHlkwzhbPt7viWhgKU8b1aqKzI9V4oHM76H1bJZJ2oVcSJbaHcUMBdiUon9UvYc+YfvbhwY+nr4adUXR5TKFOWCt7iMTJ6WD/NHHvvDlAGQBUUk2aVGDvxmk34KPVxuQmkYR+keTq/LRuotb/OEgagEy7DeVcj6Tpc+emL3sCE23rvzL1iyNJwwo8dLZ0c0vEM64lLneoqUz7rFzR/DHIoemYVBpGjGFtKSVO6SN9aCmFX4ropsIUQ5NMEIu9PQaz70HQ3TX28yBZqCnrZniblclC3DZDs0yIWSOBs5hYBoRKetWgQLyJFKzXBq+V/muwLzBShOhR8w9Aum/G2yBTP6kCbokRd6XeP/93dv+v7rBK+JvqblG5gugAXeS4QmIEoni0VV8XlYELR0qbb5XNaNf9LfJOwMxviGU/Xsz5UDyRLsBsKFgBzR9OeM62W14+i79kSe2f5jq2143uj25vnxvwA2OvK2NXs8P2dn9tYAMtbzSfr6tCvPMMR3qmLITaYcBhYyHVbe6WaeGZZ8x1QWlAKLMqcCWEAXKVXja4vOSzzTw6Xir98kuYfwx7TTQAg9YopIRgLIwhdpvOEjiPmPlVVu1vPqofVJ29vXBFDk1mM9/eGSY207ESxLB3uTXhe9Od8UENhs3nf/5khvjzkK5z/QTQdWJES+DNa8+xpLV6yw0yUizhntazFRupZ3ZqszTsQ5puHr0L6w01iqKk9dujG/Qo5+tvssxjUorwgr0d3KGclifLzRTCrQ+IU+lecFD4n+Fe9QuHQu91k9lJ9x735p8DosCdJaFkKteVOcQYgm8hI1XGqc1JZ1fG03sdRaVdQBpSppavNQ+aYFXg8XJV7aAMyDBQTtB4eQOSb8OA/+VlDnTlzKjHBjkkagT7DNpPBzneI/6GXfJdQEZPj7vV7sufD3vQ1pqe1Xh/GiI5mUzsIvwaMRHC/iGE5jVCLDd+C5xSK2jq7DUJ/k5F6tL5y416aCL03It9yBblXCUevnFE43xP5t/tvAhg9QGbk1jEmoJhcgMR7Y3qD8zMvG9tPRJQ/PrY7bSzTAN5DwvUCfuk8f+j/3+6hm/I2CqC0QI0iWM4ab/GHVejQdT1bBjVctqDnXqq51kUABo88+nw7fi24LF3iKvUHed2BUSSfP5jFfLk0/XUbMYdJcQwDdM+AQ/to2IoQMAWcDRKBKpinQgQZkVdl1bVozksXp9w3bUJ+2rXzGYVZ6BQjdELhl0/ei0+ESjKiTF5fUIAMt4e34LV/WjyZIQt4v1tx+FB0aPeRBVY3Dwqy7Y2RkpgdUs1JdfXJtGuf1QVK0a0g4dM24gIVPPrMBK+kqWEq0pwXHs3lXnIl4e9mLkKc3Du/MEyny9PNWyEkFDckiWUSYGH4xwObvZYaPHhN80aZIOfMhqVKEVfqfmHWsxm8CxRLwf8esiJxYlA35GsywpE2dl6dqbNJyMb9+IgyDN4sVmncL39E+Ythc4rOjbaV6AiL1KOXpkRtwVEg2G3h0y6Ddi3gk9N+2FQcYmUQcAr+Z/+kE1QTTPE1l/dl12T0Z2kYG96QRi6MPG3rFBxCWELVsDEVbhowk8zBN5tDob7c03BQtuH5o3oLennLVAgXj",
+      "hash": "392efda30b4f59f6e093dfb65ad449ffb7282231de6858fcc4d7aa603c411e20",
+      "expect": {
+        "title": "Water the garden boxes"
+      }
+    },
+    {
+      "id": "6f1c3a52-0b7e-4d1a-9c33-2e5b8a1d4f60",
+      "kind": "task",
+      "meta": "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",
+      "hash": "7c4dfe4d4ad4f5cf17e2aa512322a5b1088697eac54ce1b0bbd097b29ea047f6",
+      "expect": {
+        "title": "Water the garden boxes before work",
+        "notes": "Both boxes.\n\n- basil\n- **tomatoes**",
+        "steps": "Front|Back+|Check the drip line",
+        "tags": "home",
+        "priority": "3",
+        "list": "a0000000-0000-4000-8000-0000000000b2",
+        "heading": "a0000000-0000-4000-8000-0000000000b3",
+        "when": "2026-11-19",
+        "evening": "true",
+        "time": "",
+        "block": "30",
+        "deadline": "2026-11-27",
+        "deadlineTime": "9:45",
+        "repeat": "Monthly on the last Friday",
+        "repeatEnd": "on(TotalityTasks.TaskDay(year: 2027, month: 6, day: 30))",
+        "repeatDone": "0",
+        "reminders": "at(TotalityTasks.TaskDay(year: 2026, month: 11, day: 19), TotalityTasks.TaskTime(hour: 18, minute: 0))|beforeDeadline(TotalityTasks.TaskReminder.DeadlineOffset.morningOf)|place(TotalityTasks.ReminderPlace(name: \"Garden\", latitude: 40.1, longitude: -111.6, radius: 500.0, onArrival: true))",
+        "nagging": "30/midnight",
+        "snoozed": "785100900",
+        "source": "",
+        "edited": "checklist,deadline,futurePart,link,list,notes,order,priority,reminders,repeating,schedule,snooze,tags,title",
+        "unknownKept": "yes"
+      }
+    },
+    {
+      "id": "6f1c3a52-0b7e-4d1a-9c33-2e5b8a1d4f60",
+      "kind": "task",
+      "meta": "AQQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBJHrUIqo0SlCgRC3XqTO0BhXhKeJSv5dPmmuXAc8ypQ6ORQaeCcvL3n+FelSozPjkg5YEkR8mp4QhFpsrZmMZlQUMdNZjApBLxQ+6bvBTQGBlwejcXCergmcvLojQMNrrLeMOcclaL+YOLXdR4MQqwAfhGq0GA5un5jI5qb9k8EX46px1X0KIvoS0DWzQl+uQJANTGRwsgMyRiELKXSobhe+hEQPcNRlzZZbQ+Yjq5t/qoojwLLbY3cRmvM90rARKdLS0nvBqCBhuBLYk4mpGZabO5GHsUCjKGAyniMgRO4OD5x875bw5LE6i7Elldrp4vjX4vuEP55CUfjo/hDJUvDeBXQpuxfyMDrEgkqO8TPBhJgdnSQ3blFOprO/qIt1MDmCfB6DDj3es2Ty9HdwHeRTNd9DNAiF3Yfnrs6wx/YP3xvD0jgV0cNr5XrUh61/lfcQg9zSLKOLxizA0dbsyuFMgdStcxYdFpsu+5A5O+Ul1DYsbWsu7ianBqIZG4Iv4Y33GcE5KPyDA2UgrxKuiyhot/QIFuSpMJzTr0Hs/lbNZHElO39JyPmqRwFsjGkcABN+ryuxgSvD4dmZPYBkQpks/xPjAOg4Bq5bYxot8MoBoiAR78YzrutRDY/L42E/N7IuyjdqrMmvjXiiYC4AiimSVwnn44LKX3gKqTw7EFWVDdQ7gE37PbR+3yGpZnq23RK/mKDgBaFUkoutQ4vrdxY0RRIg/r93TU37cklcfdXjAJ8sGLLnkIY4aF1BotlnA8E9PHHDOU8f0oF53FBFpETMp+bJ7FcdyBRm/knYr4Cr++iyZ7950HIGQPvrGuOcOT2jEqX8Z3JT+pbOJbVFa4/ZcLmNdCsa6/xzRieaTZfeTnhmUPJlej0B2t7+U/YTLYkGuXOJ2FXiTQr1sAc3d7QVKxaACUwdZsVqB9+mCHBRzKYguQKiLDP6LfX2Vodzgnn1Sh33wIhx6JvBvRZsoJDcNpnEhJMpe2s0DcDxR/NtVYQWJphCfTTGBTe4sYB41/kCPEscx3dH67aRwJhtwW/ifQzENx6Tub/7hCPYR/AvtOkgEeL2Fpojhhbe0wq5QtdyXWIpDRLJVsCU/E+DEQTWhsOmnIRnsz1eKXiakxl3FWJDZR5dUV50Sad7ATxI1L2kevPQZ5LT2IP8Li1FPDpvcAM68aiYFIkByW3JHCsmZXBz5M1gPcyVM7j8+t1LbJPX7x/Di9cCRQsRWEbluJUVeJJ4CYmBBpmUFjd8j11KJMWYKEznQRhJLtCxlI+vuNW0KzY/nM/lgEHvQVLtkgQLBZpqIIQ6CWyNPb3aZ06max9km+DXaZRPBmSe1dNFpgrowNXowY9AeeQHN920PFJGoYX5E30sDYQer93qNRD+ev6FoY6dsrBUKW8dT5OM6gbxlhDLEinTYu23szoBO3g3gHk4pwDgC3asEcBXGnMd4/KJZbCC8hQVUQmrco4I0IyuIo2fy6XkWtb73nUsL+Y0URH2YMOqG9g0EgHX3z/VHlt1KllXSaYKyzt+IKFBxnohfRM0S75MJ+p+P0GMIpkr7CE7f+NDd8Yjk7NxXczWLGpuFIKHheijAGvn0PltCkj29CB/FwiThH/DepYIgsR3TRFwjDVyXBpZyKMDICGHD4gCw3/o15tH+APSHmUfKdlYDFu4cZldqzc2h/9axR7Lci+dibuJj0wxtSj4G986vLSNfdxUduuruym+yry+871KREkSH0HBCei/FO/XBuvtdSPwLLl75lr4QupDNbFfw34kBH8y0egxD1cwif/i5duBrbPrJa+tLx/vjZrKBYwjFlERtpqmEUAGkxcA74qqgva4E+M503Zw2FHOHEnvpoYcMj/OvqGXCCV6LNtIaIHya4taoNFdI+TrFVyYWfKoHx9hlgw=",
+      "hash": "c27cddfc57cea11362d087d2e35dc2f07fc38e383c1fbeff33ac8ca76f81fbd5",
+      "expect": {
+        "title": "Water the boxes (web)",
+        "priority": "2",
+        "mergeBase": "6f1c3a52-0b7e-4d1a-9c33-2e5b8a1d4f60"
+      }
+    },
+    {
+      "id": "6f1c3a52-0b7e-4d1a-9c33-2e5b8a1d4f60",
+      "kind": "task",
+      "meta": "AQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBehlSnTQSzLhOPLQse31KwG0xh4q7013RiH8m6mpPkiEmeOLUw2MbA19K1bCA0EHEttZ4dNpLcoUpX13Cl1H/xCxaGN3ytiVBjdfrx+kBNKADyqipfIGXOeW+Xl17/GpsA6WIEHwTkZ0KEzM4nw6kppWspHye6ltkW8TPOtkdBlSqYQIFdhY62Bmnp/BgHm1p1cnmPsUSk7Et2ThhbEjDp7OqW4Qe1byB6rEKjxG+k4KeFb2/LFmoL7HS1bynflVTZV70WdR1HI8UpE+sULMuqSI9JYWqn7P2GnvAvnsuPOuo1aYSMv3/RSGIv1qtD6zLfQ9izXO0la5dE2W16fJDvN8oBZl9VM9gx6I7xeYn9288P1Uro8SdDOWLNohwnVd2nO1BfLtcGGwUUG81lHV7KD6jVvrsRa6vbj5NZkb6wiHtfQMBLnPrY64X3tCUG1sL1of5FUxIcYQlWw5tITjTgqQDuj6MylaNqllbvcUcyvBg7QwbTBskWTTrfr+GD4W7ZX1Sln1pBKYGFwFvUFED7+feGaiF5yLkxjDTZcgLIFf32Jcii3HtV5GNIseiU0EvJucdc2ofROoc0wTPL1nfAJdq6MW9C0Mo4UnkzuXPIBWH5RWMY6fPVjXmORItjKE9mQ32vBK4Gp3WbqUol+BZALtV50foLFtpbMFwwmQV7jhkxWZ8OvWc/EGExSNVhZLLQOo723xNoGqFE5or87mUvKgahKvR6UgweV0fgjrKkow7MUFaXMZ8He7wt7+rz78YmTrYDLPQBHu/Hu57tQ8raGVAxqvrks6KUgXGb2UPsX0d4gFAyQoC7wilTFBq8eALeYVEZ1jSDYexqR+6Zqq43E1IszUCQAxtW4K5Ye8MFaqRowbisfglMU6OeRby730psQ7mukSsr4YuA/KftBKtz93tPoB24zB5GoE+UqlMjAZkDrj5nFxtUByOhuZvWU/PKcU9HyhsGOsMWmlSiCVX8tfO7aFmGC7Ou7NamTcVPtp64CjvS5msaOrva+eGhJavK3nyX0Sd2mUSUzFG1wmeweQned/byoWRvw31/aUg3/GY46wLBX/C/NDMnrvjMNB4zht9cVHy4fpCH3Q+YuisH1Rx9uG66xljGvf3JuqFyV3onGZK/reZu9sUrLDlQWkNGe35zIQ27jDp7L0e/Vu4wTXASQqBs8x2o5NJrKY9lz+ffzxQ12/qNw3lBobeCXNS2EKLbWleEsH9LjmXUwo6UMbI/Lzen/UkBD/PprLr0CjN+628Mjg16fY+OZRGzMVLwEDsciFyw9gJp7MRDvHJC+rqQ22nC35mnGma0MykrbEzeNJm2aijc64dZF9HrDduGEjE8BuRWo73vmO5f7xTO7zpZ1Wz8mRqc0uyBeNc4d+oDIVfTN3Oi1gLhVO+a1il7mwn/ol53otRjnQLtOoNuwE6JrkJPI5kFd/FVxkgyL9IiqRL5dim0vLwPMHjOrFE/NI9rsktsjoyYwfgVfcBfZEvuyOZURhJ0KRo6ic5lPmyZOIy2pNmFLWkBuQz8uvvi/M4uSkpLJgWFhazIIoYGAOl62G7z6zLthKNpOvTvWcpDuVoNNF8CJf72pOWmoanJ45WughztktlKt+Gw8bW+96N2I+rYxVAGeMQZl7OKCSPLrPeP/TgK5cC1eFa5z5sv/3SwdI/vuUUJ8eqyeOfWB9IciX691SQcs5Tpsb72E=",
+      "hash": "377d0706e0e4bb2d2fbfef5112a15d9b24a6575e7c3924634d7344a217360774",
+      "expect": {
+        "done": "true",
+        "repeat": "",
+        "snoozed": ""
+      }
+    },
+    {
+      "id": "b30f341c-3024-59f4-a0f3-6ad299c75eef",
+      "kind": "task",
+      "meta": "AQYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBorpFW+GgjtzcmdIivbkrd0lkLc0+oGPXCFZDjk4YdrPMIClzu6BaFrDJhCmQrUxAop1bBW8ab103z1NfFDzOKiKh6RXxI0Xy6Siv68bl2gRwxadUsmXX6ptHACpPiYTh9tOWu3plpPoSqkDHG1eP+/OHkSemUp//x49TKN9hciN2t6U9j9Z6vBw3dJA/MQqJnvNhMtn2p0Qozf/4aG8YR+TN/XaLgX/4iqPVSh0VDYFu6N6ZGrctqDahUGgmrc4MvXs7gG7vCqvv5LqROUppjUYCjpjgGtbtviYvFheGKYbVDqnYLx9hR6W0IU/6j3bLijjVxTRMva986W1aG4JaFPuhzwnwP83/TgD0L3q/RUDKhY1z3NwUYX5z3WeCRTFq5MUDahv6XvY63hqthmD9fFm5q6mdmrtF4mQsCf9tJe6hCQJJV3DNR6j9Gp+2DE0tZoJpCvdXaW7oUfeElyitHRQwh70Erkw3mhCGZGWf7j/wQdzkAyb0gJ2MFjxHEUzsB/EuJ2jGfhptTH+lARF3B6v4CoWezt+bfrN4lxC1308bwlQE+9WiWbFxRCYIK5ec6DwChmOQStrOtpIB4CMS90xFAfmSLuM3TtWuyhbsDVHZFVaYGoh/3i3FnNIuYY23DR1GIS87GsOyewWM9abT+rRP2gE1kdNqavzMbuMgBENhmznaQq5Vsc4ocILxbUm964+OFZsgAzEbyknaKBFTNEdRm3zY9xFNI2RECjqLspiQjW/VsIAf0PJuUhq/11QbH3LMG2h6lVnQ9VrcBjSSnv8n5LDG3RdeLqaLPAazRlVIham7CIl87IS+I52I8b/mhvmfHkchS1Tt1kAJPBMNqP2C1DgijPgtF89gKQcCCDSbHpdAiXKbXJZoy2QuOFXhT49+AbblWbIzf9irGv4mbiG3UddwpVKGfGqW46+MxitAp6tViPOyqMfjNve0gJ5M+yt9V9Cops/pmNUtjvTJ/Bv/+zp2+GfihKleQBU22fnN7KURMaLe9hgZEpW2xK5Y7bqlF4rZk+/Om375Dqf6gS50fdKTAttfUI9iZOh3MedgCGXyojiUk5VyT7OFKaqAoP/N39mkXXBy2dTEN3UADejWjb9W3Q33sKLhL2G7okzW5QUhNhK+lxY1FGMRVK9osoSYu03I+HUYqtOeWz85ENSC3XovJHQ4F2tbv0GS0wgZa1b9ZyEzyv7xfshBxueLk781REGwbtB8CfOWV4pcVgvz4rzYge6bkzjaqi0vydvlKFVllnVPuJ4Xr/P4KbsYOKTmW0PBKwNJkru9r/JtN52jzVbA+Y8tZWwTRwDWbz6KHKqoNlpoz3QUpMX1btaJHcB7ma1NP467QtpNhrIxhvMCEZJ7jVpwcYmuk7LXYPLDoAFX9OGi/cXdl0mFbUOouaQpxoZwXHq9kIpA6Q7bOA0WoldWb1xvVXrf65L870lYkMLLsI+m23XbLSGBNnf1jf4wU6fDQBLMJedWYvsC0xApE+0DKigHn7R9VjFRTg3Q50lI3UYOyvIDiK4wOP8WsWW/DJE2gaPujbcF3nXzRJo85wuD2AKjnXuJMvdDpTjmk0+Gf+zFhHaq7lhAXob9joLDIZYhLKLB7S1u2Jx2vGOzaG+s0mey9qmXxaRBrAV+RtE5kL4pekwNL6l796PqT3iKj5mPgRzH7sf",
+      "hash": "3f70695b679a1bf72eaee5508e755a41a215b98ae3b0ab4fc6746afd489b5c73",
+      "expect": {
+        "done": "false",
+        "when": "2026-11-19",
+        "repeatDone": "2",
+        "steps": "Front|Back",
+        "title": "Water the garden boxes"
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-0000000000b1",
+      "kind": "task_list",
+      "meta": "AQcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHByaheNiFR+LVO55NduIcln0FXXcbqW/7/QuMn3Qq5y+QJleS2Km27uyVXXeNtuktTwBS9jCK3LP9V0GxsOD2PioKaAGCExHxm8x5B5Nzt02NVWbrrM0u1bK0ZcAw8yb/+9rAxHXpn3YXYHc5KmquuDYYFLlyWFxe+3+Tx5IJcLsrjYEzXrRns06tFk5jtnynCXn3CtEIWtnn+H2Rm3qE6qpc6chVsJRI9tR73s+Yp02Rmov1gAOfF3cf9vn711y8CA==",
+      "hash": "3438ed61ff3c16ce83d2bd39794dcd7e5d7653a2d862d72560749e480457aef5",
+      "expect": {
+        "name": "Home",
+        "kind": "area"
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-0000000000b2",
+      "kind": "task_list",
+      "meta": "AQgICAgICAgICAgICAgICAgICAgICAgICJgaeFpqVZas+VJUknQY5LfmWt0Rn3Cdz0m6igrZlOD/CZXVAf/FAJIzLf8C+VKvZvjKrf3sFvjr80GSALcoQNwCtZd3rxkaPERXVT9ivipspougxZeLdHNzCJ7CaJhYcWCWxtbzrpMNfu9sRfhnyeZG6L/+jGL/G2y6N9Cnrt/7HDrYI/8GbifqwLjEW9sBIxO/3TQCo7b0a5A/EO2dDr71duhcV/H+AGUpFM5UZMOinVxZmJZBRs1wHJ+T7pc9U7XG2r2brs6MC+hzIOhQRLkZUCHtAu4VaznZUMF7iOacKCetksRpN2Mjk52p1mZJWIvcTtQG3NRmqFIJe8NRz6LXjqsFPIZI7jVWYk4cBhgs5I0ZnMNerucDHW2ovAAd3ADt1VoEhNNALe18J6M4jUCVWE3pA0MtSyY+Es1Gi482maiGKaD46+b0dhow/ft0WvPqddn9sNBs/RXanFdswEY4JPgBeuPB9E7V/yL7WsXNFTi0aVMvNDoCfndHE6PGzZqWDxQ/5MIqnqeRMnQcF6IOIGN3E1cq72Cdy+yDpPDCTUcqYuuRuwqo",
+      "hash": "7ae7d50a842cfbe183346682f089279506fabb570e4ee947193c4ba10adf26d7",
+      "expect": {
+        "name": "Garden boxes",
+        "kind": "project",
+        "headings": "Planting|Watering",
+        "area": "a0000000-0000-4000-8000-0000000000b1",
+        "status": "someday",
+        "deadline": "2026-12-1"
+      }
+    },
+    {
+      "id": "a0000000-0000-4000-8000-0000000000b4",
+      "kind": "task_list",
+      "meta": "AQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCSVwJi1Jbr0yn4N1hY4V44zsFqgEsajEEMXNU8ij8htJWaB55w/UJdAYpHlEGm/uSC4TIcY2T4qINl2x59IKBC+9HqVcGw+3lYhm4vbPo4HW1asVw6ucWV1vd8l9gCuvzkWjNUxFl81FcFR9JY+KLVJxA5TRwRLZ+7WpUpkQ0OAXkttRo3il3SUZaTw60uuOT+Nx8TW6Nw/r3a8T8vO5/BnIcd3383Ny/0XOcnePU9c2Z5vLaIN2Zwkr5ehD7bNChpEITAhYg5UynKdoB+L8AeFtp2R6VCKc8pTsRoHpWcPZZlhZsNey3Z0FD9uhROGQijd+4jOtBR3La9cXD4fpAqkZlwHHDw2QTHrLkmVw171X6dW/4PP8/juu0xUml0b5CPDZruhh6kupIIFaLKqxEg9dR3yGMk4L6T8hg4Qz5U93qtkA+80FcsJ5bGBjvLK3nGefoxS5U+hh8j3D32w70wt/uRm4sdX+GdDoCt+/Qwocm1QZ9A/DZLubNxw3+e+Z3shC8TSDydpJAM80rUGECwE3iJV7SBfXtzBi7chvbI0yACNO1I20JIidRA2GKBmo55M36RsZaKdz9SgnuUC+nli7FvSVAGyxVyXDSEImlAXQM3WwaiFQRI7/EdB1Z8+ha5ctKEsMLgrdWwXsO+L9rfyRm8l37+Mpnydb9CnqGUVzkbA8wnt75qew8z4fWUyfj4pN0F66/KRCQpaWSVReehmd",
+      "hash": "5b091cfae709eb4518a1c652ac1bfea95f4ece9a3296f5fbd48fc8c94d12f5c5",
+      "expect": {
+        "name": "Urgent at home",
+        "kind": "smart",
+        "pinned": "true",
+        "rules": "all:area=,deadline=3,tag!=someday"
+      }
+    }
+  ]
+}

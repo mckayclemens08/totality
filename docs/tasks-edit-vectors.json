@@ -1,0 +1,1621 @@
+{
+  "copies" : [
+    {
+      "completedAt" : 785259200,
+      "followingID" : "B30F341C-3024-59F4-A0F3-6AD299C75EEF",
+      "result" : "{\"checklist\":[{\"id\":\"185B4245-D9F9-4261-9DD9-7C104B709B6E\",\"isDone\":false,\"title\":\"Front\"},{\"id\":\"415CEBE0-DCCC-4708-A39C-29F2EC93E3F0\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785259200,\"deadline\":{\"day\":21,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{},\"id\":\"B30F341C-3024-59F4-A0F3-6AD299C75EEF\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":19,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":2,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785259200,\"when\":{\"day\":19,\"month\":11,\"year\":2026}}",
+      "task" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}"
+    },
+    {
+      "completedAt" : 785259200,
+      "followingID" : "D6D8FDFF-A718-5A1C-9908-3BBF5B8D4946",
+      "result" : "{\"checklist\":[{\"id\":\"A51DE7CC-A3DF-4F6A-B124-21EAAE96A7A7\",\"isDone\":false,\"title\":\"Front\"},{\"id\":\"3CCA816D-107A-4850-9D36-EB89859AC2B8\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785259200,\"deadline\":{\"day\":30,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{},\"id\":\"D6D8FDFF-A718-5A1C-9908-3BBF5B8D4946\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":28,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":2,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785259200}",
+      "task" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020}"
+    }
+  ],
+  "edits" : [
+    {
+      "at" : 785001000,
+      "new" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "old" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "result" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785001000},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the boxes\",\"updatedAt\":785001000,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}"
+    },
+    {
+      "at" : 785001000,
+      "new" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":true,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "old" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "result" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":true,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"checklist\":785001000,\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785001000,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}"
+    },
+    {
+      "at" : 785001000,
+      "new" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":true,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020}",
+      "old" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "result" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"schedule\":785001000,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":true,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785001000}"
+    },
+    {
+      "at" : 785001000,
+      "new" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"listID\":\"B0000000-0000-4000-8000-000000000002\",\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":9,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "old" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "result" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"list\":785001000,\"order\":785001000,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"listID\":\"B0000000-0000-4000-8000-000000000002\",\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":9,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785001000,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}"
+    },
+    {
+      "at" : 785001000,
+      "new" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "old" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "result" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"reminders\":785001000,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785001000,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}"
+    },
+    {
+      "at" : 785001000,
+      "new" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"completedAt\":785001000,\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "old" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "result" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"completedAt\":785001000,\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"completion\":785001000,\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785001000,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}"
+    },
+    {
+      "at" : 785001000,
+      "new" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "old" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}",
+      "result" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}"
+    }
+  ],
+  "note" : "Made by TasksWebEditVectorsTests.makeModelVectors from the real Tasks model. Test key only.",
+  "now" : 816014400,
+  "quickAdd" : [
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:tomorrow",
+        "time:9am",
+        "tag:#school",
+        "priority:!high"
+      ],
+      "priority" : 3,
+      "tags" : [
+        "school"
+      ],
+      "text" : "Email Dr. Lee about thesis chapter 2 tomorrow 9am #school !high",
+      "time" : "9:0",
+      "title" : "Email Dr. Lee about thesis chapter 2",
+      "when" : {
+        "day" : 11,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "time:4pm",
+        "tag:#trail-crew",
+        "priority:!high"
+      ],
+      "priority" : 3,
+      "tags" : [
+        "trail-crew"
+      ],
+      "text" : "Book campsite sat 4pm #trail-crew !high",
+      "time" : "16:0",
+      "title" : "Book campsite sat",
+      "when" : {
+        "day" : 10,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:on sat",
+        "time:at 4"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Book campsite on sat at 4",
+      "time" : "16:0",
+      "title" : "Book campsite",
+      "when" : {
+        "day" : 14,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : true,
+      "pieces" : [
+        "when:tonight"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Call Gran tonight",
+      "title" : "Call Gran",
+      "when" : {
+        "day" : 10,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "deadline" : {
+        "day" : 13,
+        "month" : 11,
+        "year" : 2026
+      },
+      "evening" : false,
+      "pieces" : [
+        "deadline:due friday"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Pay rent due friday",
+      "title" : "Pay rent"
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Pay rent by the 1st",
+      "title" : "Pay rent by the 1st"
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:next week"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Plan trip next week",
+      "title" : "Plan trip",
+      "when" : {
+        "day" : 15,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:next month"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Read next month",
+      "title" : "Read",
+      "when" : {
+        "day" : 1,
+        "month" : 12,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:in 3 days",
+        "time:at 2:30pm"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Dentist in 3 days at 2:30pm",
+      "time" : "14:30",
+      "title" : "Dentist",
+      "when" : {
+        "day" : 13,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:in two weeks"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Renew passport in two weeks",
+      "title" : "Renew passport",
+      "when" : {
+        "day" : 24,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:Apr 15 2027"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Taxes Apr 15 2027",
+      "title" : "Taxes",
+      "when" : {
+        "day" : 15,
+        "month" : 4,
+        "year" : 2027
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:20th november"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Birthday 20th november",
+      "title" : "Birthday",
+      "when" : {
+        "day" : 20,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:2026-12-01"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Ship it 2026-12-01",
+      "title" : "Ship it",
+      "when" : {
+        "day" : 1,
+        "month" : 12,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:12\/5"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Groceries 12\/5",
+      "title" : "Groceries",
+      "when" : {
+        "day" : 5,
+        "month" : 12,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "place:someday"
+      ],
+      "place" : "someday",
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Learn Greek someday",
+      "title" : "Learn Greek"
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Gym every monday",
+      "title" : "Gym every monday"
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "time:at noon"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Meet Sam at noon",
+      "time" : "12:0",
+      "title" : "Meet Sam",
+      "when" : {
+        "day" : 10,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : true,
+      "pieces" : [
+        "when:this evening",
+        "priority:!!"
+      ],
+      "priority" : 2,
+      "tags" : [
+
+      ],
+      "text" : "Reply to Jo this evening !!",
+      "title" : "Reply to Jo",
+      "when" : {
+        "day" : 10,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Sat with Gran",
+      "title" : "Sat with Gran"
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "tag:#math"
+      ],
+      "priority" : 0,
+      "tags" : [
+        "math"
+      ],
+      "text" : "Pi is 3.14 #math",
+      "title" : "Pi is 3.14"
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:today,",
+        "time:5pm"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Call mom today, 5pm",
+      "time" : "17:0",
+      "title" : "Call mom",
+      "when" : {
+        "day" : 10,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : true,
+      "pieces" : [
+        "when:thursday night"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Lunch thursday night",
+      "title" : "Lunch",
+      "when" : {
+        "day" : 12,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:this weekend"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Clean garage this weekend",
+      "title" : "Clean garage",
+      "when" : {
+        "day" : 14,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:day after tomorrow",
+        "time:14:00"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Report day after tomorrow 14:00",
+      "time" : "14:0",
+      "title" : "Report",
+      "when" : {
+        "day" : 12,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "place:anytime",
+        "tag:#school\/thesis"
+      ],
+      "place" : "anytime",
+      "priority" : 0,
+      "tags" : [
+        "school\/thesis"
+      ],
+      "text" : "Read Kant anytime #school\/thesis",
+      "title" : "Read Kant"
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "priority:!l"
+      ],
+      "priority" : 1,
+      "tags" : [
+
+      ],
+      "text" : "- [ ] Buy fuel !l",
+      "title" : "Buy fuel"
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:in a week"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Water plants in a week",
+      "title" : "Water plants",
+      "when" : {
+        "day" : 17,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:next friday",
+        "time:8 am"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Exam next friday 8 am",
+      "time" : "8:0",
+      "title" : "Exam",
+      "when" : {
+        "day" : 20,
+        "month" : 11,
+        "year" : 2026
+      }
+    },
+    {
+      "evening" : false,
+      "pieces" : [
+        "when:on Dec 31st 2026",
+        "time:10pm"
+      ],
+      "priority" : 0,
+      "tags" : [
+
+      ],
+      "text" : "Party on Dec 31st 2026 10pm",
+      "time" : "22:0",
+      "title" : "Party",
+      "when" : {
+        "day" : 31,
+        "month" : 12,
+        "year" : 2026
+      }
+    }
+  ],
+  "repeats" : [
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 19,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"daily\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every day"
+    },
+    {
+      "after" : {
+        "day" : 19,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 22,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 20,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"daily\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every day"
+    },
+    {
+      "after" : {
+        "day" : 20,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 23,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"daily\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every day"
+    },
+    {
+      "after" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 24,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 22,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"daily\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every day"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 24,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":3,\"kind\":\"daily\",\"monthDays\":[],\"skipped\":[{\"day\":21,\"month\":11,\"year\":2026}],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 3 days"
+    },
+    {
+      "after" : {
+        "day" : 24,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 27,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 27,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":3,\"kind\":\"daily\",\"monthDays\":[],\"skipped\":[{\"day\":21,\"month\":11,\"year\":2026}],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 3 days"
+    },
+    {
+      "after" : {
+        "day" : 27,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 30,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 30,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":3,\"kind\":\"daily\",\"monthDays\":[],\"skipped\":[{\"day\":21,\"month\":11,\"year\":2026}],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 3 days"
+    },
+    {
+      "after" : {
+        "day" : 30,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 3,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":3,\"kind\":\"daily\",\"monthDays\":[],\"skipped\":[{\"day\":21,\"month\":11,\"year\":2026}],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 3 days"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 20,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,4,6]}",
+      "summary" : "Every Mon, Wed and Fri"
+    },
+    {
+      "after" : {
+        "day" : 20,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 23,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 23,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,4,6]}",
+      "summary" : "Every Mon, Wed and Fri"
+    },
+    {
+      "after" : {
+        "day" : 23,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 26,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 25,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,4,6]}",
+      "summary" : "Every Mon, Wed and Fri"
+    },
+    {
+      "after" : {
+        "day" : 25,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 28,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 27,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,4,6]}",
+      "summary" : "Every Mon, Wed and Fri"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 19,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":0,\"end\":{\"never\":{}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,5]}",
+      "summary" : "Every 2 weeks on Mon and Thu"
+    },
+    {
+      "after" : {
+        "day" : 19,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 22,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 30,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":0,\"end\":{\"never\":{}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,5]}",
+      "summary" : "Every 2 weeks on Mon and Thu"
+    },
+    {
+      "after" : {
+        "day" : 30,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 3,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":0,\"end\":{\"never\":{}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,5]}",
+      "summary" : "Every 2 weeks on Mon and Thu"
+    },
+    {
+      "after" : {
+        "day" : 3,
+        "month" : 12,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 6,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 14,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":0,\"end\":{\"never\":{}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,5]}",
+      "summary" : "Every 2 weeks on Mon and Thu"
+    },
+    {
+      "after" : {
+        "day" : 31,
+        "month" : 1,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 2,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 28,
+        "month" : 2,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[31],\"skipped\":[],\"start\":{\"day\":31,\"month\":1,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the 31st"
+    },
+    {
+      "after" : {
+        "day" : 28,
+        "month" : 2,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 3,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 31,
+        "month" : 3,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[31],\"skipped\":[],\"start\":{\"day\":31,\"month\":1,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the 31st"
+    },
+    {
+      "after" : {
+        "day" : 31,
+        "month" : 3,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 4,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 30,
+        "month" : 4,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[31],\"skipped\":[],\"start\":{\"day\":31,\"month\":1,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the 31st"
+    },
+    {
+      "after" : {
+        "day" : 30,
+        "month" : 4,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 5,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 31,
+        "month" : 5,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[31],\"skipped\":[],\"start\":{\"day\":31,\"month\":1,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the 31st"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 30,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[-1,15],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the 15th and last day"
+    },
+    {
+      "after" : {
+        "day" : 30,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 15,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[-1,15],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the 15th and last day"
+    },
+    {
+      "after" : {
+        "day" : 15,
+        "month" : 12,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 18,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 31,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[-1,15],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the 15th and last day"
+    },
+    {
+      "after" : {
+        "day" : 31,
+        "month" : 12,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 1,
+        "year" : 2027
+      },
+      "next" : {
+        "day" : 15,
+        "month" : 1,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[-1,15],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the 15th and last day"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 27,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[],\"monthWeekday\":{\"ordinal\":-1,\"weekday\":6},\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the last Friday"
+    },
+    {
+      "after" : {
+        "day" : 27,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 30,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 25,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[],\"monthWeekday\":{\"ordinal\":-1,\"weekday\":6},\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the last Friday"
+    },
+    {
+      "after" : {
+        "day" : 25,
+        "month" : 12,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 28,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 29,
+        "month" : 1,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[],\"monthWeekday\":{\"ordinal\":-1,\"weekday\":6},\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the last Friday"
+    },
+    {
+      "after" : {
+        "day" : 29,
+        "month" : 1,
+        "year" : 2027
+      },
+      "completed" : {
+        "day" : 1,
+        "month" : 2,
+        "year" : 2027
+      },
+      "next" : {
+        "day" : 26,
+        "month" : 2,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"monthly\",\"monthDays\":[],\"monthWeekday\":{\"ordinal\":-1,\"weekday\":6},\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Monthly on the last Friday"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 9,
+        "month" : 2,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":3,\"kind\":\"monthly\",\"monthDays\":[],\"monthWeekday\":{\"ordinal\":2,\"weekday\":3},\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 3 months on the second Tuesday"
+    },
+    {
+      "after" : {
+        "day" : 9,
+        "month" : 2,
+        "year" : 2027
+      },
+      "completed" : {
+        "day" : 12,
+        "month" : 2,
+        "year" : 2027
+      },
+      "next" : {
+        "day" : 11,
+        "month" : 5,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":3,\"kind\":\"monthly\",\"monthDays\":[],\"monthWeekday\":{\"ordinal\":2,\"weekday\":3},\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 3 months on the second Tuesday"
+    },
+    {
+      "after" : {
+        "day" : 11,
+        "month" : 5,
+        "year" : 2027
+      },
+      "completed" : {
+        "day" : 14,
+        "month" : 5,
+        "year" : 2027
+      },
+      "next" : {
+        "day" : 10,
+        "month" : 8,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":3,\"kind\":\"monthly\",\"monthDays\":[],\"monthWeekday\":{\"ordinal\":2,\"weekday\":3},\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 3 months on the second Tuesday"
+    },
+    {
+      "after" : {
+        "day" : 10,
+        "month" : 8,
+        "year" : 2027
+      },
+      "completed" : {
+        "day" : 13,
+        "month" : 8,
+        "year" : 2027
+      },
+      "next" : {
+        "day" : 9,
+        "month" : 11,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":3,\"kind\":\"monthly\",\"monthDays\":[],\"monthWeekday\":{\"ordinal\":2,\"weekday\":3},\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 3 months on the second Tuesday"
+    },
+    {
+      "after" : {
+        "day" : 29,
+        "month" : 2,
+        "year" : 2024
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 3,
+        "year" : 2024
+      },
+      "next" : {
+        "day" : 28,
+        "month" : 2,
+        "year" : 2025
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"yearly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":29,\"month\":2,\"year\":2024},\"weekdays\":[]}",
+      "summary" : "Every 29 February"
+    },
+    {
+      "after" : {
+        "day" : 28,
+        "month" : 2,
+        "year" : 2025
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 3,
+        "year" : 2025
+      },
+      "next" : {
+        "day" : 28,
+        "month" : 2,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"yearly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":29,\"month\":2,\"year\":2024},\"weekdays\":[]}",
+      "summary" : "Every 29 February"
+    },
+    {
+      "after" : {
+        "day" : 28,
+        "month" : 2,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 3,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 28,
+        "month" : 2,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"yearly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":29,\"month\":2,\"year\":2024},\"weekdays\":[]}",
+      "summary" : "Every 29 February"
+    },
+    {
+      "after" : {
+        "day" : 28,
+        "month" : 2,
+        "year" : 2027
+      },
+      "completed" : {
+        "day" : 3,
+        "month" : 3,
+        "year" : 2027
+      },
+      "next" : {
+        "day" : 29,
+        "month" : 2,
+        "year" : 2028
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"yearly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":29,\"month\":2,\"year\":2024},\"weekdays\":[]}",
+      "summary" : "Every 29 February"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 5,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":0,\"end\":{\"never\":{}},\"interval\":2,\"kind\":\"afterFinish\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "2 weeks after I finish"
+    },
+    {
+      "after" : {
+        "day" : 5,
+        "month" : 12,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 8,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 22,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":0,\"end\":{\"never\":{}},\"interval\":2,\"kind\":\"afterFinish\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "2 weeks after I finish"
+    },
+    {
+      "after" : {
+        "day" : 22,
+        "month" : 12,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 25,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 8,
+        "month" : 1,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":0,\"end\":{\"never\":{}},\"interval\":2,\"kind\":\"afterFinish\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "2 weeks after I finish"
+    },
+    {
+      "after" : {
+        "day" : 8,
+        "month" : 1,
+        "year" : 2027
+      },
+      "completed" : {
+        "day" : 11,
+        "month" : 1,
+        "year" : 2027
+      },
+      "next" : {
+        "day" : 25,
+        "month" : 1,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":0,\"end\":{\"never\":{}},\"interval\":2,\"kind\":\"afterFinish\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "2 weeks after I finish"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 18,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"dueDate\",\"customUnit\":\"month\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"afterFinish\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "1 month after the due date"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 12,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 18,
+        "month" : 1,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"dueDate\",\"customUnit\":\"month\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"afterFinish\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "1 month after the due date"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 1,
+        "year" : 2027
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 1,
+        "year" : 2027
+      },
+      "next" : {
+        "day" : 18,
+        "month" : 2,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"dueDate\",\"customUnit\":\"month\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"afterFinish\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "1 month after the due date"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 2,
+        "year" : 2027
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 2,
+        "year" : 2027
+      },
+      "next" : {
+        "day" : 18,
+        "month" : 3,
+        "year" : 2027
+      },
+      "rule" : "{\"countFrom\":\"dueDate\",\"customUnit\":\"month\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"afterFinish\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "1 month after the due date"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 25,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"on\":{\"_0\":{\"day\":30,\"month\":11,\"year\":2026}}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every Wed"
+    },
+    {
+      "after" : {
+        "day" : 25,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 28,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"on\":{\"_0\":{\"day\":30,\"month\":11,\"year\":2026}}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every Wed"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":2,\"end\":{\"after\":{\"times\":3}},\"interval\":1,\"kind\":\"daily\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every day"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 28,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":10,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 10 days"
+    },
+    {
+      "after" : {
+        "day" : 28,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 1,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 8,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":10,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 10 days"
+    },
+    {
+      "after" : {
+        "day" : 8,
+        "month" : 12,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 11,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 18,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":10,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 10 days"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 12,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 12,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 28,
+        "month" : 12,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":10,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[]}",
+      "summary" : "Every 10 days"
+    },
+    {
+      "after" : {
+        "day" : 18,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 21,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 19,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,3,4,5,6]}",
+      "summary" : "Every weekday"
+    },
+    {
+      "after" : {
+        "day" : 19,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 22,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 20,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,3,4,5,6]}",
+      "summary" : "Every weekday"
+    },
+    {
+      "after" : {
+        "day" : 20,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 23,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 23,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,3,4,5,6]}",
+      "summary" : "Every weekday"
+    },
+    {
+      "after" : {
+        "day" : 23,
+        "month" : 11,
+        "year" : 2026
+      },
+      "completed" : {
+        "day" : 26,
+        "month" : 11,
+        "year" : 2026
+      },
+      "next" : {
+        "day" : 24,
+        "month" : 11,
+        "year" : 2026
+      },
+      "rule" : "{\"countFrom\":\"completion\",\"customUnit\":\"day\",\"done\":0,\"end\":{\"never\":{}},\"interval\":1,\"kind\":\"weekly\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":18,\"month\":11,\"year\":2026},\"weekdays\":[2,3,4,5,6]}",
+      "summary" : "Every weekday"
+    }
+  ],
+  "rootKey" : "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+  "skips" : [
+    {
+      "result" : "{\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":21,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":19,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[{\"day\":18,\"month\":11,\"year\":2026}],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":19,\"month\":11,\"year\":2026}}",
+      "task" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020,\"when\":{\"day\":18,\"month\":11,\"year\":2026}}"
+    },
+    {
+      "result" : "{\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":30,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":28,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[{\"day\":20,\"month\":11,\"year\":2026}],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020}",
+      "task" : "{\"blockMinutes\":45,\"checklist\":[{\"id\":\"A4E0F193-3BD6-4435-A578-F4DFA30A29DA\",\"isDone\":true,\"title\":\"Front\"},{\"id\":\"3F05A1AF-BCE6-43C3-9958-789D2FD0AD5D\",\"isDone\":false,\"title\":\"Back\"}],\"createdAt\":785000000,\"deadline\":{\"day\":20,\"month\":11,\"year\":2026},\"deadlineTime\":{\"hour\":17,\"minute\":0},\"edits\":{\"futurePart\":785000020,\"title\":785000010},\"id\":\"6F1C3A52-0B7E-4D1A-9C33-2E5B8A1D4F60\",\"isEvening\":false,\"nagging\":{\"everyMinutes\":10,\"giveUp\":{\"afterHours\":{\"_0\":2}}},\"notes\":\"Both boxes, and the *basil*.\",\"order\":4,\"place\":\"anytime\",\"priority\":2,\"reminders\":[{\"id\":\"11111111-2222-4333-8444-555555555555\",\"kind\":{\"at\":{\"_0\":{\"day\":18,\"month\":11,\"year\":2026},\"_1\":{\"hour\":7,\"minute\":15}}}},{\"id\":\"11111111-2222-4333-8444-666666666666\",\"kind\":{\"beforeDeadline\":{\"_0\":\"hour\"}}},{\"id\":\"11111111-2222-4333-8444-777777777777\",\"kind\":{\"place\":{\"_0\":{\"latitude\":40.25,\"longitude\":-111.65,\"name\":\"Home\",\"onArrival\":false,\"radius\":100}}}}],\"repeatRule\":{\"countFrom\":\"completion\",\"customUnit\":\"week\",\"done\":1,\"end\":{\"after\":{\"times\":10}},\"interval\":2,\"kind\":\"custom\",\"monthDays\":[],\"skipped\":[],\"start\":{\"day\":16,\"month\":11,\"year\":2026},\"weekdays\":[2,5]},\"snoozedUntil\":785003600,\"source\":{\"itemID\":\"abc\",\"module\":\"reader\",\"quote\":\"water early\",\"title\":\"Garden notes\"},\"tags\":[\"home\",\"garden\\\/boxes\"],\"time\":{\"hour\":7,\"minute\":30},\"title\":\"Water the garden boxes\",\"updatedAt\":785000020}"
+    }
+  ],
+  "tasks" : [
+    {
+      "expect" : {
+
+      },
+      "id" : "6f1c3a52-0b7e-4d1a-9c33-2e5b8a1d4f60",
+      "kind" : "task",
+      "meta" : "AYVXX8qt3CIXMrQvDcLWV5xIyTSt5kQJP9rUd1jRgcELtMFEzw8cnSfdxWBujU\/xfcmY95GUMwVoVAYzRSLVUiVY6nacplbRxwHYOlkiq4BlY4OreNFG0v2ZPTl3Y+qfKq7kzXjqq3Jcx1dHWO3Nocibs9WDIr4I0bRVLPze8eJJ\/qstN\/w1vZMRiS5\/zSwpwaj8S7\/8IP0ek0THwBRyajS7ysxp2lIDb3IbabdygQmtRs+7V7ZDAOQMlCQ9cjyabl3xlag8KUgkOuMqGrg60OLfzsVdNrGMif9kRcKdsvK5HSonKlmWhf+wTRwQhloKzyhiuivazI58IsWrvdro1MqEAOEv4u0L6SBkRqr4rbPOgsvSoldUKSQRK9CU+Hmlvjwwl\/pSQatLkf9KVn3ElSnbbzTkTUW+TdYhGmQF1qj4k8XiGeg9my3ra1bJZm8SMzypL2Ys+v3vzIGFZO8u88ER76GFNtizn54mSKwC+5fCfeliNYjyqv23zt5HGojCRZ1N1PRjNz70hD4Qzzz1NqT4ykk6BbNp\/GbnBdn+2SnCePvW+2vciK6up86MuU1dShgGWsfmgo3ZAtI1IIIEJq5+RJ2iAzcWYwVtCfoLwS2mGhAtFSYtozuMpqD3eKSbsfj\/+Y3zkyE75yiZalX1vvh0CLSbqwz1TNGzLhDrL2CLBosp3Ud1KbfuM35u66QAJIfHbjxERhE2RVPLw1U2pb3G\/\/s9x3z0rRPxhVFARQUOr5fdyeWhMJBwWOmH3ii1gbExVs94IyZY\/Is1W\/vWeVSxVi8tJkG1bh6TzWytNA6mcxSvyxF8VhBdulNaWCFVMZ3N8XRxqzvvm\/LwJsS8fPMQg9v9Bfe8AYrkVFM9UkWwn0xjQeNziIfnAWq6xB6qWk2V33SFcknmgKxBtG58kc5XR6ScRe3rixp0FR0zmJ70Pc7JGjin4UIalV03RHn2i0hTVlNOrMoI2LCK3jTJicjs8z4p2WGB5JVcA44T6mg+WFM4jxdPV6WAVLOFjL6tUlMWJT8caXLEPJNlzV1BY3uCnt\/5q6f4KINgP2BctHHLlnb1Y7GEKjQj\/n1MRlkebJcCinIgYFJOG+wAlFfw7f6Z77bS6GAtl5HsY9ZFAvcZSMozgj+\/1IdwV1tp3Jwx6igd\/wLcAl+WaYUezKeNffqmg633Sd3QDBeBWE\/iI1ir7XiHAdPFtTd+bOZ8skz4qlAoOUo6mBxyYlQtq+9jfXgpalumHG3kkp4guy5hkgmyx7cS+R7uoZA1Bdn6BB39kMt+fkiTqZdvsKDMhKnwiwbWorXLsdsg1SorJst3KlOq6Qnriv06Wh\/m1YJlxcwsN2kYlVEaQ6mCSi0z1LUxXlBxAnhbV2TcrD456dx3QzE\/gaoGm8MkZJbTiqXYc+qcAkmIugYL3G5QKo3H0LBhhpxN9oAuCrmG\/Bn+1DgjProCxImCxiV0a8aT0dVJHxdsujGTW7qVu25e3Q8EY\/UbJhICI05SdTARK1I\/wTCEsP9Thr6POHO523kAfEZit1UGteXFYwzVee4sgJFyeIPMvTrt12F4pimZBe14KN+7O5PgGCRcd3JA7Clip4WTMwAR4NRi8aXK7ovAQUIVzxCDeWxoJgzy7zA1ySTGqLNQJpJq23bcpvXhculCCcCpI5lgo5LG5OwRAUqKLdAOoafzl9KvoNeCaLi1A7UZseeKYBRi7ucgZKy4aHofG7RJg\/un4aTUaslLFM97WjIAmK75DvVQDys0UHzBCmDyYX+Uh+F2hp5S2lEgOeIEoiMJv0zO+Tj8EcCmRjTiyHU+MJML2dGrIJuJb6eQYz272nOgU8UkosErAkCYFkC30KZ8GXrvZFMppRUeZPXG1JHNI7pRaQau023ogpmhFGQXO8FlJVN6PCFxwNsfab2f1OmpoM1bDVVrjImi+3CWdqbwjVv\/cQ=="
+    },
+    {
+      "expect" : {
+        "name" : "Seminar paper"
+      },
+      "id" : "7060f3b4-64fa-40b1-b811-198adebb88f7",
+      "kind" : "task_list",
+      "meta" : "AYANRfeKyn0cwWJYwf\/KbG62l0dqT2HQeiSh7Ih\/b+Y\/BrG3udB5uMnYL7v6WcZHqetvraa+4e2IuUIJ34be0TL5FuMWMctAGsdnGMFwMXywAPlcNwft5wclWv3hX83uyfvznJs7FY6jjTsSyw9llEDKdFDdNJtR9OwMCdKC6QV4XtQoZBOa11zyX\/vxZcrLzLRenUYqpBaJseIwgRVytE0I9NCBVzztkmPmM88pA3P1EFKYhsIK3ak2rQQiezX1Ee6SU5qbCXSjF\/rywXotZK02Xyvzsk34Mh6\/daM25m+Ht+\/6sr0PwCMFDvIm9CncBCDw\/uV9+L6KQ2sMXEmro9BeEVYxY+D+gbMPdQcXurG9um5wZMsQgbzLTzrpqV0pPQvoLydrT2GjhOQXr\/+yu9OTvAuV\/2IhZvzFPD1emb2CtLHXMgxv+FJmtLiSACXFOSjL2ssX8VzuC00ECkQy6agJ\/1ylXduvMmr7tLTrpF+foEZLg\/76e7vOZGVvWYj+GFgaKBcIf3\/xPTVMlqeWFU1ExGg5NY4GXJz8Ce3lj5Gh+CsZdiFZuFITvVepHiRGA4y3QYXP+rWoIoIsnh+4RhgG"
+    },
+    {
+      "expect" : {
+        "name" : "Due this week"
+      },
+      "id" : "e28504ad-8072-4782-aedb-f8d43d74eda6",
+      "kind" : "task_list",
+      "meta" : "AdA7hRs\/pnTSNEA4MDXQCorveikAsrrnlQPQ4hIJ8KvPj2qZzfgZ5cTtMLtVPVlJmXJnP7dKYroppYW4onHNq406tqEn2CJPgv0PZaji7lEP4VISobxIRHMajkBHYuR+4RrjFit9ILLPO2IwyD\/EmsXglcNmpibEhnAD+qJkkUZkE14IGwezUanVfHcmmHsPVMK6k4kO231rVKASne\/q+04eOA\/cNtLAOo9AJBfT95Lt6mDLE8BlVVU04SVhBI7Gdr4xp7SMsmEwFlrckPmYouxyTXkRLCFUHSklav8gkyczEAXcDGgSZ60tAZlqOyVWlcuv\/UYj8AlGFSXUOEbZ14x8LngLd+Js8wpoBrwbHOs8t4hYiV3gd6C4R9hBNy\/GJ8vKuS+u8rguXe2r94Ju4lXmrXVdbJ7+cAuui6umuuIHYhFcT9ZHlAh5lyFkt27WL\/Qcp86mqdFFaq7N1kOJMzc\/835Pu6Aw4q0ues9YsqABnwesJwcCEJt1MaShfPge1NDARUUxejF\/al5zmLoDtRpPS9Akz45OanYTroM39xqi17gyJhBRZIlO6rJrM7b2s53xBZLBPxZatZWMDJSErseaM0u28HswqdPx0NSF0Y8LIe2E4Z0SQAT69vGeXN9R0Wyk+\/svg2MrBm\/11FnNBkcTE2XBvGy48Djf+Hq5sd\/92JSYtGaJlQo4dwfQ29rRcnLzBk3kRIFRlw=="
+    }
+  ],
+  "timeZone" : "America\/Denver"
+}
