@@ -14,6 +14,8 @@ A new contract is recorded here before it is implemented.
 | Calendar | Tasks | each day's events for Upcoming, through `AgendaProvider` | built |
 | Home | Tasks | search, refresh, the big tile with working tick boxes | built |
 | Tasks | Messages | shared lists in end-to-end encrypted Matrix rooms, through `SharedRooms` | built, live two-user run waits |
+| Social | Messages | Friends and Close-friends posts in end-to-end encrypted Matrix rooms, through `SharedRooms` with `SharedRoomMarker.social` | built, live two-user run waits |
+| Social | Account | photos and names through `ProfileDirectory` | built |
 
 ## Reader
 
@@ -775,6 +777,37 @@ its list and tasks are posted into the new room and the private copy is deleted.
   waits for the owner's friend's account: user 1 shares a project with user 2 as Can edit; user 2 sees no
   other list of user 1's, accepts, sees a task user 1 assigns them under Assigned to me, and comments; user 1
   sees the comment; user 1 removes user 2, whose Tasks no longer shows the list.
+
+## Social
+
+Issue 149, agreed 2026-11-17; the approved Social canvas is the mockup. Social is native (owner: "Native now,
+maybe later"), iPhone first. `TotalitySocial` imports only `TotalityCore` and `TotalityUI`, and nothing imports it
+but the app.
+
+- **One post type.** `SocialPost` is the same whatever its `Audience`: Public, Friends (people you follow who
+  follow you back) or Close friends (a list you choose). The audience decides where it's kept, and each carries the
+  agreed label: "Public: anyone on Totality can see this", "Friends: end-to-end encrypted", "Close friends:
+  end-to-end encrypted".
+- **Public** posts, their likes and comments, follows and For You are Supabase rows behind the `social_*` functions
+  (migration `20261119000001_social.sql`), reached by `RestSocialServer` with the signed-in person's token. The
+  tables are pinned to `visibility = 'public'`. For You is a ranking function on the server: newer first, likes and
+  comments, people your follows follow, tags you've liked, Not interested; never your own post and never one already
+  shown. Each post says why it's there.
+- **Friends and Close friends** go through `SharedRooms` (the app's `MatrixTaskRooms`, given `SharedRoomMarker.social`),
+  one end-to-end encrypted room per author per audience, the author its owner (100) and readers viewers (0). Which
+  audience a room is for is the room's first post, inside the encryption. Posts, deletes, likes, comments and comment
+  removals are `RoomMessage`s; `RoomTimeline.build` replays a room and counts only the owner's posts, with the
+  server's timestamps. The Friends room's members follow `social_friends()` each time Social loads; Close friends
+  are the Close-friends room's members. An invite is accepted only from someone you follow.
+- **What the server sees.** Public posts and the follow graph in full. For the rooms: two rooms per person named
+  "Totality posts", who's in each, and when each post was sent. Everyone in a room can see who else is in it, so
+  people on your Close-friends list can see each other.
+- **Two-user test.** `SocialTwoUserTests` against stand-in servers, and the Social cases in
+  `backend-tests/social.test.js` against the real migration. The live run on two iPhones waits for the owner's
+  friend's account.
+- **Not built yet:** photos, video, audio and stories (need public media in the blob store), saves, notifications,
+  hide like counts, safety (mute, report, who can comment, private accounts), Messages' "Who can message me",
+  connections to other modules, and Social on the home tile.
 
 ## Storage in settings
 

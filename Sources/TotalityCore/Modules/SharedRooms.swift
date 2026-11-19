@@ -148,18 +148,43 @@ public protocol SharedRooms: AnyObject {
     func message(_ text: String, to username: String) async throws
 }
 
+/// How a module's rooms are told apart from chats and from each other's. The room's name and topic aren't
+/// end-to-end encrypted, so they are fixed words that say only which module the room is for, never what's in it.
+public struct RoomMarker: Hashable, Sendable {
+    public let name: String
+    public let topic: String
+    /// The message type a module's posts go out as, inside `m.room.message`, so they're encrypted like a chat message.
+    public let messageType: String
+
+    public init(name: String, topic: String, messageType: String) {
+        self.name = name
+        self.topic = topic
+        self.messageType = messageType
+    }
+
+    /// Whether a room is this module's. The name alone is enough, since an invite may not carry the topic.
+    public func matches(name: String?, topic: String?) -> Bool {
+        name == self.name || topic == self.topic
+    }
+}
+
 /// How a shared room is told apart from a chat. The room's name and topic aren't end-to-end encrypted, so
 /// they are fixed words that say only that it's a shared list, never which one: the list's own name
 /// travels inside the encrypted room.
 public enum SharedRoomMarker {
-    public static let name = "Totality shared list"
-    public static let topic = "app.totality.tasks.v1"
-    /// The message type a module's posts go out as, inside `m.room.message`, so they're encrypted like a chat message.
-    public static let messageType = "app.totality.tasks"
+    /// Tasks' shared lists (issue 123, step 6).
+    public static let tasks = RoomMarker(name: "Totality shared list", topic: "app.totality.tasks.v1", messageType: "app.totality.tasks")
+    /// Social's Friends and Close-friends posts (issue 149). Which audience a room is for travels inside it.
+    public static let social = RoomMarker(name: "Totality posts", topic: "app.totality.social.v1", messageType: "app.totality.social")
+    /// Every module's marker, so Messages can leave all of them out of its chats.
+    public static let all = [tasks, social]
 
-    /// A room Messages leaves out of its chats and requests. The name alone is enough, since an invite
-    /// may not carry the topic.
+    public static var name: String { tasks.name }
+    public static var topic: String { tasks.topic }
+    public static var messageType: String { tasks.messageType }
+
+    /// A room Messages leaves out of its chats and requests: any module's shared room.
     public static func isSharedRoom(name: String?, topic: String?) -> Bool {
-        name == Self.name || topic == Self.topic
+        all.contains { $0.matches(name: name, topic: topic) }
     }
 }

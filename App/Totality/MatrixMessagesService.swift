@@ -349,7 +349,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             }
             // The name and photo are outside Matrix's encryption, which the screen says where they're set.
             // A group can't take the shared-list marker as its name, or it would vanish from Messages.
-            let name = name == SharedRoomMarker.name ? nil : name
+            let name = SharedRoomMarker.all.contains { $0.name == name } ? nil : name
             let id = try await client.createRoom(request: CreateRoomParameters(
                 name: name, isEncrypted: true, isDirect: false, visibility: .private, preset: .privateChat, invite: people
             ))

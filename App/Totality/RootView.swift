@@ -6,6 +6,7 @@ import TotalityMail
 import TotalityMessages
 import TotalityPhotos
 import TotalityReader
+import TotalitySocial
 import TotalityTasks
 import TotalityUI
 import TotalityWeb
@@ -25,6 +26,8 @@ struct RootView: View {
     @State private var tasks: TasksModel?
     /// Shared task lists, over Messages' Matrix connection (step 6).
     @State private var sharedLists: SharedListsModel?
+    /// Social, made the first time it's opened (issue 149). It needs the sign-in, not the content key.
+    @State private var social: SocialModel?
     /// Quick add from the Tasks tile, over the home page.
     @State private var quickAddingTask = false
     @State private var messages: MessagesModel
@@ -96,6 +99,7 @@ struct RootView: View {
                 web = nil
                 tasks = nil
                 sharedLists = nil
+                social = nil
                 await mailWiring.disconnect()
                 mail.keyChanged()
                 photosTurn += 1
@@ -259,6 +263,17 @@ struct RootView: View {
         case .photos:
             PhotosHomeView(model: photos, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
                 .id(ObjectIdentifier(photos))
+        case .social:
+            if let social = social ?? makeSocial() {
+                SocialHomeView(model: social) { open = nil }
+                    .onAppear { if self.social == nil { self.social = social } }
+            } else {
+                ModuleMessage(
+                    systemImage: "person.crop.circle.badge.exclamationmark",
+                    title: "Sign-in isn't set up",
+                    detail: "This build has no backend settings, so Social can't open."
+                ) { open = nil }
+            }
         default:
             ModuleMessage(
                 systemImage: "hammer",
@@ -530,6 +545,19 @@ struct RootView: View {
     }
 
     /// Shared lists travel in Matrix rooms, which run only where the Matrix SDK is linked.
+    /// Social for whoever is signed in. Friends and Close-friends posts ride Messages' Matrix connection,
+    /// in their own encrypted rooms, which only the iPhone build has.
+    private func makeSocial() -> SocialModel? {
+        guard let config = AccountSetup.config, let token = AccountSetup.searchToken, let username = AccountSetup.username else { return nil }
+        let server = RestSocialServer(base: config.url, publishableKey: config.publishableKey, token: token, username: username)
+        #if canImport(MatrixRustSDK)
+        let rooms: (any SharedRooms)? = MatrixTaskRooms(messages: messages, marker: SharedRoomMarker.social)
+        #else
+        let rooms: (any SharedRooms)? = nil
+        #endif
+        return SocialModel(server: server, privateRooms: rooms, profiles: AccountSetup.profiles)
+    }
+
     private func makeSharedLists(directory: (any ProfileDirectory)?) -> SharedListsModel? {
         #if canImport(MatrixRustSDK)
         let model = SharedListsModel(rooms: MatrixTaskRooms(messages: messages))
