@@ -64,9 +64,11 @@ Rules:
 - **Sign out (my computer):** log the device out, `clearStores()`, delete the `totality-matrix-*` databases, then the usual site sign-out.
 - **Removing the browser on the iPhone** (Devices) must also delete its Matrix device. That's an iPhone change in the build PR.
 
-## 7. Scope of v1
+## 7. Scope (owner, 2026-11-18: "as functional as the iphone app messages module")
 
-Recommended (open question 1): chat list, read chats, send text, reply, react, see photos and short videos, mark read. Not in v1: new chats, groups settings, sending photos, deleting, calls, disappearing-message settings. They stay on the iPhone and the page says so. Sending is the user's own action from their own keyboard; it isn't an AI action, so rule 6 doesn't come into it.
+The same as the iPhone Messages module: chat list with requests (accept, decline, block), new chats by username, groups (start with names, a name and a photo; rename; change photo; leave), read and send text, reply, react, send and see photos and short videos, retry, delete your own messages, typing and read receipts (with the same share-read setting), disappearing messages, load earlier, blocked people (block, list, unblock). Both sides use the same Matrix events, so a chat looks the same on the iPhone and the website. Calls aren't in the iPhone module either. Sending is the user's own action from their own keyboard; it isn't an AI action, so rule 6 doesn't come into it.
+
+Photos and videos sent from the browser are sealed in the page by the SDK (AES-CTR attachment encryption, as on the iPhone) before upload. Photos: JPEG/PNG/GIF/WebP, re-encoded in a canvas to strip metadata and resized like the iPhone. Videos: MP4 as picked, size-limited like the iPhone.
 
 Rendering: plain `body` text with `textContent`, never `formatted_body` HTML. `http(s)` links only, `noopener noreferrer nofollow`. Photos only as JPEG/PNG/GIF/WebP up to 10 MB, videos up to 40 MB, the rest "opens on the iPhone".
 
@@ -100,13 +102,14 @@ Follows `docs/website-security-review.md`.
 | M8 | **The Matrix token leaks.** | Never in `localStorage`, URLs or logs; sealed or memory only; `Referrer-Policy: no-referrer`. The JWT pass lasts 60 seconds and is used once. |
 | M9 | **Untrusted media and links.** | Decrypted in the page, shown as `blob:` images or `<video>` only for listed types and sizes, revoked on close. No `formatted_body`, no remote images, links with `noopener noreferrer`. |
 | M10 | **Device name leaks the browser and OS to contacts.** | Name is plain `Totality web`. |
+| M12 | **Uploads.** Only files the user picks are sent. | No drag-anywhere or paste auto-send; a picked file is shown before Send. Photos are redrawn in a canvas, which drops location and camera details, as the iPhone does. Bytes are sealed by the SDK before upload. |
 | M11 | **Rule check.** | 1: no new tables. 2: messages are sealed by Megolm on the device before upload. 3: the password isn't involved; the secret comes from the root key. 4: no secrets; the JWT key stays in Supabase. 5: "verified" is shown only once the device is really cross-signed. 6: no AI on the web. 7: Messages on the web is its own folder, importing no other module. 8: unchanged. |
 
-**Result.** No blocker. Changes: the never-reset rule (M4), memory-only chats (M6), lock = log out (M7), plain device name (M10), the proof test before building (section 4). Four open questions for the owner, below.
+**Result.** No blocker. Changes: the never-reset rule (M4), memory-only chats (M6), lock = log out (M7), plain device name (M10), the proof test before building (section 4). Decisions below.
 
-## Open questions for the owner
+## Decisions (owner, 2026-11-18)
 
-1. **Scope:** read and send text, replies and reactions (recommended), or read-only like the other web modules for now?
-2. **Shared computers:** Messages off there (recommended; no leftover devices), or on, with a new device each visit that logs out on lock?
-3. **Device name contacts see:** `Totality web` (recommended), or with the browser, such as `Totality web · Safari`?
-4. **Size:** Messages adds about 2.3 MB (gzip) the first time it's opened, then it's cached. OK?
+1. **Scope:** full parity with the iPhone Messages module (section 7).
+2. **Shared computers:** Messages is off there. Section 6's shared-computer lock path stays as a backstop only.
+3. **Device name:** `Totality web`.
+4. **Size:** about 2.3 MB gzip on first open is fine.
