@@ -120,6 +120,7 @@ struct RootView: View {
             // So the Messages tile shows who's written without opening Messages first. Not while it's off Home.
             if !homeChoices.removed.contains(.messages) { Task { await messages.connect() } }
             await refreshAhead()
+            await openSocialForHome()
             await account?.sync?.syncNow()
         }
         // Every minute while Totality is in front, the modules fetch what's new, so opening one never waits.
@@ -349,6 +350,7 @@ struct RootView: View {
         glances[.calendar] = calendar?.glance
         glances[.web] = web?.glance
         glances[.tasks] = tasks?.glance
+        glances[.social] = social?.glance
         glances[.mail] = mail.current.glance
         glances[.messages] = messages.glance
         glances[.photos] = photos.glance
@@ -545,6 +547,13 @@ struct RootView: View {
     }
 
     /// Shared lists travel in Matrix rooms, which run only where the Matrix SDK is linked.
+    /// So the Social tile shows the newest posts without opening Social first. Not while it's off Home.
+    private func openSocialForHome() async {
+        guard !homeChoices.removed.contains(.social), case .signedIn = account?.phase else { return }
+        if social == nil { social = makeSocial() }
+        await social?.load()
+    }
+
     /// Social for whoever is signed in. Friends and Close-friends posts ride Messages' Matrix connection,
     /// in their own encrypted rooms, which only the iPhone build has.
     private func makeSocial() -> SocialModel? {
@@ -555,7 +564,13 @@ struct RootView: View {
         #else
         let rooms: (any SharedRooms)? = nil
         #endif
-        return SocialModel(server: server, privateRooms: rooms, profiles: AccountSetup.profiles)
+        let model = SocialModel(server: server, privateRooms: rooms, profiles: AccountSetup.profiles)
+        account?.onOpenSocialProfile = {
+            showingAccount = false
+            Task { model.requestedProfile = await AccountSetup.username?() }
+            bringUp(.social)
+        }
+        return model
     }
 
     private func makeSharedLists(directory: (any ProfileDirectory)?) -> SharedListsModel? {

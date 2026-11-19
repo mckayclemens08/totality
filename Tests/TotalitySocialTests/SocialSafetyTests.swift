@@ -86,3 +86,18 @@ import TotalityCore
         #expect(LikeText.count(post, hideEverywhere: false) == "Liked")
     }
 }
+
+@MainActor
+@Suite struct SocialGlanceTests {
+    @Test func theTileWaitsThenShowsTheNewest() async {
+        let world = FakeSocialWorld()
+        let maya = world.person("maya")
+        let model = SocialModel(server: world.person("jonah"))
+        #expect(model.glance == nil, "nothing claimed before loading")
+        await model.load()
+        #expect(model.glance == ModuleGlance(lines: ["Nothing new yet"], isQuiet: true))
+        _ = try? await maya.publish(title: "Sunrise on Timpanogos", body: "Summit to saddle.", tags: [])
+        await model.load()
+        #expect(model.glance?.lines == ["@maya: Sunrise on Timpanogos"])
+    }
+}

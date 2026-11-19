@@ -231,7 +231,7 @@ private struct SignOutButton: View {
 
 // MARK: - The screens the rows open
 
-/// The public profile as it is today, with Edit and Share, until Social has its own profile screen.
+/// The public profile's photo, name and bio, with Edit and Share, and a way to see it as others do in Social.
 struct ProfileScreen: View {
     let model: AccountModel
     @State private var editing = false
@@ -242,6 +242,9 @@ struct ProfileScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
                 ProfileSummary(model: model, onEdit: { editing = true }, onShare: { sharing = true })
+                if let open = model.onOpenSocialProfile {
+                    HeaderPill("See it in Social", systemImage: "person.2", action: open)
+                }
             }
             .padding(Space.s4)
             .frame(maxWidth: .infinity, alignment: .topLeading)
