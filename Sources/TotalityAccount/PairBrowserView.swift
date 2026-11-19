@@ -146,9 +146,11 @@ private final class ScannerController: UIViewController, AVCaptureMetadataOutput
         DispatchQueue.global(qos: .userInitiated).async { session.stopRunning() }
     }
 
-    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
-        for case let code as AVMetadataMachineReadableCodeObject in objects {
-            if let text = code.stringValue { onCode?(text) }
+    /// Delivered on the main queue (set above), so it's safe to step onto the main actor.
+    nonisolated func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        let texts = objects.compactMap { ($0 as? AVMetadataMachineReadableCodeObject)?.stringValue }
+        MainActor.assumeIsolated {
+            for text in texts { onCode?(text) }
         }
     }
 }
