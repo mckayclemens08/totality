@@ -1,3 +1,4 @@
+import Foundation
 import TotalityCore
 
 /// Mail's entry in the registry. It takes nothing from other modules yet, and search inside Totality

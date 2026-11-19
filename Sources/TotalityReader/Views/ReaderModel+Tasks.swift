@@ -5,7 +5,7 @@ import TotalityCore
 
 extension ReaderModel {
     /// The longest quote a task keeps. Anything longer is cut at a word, with an ellipsis.
-    static let quoteLimit = 600
+    nonisolated static let quoteLimit = 600
 
     /// Opens Add to Tasks for an item, with the words chosen in it, if any. Nothing is made until Add.
     public func addToTasks(_ item: ReaderItem, quote: String?) {
@@ -17,7 +17,7 @@ extension ReaderModel {
         )
     }
 
-    static func trimmedQuote(_ text: String) -> String {
+    nonisolated static func trimmedQuote(_ text: String) -> String {
         let flat = text.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
         guard flat.count > quoteLimit else { return flat }
         let cut = flat.prefix(quoteLimit)
