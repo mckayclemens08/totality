@@ -92,14 +92,14 @@ export async function browserForget(token: string): Promise<void> {
   try { await rpc(token, "browser_forget", {}); } catch { /* the session ends anyway */ }
 }
 
-export interface ObjectRow { id: string; kind: string; meta_cipher: string | null; storage_key: string | null; byte_size: number | null }
+export interface ObjectRow { id: string; kind: string; meta_cipher: string | null; storage_key: string | null; byte_size: number | null; content_hash?: string | null }
 
 /** The signed-in account's live docs and files, a page at a time (the server stops at its own page size). */
 export async function listObjects(token: string, kinds: string[] = ["note", "file"]): Promise<ObjectRow[]> {
   const rows: ObjectRow[] = [];
   const page = 500;
   for (let from = 0; ; from += page) {
-    const res = await call(`/rest/v1/content_objects?select=id,kind,meta_cipher,storage_key,byte_size&kind=in.(${kinds.join(",")})&deleted_at=is.null&order=id`, {
+    const res = await call(`/rest/v1/content_objects?select=id,kind,meta_cipher,storage_key,byte_size,content_hash&kind=in.(${kinds.join(",")})&deleted_at=is.null&order=id`, {
       headers: { ...headers(token), "range-unit": "items", range: `${from}-${from + page - 1}` },
     });
     if (res.status === 401) throw new NetError("wrongPassword");
@@ -211,10 +211,10 @@ export { b64 };
 // Every change names the hash it expects, so two devices can't overwrite each other unseen. Row-level
 // security limits every query to the signed-in account; inserts name the owner, which the policy checks.
 
-export interface SealedRow { id: string; kind: string; meta: string | null; hash: string | null; deleted: boolean }
+export interface SealedRow { id: string; kind: string; meta: string | null; hash: string | null; deleted: boolean; storageKey?: string | null }
 const hashHex = (literal: string | null): string | null => (literal && literal.startsWith("\\x") ? literal.slice(2) : null);
-const rowOf = (r: { id: string; kind: string; meta_cipher: string | null; content_hash: string | null; deleted_at: string | null }): SealedRow =>
-  ({ id: r.id.toLowerCase(), kind: r.kind, meta: r.meta_cipher, hash: hashHex(r.content_hash), deleted: r.deleted_at !== null });
+const rowOf = (r: { id: string; kind: string; meta_cipher: string | null; content_hash: string | null; deleted_at: string | null; storage_key?: string | null }): SealedRow =>
+  ({ id: r.id.toLowerCase(), kind: r.kind, meta: r.meta_cipher, hash: hashHex(r.content_hash), deleted: r.deleted_at !== null, storageKey: r.storage_key ?? null });
 
 /** Live rows of some kinds with their hashes, a page at a time. */
 export async function listSealed(token: string, kinds: string[]): Promise<SealedRow[]> {
@@ -234,7 +234,7 @@ export async function listSealed(token: string, kinds: string[]): Promise<Sealed
 
 /** One row as the server has it now, tombstones included, or null when there is none. */
 export async function fetchSealed(token: string, id: string): Promise<SealedRow | null> {
-  const res = await call(`/rest/v1/content_objects?select=id,kind,meta_cipher,content_hash,deleted_at&id=eq.${encodeURIComponent(id)}`, { headers: headers(token) });
+  const res = await call(`/rest/v1/content_objects?select=id,kind,meta_cipher,content_hash,deleted_at,storage_key&id=eq.${encodeURIComponent(id)}`, { headers: headers(token) });
   if (res.status === 401) throw new NetError("wrongPassword");
   if (!res.ok) throw new NetError("failed");
   const [row] = (await res.json()) as Parameters<typeof rowOf>[0][];
@@ -257,9 +257,11 @@ const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
  * Saves sealed details with no body. `expected` is the hash the change was made from: null for a new row,
  * "deleted" to bring back a row another device deleted (an edit beats a delete, as SyncEngine has it).
  */
-export async function putSealed(token: string, owner: string, row: { id: string; kind: string; meta: string; hash: string; size: number }, expected: string | null | "deleted"): Promise<void> {
+export async function putSealed(token: string, owner: string, row: { id: string; kind: string; meta: string; hash: string; size: number; storageKey?: string }, expected: string | null | "deleted"): Promise<void> {
   if (!uuidRe.test(row.id) || !/^[0-9a-f]{64}$/.test(row.hash) || !/^[a-z_]+$/.test(row.kind)) throw new NetError("failed");
-  const body: Record<string, unknown> = { storage_key: null, byte_size: row.size, content_hash: "\\x" + row.hash, meta_cipher: row.meta, deleted_at: null };
+  // A body lives only under this account's own sealed-store key (SealedBlobKey.key).
+  if (row.storageKey !== undefined && !new RegExp(`^${owner.toLowerCase()}/sealed/[0-9a-f-]{36}$`).test(row.storageKey)) throw new NetError("failed");
+  const body: Record<string, unknown> = { storage_key: row.storageKey ?? null, byte_size: row.size, content_hash: "\\x" + row.hash, meta_cipher: row.meta, deleted_at: null };
   let res: Response;
   if (expected === null) {
     res = await call("/rest/v1/content_objects?select=id", {
@@ -283,4 +285,56 @@ export async function tombstoneSealed(token: string, id: string, expected: strin
     body: JSON.stringify({ deleted_at: new Date().toISOString(), meta_cipher: null, storage_key: null, content_hash: null, byte_size: 0 }),
   });
   await changed(res);
+}
+
+// ---- the sealed store (server/blobs): resumable uploads, as SealedStoreClient sends them ----
+
+async function blobCall(token: string, id: string, init: RequestInit): Promise<Response> {
+  if (!uuidRe.test(id)) throw new NetError("failed");
+  try {
+    return await fetch(config.blobUrl + id, { ...init, headers: { authorization: `Bearer ${token}`, ...(init.headers as Record<string, string> | undefined) }, credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" });
+  } catch { throw new NetError("offline"); }
+}
+const blobFailed = (status: number): NetError => new NetError(status === 401 ? "wrongPassword" : status === 429 ? "rateLimited" : "failed");
+
+/**
+ * Stores one sealed blob under `id` (SealedStoreClient.put): asks how far an earlier try got, sends the
+ * rest, then finishes it with its size and SHA-256 so the server checks every byte arrived. A blob already
+ * finished with the same size is an earlier try that landed.
+ */
+export async function putBlob(token: string, id: string, sealed: Uint8Array, sha256Hex: string): Promise<void> {
+  if (!sealed.length || !/^[0-9a-f]{64}$/.test(sha256Hex)) throw new NetError("failed");
+  const head = await blobCall(token, id, { method: "HEAD" });
+  let offset = 0;
+  if (head.status === 200) {
+    if (head.headers.get("blob-state") === "done") { if (Number(head.headers.get("blob-size")) === sealed.length) return; throw new NetError("failed"); }
+    offset = Number(head.headers.get("upload-offset") ?? 0);
+    if (!(offset >= 0 && offset <= sealed.length)) { await deleteBlob(token, id); offset = 0; }
+  } else if (head.status !== 404) throw blobFailed(head.status);
+  const piece = 8 * 1024 * 1024;
+  for (let corrections = 0; offset < sealed.length;) {
+    const end = Math.min(offset + piece, sealed.length);
+    const res = await blobCall(token, id, { method: "PATCH", body: sealed.slice(offset, end), headers: { "upload-offset": String(offset), "content-type": "application/octet-stream" } });
+    if (res.status === 204) { offset = Number(res.headers.get("upload-offset")); if (offset !== end) throw new NetError("failed"); continue; }
+    if (res.status === 409 && ++corrections <= 3) {
+      if (res.headers.get("blob-state") === "done") return;
+      offset = Number(res.headers.get("upload-offset"));
+      if (!(offset >= 0 && offset <= sealed.length)) throw new NetError("failed");
+      continue;
+    }
+    throw blobFailed(res.status);
+  }
+  const done = await blobCall(token, id, { method: "POST", body: JSON.stringify({ size: sealed.length, sha256: sha256Hex }), headers: { "content-type": "application/json" } });
+  if (done.status === 201) return;
+  if (done.status === 409) {
+    const now = await blobCall(token, id, { method: "HEAD" });
+    if (now.headers.get("blob-state") === "done" && Number(now.headers.get("blob-size")) === sealed.length) return;
+  }
+  if (done.status === 400) await deleteBlob(token, id).catch(() => {});
+  throw blobFailed(done.status);
+}
+
+export async function deleteBlob(token: string, id: string): Promise<void> {
+  const res = await blobCall(token, id, { method: "DELETE" });
+  if (res.status !== 204 && res.status !== 404) throw blobFailed(res.status);
 }
