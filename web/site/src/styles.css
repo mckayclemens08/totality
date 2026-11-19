@@ -30,7 +30,7 @@ h1 { font-size: 44px; line-height: 1.1; margin: 24px 0 12px; }
 label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
 input {
   font: inherit; font-size: 16px; border: 0; outline: 0; padding: 14px 16px; border-radius: 18px;
-  background: var(--bg); color: var(--text-primary);
+  background: var(--surface); color: var(--text-primary);
   box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light);
 }
 input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -44,3 +44,34 @@ button:active { transform: scale(0.97); opacity: 0.9; }
 .note svg { flex: none; margin-top: 2px; stroke: var(--text-secondary); fill: none; }
 .status { font-size: 13px; line-height: 1.5; color: var(--text-secondary); margin: 0; min-height: 1.5em; }
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+
+/* Fields are raised, like the app's: the same surface as the card, lifted by the shadow pair. Never inset. */
+.lede.small { font-size: 15px; line-height: 1.5; }
+.step { font-size: 12px; font-weight: 600; color: var(--accent); }
+.pair, .locked { align-items: flex-start; }
+.pair { flex: 0 1 460px; }
+.qr-wrap {
+  align-self: center; padding: 16px; border-radius: 24px; background: #ffffff;
+  box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light);
+}
+.qr { display: block; } .qr rect { fill: #15181d; } .qr rect:first-child { fill: #ffffff; }
+.code-row { align-self: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.code { font-size: 34px; font-weight: 700; letter-spacing: 6px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.sub { font-size: 13px; line-height: 1.45; color: var(--text-secondary); }
+.row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; }
+button.quiet { background: var(--surface); color: var(--text-primary); box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light); }
+button:disabled { opacity: 0.6; cursor: default; }
+.fineprint { font-size: 13px; line-height: 1.5; color: var(--text-secondary); margin: 0; padding: 14px 16px; border-radius: 18px; background: var(--surface); box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light); }
+.choice { flex-direction: row; gap: 14px; align-items: flex-start; font-size: 15px; color: var(--text-primary); cursor: pointer; }
+.choice-text { display: flex; flex-direction: column; gap: 3px; }
+.choice-text b { font-weight: 600; }
+/* A switch: raised track, accent when on. A radio underneath keeps it keyboard and screen-reader friendly. */
+input.switch {
+  appearance: none; flex: none; width: 48px; height: 28px; margin: 0; padding: 0; border-radius: 14px; border: 0;
+  background: var(--surface); position: relative; cursor: pointer;
+  box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light);
+}
+input.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 12px; background: #ffffff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.15s ease; }
+input.switch:checked { background: var(--accent); }
+input.switch:checked::after { transform: translateX(20px); }
+@media (prefers-reduced-motion: reduce) { input.switch::after { transition: none; } }

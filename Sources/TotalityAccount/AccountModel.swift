@@ -38,6 +38,8 @@ public final class AccountModel {
     public let syncRemote: (any SyncRemote)?
     /// Settings' storage bars. The app sets it, since it reads what other modules hold.
     public var storage: StorageModel?
+    /// Adds a browser to the account. The app sets it, since it holds the content key.
+    public var pairing: PairBrowserModel?
     private let service: any AccountService
 
     public init(
