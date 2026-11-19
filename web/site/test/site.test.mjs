@@ -20,7 +20,7 @@ test("everything loads from our own domain, with integrity", () => {
   for (const f of readdirSync("dist").filter((f) => /\.(js|css)$/.test(f))) {
     const body = readFileSync(`dist/${f}`, "utf8");
     const own = (process.env.SUPABASE_URL ?? "").replace(/^https?:\/\//, "");
-    const allowed = ["www\\.w3\\.org", "usetotality\\.com/blobs/"].concat(own ? [own.replace(/\./g, "\\.")] : []).join("|");
+    const allowed = ["www\\.w3\\.org", "usetotality\\.com/(blobs|mail)/"].concat(own ? [own.replace(/\./g, "\\.")] : []).join("|");
     const hit = body.match(new RegExp("https?://(?!" + allowed + ")[a-z0-9][^\"'`\\s)]{0,60}"));
     assert.equal(hit, null, `${f} reaches another host: ${hit && hit[0]}`);
   }
@@ -79,4 +79,17 @@ test("blob: is allowed for images only, and every blob URL is tracked and revoke
   assert.match(src, /urls\.add\(url\)/);
   assert.match(src, /revokeObjectURL/);
   assert.match(src, /stopPhotos = \(\): void => \{ run\+\+; revokeAll\(\)/);
+});
+
+test("untrusted mail is framed with no powers, through the single allowed Trusted Types policy", () => {
+  const csp = headers.match(/Content-Security-Policy: (.+)/)[1];
+  assert.match(csp, /require-trusted-types-for 'script'; trusted-types mail-frame;/);
+  const files = readdirSync("src", { recursive: true }).filter((f) => /\.ts$/.test(f));
+  assert.deepEqual(files.filter((f) => /\.srcdoc\s*=/.test(readFileSync(`src/${f}`, "utf8"))).map((f) => f.replaceAll("\\", "/")), ["mail/view.ts"]);
+  const view = readFileSync("src/mail/view.ts", "utf8");
+  assert.match(view, /sandbox: ""/, "an empty sandbox: no scripts, same-origin, forms, popups or navigation");
+  assert.match(view, /default-src 'none'; img-src data:; style-src 'unsafe-inline'/);
+  assert.match(view, /createPolicy\("mail-frame"/);
+  assert.doesNotMatch(view, /allow-/, "no sandbox powers are granted");
+  assert.match(view, /rel: "noopener noreferrer nofollow"/);
 });

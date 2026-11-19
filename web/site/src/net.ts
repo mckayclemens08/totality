@@ -102,4 +102,22 @@ export async function getBlob(token: string, id: string): Promise<Uint8Array | n
   return new Uint8Array(await res.arrayBuffer());
 }
 
+export interface MailEntry { id: string; size: number; received: number }
+async function mailGet(token: string, path: string): Promise<Response> {
+  try { return await fetch(config.mailUrl + path, { headers: { authorization: `Bearer ${token}` }, credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" }); }
+  catch { throw new NetError("offline"); }
+}
+export async function mailList(token: string): Promise<MailEntry[]> {
+  const res = await mailGet(token, "list");
+  if (!res.ok) throw new NetError(res.status === 401 ? "wrongPassword" : "failed");
+  const body = (await res.json()) as { messages?: { id: string; size: number; received: string | number }[] };
+  return (body.messages ?? []).map((m) => ({ id: m.id.toLowerCase(), size: m.size, received: typeof m.received === "number" ? (m.received > 1e11 ? m.received : m.received * 1000) : Date.parse(m.received) || 0 }));
+}
+export async function mailMessage(token: string, id: string): Promise<Uint8Array | null> {
+  const res = await mailGet(token, `message/${id}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new NetError(res.status === 401 ? "wrongPassword" : "failed");
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 export { b64 };

@@ -1509,3 +1509,50 @@ describe('the server setup', () => {
     assert.doesNotMatch(compose, /env_file/)
   })
 })
+
+describe('browser access (issue 150)', () => {
+  const site = 'https://app.usetotality.com'
+  let root, server, base, mailbox, id
+  before(async () => {
+    root = await mkdtemp(join(tmpdir(), 'totality-mail-cors-'))
+    mailbox = randomUUID()
+    const keys = newKeys()
+    const mailboxes = new Mailboxes(root)
+    await mailboxes.publish('ada_lovelace', mailbox, keys.publicKey)
+    id = randomUUID()
+    await mailboxes.add(mailbox, id, seal(Buffer.from('hello'), keys.publicKey, mailbox, id))
+    const checkSignIn = async (token) => (token === 'ada-session' ? { name: 'ada_lovelace', mailbox } : null)
+    server = serve(new Arrivals({ secret: SECRET, checkSignIn, checkSpam: async () => null, mailboxes }), 0, [site])
+    await new Promise((resolve) => { server.once('listening', resolve) })
+    base = `http://127.0.0.1:${server.address().port}`
+  })
+  after(async () => {
+    server.closeAllConnections()
+    server.close()
+    await rm(root, { recursive: true, force: true })
+  })
+
+  test('the website may ask to read, and only to read', async () => {
+    const ask = (origin, method) => fetch(`${base}/mail/list`, { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': method } })
+    const ok = await ask(site, 'GET')
+    assert.equal(ok.status, 204)
+    assert.equal(ok.headers.get('access-control-allow-origin'), site)
+    assert.equal(ok.headers.get('access-control-allow-methods'), 'GET')
+    for (const [origin, method] of [[site, 'POST'], [site, 'DELETE'], ['https://evil.example', 'GET'], ['https://app.usetotality.com.evil.example', 'GET']]) {
+      const no = await ask(origin, method)
+      assert.equal(no.status, 403)
+      assert.equal(no.headers.get('access-control-allow-origin'), null)
+    }
+  })
+
+  test('a signed-in read carries the website, and a stranger still gets nothing', async () => {
+    const mine = await fetch(`${base}/mail/list`, { headers: { Origin: site, Authorization: 'Bearer ada-session' } })
+    assert.equal(mine.status, 200)
+    assert.equal(mine.headers.get('access-control-allow-origin'), site)
+    assert.equal((await mine.json()).messages.length, 1)
+    const stranger = await fetch(`${base}/mail/list`, { headers: { Origin: site, Authorization: 'Bearer nobody' } })
+    assert.equal(stranger.status, 401)
+    const other = await fetch(`${base}/mail/list`, { headers: { Origin: 'https://evil.example', Authorization: 'Bearer ada-session' } })
+    assert.equal(other.headers.get('access-control-allow-origin'), null)
+  })
+})
