@@ -1,0 +1,16 @@
+{
+  "name": "totality-site",
+  "private": true,
+  "description": "The Totality website frame (issue 150, step 2). Static files for Cloudflare Pages. Holds no keys yet.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && npm run build && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,46 @@
+/* Neumorphic: soft dual shadows, no borders, no sunken look. Colours come from tokens.css only. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+  min-height: 100vh;
+}
+.stage {
+  min-height: 100vh;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 56px; padding: 40px;
+}
+.intro { flex: 1 1 380px; max-width: 460px; }
+.badge {
+  width: 64px; height: 64px; border-radius: 32px; background: var(--surface);
+  box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light);
+  display: flex; align-items: center; justify-content: center;
+}
+.badge svg { fill: var(--accent); }
+h1 { font-size: 44px; line-height: 1.1; margin: 24px 0 12px; }
+.lede { font-size: 17px; line-height: 1.55; color: var(--text-secondary); margin: 0; }
+.card {
+  flex: 0 1 400px; border-radius: 28px; background: var(--surface); padding: 32px;
+  box-shadow: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light);
+  display: flex; flex-direction: column; gap: 16px;
+}
+.card h2 { font-size: 22px; margin: 0; }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+input {
+  font: inherit; font-size: 16px; border: 0; outline: 0; padding: 14px 16px; border-radius: 18px;
+  background: var(--bg); color: var(--text-primary);
+  box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light);
+}
+input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+button {
+  font: inherit; border: 0; cursor: pointer; padding: 11px 18px; border-radius: 18px;
+  font-size: 14px; font-weight: 600; background: var(--accent); color: var(--accent-on);
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+button:active { transform: scale(0.97); opacity: 0.9; }
+.note { font-size: 13px; color: var(--text-secondary); line-height: 1.5; display: flex; gap: 8px; }
+.note svg { flex: none; margin-top: 2px; stroke: var(--text-secondary); fill: none; }
+.status { font-size: 13px; line-height: 1.5; color: var(--text-secondary); margin: 0; min-height: 1.5em; }
+@media (prefers-reduced-motion: reduce) { button { transition: none; } }

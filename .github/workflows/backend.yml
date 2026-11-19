@@ -37,6 +37,20 @@ jobs:
       - run: cmp dist/editor.js ../../Sources/TotalityReader/Resources/Editor/editor.js
       - run: cmp src/editor.css ../../Sources/TotalityReader/Resources/Editor/editor.css
       - run: cmp dist/book.js ../../Sources/TotalityReader/Resources/Editor/book.js
+  website-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/site/package-lock.json
+      - run: npm ci
+      - run: npm test
   gateway-tests:
     runs-on: ubuntu-latest
     defaults:
