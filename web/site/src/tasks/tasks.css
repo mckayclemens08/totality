@@ -1,8 +1,5 @@
 /* Tasks editing (mockup v2). Raised and soft everywhere; selected is the accent, pressed is a small scale. Never inset. */
 .tasks-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.grow { flex: 1; }
-.save-status { font-size: 13px; color: var(--text-secondary); }
-.save-status.bad { color: var(--danger, var(--text-primary)); font-weight: 600; }
 .task-editor { flex: 1 1 320px; max-width: 420px; gap: 12px; }
 .tasknav .new-list { margin-top: 12px; align-self: flex-start; }
 button.navrow.nested { padding-left: 26px; }
@@ -35,7 +32,6 @@ button.circle-btn.done { background: var(--accent); }
 .rules { display: flex; flex-direction: column; gap: 8px; }
 .rule-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .rule-row select, .rule-row input { flex: 1 1 120px; }
-.row-field { flex-direction: row; align-items: center; gap: 10px; color: var(--text-primary); }
 
 /* bulk bar */
 .bulk {
@@ -46,22 +42,11 @@ button.circle-btn.done { background: var(--accent); }
 .bulk .tag-input { width: 110px; padding: 8px 12px; font-size: 13px; }
 .bulk select { padding: 8px 12px; font-size: 13px; }
 
-/* fields (raised like inputs, never inset) */
-.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.field-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
-select, textarea {
-  font: inherit; font-size: 15px; border: 0; outline: 0; padding: 12px 14px; border-radius: 16px; min-width: 0;
-  background: var(--surface); color: var(--text-primary);
-  box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light);
-}
-select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-textarea { resize: vertical; line-height: 1.5; }
-.task-editor input, .sheet input { font-size: 15px; padding: 12px 14px; min-width: 0; }
+.task-editor input { font-size: 15px; padding: 12px 14px; min-width: 0; }
 input.title-field { font-size: 20px; font-weight: 700; }
 .notes-field { min-height: 80px; width: 100%; box-sizing: border-box; }
 button.pick { text-align: left; font-weight: 500; padding: 11px 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stack { display: flex; flex-direction: column; gap: 12px; }
-.segs.wrap { flex-wrap: wrap; }
 .steps { display: flex; flex-direction: column; gap: 6px; }
 .step-edit { display: flex; align-items: center; gap: 8px; }
 .step-edit input[type="text"] { flex: 1; padding: 9px 12px; font-size: 14px; }
@@ -72,20 +57,7 @@ button.icon-btn, button.chip-x {
   box-shadow: 2px 2px 4px var(--shadow-dark), -2px -2px 4px var(--shadow-light);
 }
 button.chip-x { width: 20px; height: 20px; font-size: 13px; margin-left: 4px; }
-.danger { color: var(--danger, var(--text-primary)); }
-button.quiet.danger { color: var(--danger, var(--text-primary)); }
-.editor-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
-
-/* sheets: a native dialog lifted off a dimmed page */
-dialog.sheet {
-  border: 0; padding: 22px; border-radius: 24px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
-  background: var(--surface); color: var(--text-primary); box-sizing: border-box;
-  box-shadow: 8px 8px 18px var(--shadow-dark), -8px -8px 18px var(--shadow-light);
-}
-dialog.sheet[open] { display: flex; flex-direction: column; gap: 14px; }
-dialog.sheet h2 { margin: 0; font-size: 20px; }
-dialog.sheet::backdrop { background: rgba(20, 24, 30, 0.35); }
-.sheet-foot { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+button.quiet.editor-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
 
 /* Undo */
 .toast {

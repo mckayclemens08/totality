@@ -1,0 +1,66 @@
+{
+  "note": "Made by web/site/test/make-reader-vectors.mjs from the website's own code. Test key only.",
+  "rootKey": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+  "items": [
+    {
+      "id": "d0c00000-0000-4000-8000-000000000001",
+      "owner": "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e",
+      "meta": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQTK6lpwxgd6gdcW4T/A+WmKK8hGFoOIf7K/uZu+mLLTzBsDg3rL1fuem/nNcBg4i3nZ3T9vs9v56CaMPSfvjAKotY9Dqp0h+Qb3lQjXgflVAojUXfmZtvVf0qH75DkVRr5X5lnHxjJpadx06SURxrRzRWQVb4G1IEKapRpGmrUdYFtBWXytbZk5uuVxY45+aP3+A7kdUqzFbhH2qpM+MnC5r1429cIi3QAGDYxL4WBWqv6oVCEuKTcJ6fLjtHWDpje+LMcDLf1pv9E=",
+      "body": "AQICAgICAgICAgICAgICAgICAgICAgICAtPf67WiH9S3PcEmv68E3aQ=",
+      "hash": "8cbaa725d150744da0c1307df6e391fd02c27e46cb94c5e6dd35b798e5a6051a",
+      "bodyHash": "d281e991b097f2d7e72709e2746ffa8ca88fc2583feb3c60bb90c060bdad6230",
+      "blob": "787b8d21-997a-468a-807d-5556e197c7be",
+      "title": "",
+      "text": "",
+      "mime": "text/markdown; variant=pandoc",
+      "byteCount": 0,
+      "wordTarget": null,
+      "editorOpens": true
+    },
+    {
+      "id": "d0c00000-0000-4000-8000-000000000001",
+      "owner": "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e",
+      "meta": "AQMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA/TrchUktqjRyYMkmuP/nFy33sccd9A3z7yU5QS4ivn174QVlS1AguhjRA503IoF8Hn/wshLN6ltEt/IkLpmlKUJkKDgdlEelEmaoaeX9f+1PIR5Vgv5x1lfEzbGSpc3hsJzJzP+jlAEz4bGnrflkGJDTEM/jrfPVhNkf+b8q8O6/eUlFX1kneqz4m663u+EAZ7q4vGWycB/14bJcyzrCUSay+g6kBbDppJRznvbBzyWr/4gHL3i67ug1QcSdnng9AvOeGoG3+IMpTAzWIvIQoeXz5V+DqJZgKE=",
+      "body": "AQQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD+OK0xghTHJaqVVwtyEjso+UPX2IRUmUVClDFTM7/qm95yeGoiaIgIpLQPtM0n+7/fFCK8hDJgkp0bmxwl3hcDiCFAZnYoHrBJIBxQcp7hUjErKWiZm++ci7Dr8FcJcKXa9EjOViReFDgxUIhBD1pK8lBQbqq1uUtkPqYkYevm/Lo4RhlhxD6Oe+tF9Prv9SFphZjvJcwFDX8XNgfwSPX41mrhnET8sinBvmQ2y5w8XGKueqDLWJXjjNCSN6qog9Q0k/C0qnMlmCRq5gPt94bB4BA2n088FiA8xi+wMR7O1RIz6IiMT8taa8yZcN5Kh",
+      "hash": "be6df1132cd2ac468959d8308812070b54012ca32d4fa07972b31ecb16b0f29f",
+      "bodyHash": "bc022d075596eac06d74122baf46fcf05c33cc2c149a0e5ca277b677259574c9",
+      "blob": "94e93e91-0dcb-4c2d-9459-f8dfaabaa2e1",
+      "title": "Reading notes",
+      "text": "# Reading notes\n\nThe state is the *actuality* of the **ethical** Idea.\n\n- first point\n- second point\n\n1. one\n2. two\n\n> A quote.\n\nSee [the SEP entry](https://plato.stanford.edu/entries/hegel/). Ünïcode ✓ <b>not html</b>\n",
+      "mime": "text/markdown; variant=pandoc",
+      "byteCount": 223,
+      "wordTarget": null,
+      "editorOpens": true
+    },
+    {
+      "id": "c65d60af-0cf1-4a44-806d-b99182164cbe",
+      "owner": "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e",
+      "meta": "AQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBexnDKeag3j+ZVF4GCYYtGHQ9FLPW5s7JMKbec+iGNxFeZu04ZpnHbmLv9FbI03gJIHqWSmIhsanq2jafttwQviKv8lyMD0X0ZlrvhWW+tnhJRUntj3vXza5IA0a0qtkoBXoYWQhW6Vqr1PefO32clao1dwB5us0vNKFHzT6us3s0z4CJqULNFdJ0igD8yT6VvWplIFVWCifzTleBNveMj+lcPpYeiYnMS5EhtT1dZlhqQY0eQvMiSkNtMgg4zai4T/IjFiafRF8NIAesNY2oLxCKUWuMPv7eDR4oGk9z1CItM6Zp8iFqyymsuBA1EpUyqcfx1RjGzVDiBsKiPXWKzXPJm4pnDVI1mQEhkUMkbTYoM6b60BK",
+      "body": "AQYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBvE1J7AhQetHTcH7WUpj2b2sMmSLHFdfy4NHHyttij6d+FP2Bvf39I3GtKD/6KTBZIToxkrqO/1sukICBS9TXgns",
+      "hash": "b00f574ead149b79970bec89aa3743a9290a95513c424486c3014e8db3cd6407",
+      "bodyHash": "60d3d5188c60c27a7916ea3c5c170899c28a279e180d9c477c39378080687fdb",
+      "blob": "36fa36d2-d7f2-4518-84fc-5b36d97cb1db",
+      "title": "Seminar paper draft (v2)",
+      "text": "# Seminar paper draft\n\nRewritten on the website.\n",
+      "mime": "text/markdown; variant=pandoc",
+      "byteCount": 49,
+      "wordTarget": 5000,
+      "editorOpens": true
+    },
+    {
+      "id": "d0c00000-0000-4000-8000-000000000002",
+      "owner": "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e",
+      "meta": "AQcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHB1NWrcaxBAJqEsqsv6jTugACBawY7tFSylBZ64FBBSGcgB+VyWx7R7qhJjteBc0ReK7TSMgpbi3MVBA9e88cEyiCE1qYGHJKnk/EdF3BEmBbvCplYNhrxTVdnot8HseWqyWLJBIeFAdKNsJM66d4+5NWskHSQGn+tNO8IueALwJO/D4KfcCMYbD709nez5Kip+owN10Ats6KoAy5E4iaMrxdOskb3YGargVAHCkTuvsOcMZLFEjXIEMjyx/1o5Z13JJWfckfup67XwR0NPVuRsa3JoX3tLrJtkB7hu4wFsmQ2pSlib/3gsE=",
+      "body": "AQgICAgICAgICAgICAgICAgICAgICAgICFWucHJUPQH6Uyo9BQxirkFgxexCkYp5h28ZDgJawo2J6F5hiNNpoZuSuw==",
+      "hash": "9495a7237b20704f5d9470f1dafdd45c6d4f9301b0d0e2ec078fb00c253cf6eb",
+      "bodyHash": "51e1ea1a080207a2674ff6ced2786624bce33afb967c8c251b2ff59bfc4d10bf",
+      "blob": "73870976-c036-4eaa-9c3e-6f2240b35853",
+      "title": "Reading notes (conflict copy)",
+      "text": "My words from the website.",
+      "mime": "text/markdown; variant=pandoc",
+      "byteCount": 26,
+      "wordTarget": null,
+      "editorOpens": true
+    }
+  ]
+}

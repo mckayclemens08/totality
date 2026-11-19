@@ -1,0 +1,9 @@
+/* The Reader's writing editor. Raised fields, never inset; the preview reads like the doc does. */
+input.doc-title-field { font-family: Georgia, serif; font-size: 26px; font-weight: 700; width: 100%; box-sizing: border-box; }
+.md-tools { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+button.tool { padding: 7px 11px; font-size: 13px; min-width: 36px; }
+.md-split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
+textarea.md-field { min-height: 60vh; width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; line-height: 1.6; }
+.md-preview { min-height: 60vh; border-radius: 16px; background: var(--bg); padding: 6px; overflow: auto; }
+.md-preview .note-frame { min-height: 58vh; }
+@media (max-width: 980px) { .md-split { grid-template-columns: 1fr; } .md-preview, textarea.md-field { min-height: 40vh; } }

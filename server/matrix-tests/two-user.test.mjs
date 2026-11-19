@@ -192,3 +192,24 @@ describe('Messages two-user test', () => {
     assert.equal(anonymous.status, 401)
   })
 })
+
+// Remove on the iPhone (Devices › Browsers): a fresh sign-in pass confirms deleting a website device, so a
+// browser's Matrix device goes without any password.
+describe('removing a website device', () => {
+  test('a fresh pass confirms the delete', async () => {
+    const handle = `rm_${randomUUID().slice(0, 8)}`
+    const web = await call(null, 'POST', '/login', { type: 'org.matrix.login.jwt', token: pass(handle), initial_device_display_name: 'Totality web' })
+    assert.equal(web.status, 200)
+    const phone = await signIn(handle)
+    const path = `/devices/${encodeURIComponent(web.json.device_id)}`
+    assert.equal((await call(phone.token, 'GET', path)).json.display_name, 'Totality web')
+    const challenge = await call(phone.token, 'DELETE', path, {})
+    assert.equal(challenge.status, 401)
+    assert.ok(challenge.json.flows.some((f) => f.stages.includes('org.matrix.login.jwt')), JSON.stringify(challenge.json.flows))
+    // Note: Tuwunel 1.9.4 accepts any valid pass here, even one made for another person (checked in CI,
+    // 2026-11-19). The request itself still needs this account's own token, so this step proves little extra.
+    const done = await call(phone.token, 'DELETE', path, { auth: { type: 'org.matrix.login.jwt', token: pass(handle), session: challenge.json.session } })
+    assert.equal(done.status, 200, JSON.stringify(done.json))
+    assert.equal((await call(web.json.access_token, 'GET', '/account/whoami')).status, 401, 'the browser\'s token stops working')
+  })
+})

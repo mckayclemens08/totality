@@ -84,3 +84,21 @@ export async function deriveSeed(info: string): Promise<Uint8Array> {
   if (!key) throw new LockedError("locked");
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: te.encode(info) }, key, 256));
 }
+
+/** Keeps a small record sealed under its own non-extractable key ("my computer" only). `wipe` clears it too. */
+export async function saveSealed(name: string, value: unknown): Promise<void> {
+  const wrap = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12)) as Uint8Array<ArrayBuffer>;
+  const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrap, te.encode(JSON.stringify(value)) as Uint8Array<ArrayBuffer>);
+  await idb("readwrite", (st) => st.put({ wrap, iv, data }, `sealed:${name}`));
+}
+export async function loadSealed<T>(name: string): Promise<T | null> {
+  try {
+    const rec = (await idb("readonly", (s) => s.get(`sealed:${name}`))) as { wrap: CryptoKey; iv: Uint8Array<ArrayBuffer>; data: ArrayBuffer } | undefined;
+    if (!rec) return null;
+    return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: rec.iv }, rec.wrap, rec.data))) as T;
+  } catch { return null; }
+}
+export async function dropSealed(name: string): Promise<void> {
+  try { await idb("readwrite", (s) => s.delete(`sealed:${name}`)); } catch { /* nothing kept */ }
+}

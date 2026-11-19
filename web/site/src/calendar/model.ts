@@ -33,7 +33,7 @@ export function parseEvent(id: string, raw: unknown): CalEvent | null {
 }
 
 // ---- time zones, with Intl only ----
-interface Wall { y: number; mo: number; d: number; h: number; mi: number; s: number }
+export interface Wall { y: number; mo: number; d: number; h: number; mi: number; s: number }
 const fmts = new Map<string, Intl.DateTimeFormat>();
 function formatter(tz: string): Intl.DateTimeFormat {
   let f = fmts.get(tz);
@@ -70,15 +70,18 @@ export const cmpDay = (a: Day, b: Day): number => a.year - b.year || a.month - b
 
 function repeatStart(e: CalEvent, index: number): number | null {
   const w = wall(e.start, e.tz);
+  // Calendar.date(byAdding:) keeps the part of a second the start has; the wall clock here has whole seconds.
+  const frac = ((e.start % 1000) + 1000) % 1000;
+  const at = (x: Wall) => fromWall(x, e.tz) + frac;
   if (e.repeat!.freq === "daily" || e.repeat!.freq === "weekly") {
     const d = addDays({ year: w.y, month: w.mo, day: w.d }, index * (e.repeat!.freq === "daily" ? 1 : 7));
-    return fromWall({ ...w, y: d.year, mo: d.month, d: d.day }, e.tz);
+    return at({ ...w, y: d.year, mo: d.month, d: d.day });
   }
   let y = w.y, mo = w.mo;
   if (e.repeat!.freq === "monthly") { const t = w.mo - 1 + index; y += Math.floor(t / 12); mo = (((t % 12) + 12) % 12) + 1; } else y += index;
   const check = new Date(Date.UTC(y, mo - 1, w.d));
   if (check.getUTCMonth() !== mo - 1) return null; // that day doesn't exist that month
-  return fromWall({ ...w, y, mo }, e.tz);
+  return at({ ...w, y, mo });
 }
 
 /** Every occurrence that touches [lower, upper) (milliseconds). */
@@ -103,4 +106,10 @@ export function occurrences(e: CalEvent, lower: number, upper: number): Occurren
     if (o) out.push(o);
   }
   return out;
+}
+
+/** CalendarEvent.occurrences(from:through:in:): all-day events count days in their own zone, timed ones in `display`. */
+export function occurrencesBetween(e: CalEvent, first: Day, last: Day, display: string): Occurrence[] {
+  const frame = e.allDay ? e.tz : display;
+  return occurrences(e, dayStart(first, frame), dayStart(addDays(last, 1), frame));
 }

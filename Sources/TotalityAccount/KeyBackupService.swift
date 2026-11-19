@@ -138,7 +138,7 @@ extension SupabaseAccountService: KeyBackupService {
 /// layout. Private messaging will use a real Matrix SDK when Phase 2 opens.
 struct MatrixSession: Sendable {
     static let server = URL(string: "https://matrix.usetotality.com")!
-    private static let urlSession = URLSession(configuration: .ephemeral)
+    static let urlSession = URLSession(configuration: .ephemeral)
     private static let defaultKeyType = "m.secret_storage.default_key"
 
     private struct Login: Decodable {
@@ -238,7 +238,7 @@ struct MatrixSession: Sendable {
         return "_matrix/client/v3/user/\(user)/account_data/\(type)"
     }
 
-    private func authorized(path: String, method: String) -> URLRequest {
+    func authorized(path: String, method: String) -> URLRequest {
         var components = URLComponents(url: Self.server, resolvingAgainstBaseURL: false)!
         components.percentEncodedPath = "/" + path
         var request = URLRequest(url: components.url!)
