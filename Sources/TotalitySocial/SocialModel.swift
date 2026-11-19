@@ -44,6 +44,17 @@ public final class SocialModel {
     /// Who you follow, for the Following feed and for which rooms' invites to accept.
     public private(set) var followingSet: Set<String> = []
     public var requestedProfile: String?
+    /// A post asked for from outside Social, such as a task's link back to where it came from.
+    public var requestedPost: UUID?
+
+    // Connections to the other modules (issue 149 §7), set by the app through the registry, so Social
+    // imports none of them.
+    /// Turns a post into a task.
+    public var taskMaker: (any TaskMaker)?
+    /// Keeps a copy of a post in the Reader, sealed there like any note.
+    public var receiver: (any ContentReceiver)?
+    /// Opens your chat with someone in Messages.
+    public var onMessage: (@MainActor (String) -> Void)?
     /// Your own Social settings, once loaded.
     public private(set) var settings = SocialSettings()
     /// People waiting for you to approve their follow, while your account is private.
@@ -247,6 +258,12 @@ public final class SocialModel {
     /// Posts opened from a profile, which aren't in either feed.
     private var opened: [UUID: SocialPost] = [:]
 
+    /// A public post that isn't in any list here, such as one a task links to.
+    public func fetchPost(_ id: UUID) async {
+        guard post(id) == nil, let found = try? await server.post(id) else { return }
+        opened[id] = found
+    }
+
     public func remember(_ posts: [SocialPost]) {
         for post in posts { opened[post.id] = post }
     }
@@ -381,6 +398,35 @@ public final class SocialModel {
         } catch {
             notice = Self.message(error)
             return false
+        }
+    }
+
+    // MARK: Other modules
+
+    /// What Add to Tasks starts from: the post's headline, and a link back to it.
+    public func taskDraft(_ post: SocialPost) -> TaskDraft {
+        let title = String(post.headline.prefix(120))
+        return TaskDraft(title: title, source: TaskSource(
+            module: .social, itemID: post.id.uuidString, title: title, detail: Handle.display(post.author),
+            quote: String(post.body.prefix(280))
+        ))
+    }
+
+    /// A copy of the post as a Reader note. It's yours from then on: sealed in the Reader, and it stays
+    /// even if the author deletes the post.
+    public func saveToReader(_ post: SocialPost) async {
+        guard let receiver else {
+            notice = "The Reader isn't open on this phone yet."
+            return
+        }
+        let title = post.title ?? String(post.body.prefix(60))
+        let tags = post.tags.isEmpty ? "" : "\n\n" + post.tags.map { "#" + $0 }.joined(separator: " ")
+        let body = post.body + tags + "\n\n— \(post.displayName) (\(Handle.display(post.author))), \(post.date.formatted(date: .abbreviated, time: .shortened)), \(post.audience.name) on Social"
+        do {
+            _ = try await receiver.receive(noteTitled: title, body: body)
+            notice = "Saved to the Reader."
+        } catch {
+            notice = "That didn't reach the Reader. Try again."
         }
     }
 

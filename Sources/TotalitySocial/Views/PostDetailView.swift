@@ -19,6 +19,7 @@ struct PostDetailView: View {
     /// The author's settings that matter here: whether you may comment.
     @State private var authorProfile: SocialProfile?
     @AppStorage(LikeCountsPreference.key) private var hideEverywhere = false
+    @State private var taskDraft: TaskDraft?
 
     var body: some View {
         let theme = Theme.current
@@ -72,9 +73,11 @@ struct PostDetailView: View {
                 }
             } else {
                 EmptyFeed(systemImage: "questionmark.circle", title: "This post isn't here any more", detail: "Its author may have deleted it.")
+                    .task { await model.fetchPost(id) }
             }
         }
         .background(theme.bg.color.ignoresSafeArea())
+        .addToTasksSheet($taskDraft, maker: model.taskMaker) { _ in model.notice = "Added to Tasks." }
     }
 
     private func author(_ post: SocialPost) -> some View {
@@ -94,6 +97,12 @@ struct PostDetailView: View {
             .buttonStyle(SoftPress())
             Spacer(minLength: 0)
             HeaderMenu("More", systemImage: "ellipsis") {
+                if model.taskMaker != nil {
+                    Button("Add to Tasks", systemImage: "checklist") { taskDraft = model.taskDraft(post) }
+                }
+                if model.receiver != nil {
+                    Button("Save to Reader", systemImage: "books.vertical") { Task { await model.saveToReader(post) } }
+                }
                 if post.author == model.me {
                     Button("Delete post", systemImage: "trash", role: .destructive) { confirmingDelete = true }
                 } else {

@@ -565,6 +565,15 @@ struct RootView: View {
         let rooms: (any SharedRooms)? = nil
         #endif
         let model = SocialModel(server: server, privateRooms: rooms, profiles: AccountSetup.profiles)
+        model.taskMaker = registry?.taskMaker
+        model.receiver = registry?.receiver(for: .social)
+        model.onMessage = { name in
+            Task {
+                guard let chat = await messages.startChat(with: name) else { return }
+                messages.requestedChat = chat
+                bringUp(.messages)
+            }
+        }
         account?.onOpenSocialProfile = {
             showingAccount = false
             Task { model.requestedProfile = await AccountSetup.username?() }
@@ -663,6 +672,8 @@ struct RootView: View {
         photos.taskMaker = maker
         reader?.taskMaker = maker
         web?.taskMaker = maker
+        social?.taskMaker = maker
+        social?.receiver = registry.receiver(for: .social)
         tasks?.replyWatchers = [MailReplyWatcher(model: mail)]
         tasks?.onOpenSource = { source in show(source.hit) }
         tasks?.sourceGone = { source in
@@ -714,6 +725,9 @@ struct RootView: View {
             mail.current.requestFromSearch(id)
         case .photos: photos.requestedItem = UUID(uuidString: hit.itemID)
         case .tasks: tasks?.requestedTask = UUID(uuidString: hit.itemID)
+        case .social:
+            if social == nil { social = makeSocial() }
+            social?.requestedPost = UUID(uuidString: hit.itemID)
         case .web:
             guard let url = URL(string: hit.itemID) else { return }
             web?.open(url)

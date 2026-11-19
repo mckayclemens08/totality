@@ -16,6 +16,9 @@ A new contract is recorded here before it is implemented.
 | Tasks | Messages | shared lists in end-to-end encrypted Matrix rooms, through `SharedRooms` | built, live two-user run waits |
 | Social | Messages | Friends and Close-friends posts in end-to-end encrypted Matrix rooms, through `SharedRooms` with `SharedRoomMarker.social` | built, live two-user run waits |
 | Social | Account | photos and names through `ProfileDirectory` | built |
+| Social | Tasks | a post becomes a task through `TaskMaker`; the task links back to the post | built |
+| Social | Reader | a post is saved as a Reader note through `ContentReceiver` | built |
+| Social | Messages | Message on a profile opens your chat, when their Who can message me allows | built; server enforcement waits |
 
 ## Reader
 
@@ -805,9 +808,17 @@ but the app.
 - **Two-user test.** `SocialTwoUserTests` against stand-in servers, and the Social cases in
   `backend-tests/social.test.js` against the real migration. The live run on two iPhones waits for the owner's
   friend's account.
-- **Not built yet:** photos, video, audio and stories (need public media in the blob store), saves, notifications,
-  hide like counts, safety (mute, report, who can comment, private accounts), Messages' "Who can message me",
-  connections to other modules, and Social on the home tile.
+- **Safety** (migration `20261119000002_social_safety.sql`): private accounts make follows into requests; who can
+  comment is a row rule; mutes, saves and reports are private to their sender; block is Totality's one block and
+  also empties your rooms of them. A report about an encrypted post carries only the person and reason. Settings
+  rows are readable by everyone signed in, because others' devices and the server need them, and writable only by
+  their owner. "Who can message me" is stored and shown, but only Messages checks it: the Matrix server doesn't yet.
+- **Home and other modules.** The tile shows the newest posts once Social has loaded. Account's profile screen opens
+  your Social profile through a closure the app sets. A post can become a task or a Reader note, and a profile's
+  Message opens Messages; a task's link opens the post.
+- **Not built yet:** photos, video, audio and stories (need public media in the blob store), notifications (need
+  push), saving Friends and Close-friends posts, attaching other modules' items to a post, and the Matrix server
+  enforcing "Who can message me".
 
 ## Storage in settings
 
