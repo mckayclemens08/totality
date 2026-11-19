@@ -1,0 +1,12 @@
+# Free-tier sized: a static proxy for the homepage paths only. No secrets, no storage, no bindings.
+name = "totality-public-home"
+main = "worker.mjs"
+compatibility_date = "2026-11-01"
+workers_dev = false
+routes = [
+  { pattern = "usetotality.com/", zone_name = "usetotality.com" },
+  { pattern = "usetotality.com/styles.css", zone_name = "usetotality.com" },
+  { pattern = "usetotality.com/main.js", zone_name = "usetotality.com" },
+  { pattern = "usetotality.com/favicon.svg", zone_name = "usetotality.com" },
+  { pattern = "usetotality.com/fonts/*", zone_name = "usetotality.com" },
+]
