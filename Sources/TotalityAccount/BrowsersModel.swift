@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import Supabase
 
-/// A browser paired with the website, as the account server lists it (supabase/migrations/20261119000001_web_browsers.sql).
+/// A browser paired with the website, as the account server lists it (supabase/migrations/20261119000003_web_browsers.sql).
 public struct WebBrowser: Sendable, Equatable, Identifiable {
     public let id: UUID
     public let label: String
