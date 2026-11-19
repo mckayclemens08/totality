@@ -1,0 +1,103 @@
+/* Tasks editing (mockup v2). Raised and soft everywhere; selected is the accent, pressed is a small scale. Never inset. */
+.tasks-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.grow { flex: 1; }
+.save-status { font-size: 13px; color: var(--text-secondary); }
+.save-status.bad { color: var(--danger, var(--text-primary)); font-weight: 600; }
+.task-editor { flex: 1 1 320px; max-width: 420px; gap: 12px; }
+.tasknav .new-list { margin-top: 12px; align-self: flex-start; }
+button.navrow.nested { padding-left: 26px; }
+.drop { outline: 2px dashed var(--accent); outline-offset: -2px; }
+
+/* rows */
+.taskrow-wrap { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 16px; cursor: grab; }
+.taskrow-wrap:hover { background: var(--bg); }
+.taskrow-wrap.on { background: var(--bg); box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light); }
+button.task-open { all: unset; box-sizing: border-box; cursor: pointer; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 4px; }
+button.task-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+button.circle-btn {
+  flex: none; width: 26px; height: 26px; padding: 0; border-radius: 13px; font-size: 13px; line-height: 1;
+  background: var(--surface); color: var(--accent-on);
+  box-shadow: 2px 2px 4px var(--shadow-dark), -2px -2px 4px var(--shadow-light);
+}
+button.circle-btn.done { background: var(--accent); }
+.pick-box { flex: none; width: 20px; height: 20px; padding: 0; accent-color: var(--accent); box-shadow: none; }
+.add-here { align-self: flex-start; margin: 4px 0 8px 8px; }
+.heading-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 4px; border-radius: 14px; }
+.heading-row input { flex: 1; font-weight: 700; font-size: 15px; padding: 10px 14px; }
+.empty { padding: 18px 12px; }
+
+/* list header and smart rules */
+.list-head { display: flex; flex-direction: column; gap: 10px; padding: 10px 8px 16px; }
+.list-actions { display: flex; justify-content: flex-end; }
+.grid2, .grid3 { display: grid; gap: 10px; }
+.grid2 { grid-template-columns: 1fr 1fr; }
+.grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.rules { display: flex; flex-direction: column; gap: 8px; }
+.rule-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rule-row select, .rule-row input { flex: 1 1 120px; }
+.row-field { flex-direction: row; align-items: center; gap: 10px; color: var(--text-primary); }
+
+/* bulk bar */
+.bulk {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; margin: 4px 4px 10px; border-radius: 18px;
+  background: var(--bg); box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light);
+}
+.bulk-count { font-weight: 700; font-size: 14px; }
+.bulk .tag-input { width: 110px; padding: 8px 12px; font-size: 13px; }
+.bulk select { padding: 8px 12px; font-size: 13px; }
+
+/* fields (raised like inputs, never inset) */
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+select, textarea {
+  font: inherit; font-size: 15px; border: 0; outline: 0; padding: 12px 14px; border-radius: 16px; min-width: 0;
+  background: var(--surface); color: var(--text-primary);
+  box-shadow: 3px 3px 6px var(--shadow-dark), -3px -3px 6px var(--shadow-light);
+}
+select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+textarea { resize: vertical; line-height: 1.5; }
+.task-editor input, .sheet input { font-size: 15px; padding: 12px 14px; min-width: 0; }
+input.title-field { font-size: 20px; font-weight: 700; }
+.notes-field { min-height: 80px; width: 100%; box-sizing: border-box; }
+button.pick { text-align: left; font-weight: 500; padding: 11px 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.segs.wrap { flex-wrap: wrap; }
+.steps { display: flex; flex-direction: column; gap: 6px; }
+.step-edit { display: flex; align-items: center; gap: 8px; }
+.step-edit input[type="text"] { flex: 1; padding: 9px 12px; font-size: 14px; }
+.struck { text-decoration: line-through; color: var(--text-secondary); }
+button.icon-btn, button.chip-x {
+  flex: none; padding: 0; width: 28px; height: 28px; border-radius: 14px; font-size: 16px; line-height: 1;
+  background: var(--surface); color: var(--text-secondary);
+  box-shadow: 2px 2px 4px var(--shadow-dark), -2px -2px 4px var(--shadow-light);
+}
+button.chip-x { width: 20px; height: 20px; font-size: 13px; margin-left: 4px; }
+.danger { color: var(--danger, var(--text-primary)); }
+button.quiet.danger { color: var(--danger, var(--text-primary)); }
+.editor-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+
+/* sheets: a native dialog lifted off a dimmed page */
+dialog.sheet {
+  border: 0; padding: 22px; border-radius: 24px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
+  background: var(--surface); color: var(--text-primary); box-sizing: border-box;
+  box-shadow: 8px 8px 18px var(--shadow-dark), -8px -8px 18px var(--shadow-light);
+}
+dialog.sheet[open] { display: flex; flex-direction: column; gap: 14px; }
+dialog.sheet h2 { margin: 0; font-size: 20px; }
+dialog.sheet::backdrop { background: rgba(20, 24, 30, 0.35); }
+.sheet-foot { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+
+/* Undo */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 10; max-width: calc(100vw - 32px); box-sizing: border-box;
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px 12px 18px; border-radius: 18px; font-size: 14px;
+  background: var(--surface); color: var(--text-primary); box-shadow: 6px 6px 12px var(--shadow-dark), -6px -6px 12px var(--shadow-light);
+}
+.toast[hidden] { display: none; }
+button.toast-btn { padding: 8px 14px; font-size: 13px; }
+
+@media (max-width: 860px) {
+  .tasknav, .task-editor { max-width: none; flex-basis: 100%; }
+  .grid3 { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
