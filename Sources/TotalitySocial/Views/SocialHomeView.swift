@@ -9,7 +9,7 @@ public struct SocialHomeView: View {
     let onClose: () -> Void
     @State private var path = NavigationPath()
     @State private var composing = false
-    @State private var searching = false
+    @State private var tab = SocialTab.feed
 
     public init(model: SocialModel, onClose: @escaping () -> Void) {
         self.model = model
@@ -24,12 +24,11 @@ public struct SocialHomeView: View {
     public var body: some View {
         let theme = Theme.current
         NavigationStack(path: $path) {
-            VStack(spacing: 0) {
-                header
-                content
-            }
+            tabScreen
             .background(theme.bg.color.ignoresSafeArea())
-            .addButton("New post") { composing = true }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                SocialTabBar(selected: tab, me: model.me, onSelect: select)
+            }
             .navigationDestination(for: Route.self) { route in
                 switch route {
                 case .post(let id): PostDetailView(model: model, id: id, open: open)
@@ -39,12 +38,6 @@ public struct SocialHomeView: View {
             .hidesNavigationBar()
         }
         .sheet(isPresented: $composing) { ComposeView(model: model) { composing = false } }
-        .sheet(isPresented: $searching) {
-            PeopleSearchView(model: model) { name in
-                searching = false
-                open(.profile(name))
-            } onClose: { searching = false }
-        }
         .overlay(alignment: .bottom) { NoticeBanner(text: $model.notice) }
         .task { if model.phase == .loading { await model.load() } }
         .onDisappear { Task { await model.flushShown() } }
@@ -62,6 +55,32 @@ public struct SocialHomeView: View {
 
     func open(_ route: Route) { path.append(route) }
 
+    /// A tab in the bottom bar: the + opens the composer, the others become the screen showing.
+    func select(_ picked: SocialTab) {
+        switch picked.destination(me: model.me) {
+        case .show(let next): tab = next
+        case .compose: composing = true
+        case nil: break
+        }
+    }
+
+    @ViewBuilder
+    private var tabScreen: some View {
+        switch tab {
+        case .feed, .newPost:
+            VStack(spacing: 0) {
+                header
+                content
+            }
+        case .search:
+            PeopleSearchView(model: model) { name in open(.profile(name)) }
+        case .saved:
+            SavedPostsView(model: model, open: open)
+        case .profile:
+            if let me = model.me { SocialProfileView(model: model, username: me, open: open, isTab: true) }
+        }
+    }
+
     private var header: some View {
         HStack(spacing: Space.s3) {
             HeaderButton("Home", systemImage: "square.grid.2x2", action: onClose)
@@ -70,10 +89,8 @@ public struct SocialHomeView: View {
                 FeedTab(title: feed.name, isSelected: model.feed == feed) { model.feed = feed }
             }
             Spacer(minLength: 0)
-            HeaderButton("Search", systemImage: "magnifyingglass") { searching = true }
-            if let me = model.me {
-                HeaderButton("Your profile", systemImage: "person") { open(.profile(me)) }
-            }
+            // Search and your profile moved to the bottom bar; this keeps the feed names centred.
+            Color.clear.frame(width: Metric.headerButton, height: Metric.headerButton)
         }
         .padding(.horizontal, Space.s4)
         .padding(.top, Space.s2)
@@ -119,7 +136,7 @@ public struct SocialHomeView: View {
                     }
                 }
                 .padding(.horizontal, Space.s4)
-                .padding(.bottom, Metric.addButton + Space.s6)
+                .padding(.bottom, Space.s4)
             }
             .refreshable { await model.refresh() }
         }

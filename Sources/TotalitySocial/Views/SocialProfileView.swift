@@ -8,6 +8,8 @@ struct SocialProfileView: View {
     let model: SocialModel
     let username: String
     let open: (SocialHomeView.Route) -> Void
+    /// Your own profile shown as the Profile tab, where there is nothing to go back to.
+    var isTab = false
     @Environment(\.dismiss) private var dismiss
     @State private var profile: SocialProfile?
     @State private var posts: [SocialPost] = []
@@ -27,7 +29,7 @@ struct SocialProfileView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
                 HStack {
-                    HeaderButton("Back", systemImage: "chevron.left") { dismiss() }
+                    if !isTab { HeaderButton("Back", systemImage: "chevron.left") { dismiss() } }
                     Spacer()
                     if let profile { menu(profile) }
                 }
@@ -197,7 +199,8 @@ struct SocialProfileView: View {
 struct PeopleSearchView: View {
     let model: SocialModel
     let onPick: (String) -> Void
-    let onClose: () -> Void
+    /// None when Search is a tab rather than a sheet.
+    var onClose: (() -> Void)?
     @State private var query = ""
     @State private var results: [SocialProfile] = []
 
@@ -207,7 +210,7 @@ struct PeopleSearchView: View {
             HStack {
                 Text("Search").font(Typeface.title)
                 Spacer()
-                HeaderButton("Close", systemImage: "xmark", action: onClose)
+                if let onClose { HeaderButton("Close", systemImage: "xmark", action: onClose) }
             }
             SearchBox("People on Totality", text: $query)
             ScrollView {
