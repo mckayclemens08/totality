@@ -6,7 +6,7 @@ import { dayText, timeText, type Task } from "./model";
 import { newID, type Raw } from "./edit";
 import { addDays, encodeRule, newRule, parseRule, summary, upcoming, weekday, type Day, type Kind, type Rule, type Unit } from "./repeat";
 import { localToday, type TasksStore } from "./store";
-import { dayFrom, dayValue, field, input, onSettled, select, seg, sheet, timeFrom, timeValue } from "./ui";
+import { dayFrom, dayValue, field, input, onSettled, select, seg, sheet, timeFrom, timeValue } from "../ui";
 
 const PRIORITIES: [string, string][] = [["0", "None"], ["1", "Low"], ["2", "Medium"], ["3", "High"]];
 const WEEKDAY_SHORT = ["S", "M", "T", "W", "T", "F", "S"];

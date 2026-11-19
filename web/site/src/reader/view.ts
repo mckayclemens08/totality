@@ -5,13 +5,18 @@ import { fromByteaLiteral, openBlob, OpenFailure } from "../sealed";
 import { uuidBytes } from "../pairing/protocol";
 import { blobIdFromKey, displayTitle, inLibrary, parseItem, typeName, type ReaderItem } from "./item";
 import { isMarkdown, parse, plain, type Block, type Run } from "./markdown";
+import { register } from "../registry";
+import { editNote, newDoc } from "./editor";
+import { editable } from "./edit";
 
 export interface Ctx { token: () => Promise<string>; userId: string }
-interface Entry { item: ReaderItem; row: net.ObjectRow }
+interface Entry { item: ReaderItem; row: net.ObjectRow; raw: Record<string, unknown> }
 
 const dec = new TextDecoder();
 const when = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 let run = 0;
+/** A doc just made with New doc opens straight in the editor. */
+let editNext: string | null = null;
 export const stopReader = (): void => { run++; };
 
 async function open(purpose: "metadata" | "content", sealed: Uint8Array, id: string): Promise<Uint8Array> {
@@ -25,14 +30,21 @@ async function loadLibrary(ctx: Ctx): Promise<{ entries: Entry[]; unreadable: nu
   for (const row of rows) {
     try {
       if (!row.meta_cipher) throw new OpenFailure("meta");
-      const item = parseItem(dec.decode(await open("metadata", fromByteaLiteral(row.meta_cipher), row.id)));
+      const json = dec.decode(await open("metadata", fromByteaLiteral(row.meta_cipher), row.id));
+      const item = parseItem(json);
       if (!item || item.id !== row.id) throw new OpenFailure("meta");
-      if (inLibrary(item)) entries.push({ item, row });
+      if (inLibrary(item)) entries.push({ item, row, raw: JSON.parse(json) as Record<string, unknown> });
     } catch { unreadable++; }
   }
   entries.sort((a, b) => b.item.updatedAt - a.item.updatedAt);
   return { entries, unreadable };
 }
+
+// The Reader lends its notes and files to the Calendar's "Attach from Reader", as ReaderModule.attachable does.
+// The journal is private, so it is never offered.
+register({ module: "reader", for: ["calendar"], attachable: async (ctx) => (await loadLibrary(ctx)).entries.map(({ item }) => ({
+  module: "reader", kind: item.kind === "note" ? "note" : "file", id: item.id.toUpperCase(), keyRef: `crk:${item.id}`, preview: { title: displayTitle(item) },
+})) });
 
 // ---- drawing a note: elements built from the tree with textContent only ----
 
@@ -87,7 +99,12 @@ async function showItem(ctx: Ctx, entry: Entry, pane: HTMLElement, mine: number)
     const text = dec.decode(await open("content", sealed, row.id));
     if (mine !== run) return;
     const frame = noteFrame(isMarkdown(item.mime) ? parse(text) : plain(text));
-    pane.replaceChildren(head, frame);
+    const hash = entry.row.content_hash?.startsWith("\\x") ? entry.row.content_hash.slice(2) : null;
+    const edit = editable(entry.raw)
+      ? h("button", { type: "button", class: "small-btn", onclick: () => editNote(ctx, pane, { raw: entry.raw, hash, storageKey: row.storage_key }, text) }, "Edit")
+      : h("p", { class: "sub" }, "To edit this doc here, open it once in the iPhone's editor. That turns it into the editor's format and keeps the original.");
+    pane.replaceChildren(head, h("div", { class: "editor-foot" }, edit), frame);
+    if (editNext === row.id) { editNext = null; (edit as HTMLElement).click(); }
   } catch (e) {
     if (mine !== run) return;
     pane.replaceChildren(head, message(e instanceof OpenFailure ? "This note didn't open with your key, so it was left alone." : "Couldn't load this note. Check your connection."));
@@ -98,7 +115,14 @@ export async function showReader(into: HTMLElement, ctx: Ctx, selected: string |
   const mine = ++run;
   const list = h("section", { class: "panel library" }, h("div", { class: "panel-title" }, "Library"), message("Opening your library…"));
   const pane = h("section", { class: "panel reading" }, message("Pick something from your library."));
-  into.replaceChildren(h("div", { class: "page-head" }, h("h1", {}, "Reader")), h("div", { class: "reader" }, list, pane));
+  const status = h("span", { class: "save-status", role: "status", "aria-live": "polite" });
+  const add = h("button", { type: "button", class: "small-btn", onclick: async () => {
+    add.disabled = true;
+    const id = await newDoc(ctx, status);
+    add.disabled = false;
+    if (id) { editNext = id; location.hash = `#/reader/${id}`; if (selected === id) void showReader(into, ctx, id); }
+  } }, "+ New doc");
+  into.replaceChildren(h("div", { class: "page-head tasks-head" }, h("h1", {}, "Reader"), status, h("span", { class: "grow" }), add), h("div", { class: "reader" }, list, pane));
   let lib: Awaited<ReturnType<typeof loadLibrary>>;
   try { lib = await loadLibrary(ctx); } catch (e) {
     if (mine !== run) return;
@@ -113,7 +137,7 @@ export async function showReader(into: HTMLElement, ctx: Ctx, selected: string |
     return b;
   });
   list.replaceChildren(h("div", { class: "panel-title" }, "Library"),
-    ...(rows.length ? rows : [message("Nothing here yet. Add notes and files on your iPhone and they appear here.")]),
+    ...(rows.length ? rows : [message("Nothing here yet. Start a doc with New doc, or add files on your iPhone.")]),
     ...(lib.unreadable ? [h("p", { class: "sub" }, `${lib.unreadable} item${lib.unreadable === 1 ? "" : "s"} didn't open with your key and ${lib.unreadable === 1 ? "is" : "are"} hidden.`)] : []));
   const entry = lib.entries.find((e) => e.item.id === selected);
   if (entry) await showItem(ctx, entry, pane, mine);

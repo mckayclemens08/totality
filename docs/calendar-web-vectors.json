@@ -1,0 +1,134 @@
+{
+  "note": "Made by web/site/test/make-calendar-vectors.mjs from the website's own code. Test key only.",
+  "rootKey": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+  "items": [
+    {
+      "id": "ca1e0000-0000-4000-8000-000000000001",
+      "meta": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAfWjlenL5ZRvX85LKcZsESccNifllTP4LJm0cbJBReQkvGwa4b+AQGHS6Hio0EsuUy3mfH8CW6iAiGXlYeCi+MxRx8clCxuKTT6D40DohfhizCzJdJxcAygzEwPhLPFbsOjsNdB0pfx8QySM5dBt0M7gAwtmZSlirooPAXydRCHEUF78OYTjgdkzFr9BVt/A4LWZnI6Dj8nenePukm43BmyiQJVGYUPleHz8gSIb9EsYtCUsQEh7DJEOKDAPFnMG6Y4zS/NI91aMFoblCHTqmk5cnD1Rkkdtr3nLcd+uwTbY0pGBue3RAs/0HrW5UtzrVoc/AACluvpnhVEuYUAze8sCL1YTOvZBZIPB5fmFYL/cctFxaK7Vc77oZJCLK6Xe3QVck8GUdEiftU7APpgOSd98asGf4pMtc5jg9bbVu/fsE60aM/crXQI8u/Z75sMip+eaF/0EIgwoH8CLKk4pin1CkeHXh0MPURWndbt3heDFOKiNgPm3dsL7IgHxw8yYVAh5QRWANuHH6QLgIvSDm1AqhHLtIyJ7usn+xHmFXi88Nm07chBv/gfJ3AuGFMMR+WHSUWt2efNw8GRjLxRElhO8cljIGF+RvK8xVTchD3ubyl+UiJtZNbzzNT7ZNskzPb/OykSM3lXrfpdMSEsLFHDVuZk7YlivoUi81P2xp4glf7eQaknqEk7eGosJgYBo1ncptXhiDwCYIvJ/3jt9xeq6jjUZ4AZdGGieQF8Piyw5WZEVF15n/zrx7w==",
+      "hash": "18f417af3abd46d1069cf9f053108550ca174f141cafa6c7abe9be3d71c76821",
+      "expect": {
+        "title": "Seminar",
+        "location": "JFSB 4010",
+        "notes": "Bring the outline.\nAsk about week 9.",
+        "start": 816906600,
+        "end": 816911100,
+        "isAllDay": false,
+        "timeZoneID": "America/Denver",
+        "repeatRule": {
+          "frequency": "weekly",
+          "until": {
+            "year": 2027,
+            "month": 4,
+            "day": 20
+          }
+        },
+        "reminderMinutes": 30,
+        "skipped": [],
+        "attachments": [
+          {
+            "module": "reader",
+            "kind": "note",
+            "id": "5E1D0000-0000-4000-8000-0000000000D1",
+            "keyRef": "crk:5e1d0000-0000-4000-8000-0000000000d1",
+            "preview": {
+              "title": "Seminar outline"
+            }
+          }
+        ],
+        "createdAt": 816790500
+      }
+    },
+    {
+      "id": "ca1e0000-0000-4000-8000-000000000002",
+      "meta": "AQICAgICAgICAgICAgICAgICAgICAgICAiTXBSr87QdL+FyEszVCvdN7whb2z0fB/dI17TZMKIGp8UAwMjwSAz4xypassrOyqdzSC/LdMa7kXVN8gRJs0rwbwMzJnRJkrsK5GtUJrGUCATkcZcqHJSrPyG/Kd5n813YzHN3IBc/YcGXb6lzfTEvqelJ2it1RvmRcCCTQ/A/kCnvefvCd8s9w9wtglYi6fDgXt3F1vAyndUt35p7Pu49kNHpYl10+XYDSLi3hDayBbBD8Eo0YWZF+jmtUtw/tCWK1uCNYEo3xrYsejzF7mUSDVDo5CXLSHTdpEqmo+p1CgeoELjZ0QpUEojfXAt8oN+I3dwg=",
+      "hash": "fd8e747953160a23dd0c2785c8ed8af53662ede0e8880af41026b9fb7b698ffc",
+      "expect": {
+        "title": "Moab",
+        "isAllDay": true,
+        "timeZoneID": "GMT",
+        "start": 819244800,
+        "end": 819417600,
+        "skipped": []
+      }
+    },
+    {
+      "id": "ca1e0000-0000-4000-8000-000000000003",
+      "meta": "AQMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA6AA2QkvK/rBuJYEkikMI+sep7QymbwitNyeR+uB8VULRg+rnYS591JT7IDdosfEww4d8YN/BQbkFml9bZj+/WD8LW8QkB9RcGuUT2Npck9Udbr0CPPcjfX5joDA0Y162uY8blMh+RerYmIyviP7BDIgffi+4Dvc8Egpxjy4jHpjwDeT1aBkGtwEGnGZ5CzM4T6OnxsKlBnctZWgNTVOw0L0URbkZ3zVBJGi+WWywC1Tk57vpH33q2uMWkFXnURGlGRmlDvW70Q8Rn4SXq67YZ8yw+MMxy9RiSmE01R8mOzckGNqmXvFIBcXqHSvFCesQcrc7kI2Igniyh4pTHpPIVmtQz/zsHzcXp55Hw==",
+      "hash": "9c647a883699a1be20df3c1523b3c89da4bb2e79d2245933e8a2b93338bc9538",
+      "expect": {
+        "title": "Seminar (moved)",
+        "start": 817515000,
+        "skipped": []
+      }
+    },
+    {
+      "id": "ca1e0000-0000-4000-8000-000000000001",
+      "meta": "AQQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBObdNpqBWYZl0zJQ4Az8gYcIYjkSD0CuIrxLRkUw3kiPkwhc05ocOawNssS+mOyQJfM7uLDl5lzGPpHnR1sXaTfn5hIbtMSG60jNJCBC9fMDmCnk8pvItKnaJIU9+TStxYOsHOmzJbkm13Jb8NQStyF8JAstrFaL6YmLa8j/N34/KhMNMytrUptlfzN5A7lDMICKvpohRC+PlsOsoYn+sPF94SHPcDyNgFrQAg0jo7fVFHU7W8GGYJal6kvbkliP3ef+Qo/xIrA+aoN+udemHK7yFsRGYy0pmxVT+oF/+WsPflj8ak/qmyfaqQyIAhg9b6jm4cKYI2URjvYyOcj37wKMBDuh5akrFpT2O5xk0gEXkwvko5ZnUtdREejPCiYCmIDPAANU0QtqDNavpkoIQmYdGOjMfcPRw1PyvY9HXooOYHbv27AlLMAoJU9DPImB9AXJ6LJXX6B0hkfcv+Ow9fRsBz4uGkwJQEPEEY8zAXrBecWHsNiVbXvsWy0F4oZlkSfBSPYF4OQIWk4SeocaMh5///8Vp3OBUcBfE7dxGJLV99yXIMkiN65nPUMrvn3cQvFs5VtC9CJ5RSe3DqEFwqENAieeKGU64V02oPlskVdvFTUonse6vJQ4f8ecJS/nUfEaz0yODhQltiRyEFaSsNTzSUsRGTaix3EpkGyg5A1GobJ6JqngB9iSjI7CSuKsrgztacxnJd/vedeP3P9ccG5mvXOqfJCLkr3WMmkKGj817y1gtKBGBiPJZAu1TNJUz6rBzA==",
+      "hash": "1b4e804b1bad7a3d6c7b4987150b1e07d11c45df1bfad5acedf2424b204aa41f",
+      "expect": {
+        "title": "Seminar",
+        "skipped": [
+          817511400
+        ],
+        "updatedAt": 816790560
+      }
+    },
+    {
+      "id": "ca1e0000-0000-4000-8000-000000000001",
+      "meta": "AQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBWy/MhexR6eXgWsiQ2hAljEs0hrx0lp2yHD6K4gRY3WN1q4KAaLKfEzXlVite1KpS8AUJvXHg1cOgdBgVPyoQ+r7zEesSK28F7qG7TQcUXSMITozFZHm9bPxy0kgU/jNJ12G8rSBsVduN/bgqay8fec5eBX0nf7ymfArnhSsjurmT2wgIbjddEpnUEBA3Y3mcuL2jleYIHbLqKj+ewlXgUNgpSFDAYKoxRTU5FV4ZrN2tb0wrZpV7MpS0f6k/hW7VBHzeBpu97DKU9awTjaxPjshd2d72eGSLwefolM+Sez8lGNd57CY8GwePQfyhAZh17sTTFSkq9YgJQ8eGpXTHHn29RIZIp1aJg35t0S82OYYmcpkM4Kxv+Btgi7Q0IgUCe/bTymwql7z2qs576HNbOLgKLzZmhZB8T/w7Rs1TpBpWGJm8Y3k1mVNFlxWIg7AtQ+JyAnvCiDFs5rL5GFPW3WbggbBkOPc8Y4UznJK/uIt6XJ0xTRA1h9yg3LS3GI2YEIy7kk/519drIIMEizH6GchATPB+NjK/E+WmYMmKgdxGCTJcaE9NDMs7f2YTIw6Hy3SLDlX3Kug5TG55mdJz0ymNRvB3QHWdh67pG3GyRbbUM3SG6VTXitjS7XSPLNSkWf3GJUerBR/ULVA33As3LOE1ZIFgrMD86dkJGDgwsPZdAbwOKKbBfU6jBipPsGmxWdOz8LUxaltyy+lHBuVTeZuixlc73YJPt+6LJf3BZSQXIzkzzDLK3ciJ9kIVUJQTfonzSnoryBHkylZ2b4=",
+      "hash": "3563c49375cef308bcbf38ddb3985f4e01371e5cbced4f0c85aac08dbdc5ffd4",
+      "expect": {
+        "start": 816908400,
+        "skipped": [
+          817513200,
+          818118000
+        ],
+        "reminderMinutes": 30,
+        "attachments": [
+          {
+            "module": "reader",
+            "kind": "note",
+            "id": "5E1D0000-0000-4000-8000-0000000000D1",
+            "keyRef": "crk:5e1d0000-0000-4000-8000-0000000000d1",
+            "preview": {
+              "title": "Seminar outline"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "7beaee83-67c1-4aa2-9bfa-7a359a9e6614",
+      "meta": "AQYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBsbxdMPpMyZPZy6alDHDZ5yurzAglJAFxSygeWwAaEFVw/NccZb8mbvSYEYARAGnoR6j3VA5cXko68tEv+YglpTSqxFH8Nzl4eiymuoVkem5OzPP2G2JrDIDQzaQMk81cFDdxPqucx+TcyqNboXH8xatJB+9nkQaV4gP7N1+XP3FXaz6LS64ubXe1l/JUI4QfyRFbV0HXLES+BNdyMR+8flcOB4prM/nFgspdS/RdUqn47hhYRlUCCLLzeWzNS/4qvxkEeIq8WEp4Ea+vkuoI7TJnJ2E3mWMh/eEFNNLETiQxE/6hI63HRrt1jDXx2EPbhFtJ2MSIz4TfT75ls/MXR4MoujlhkiNdEKM/W/8YqQz9xV7qfTaCiufe4a2eg1P+ml70Wg4KHxbNqkfpQ==",
+      "hash": "1b56eb4302556b9e1593a1e45735388575c8d95941d3985ef927dc49e30ac424",
+      "expect": {
+        "title": "Office hours <b>x</b>"
+      }
+    },
+    {
+      "id": "7beaee83-67c1-4aa2-9bfa-7a359a9e6614",
+      "meta": "AQcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHB4kFvqa0+fyHjgx8A7QN1BgvVAcFFy1y0J23I8wykPTvNv3raKwnw/iy7SrVTmkR2rqyhJkIUxspbkh2wRKo6l5JLaMHDXZ0eXx7opM6Ol9aP6VHMv0r3pFJ5gjhxZr4Kk30U6A8UEixt0JePKctZ9S62Nm4HdLmw5vgUioOUCATWPc6e+6/CdjO8KXdtxoM7Xk6vysrBADasUi/dCgnFpMflhS4SwZ7c5f9F7KfDr+KWgV0TTlLWBRWYcGHYkZj9Ait0zBSF8q6cAB0W0ElV2uVWW2Kp9d7mAMA7J0V71eEp7e1/+vpxIL2fAuWd4uhFAum+Oebup5UApF1NDWp52ve+PtR2oXhk2zV+S/WDOwDK7n6z4NRgohhG4PJdKD5qqSE8dSPUW5vsOhZ6FrOPs1HIb0IxjCSAKgwOfFDeXwoO9ve8RJ/Fg1u15Qq",
+      "hash": "43ed83618465c3b23afd5a745b5468eca6ae3050f641dbf4f21f67f892865c4d",
+      "expect": {
+        "title": "Office hours",
+        "notes": "Bring outline",
+        "reminderMinutes": 10,
+        "updatedAt": 816790500
+      }
+    }
+  ],
+  "conflicts": [
+    {
+      "mine": 6,
+      "theirs": 5,
+      "keep": "mine",
+      "copyID": "AF3D0B40-C6B3-4A10-B66E-39310DB8953E"
+    },
+    {
+      "mine": 5,
+      "theirs": 6,
+      "keep": "theirs",
+      "copyID": "AF3D0B40-C6B3-4A10-B66E-39310DB8953E"
+    }
+  ]
+}

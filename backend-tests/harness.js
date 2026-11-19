@@ -23,6 +23,11 @@ const SUPABASE_STUB = `
   create function auth.uid() returns uuid language sql stable as $$
     select nullif(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub', '')::uuid
   $$;
+  create function auth.jwt() returns jsonb language sql stable as $$
+    select coalesce(nullif(current_setting('request.jwt.claims', true), ''), '{}')::jsonb
+  $$;
+  -- Supabase keeps one row per sign-in; its refresh tokens go when the row does.
+  create table auth.sessions (id uuid primary key, user_id uuid references auth.users(id) on delete cascade);
   create table storage.buckets (
     id text primary key, name text, public boolean default false,
     file_size_limit bigint, allowed_mime_types text[]
@@ -64,7 +69,7 @@ export async function newUser(db, handle, username = handle ?? `u_${randomUUID()
 export async function as(db, user, fn) {
   return db.transaction(async (tx) => {
     await tx.query(`select set_config('request.jwt.claims', $1, true)`,
-      [user ? JSON.stringify({ sub: user.id, role: 'authenticated' }) : ''])
+      [user ? JSON.stringify({ sub: user.id, role: 'authenticated', ...(user.session ? { session_id: user.session } : {}) }) : ''])
     await tx.exec(`set local role ${user ? 'authenticated' : 'anon'}`)
     const q = async (sql, params) => (await tx.query(sql, params)).rows
     return fn(q)
@@ -86,4 +91,11 @@ export async function addObject(db, user, fields = {}) {
       `insert into storage.objects (bucket_id, name) values ('content', $1)`, [o.storage_key]))
   }
   return { id, ...o }
+}
+
+// A new sign-in for the user, as Supabase makes one: returns the user as seen through that session.
+export async function signIn(db, user) {
+  const session = randomUUID()
+  await db.query('insert into auth.sessions (id, user_id) values ($1, $2)', [session, user.id])
+  return { ...user, session }
 }
