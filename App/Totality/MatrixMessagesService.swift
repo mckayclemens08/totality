@@ -406,16 +406,22 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         return members
     }
 
+    /// The SDK's error as one a person can read. Only a real network failure says offline; anything else
+    /// says it didn't go through, with a short code the owner can quote (see `MatrixFailure.code`).
     static func translate(_ error: any Error) -> any Error {
         switch error {
         case let error as MessagesError: return error
-        case let error as ClientError:
-            if case .MatrixApi(_, let code, _, _) = error, code == "M_FORBIDDEN" {
-                return MessagesError.failed("The Matrix server refused that.")
-            }
-            return MessagesError.failed("Messages couldn't reach the server. Check your connection and try again.")
+        case let error as ClientError: return failure(error).error
         case is URLError: return MessagesError.offline
-        default: return MessagesError.failed("Something went wrong. Try again.")
+        default: return MatrixFailure.sdk(String(describing: type(of: error))).error
+        }
+    }
+
+    static func failure(_ error: ClientError) -> MatrixFailure {
+        switch error {
+        case .MatrixApi(_, let code, _, _): .server(code: code)
+        case .Generic(let message, _): .fromSDK(message)
+        case .ContentScanner: .sdk("content scanner")
         }
     }
 
