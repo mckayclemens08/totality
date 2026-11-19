@@ -113,6 +113,7 @@ enum ContentSetup {
             model.attach(to: reader.refresher)
             reader.drive = model
         }
+        let tasks = TasksModel(vault: taskVault)
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
@@ -123,15 +124,16 @@ enum ContentSetup {
             MailModule(refresh: mailRefresh),
             PhotosModule(refresh: { await refresh(.photos) }),
             MessagesRefresher(refresh: { await refresh(.messages) }),
-            TasksModule(vault: taskVault, refresh: { await refresh(.tasks) }),
+            // A task made or planned from another module is read in at once (step 4).
+            TasksModule(vault: taskVault, refresh: { await refresh(.tasks) }, changed: { @MainActor [weak tasks] in await tasks?.load() }),
         ], profiles: AccountSetup.profiles)
-        let tasks = TasksModel(vault: taskVault)
         // Reminders ring from this iPhone alone: local notifications and places iOS watches.
         tasks.reminderCenter = HomeGatedTaskReminders(SystemTaskReminders.shared)
         tasks.actionQueue = .shared
         SystemTaskReminders.shared.onAction = { [weak tasks] _ in await tasks?.applyQueuedActions() }
         // Upcoming's events come through the registry, so Tasks never reaches into the Calendar.
-        tasks.agenda = { [registry] start, end in await registry.agenda(from: start, to: end) }
+        // Tasks is on the calendar too now, so it leaves itself out.
+        tasks.agenda = { [registry] start, end in await registry.agenda(from: start, to: end, except: .tasks) }
         return (
             reader,
             CalendarModel(

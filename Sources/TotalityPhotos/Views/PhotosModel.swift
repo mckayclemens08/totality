@@ -41,6 +41,8 @@ public final class PhotosModel {
     public private(set) var fix: Fix?
     /// What carries a share to another person, set by the app where that runs. Nil hides Share.
     public var sender: (any PersonSender)?
+    /// Makes tasks from photos, through the registry (issue 123, step 4). Nil hides Add to Tasks.
+    @ObservationIgnored public var taskMaker: (any TaskMaker)?
     /// How far a share has got, while one is going.
     public private(set) var sharing: (done: Int, total: Int)?
     /// How many items the last share got through.
@@ -711,5 +713,17 @@ public final class PhotosModel {
         let next = min(max(columns + step, Self.columnRange.lowerBound), Self.columnRange.upperBound)
         guard next != columns else { return }
         columns = next
+    }
+}
+
+// MARK: - Tasks (issue 123, step 4)
+
+extension PhotosModel {
+    /// Whether a task's photo is still in the library. One in Recently Deleted counts as gone. Unknown
+    /// until Photos has loaded.
+    public func hasItem(_ id: String) -> Bool? {
+        guard phase == .ready else { return nil }
+        guard let uuid = UUID(uuidString: id) else { return false }
+        return items(in: .library).contains { $0.id == uuid } || items(in: .videos).contains { $0.id == uuid }
     }
 }

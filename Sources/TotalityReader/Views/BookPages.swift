@@ -267,10 +267,26 @@ private final class BookRelay: NSObject, WKScriptMessageHandler {
 }
 
 #if os(iOS)
-final class BookWebView: WKWebView {}
+/// A book's pages, whose selection menu also offers Add to Tasks with the chosen words (step 4).
+final class BookWebView: WKWebView {
+    var onAddToTasks: ((String) -> Void)?
+
+    override func buildMenu(with builder: any UIMenuBuilder) {
+        super.buildMenu(with: builder)
+        guard builder.system == .context, onAddToTasks != nil else { return }
+        let add = UIAction(title: "Add to Tasks", image: UIImage(systemName: "checkmark.circle")) { [weak self] _ in
+            self?.evaluateJavaScript("window.getSelection().toString()") { result, _ in
+                guard let words = result as? String else { return }
+                self?.onAddToTasks?(words)
+            }
+        }
+        builder.insertChild(UIMenu(options: .displayInline, children: [add]), atEndOfMenu: .root)
+    }
+}
 
 private struct BookWebViewHost: UIViewRepresentable {
     let webView: WKWebView?
+    var onAddToTasks: ((String) -> Void)?
 
     func makeUIView(context: Context) -> UIView {
         let container = UIView()
@@ -281,6 +297,7 @@ private struct BookWebViewHost: UIViewRepresentable {
 
     func updateUIView(_ container: UIView, context: Context) {
         attach(to: container)
+        (webView as? BookWebView)?.onAddToTasks = onAddToTasks
     }
 
     private func attach(to container: UIView) {
@@ -305,6 +322,7 @@ final class BookWebView: WKWebView {
 
 private struct BookWebViewHost: NSViewRepresentable {
     let webView: WKWebView?
+    var onAddToTasks: ((String) -> Void)?
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
@@ -361,7 +379,10 @@ struct BookPagesReader: View {
             } else if case .failed(let reason) = controller.phase {
                 ReaderMessage(systemImage: "exclamationmark.triangle", title: "The pages didn't open", detail: reason)
             } else {
-                BookWebViewHost(webView: controller.webView)
+                BookWebViewHost(
+                    webView: controller.webView,
+                    onAddToTasks: model.taskMaker == nil ? nil : { model.addToTasks(item, quote: $0) }
+                )
                     .overlay {
                         if controller.phase == .starting {
                             ProgressView()

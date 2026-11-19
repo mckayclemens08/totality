@@ -44,6 +44,8 @@ struct ChatView: View {
     let onGone: () -> Void
     @FocusState private var writing: Bool
     @State private var playing: ChatMessage?
+    /// A message being added to Tasks (step 4).
+    @State private var taskDraft: TaskDraft?
     @State private var confirmingBlock = false
     /// A disappearing setting waiting for the person to confirm it.
     @State private var pendingSetting: Disappearing?
@@ -173,6 +175,7 @@ struct ChatView: View {
         .sheet(item: $playing) { message in
             VideoViewer(message: message, model: model) { playing = nil }
         }
+        .addToTasksSheet($taskDraft, maker: messages.taskMaker) { made in model.notice = made.line }
         .toolbar { chatMenu }
         .sheet(isPresented: $editingGroup) {
             GroupDetailsView(chat: model, messages: messages) { editingGroup = false }
@@ -257,8 +260,20 @@ struct ChatView: View {
                 writing = true
             },
             onDelete: { deleting = message },
+            onAddToTasks: messages.taskMaker == nil || message.kind == .deleted ? nil : { taskDraft = draft(for: message) },
             keys: messages.keys,
             onRestore: onOpenAccount
+        )
+    }
+
+    /// Only the title the person writes and a link to this chat go to Tasks. The message's words aren't
+    /// copied (decision 4).
+    private func draft(for message: ChatMessage) -> TaskDraft {
+        let who = message.isOwn ? "You" : messages.people.name(ofMatrixID: message.sender)
+        let when = message.time.formatted(date: .abbreviated, time: .shortened)
+        return TaskDraft(
+            title: "",
+            source: TaskSource(module: .messages, itemID: model.chatID, title: model.title, detail: "\(who) · \(when)")
         )
     }
 
@@ -535,6 +550,7 @@ struct Bubble: View {
     let onOpenPhoto: () -> Void
     let onReply: () -> Void
     let onDelete: () -> Void
+    var onAddToTasks: (() -> Void)? = nil
     /// Whether this account's message keys are backed up here, which decides what a locked message offers.
     var keys: MessageKeys = .checking
     var onRestore: (() -> Void)? = nil
@@ -637,6 +653,9 @@ struct Bubble: View {
                 }
             }
             .controlGroupStyle(.compactMenu)
+        }
+        if let onAddToTasks {
+            Button("Add to Tasks", systemImage: "checkmark.circle", action: onAddToTasks)
         }
         if message.canReply && message.kind != .deleted {
             Button("Reply", systemImage: "arrowshape.turn.up.left", action: onReply)

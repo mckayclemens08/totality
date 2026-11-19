@@ -1,4 +1,5 @@
 import Foundation
+import TotalityCore
 
 /// One task. All of it is sealed before it leaves the device: the server sees one ciphertext row.
 public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
@@ -45,6 +46,8 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         case title, notes, place, schedule, deadline, checklist, tags, priority, list, order, completion
         /// From step 3. Older versions keep these names' times but can't read the parts, and leave them be.
         case repeating, reminders, snooze
+        /// From step 4: where it came from, and whether it waits for a reply.
+        case link
     }
 
     public let id: UUID
@@ -86,6 +89,10 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
     public var nagging: Nagging?
     /// Snoozed from a notification: nothing rings, nagging included, until then (owner, 2026-11-18).
     public var snoozedUntil: Date?
+    /// Where it came from, with any quote, so it can open the source again (step 4). Sealed with the rest.
+    public var source: TaskSource?
+    /// How long it's blocked on the calendar from its time, once dragged onto one (step 4). Part of the schedule.
+    public var blockMinutes: Int?
 
     public init(
         id: UUID = UUID(), title: String, notes: String = "", place: Place = .inbox, when: TaskDay? = nil,
@@ -118,6 +125,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         case id, title, notes, place, when, isEvening, time, deadline, checklist, tags, priority, listID, headingID, order
         case createdAt, completedAt, updatedAt, edits
         case deadlineTime, repeatRule, reminders, nagging, snoozedUntil
+        case source, blockMinutes
     }
 
     /// Missing parts take their defaults, so a task saved by an older version still opens.
@@ -146,6 +154,8 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         reminders = (try? c.decodeIfPresent([TaskReminder].self, forKey: .reminders)) ?? []
         nagging = try? c.decodeIfPresent(Nagging.self, forKey: .nagging)
         snoozedUntil = try? c.decodeIfPresent(Date.self, forKey: .snoozedUntil)
+        source = try? c.decodeIfPresent(TaskSource.self, forKey: .source)
+        blockMinutes = try? c.decodeIfPresent(Int.self, forKey: .blockMinutes)
     }
 
     public var isCompleted: Bool { completedAt != nil }
@@ -187,7 +197,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         case .title: title == other.title
         case .notes: notes == other.notes
         case .place: place == other.place
-        case .schedule: when == other.when && isEvening == other.isEvening && time == other.time
+        case .schedule: when == other.when && isEvening == other.isEvening && time == other.time && blockMinutes == other.blockMinutes
         case .deadline: deadline == other.deadline && deadlineTime == other.deadlineTime
         case .checklist: checklist == other.checklist
         case .tags: tags == other.tags
@@ -198,6 +208,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
         case .repeating: repeatRule == other.repeatRule
         case .reminders: reminders == other.reminders && nagging == other.nagging
         case .snooze: snoozedUntil == other.snoozedUntil
+        case .link: source == other.source
         }
     }
 
@@ -210,6 +221,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
             when = other.when
             isEvening = other.isEvening
             time = other.time
+            blockMinutes = other.blockMinutes
         case .deadline:
             deadline = other.deadline
             deadlineTime = other.deadlineTime
@@ -226,6 +238,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
             reminders = other.reminders
             nagging = other.nagging
         case .snooze: snoozedUntil = other.snoozedUntil
+        case .link: source = other.source
         }
     }
 
@@ -283,7 +296,8 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
             case .title: try c.encode(task.title)
             case .notes: try c.encode(task.notes)
             case .place: try c.encode(task.place)
-            case .schedule: try c.encode([String(describing: task.when), String(task.isEvening), String(describing: task.time)])
+            case .schedule:
+                try c.encode([String(describing: task.when), String(task.isEvening), String(describing: task.time), String(describing: task.blockMinutes)])
             case .deadline: try c.encode(String(describing: task.deadline) + String(describing: task.deadlineTime))
             case .checklist: try c.encode(task.checklist.map { "\($0.id)|\($0.title)|\($0.isDone)" })
             case .tags: try c.encode(task.tags)
@@ -294,6 +308,7 @@ public struct TaskItem: Identifiable, Codable, Sendable, Hashable {
             case .repeating: try c.encode(task.repeatRule)
             case .reminders: try c.encode([String(describing: task.reminders), String(describing: task.nagging)])
             case .snooze: try c.encode(task.snoozedUntil?.timeIntervalSince1970 ?? 0)
+            case .link: try c.encode(task.source)
             }
         }
     }

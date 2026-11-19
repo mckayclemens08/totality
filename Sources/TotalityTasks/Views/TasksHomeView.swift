@@ -18,6 +18,8 @@ public struct TasksHomeView: View {
     @State private var showsLists = false
     /// An area, project or smart list, open over the rest.
     @State private var openList: UUID?
+    /// The built-in Waiting list, open over the rest (step 4).
+    @State private var showsWaiting = false
     @State private var making: TaskList.Kind?
     @State private var selection = TaskSelection()
     @State private var selectionSheet: SelectionSheet?
@@ -37,7 +39,7 @@ public struct TasksHomeView: View {
         .background(theme.bg.color)
         .edgeSwipeBack(onClose)
         .overlay(alignment: .bottomTrailing) {
-            if model.phase == .ready, !selection.isOn, openList == nil {
+            if model.phase == .ready, !selection.isOn, openList == nil, !showsWaiting {
                 if showsLists {
                     Menu {
                         Button("New task", systemImage: "plus") { addingTo = .inbox }
@@ -65,6 +67,14 @@ public struct TasksHomeView: View {
             }
         }
         .motion(Motion.smooth, value: openList)
+        .overlay {
+            if showsWaiting {
+                WaitingScreen(model: model) { showsWaiting = false }
+                    .transition(.move(edge: .trailing))
+                    .zIndex(1)
+            }
+        }
+        .motion(Motion.smooth, value: showsWaiting)
         .overlay(alignment: .top) {
             if selection.isOn {
                 SelectionHeader(selection: selection, visible: visibleIDs)
@@ -93,7 +103,7 @@ public struct TasksHomeView: View {
                     .padding(.bottom, selection.isOn ? Space.s8 + Space.s6 : Space.s5 + Metric.addButton)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let last = model.lastCompleted {
-                UndoBar(title: last.title, onUndo: { Task { await model.undoCompletion() } }, onDismiss: model.dismissUndo)
+                UndoBar(title: last.title, line: last.line, onUndo: { Task { await model.undoCompletion() } }, onDismiss: model.dismissUndo)
                     .padding(.horizontal, Space.s4)
                     .padding(.bottom, Space.s5 + Metric.addButton)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -271,7 +281,8 @@ public struct TasksHomeView: View {
                     model: model,
                     onBucket: { item in withMotion(Motion.snappy) { showsLists = false; bucket = item } },
                     onList: { openList = $0 },
-                    onNew: { making = $0 }
+                    onNew: { making = $0 },
+                    onWaiting: { showsWaiting = true }
                 )
             } else {
                 TaskListView(model: model, bucket: bucket, expanded: $expanded)
@@ -284,13 +295,14 @@ public struct TasksHomeView: View {
 /// "Completed …  Undo", for a few seconds after a tick.
 struct UndoBar: View {
     let title: String
+    var line: String?
     let onUndo: () -> Void
     let onDismiss: () -> Void
 
     var body: some View {
         let theme = Theme.current
         HStack(spacing: Space.s3) {
-            Text("Completed “\(title)”")
+            Text(line ?? "Completed “\(title)”")
                 .font(Typeface.callout.weight(.regular))
                 .foregroundStyle(theme.textPrimary.color)
                 .lineLimit(1)

@@ -33,6 +33,10 @@ public final class ReaderModel {
     public var isSynced = false
     /// A problem to show the person, cleared when they dismiss it.
     public var notice: String?
+    /// Makes tasks from what's read, through the registry (issue 123, step 4). Nil hides Add to Tasks.
+    @ObservationIgnored public var taskMaker: (any TaskMaker)?
+    /// A task waiting for its title in the Add to Tasks sheet.
+    public var taskDraft: TaskDraft?
     /// A big file being imported, and how far it's got, for the progress bar.
     public private(set) var importing: ImportProgress?
     /// The journal (issue 128): every day with writing, and the notes added under them.
