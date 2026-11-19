@@ -3,7 +3,8 @@
 import * as vault from "../keystore";
 import * as net from "../net";
 
-export interface MatrixSession { userId: string; deviceId: string; accessToken: string }
+/** `owner` is the Totality account (Supabase user ID) the device was signed in for. */
+export interface MatrixSession { userId: string; deviceId: string; accessToken: string; owner: string }
 const NAME = "matrix";
 let current: MatrixSession | null = null;
 
@@ -28,19 +29,33 @@ export async function deleteCryptoStore(userId: string): Promise<void> {
   }
 }
 
+// Bumped by sign-out and lock, so a connection still being made can tell it was cancelled.
+let generation = 0;
+export const generationNow = (): number => generation;
+export const cancelConnecting = (): void => { generation++; };
+
 let stopEngine: (() => Promise<void>) | null = null;
 export const onEngineStop = (stop: (() => Promise<void>) | null): void => { stopEngine = stop; };
 
 /** Sign out: logs this browser's Matrix device out (the server deletes it and its keys), then wipes it here. */
 export async function signOutMessages(): Promise<void> {
+  generation++;
   const s = current ?? (await vault.loadSealed<MatrixSession>(NAME));
   current = null;
   await stopEngine?.().catch(() => {});
   stopEngine = null;
+  clearMessagesPrefs();
   if (!s) return;
   await net.matrixLogout(s.accessToken);
   await vault.dropSealed(NAME);
   await deleteCryptoStore(s.userId);
+}
+
+/** Per-browser Messages settings and "viewed up to" marks, which name rooms, go with the sign-in. */
+export function clearMessagesPrefs(): void {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (k?.startsWith("totality.messages.")) localStorage.removeItem(k); }
+  } catch { /* storage can be blocked */ }
 }
 
 /** The device was logged out elsewhere (for example removed on the iPhone): forget it here. */

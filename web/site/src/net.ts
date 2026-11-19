@@ -168,8 +168,21 @@ export async function matrixMedia(token: string, mxc: string, max: number): Prom
   if (!res.ok) throw new NetError(res.status === 401 ? "wrongPassword" : "failed");
   const size = Number(res.headers.get("content-length") ?? "0");
   if (size > max) throw new NetError("failed");
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.length > max) throw new NetError("failed");
+  // Read in pieces and stop past the limit, so a server that sends no length can't fill memory.
+  const reader = res.body?.getReader();
+  if (!reader) throw new NetError("failed");
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > max) { await reader.cancel().catch(() => {}); throw new NetError("failed"); }
+    parts.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) { bytes.set(p, at); at += p.length; }
   return bytes;
 }
 

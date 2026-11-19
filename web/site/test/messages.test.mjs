@@ -125,3 +125,30 @@ test("the Matrix SDK is pinned exactly and loads only with Messages", () => {
   assert.doesNotMatch(readFileSync(`dist/${app}`, "utf8"), /OlmMachine|matrix_sdk_crypto/, "the SDK isn't in the main bundle");
   assert.equal(readdirSync("dist/assets").filter((f) => f.endsWith(".wasm")).length, 1);
 });
+
+test("the review's fixes stay in place (PR 179 review)", () => {
+  const engine = readFileSync("src/messages/engine.ts", "utf8"), view = readFileSync("src/messages/view.ts", "utf8"), session = readFileSync("src/messages/session.ts", "utf8");
+  // M1, M2: a thumbnail is tried once per visit, and only a real thumbnail is ever loaded in the list.
+  assert.match(view, /catch\(\(\) => \{ thumbs\.set\(m\.id, FAILED\)/);
+  assert.match(engine, /const file = which === "thumbnail" \? thumbFile : c\.file;/);
+  assert.match(engine, /PHOTO_MAX = 10 \* 1024 \* 1024, VIDEO_MAX = 100 \* 1024 \* 1024, THUMB_MAX = 2 \* 1024 \* 1024/);
+  // M3: sign-out or lock cancels a connection being made, and another account's session is never used.
+  assert.match(session, /signOutMessages\(\): Promise<void> \{\n  generation\+\+;/);
+  assert.match(view, /cancelConnecting\(\);\n  const e = engine;/);
+  assert.match(engine, /session && session\.owner !== owner/);
+  assert.match(engine, /E\.connect|connect\(supabaseToken: \(\) => Promise<string>, owner: string\)/);
+  // M4: writes to the account's keys are refused, and every secret must open before bootstrapping.
+  assert.match(engine, /engine\.guardSecretStorage\(\);/);
+  assert.match(engine, /ss\.store = async \(\) => \{ throw/);
+  assert.match(engine, /if \(opened\.some\(\(v\) => typeof v !== "string"/);
+  // L1, L5: Messages' saved choices go at sign-out; reactions are capped.
+  assert.match(session, /clearMessagesPrefs\(\);\n  if \(!s\) return;/);
+  assert.match(engine, /rel\.key\.length > 16/);
+});
+
+test("the account-key guard matches exactly the names the iPhone writes", () => {
+  const src = readFileSync("src/messages/engine.ts", "utf8");
+  const re = new RegExp(/protectedType = \(t: string\): boolean => \/(.*)\/\.test/.exec(src)[1]);
+  for (const t of ["m.cross_signing.master", "m.cross_signing.self_signing", "m.cross_signing.user_signing", "m.secret_storage.default_key", "m.secret_storage.key.abc", "m.megolm_backup.v1"]) assert.ok(re.test(t), t);
+  for (const t of ["m.direct", "m.push_rules", "m.megolm_backup.v1x", "app.totality.after_viewing"]) assert.ok(!re.test(t), t);
+});

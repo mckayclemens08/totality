@@ -3,7 +3,8 @@
 import { h, svg } from "../dom";
 import type { Ctx } from "../reader/view";
 import type { Engine, ChatSummary, KeysState } from "./engine";
-import { blobUrl, revokeAll, preparePhoto, prepareVideo, prepareGroupPhoto } from "./media";
+import { blobUrl, revoke, revokeAll, preparePhoto, prepareVideo, prepareGroupPhoto } from "./media";
+import { cancelConnecting } from "./session";
 import {
   DISAPPEARING, GroupLabels, LockedMessage, QUICK_REACTIONS, SHARE_READ_KEY, cleanGroupName, disappearingExplanation, disappearingLabel,
   displayName, dueMessages, parseGroupMembers, visibleMessages, type ChatMessage,
@@ -30,6 +31,7 @@ export function stopMessages(): void {
 /** Locking or signing out: ends the connection too. Chats leave memory with it. */
 export async function endMessages(): Promise<void> {
   stopMessages();
+  cancelConnecting();
   const e = engine;
   engine = null; connecting = null;
   await e?.stop();
@@ -100,7 +102,7 @@ export async function showMessages(into: HTMLElement, ctx: MessagesCtx, chatId: 
   body.replaceChildren(status("Opening Messages…"));
   try {
     if (!engine) {
-      connecting ??= import("./engine").then(({ Engine: E }) => E.connect(ctx.token));
+      connecting ??= import("./engine").then(({ Engine: E }) => E.connect(ctx.token, ctx.userId));
       engine = await connecting;
     }
   } catch (e) {
@@ -207,7 +209,8 @@ function verifiedInfo(): void {
 
 // ---- the list and the chat ----
 
-const thumbs = new Map<string, string>(); // message id → blob URL
+const thumbs = new Map<string, string>(); // message id → blob URL, "" while loading, FAILED when it can't load
+const FAILED = "failed";
 const groupPhotos = new Map<string, string>(); // mxc → blob URL
 
 function mainScreen(body: HTMLElement, e: Engine, startChat: string | null, mine: number): void {
@@ -357,10 +360,12 @@ function chatView(pane: HTMLElement, e: Engine, roomId: string, back: () => void
   const media = (m: ChatMessage) => {
     const box = h("button", { type: "button", class: "msg-media", "aria-label": m.kind.type === "video" ? "Play video" : "Open photo" });
     const url = thumbs.get(m.id);
-    if (url) box.append(h("img", { src: url, alt: m.kind.type === "video" ? "Video" : "Photo" }));
+    if (url && url !== FAILED) box.append(h("img", { src: url, alt: m.kind.type === "video" ? "Video" : "Photo" }));
+    else if (url === FAILED) box.append(h("span", { class: "media-none" }, m.kind.type === "video" ? "Video" : "Photo · tap to open"));
     else if (url === undefined && m.state === "sent") {
       thumbs.set(m.id, "");
-      void e.media(roomId, m.id, "thumbnail").then(({ bytes, type }) => { thumbs.set(m.id, blobUrl(bytes, type)); draw(); }).catch(() => thumbs.delete(m.id));
+      // Tried once per visit: a thumbnail that's missing, too big or tampered with isn't fetched again (review M1).
+      void e.media(roomId, m.id, "thumbnail").then(({ bytes, type }) => { thumbs.set(m.id, blobUrl(bytes, type)); draw(); }).catch(() => { thumbs.set(m.id, FAILED); draw(); });
     }
     if (m.kind.type === "video") box.append(h("span", { class: "play" }, icon(ICONS.play, 22)));
     box.onclick = () => openMedia(e, roomId, m);
@@ -434,6 +439,9 @@ function chatView(pane: HTMLElement, e: Engine, roomId: string, back: () => void
     leave: () => {
       if (typingSent) void e.setTyping(roomId, false);
       if (newest) store(viewedKey(roomId), String(newest));
+      // Thumbnails belong to the chat that showed them.
+      for (const u of thumbs.values()) if (u && u !== FAILED) revoke(u);
+      thumbs.clear();
     },
   };
 }
@@ -447,6 +455,8 @@ async function openMedia(e: Engine, roomId: string, m: ChatMessage): Promise<voi
   try {
     const { bytes, type } = await e.media(roomId, m.id, "full");
     const url = blobUrl(bytes, type);
+    if (!d.open) { revoke(url); return; }
+    d.addEventListener("close", () => revoke(url));
     holder.replaceChildren(isVideo ? h("video", { src: url, controls: true, autoplay: true, playsinline: true }) : h("img", { src: url, alt: "Photo" }));
   } catch (err) { holder.replaceChildren(status(errorText(err))); }
 }

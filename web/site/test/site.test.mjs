@@ -73,6 +73,12 @@ test("the password only goes to net.signIn, and nothing is logged or stored by i
       for (const m of src.matchAll(/\bstore\(([^,)]*)/g)) assert.match(m[1], /^(SHARE_READ_KEY|viewedKey\(roomId|key: string)$/, `messages stores ${m[1]}`);
       continue;
     }
+    if (f.replaceAll("\\", "/") === "messages/session.ts") {
+      // Sign-out only removes Messages' own keys: it reads key names and removes them, and writes nothing.
+      for (const m of src.matchAll(/(local|session)Storage\.(\w+)\(/g)) assert.match(m[2], /^(key|removeItem)$/, `session.ts uses ${m[2]}`);
+      assert.match(src, /startsWith\("totality\.messages\."\)\) localStorage\.removeItem/);
+      continue;
+    }
     for (const m of src.matchAll(/(local|session)Storage\.\w+\(([^)]*)\)/g)) assert.match(m[2], /totality\.theme/);
   }
 });

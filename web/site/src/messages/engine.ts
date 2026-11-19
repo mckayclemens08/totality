@@ -12,7 +12,7 @@ import { initAsync } from "@matrix-org/matrix-sdk-crypto-wasm";
 import wasmUrl from "../../node_modules/@matrix-org/matrix-sdk-crypto-wasm/pkg/matrix_sdk_crypto_wasm_bg.wasm";
 import * as net from "../net";
 import * as vault from "../keystore";
-import { cryptoPrefix, deleteCryptoStore, forgetMatrixSession, keepMatrixSession, loadMatrixSession, onEngineStop, type MatrixSession } from "./session";
+import { cryptoPrefix, deleteCryptoStore, forgetMatrixSession, generationNow, keepMatrixSession, loadMatrixSession, onEngineStop, type MatrixSession } from "./session";
 import { encryptAttachment, decryptAttachment } from "./attach";
 import {
   DEVICE_NAME, MessagesErrors, RETENTION_EVENT, SHARED_ROOM, disappearingContent, disappearingFrom, displayName, isJustTheTwoOfYou, extraPeople,
@@ -55,7 +55,8 @@ function translate(e: unknown): Error {
 }
 async function guard<T>(work: () => Promise<T>): Promise<T> { try { return await work(); } catch (e) { throw translate(e); } }
 
-const PHOTO_MAX = 25 * 1024 * 1024, VIDEO_MAX = 100 * 1024 * 1024, THUMB_MAX = 2 * 1024 * 1024;
+// Received sizes: photos up to 10 MB, videos up to 100 MB (the iPhone sends up to that), thumbnails 2 MB.
+const PHOTO_MAX = 10 * 1024 * 1024, VIDEO_MAX = 100 * 1024 * 1024, THUMB_MAX = 2 * 1024 * 1024;
 
 export class Engine {
   private listeners = new Set<() => void>();
@@ -69,15 +70,29 @@ export class Engine {
 
   // ---------- connecting ----------
 
-  static async connect(supabaseToken: () => Promise<string>): Promise<Engine> {
+  static async connect(supabaseToken: () => Promise<string>, owner: string): Promise<Engine> {
+    // Sign-out or lock while this runs bumps the generation; then nothing made here is kept (review M3).
+    const gen = generationNow();
+    const live = (): void => { if (generationNow() !== gen) throw new MessagesError(MessagesErrors.generic); };
     await initAsync(new URL(wasmUrl, location.href));
+    live();
     let session = await loadMatrixSession();
+    live();
+    if (session && session.owner !== owner) {
+      // Left by another account in this browser: never used, logged out and wiped.
+      await net.matrixLogout(session.accessToken);
+      await forgetMatrixSession();
+      session = null;
+    }
     for (let attempt = 0; ; attempt++) {
       if (!session) {
         const pass = await net.matrixPass(await supabaseToken());
-        const fresh = await net.matrixLogin(pass, DEVICE_NAME);
+        live();
+        const fresh: MatrixSession = { ...(await net.matrixLogin(pass, DEVICE_NAME)), owner };
+        if (generationNow() !== gen) { await net.matrixLogout(fresh.accessToken); live(); }
         await deleteCryptoStore(fresh.userId); // a new device starts with an empty store
         await keepMatrixSession(fresh);
+        if (generationNow() !== gen) { await net.matrixLogout(fresh.accessToken); await forgetMatrixSession(); live(); }
         session = fresh;
       }
       const client = createClient({
@@ -91,17 +106,41 @@ export class Engine {
         if ((e as { errcode?: string }).errcode === "M_UNKNOWN_TOKEN" && attempt === 0) { await forgetMatrixSession(); session = null; continue; }
         throw translate(e);
       }
+      live();
       const storageKey = await vault.deriveSeed("totality/web-matrix-store/v1");
       try {
         await client.initRustCrypto({ cryptoDatabasePrefix: cryptoPrefix(session.userId), storageKey });
       } finally { storageKey.fill(0); }
       const engine = new Engine(client, session);
-      engine.listen();
-      onEngineStop(() => engine.stop());
-      await client.startClient({ lazyLoadMembers: true, initialSyncLimit: 30, pendingEventOrdering: PendingEventOrdering.Detached });
-      await engine.firstSync();
+      try {
+        live();
+        engine.guardSecretStorage();
+        engine.listen();
+        onEngineStop(() => engine.stop());
+        await client.startClient({ lazyLoadMembers: true, initialSyncLimit: 30, pendingEventOrdering: PendingEventOrdering.Detached });
+        await engine.firstSync();
+        live();
+      } catch (e) { await engine.stop(); throw e; }
       return engine;
     }
+  }
+
+  /**
+   * The account's keys live in secret storage and account data, written by the iPhone. This browser only ever
+   * reads them, so every write to those names is refused here, whatever the SDK decides to do (review M4).
+   */
+  private guardSecretStorage(): void {
+    const protectedType = (t: string): boolean => /^m\.(cross_signing\.|secret_storage\.|megolm_backup\.v1$)/.test(t);
+    const ss = this.client.secretStorage as unknown as { store: (name: string, ...rest: unknown[]) => Promise<void>; addKey: (...a: unknown[]) => Promise<unknown>; setDefaultKeyId: (...a: unknown[]) => Promise<void> };
+    ss.store = async () => { throw new Error("Totality web never writes secret storage"); };
+    ss.addKey = async () => { throw new Error("Totality web never writes secret storage"); };
+    ss.setDefaultKeyId = async () => { throw new Error("Totality web never writes secret storage"); };
+    const c = this.client as unknown as { setAccountData: (type: string, ...rest: unknown[]) => Promise<unknown> };
+    const original = c.setAccountData.bind(this.client);
+    c.setAccountData = async (type: string, ...rest: unknown[]) => {
+      if (protectedType(type)) throw new Error("Totality web never writes the account's keys");
+      return original(type, ...rest);
+    };
   }
 
   private firstSync(): Promise<void> {
@@ -185,6 +224,9 @@ export class Engine {
       if (!(await ss.checkKey(key, info))) { key.fill(0); return set({ kind: "doesntOpen" }); }
       Engine.unlocked = { id, key };
       try {
+        // All three must open to real keys here, or the SDK could decide to make new ones (review M4).
+        const opened = await Promise.all(needed.map((n) => ss.get(n).catch(() => undefined)));
+        if (opened.some((v) => typeof v !== "string" || v.length < 32)) return set({ kind: "noBackup" });
         await crypto.bootstrapCrossSigning({
           // A reset would need this callback to upload new keys. It refuses, so nothing can ever be reset.
           authUploadDeviceSigningKeys: async () => { throw new Error("Totality web never resets cross-signing"); },
@@ -422,7 +464,10 @@ export class Engine {
       if (ev.getType() !== "m.reaction" || ev.isRedacted() || ev.status === EventStatus.NOT_SENT) continue;
       const rel = ev.getContent()["m.relates_to"];
       if (rel?.rel_type !== "m.annotation" || typeof rel.event_id !== "string" || typeof rel.key !== "string") continue;
+      // Reactions are short emoji; anything long, or past 20 kinds on one message, isn't shown (review L5).
+      if (rel.key.length === 0 || rel.key.length > 16) continue;
       const byKey = reactions.get(rel.event_id) ?? new Map<string, Set<string>>();
+      if (!byKey.has(rel.key) && byKey.size >= 20) continue;
       byKey.set(rel.key, (byKey.get(rel.key) ?? new Set()).add(ev.getSender() ?? ""));
       reactions.set(rel.event_id, byKey);
     }
@@ -553,7 +598,8 @@ export class Engine {
     const c = ev!.getContent();
     const isVideo = c.msgtype === "m.video";
     const thumbFile = c.info?.thumbnail_file;
-    const file = which === "thumbnail" && thumbFile ? thumbFile : which === "thumbnail" && isVideo ? null : c.file;
+    // The list only ever loads a real thumbnail; a photo sent without one waits for a tap (review M2).
+    const file = which === "thumbnail" ? thumbFile : c.file;
     if (!file || !isOwnMedia(file.url)) fail("That photo isn't here any more.");
     const type = file === thumbFile ? "image/jpeg" : isVideo ? "video/mp4" : String(c.info?.mimetype ?? "image/jpeg");
     if (!/^(image\/(jpeg|png|gif|webp)|video\/mp4)$/.test(type)) fail("This kind of file opens on your iPhone.");

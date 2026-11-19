@@ -36,8 +36,9 @@ async function sign(handle: string): Promise<string> {
   return `${body}.${base64url(new Uint8Array(signature))}`;
 }
 
+// Vary and no-store go on every answer, allowed or not, so no cache can hand one origin's answer to another.
 function cors(origin: string | null): Record<string, string> {
-  if (!origin || !allowedOrigins.includes(origin)) return {};
+  if (!origin || !allowedOrigins.includes(origin)) return { Vary: "Origin" };
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST",
@@ -59,7 +60,7 @@ Deno.serve(async (request) => {
   const origin = request.headers.get("Origin");
   const reply = answer(origin);
   // Preflight: answered for the listed origins only. Anyone else's browser refuses to send the request.
-  if (request.method === "OPTIONS") return new Response(null, { status: cors(origin)["Access-Control-Allow-Origin"] ? 204 : 403, headers: cors(origin) });
+  if (request.method === "OPTIONS") return new Response(null, { status: cors(origin)["Access-Control-Allow-Origin"] ? 204 : 403, headers: { "Cache-Control": "no-store", ...cors(origin) } });
   if (!supabaseURL || !publicKey || !signingKey) return reply(500);
   if (request.method !== "POST") return reply(405);
   const authorization = request.headers.get("Authorization");

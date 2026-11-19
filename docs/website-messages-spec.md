@@ -72,7 +72,7 @@ The same as the iPhone Messages module: chat list with requests (accept, decline
 
 Photos and videos sent from the browser are sealed in the page by the SDK (AES-CTR attachment encryption, as on the iPhone) before upload. Photos: JPEG/PNG/GIF/WebP, re-encoded in a canvas to strip metadata and resized like the iPhone. Videos: MP4 as picked, size-limited like the iPhone.
 
-Rendering: plain `body` text with `textContent`, never `formatted_body` HTML. `http(s)` links only, `noopener noreferrer nofollow`. Photos only as JPEG/PNG/GIF/WebP up to 10 MB, videos up to 40 MB, the rest "opens on the iPhone".
+Rendering: plain `body` text with `textContent`, never `formatted_body` HTML. `http(s)` links only, `noopener noreferrer nofollow`. Photos only as JPEG/PNG/GIF/WebP up to 10 MB, videos up to 100 MB (what the iPhone sends), the rest "opens on the iPhone". The chat list loads only real thumbnails (2 MB at most), once per visit; a photo sent without one opens on tap.
 
 ## 8. Server changes
 
