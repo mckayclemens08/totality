@@ -26,6 +26,8 @@ public struct SocialHomeView: View {
         NavigationStack(path: $path) {
             tabScreen
             .background(theme.bg.color.ignoresSafeArea())
+            // Inside the tab bar's inset, so the note sits just above the bar rather than over it.
+            .noticeBanner($model.notice)
             // Swiping in from the left edge goes back to the app's home, as in every other module.
             .edgeSwipeBack(onClose)
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -35,14 +37,15 @@ public struct SocialHomeView: View {
                 switch route {
                 case .post(let id): PostDetailView(model: model, id: id, open: open)
                         .edgeSwipeBack(back)
+                        .noticeBanner($model.notice)
                 case .profile(let name): SocialProfileView(model: model, username: name, open: open)
                         .edgeSwipeBack(back)
+                        .noticeBanner($model.notice)
                 }
             }
             .hidesNavigationBar()
         }
         .sheet(isPresented: $composing) { ComposeView(model: model) { composing = false } }
-        .overlay(alignment: .bottom) { NoticeBanner(text: $model.notice) }
         .task { if model.phase == .loading { await model.load() } }
         .onDisappear { Task { await model.flushShown() } }
         .onChange(of: model.requestedPost, initial: true) { _, id in
@@ -413,6 +416,12 @@ struct NoticeBanner: View {
 }
 
 extension View {
+    /// The notice at the bottom of this screen. Each screen carries its own, so on the tab screens it
+    /// lands above the bottom bar, and on pushed screens (no bar) at the usual bottom spot.
+    func noticeBanner(_ text: Binding<String?>) -> some View {
+        overlay(alignment: .bottom) { NoticeBanner(text: text) }
+    }
+
     /// Social draws its own headers, so the system bar is hidden where there is one.
     func hidesNavigationBar() -> some View {
         #if os(iOS)
