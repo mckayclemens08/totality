@@ -111,7 +111,8 @@ struct SocialProfileView: View {
 
     private var isMe: Bool { username == model.me }
 
-    private func header(_ profile: SocialProfile) -> some View {
+    /// Internal so renders can draw it without the scroll view.
+    func header(_ profile: SocialProfile) -> some View {
         let theme = Theme.current
         return VStack(alignment: .leading, spacing: Space.s3) {
             HStack(spacing: Space.s4) {
@@ -127,15 +128,17 @@ struct SocialProfileView: View {
             if let bio = profile.bio, !bio.isEmpty {
                 Text(bio).font(Typeface.body).foregroundStyle(theme.textPrimary.color)
             }
-            HStack(spacing: Space.s3) {
-                count(profile.posts, "posts")
-                // A private account's lists are only for it and its approved followers; others see plain numbers.
-                let canOpen = isMe || !profile.isClosed
-                countButton(profile.followers, profile.followers == 1 ? "follower" : "followers", canOpen: canOpen) {
+            // Three even columns, number above label. A private account's lists are only for it and its
+            // approved followers; others see the same numbers without the tap.
+            let canOpen = isMe || !profile.isClosed
+            HStack(spacing: 0) {
+                stat(profile.posts, Self.label(profile.posts, "post", "posts"))
+                stat(profile.followers, Self.label(profile.followers, "follower", "followers"), canOpen: canOpen) {
                     open(.people(username, followers: true))
                 }
-                countButton(profile.following, "following", canOpen: canOpen) { open(.people(username, followers: false)) }
+                stat(profile.following, "following", canOpen: canOpen) { open(.people(username, followers: false)) }
             }
+            .padding(.vertical, Space.s1)
             HStack(spacing: Space.s3) {
                 if isMe {
                     HeaderPill("Close friends · \(model.closeFriends.count)", systemImage: "star.circle") { editingCloseFriends = true }
@@ -172,36 +175,31 @@ struct SocialProfileView: View {
         }
     }
 
-    private func count(_ value: Int, _ label: String) -> some View {
+    /// "1 post", "2 posts".
+    static func label(_ value: Int, _ one: String, _ many: String) -> String { value == 1 ? one : many }
+
+    private func statLabel(_ value: Int, _ label: String) -> some View {
         let theme = Theme.current
-        return VStack(alignment: .leading, spacing: 0) {
-            Text("\(value)").font(Typeface.headline).foregroundStyle(theme.textPrimary.color)
+        return VStack(spacing: Space.s1 / 2) {
+            Text("\(value)").font(Typeface.headline).foregroundStyle(theme.textPrimary.color).monospacedDigit()
             Text(label).font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
         }
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
-    /// A count that opens its list: a soft raised capsule with a chevron. Plain when it can't open.
+    /// One stat in the row. One that opens its list is the whole column as a button, which looks the same
+    /// and answers a press with SoftPress's scale and fade.
     @ViewBuilder
-    private func countButton(_ value: Int, _ label: String, canOpen: Bool, action: @escaping () -> Void) -> some View {
-        if canOpen {
-            Button(action: action) {
-                HStack(spacing: Space.s2) {
-                    count(value, label)
-                    Image(systemName: "chevron.right")
-                        .font(Typeface.micro)
-                        .foregroundStyle(Theme.current.textSecondary.color)
-                        .accessibilityHidden(true)
-                }
-                .padding(.horizontal, Space.s3)
-                .padding(.vertical, Space.s2)
-                .neumorphic(.subtle, in: Capsule())
-                .contentShape(Capsule())
-            }
-            .buttonStyle(SoftPress())
-            .accessibilityHint("Opens the list")
+    private func stat(_ value: Int, _ label: String, canOpen: Bool = false, action: (() -> Void)? = nil) -> some View {
+        if canOpen, let action {
+            Button(action: action) { statLabel(value, label) }
+                .buttonStyle(SoftPress())
+                .accessibilityHint("Opens the list")
         } else {
-            count(value, label).padding(.horizontal, Space.s3)
+            statLabel(value, label)
         }
     }
 
