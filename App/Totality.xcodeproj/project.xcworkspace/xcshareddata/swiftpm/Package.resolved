@@ -1,5 +1,5 @@
 {
-  "originHash" : "93f405faf748077fff8b4a78835c4d08e32297470ea3e5a9c2f0833be5cd2dd1",
+  "originHash" : "58158a1771481d3264e10fa62f40c74bd04e2ff51dbf50fd41a67700f71c30f5",
   "pins" : [
     {
       "identity" : "fluidaudio",
@@ -71,6 +71,15 @@
       "state" : {
         "revision" : "45eb0224913ea070ec4fba17291b9e7ecf4749ca",
         "version" : "1.5.1"
+      }
+    },
+    {
+      "identity" : "swift-issue-reporting",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pointfreeco/swift-issue-reporting",
+      "state" : {
+        "revision" : "b23bb4493c439d3e05152bc167014235ba3d47fc",
+        "version" : "2.1.2"
       }
     },
     {

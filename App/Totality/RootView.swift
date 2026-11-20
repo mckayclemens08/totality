@@ -164,6 +164,8 @@ struct RootView: View {
                 Task {
                     await refreshAhead()
                     await account?.sync?.syncNow()
+                    // An account whose Matrix address couldn't be made at sign-up gets another try.
+                    await account?.setUpMessagesIfNeeded()
                 }
             case .background:
                 AppRefresh.shared.scheduleBackground()

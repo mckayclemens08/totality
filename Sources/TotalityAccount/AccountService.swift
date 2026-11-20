@@ -48,6 +48,9 @@ public protocol AccountService: Sendable {
     /// Someone else's profile, if they have one this account is allowed to see. Its photo has been
     /// checked and rebuilt on this device, never shown as the server's file.
     func lookUpProfile(_ username: Username) async throws -> PublicProfile?
+    /// Makes sure this account has its Matrix address, so other people can find and message it before it
+    /// ever opens Messages. Safe to repeat.
+    func setUpMessagesAccount() async throws
 }
 
 public enum SignOutResult: Equatable, Sendable {

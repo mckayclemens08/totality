@@ -195,6 +195,36 @@ describe('Messages two-user test', () => {
 
 // Remove on the iPhone (Devices › Browsers): a fresh sign-in pass confirms deleting a website device, so a
 // browser's Matrix device goes without any password.
+// Owner, 2026-11-20 ("Yes, at sign-up"): the app signs a new account in with a pass and straight back
+// out (SupabaseAccountService.setUpMessagesAccount), so others can find it before it opens Messages.
+describe('a new account is findable before it opens Messages', () => {
+  test('set up at sign-up, found and invited by another, with no device left behind', async () => {
+    const handle = `fresh_${run}`
+    const id = `@${handle}:${server}`
+    const unknown = `@never_${run}:${server}`
+    // Before set-up, nobody is there: this is the "There's no one called" case.
+    assert.equal((await call(one.token, 'GET', `/profile/${encodeURIComponent(unknown)}`)).status, 404)
+
+    const setup = await signIn(handle)
+    assert.equal(setup.id, id)
+    assert.equal((await call(setup.token, 'POST', '/logout', {})).status, 200)
+    assert.equal((await call(setup.token, 'GET', '/account/whoami')).status, 401, 'the set-up token still works')
+
+    assert.equal((await call(one.token, 'GET', `/profile/${encodeURIComponent(id)}`)).status, 200)
+    const room = await newChat(one, [{ id }])
+    assert.ok(room)
+
+    // Doing it again is harmless, and when they do open Messages only that device is there.
+    const again = await signIn(handle)
+    await call(again.token, 'POST', '/logout', {})
+    const messages = await signIn(handle)
+    const { json } = await call(messages.token, 'GET', '/devices')
+    assert.equal(json.devices.length, 1, JSON.stringify(json))
+    const { json: sync } = await call(messages.token, 'GET', '/sync?timeout=0')
+    assert.ok(sync.rooms?.invite?.[room], 'the invite made before they opened Messages is waiting')
+  })
+})
+
 describe('removing a website device', () => {
   test('a fresh pass confirms the delete', async () => {
     const handle = `rm_${randomUUID().slice(0, 8)}`

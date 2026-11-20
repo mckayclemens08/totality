@@ -119,6 +119,17 @@ extension SupabaseAccountService: KeyBackupService {
         }
     }
 
+    /// The Matrix server makes an account the first time a pass signs it in (`register_user` in
+    /// server/tuwunel.toml), so this signs in and straight back out. Nothing is left behind: no token is
+    /// kept, the device is removed at once, and no keys are made. Messages makes this device's own keys on
+    /// the device when it first opens. The password plays no part; the pass comes from the sign-in token.
+    public func setUpMessagesAccount() async throws {
+        try await mapErrors {
+            let session = try await MatrixSession.signIn(with: try await matrixPass(), deviceName: "Totality setup")
+            await session.signOut()
+        }
+    }
+
     /// A key-backup Matrix session lasts for one job and is then thrown away, so its token is never stored.
     /// (Messages keeps its own long-lived session, in the Keychain, under App/Totality.)
     private func withMatrix<Result: Sendable>(_ work: @Sendable (MatrixSession) async throws -> Result) async throws -> Result {
@@ -163,12 +174,12 @@ struct MatrixSession: Sendable {
     let accessToken: String
     let userID: String
 
-    static func signIn(with pass: String) async throws -> MatrixSession {
+    static func signIn(with pass: String, deviceName: String = "Totality key backup") async throws -> MatrixSession {
         var request = URLRequest(url: server.appendingPathComponent("_matrix/client/v3/login"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "type": "org.matrix.login.jwt", "token": pass, "initial_device_display_name": "Totality key backup",
+            "type": "org.matrix.login.jwt", "token": pass, "initial_device_display_name": deviceName,
         ])
         let (data, response) = try await urlSession.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw AccountError.failed }
