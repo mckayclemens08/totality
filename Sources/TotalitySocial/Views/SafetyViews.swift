@@ -121,11 +121,51 @@ struct ReachPicker: View {
         let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s2) {
             Text(title).font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
-            HStack(spacing: Space.s2) {
+            // The pills keep their whole word, so four of them are wider than a phone. Left in a plain
+            // HStack they widened the whole sheet past the screen; they wrap inside the margins instead.
+            ChipFlow {
                 ForEach(choices) { choice in
                     FilterPill(choice.name, isSelected: selection == choice) { selection = choice }
                 }
             }
+            .padding(.vertical, Space.s1)
+        }
+    }
+}
+
+/// Lays pills out in rows, wrapping as they run out of room, so a row never pushes past the sheet's margins.
+private struct ChipFlow: Layout {
+    var spacing: CGFloat = Space.s2
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, row: CGFloat = 0, widest: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                y += row + spacing
+                x = 0
+                row = 0
+            }
+            x += size.width + spacing
+            row = max(row, size.height)
+            widest = max(widest, x - spacing)
+        }
+        return CGSize(width: proposal.width ?? widest, height: y + row)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, row: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                y += row + spacing
+                x = bounds.minX
+                row = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            row = max(row, size.height)
         }
     }
 }
