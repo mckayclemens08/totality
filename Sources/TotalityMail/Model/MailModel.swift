@@ -279,6 +279,21 @@ public final class MailModel {
         return fresh
     }
 
+    /// Instant Gmail sync: keeps each Gmail watch going, or stops them while it's off.
+    public func keepGmailWatching(_ plan: GmailPushPlan) async {
+        await store.keepGmailWatching(plan)
+    }
+
+    /// A push said a Gmail inbox changed. Fetches, and returns the notifications for what's new.
+    /// What was here before is the baseline: with nothing to compare against, it notifies nothing rather
+    /// than everything unread.
+    public func refreshForPush(details: Bool) async -> [NewMailNote] {
+        let before = phase == .ready ? mailbox : await store.cached()
+        await refresh()
+        guard let before, phase == .ready else { return [] }
+        return NewMailNote.notes(before: before, after: mailbox, details: details)
+    }
+
     /// New mail from outside accounts, straight from each provider. Totality mail is already showing by
     /// now, so this never holds it up.
     private func downloadOutside() async {

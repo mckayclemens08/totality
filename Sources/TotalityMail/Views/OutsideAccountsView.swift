@@ -30,6 +30,9 @@ struct OutsideAccountsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.s4) {
                     content
+                    if model.phase == .ready, model.accounts.contains(where: { $0.provider == .gmail }) {
+                        GmailPushSettingsView()
+                    }
                     if let notice = model.notice {
                         Text(notice)
                             .font(Typeface.caption)
@@ -136,6 +139,20 @@ struct OutsideAccountsView: View {
                 .font(Typeface.caption)
                 .foregroundStyle(theme.textSecondary.color)
                 .fixedSize(horizontal: false, vertical: true)
+            if account.provider == .gmail, GmailPushSettings.shared.isOn, GmailWatchBook.shared.needsAllow(account.id) {
+                Text(OutsideWording.instantNeedsAllow)
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Allow Instant Gmail") {
+                    let signIn = webSignIn(webAuthenticationSession)
+                    Task { await model.allowInstant(account, signingIn: signIn) }
+                }
+                .font(Typeface.callout)
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.accent.color)
+                .disabled(isBusy)
+            }
             if !account.keepsInStep {
                 Text(OutsideWording.readOnly)
                     .font(Typeface.caption)

@@ -266,6 +266,18 @@ public struct GoogleSignIn: Sendable {
         ]).access_token
     }
 
+    /// A fresh access token and, when the account allowed `openid email`, Google's ID token for it. The ID
+    /// token says which address this is, signed by Google, and opens nothing. Instant Gmail sync shows it
+    /// to Totality's server once to prove the address is this person's (CLAUDE.md rule 8).
+    public func refreshed(refreshToken: String) async throws -> (accessToken: String, idToken: String?) {
+        let answer = try await token([
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": clientID,
+        ])
+        return (answer.access_token, answer.id_token)
+    }
+
     /// Takes Totality's access away at Google, for every scope this Google account gave it. Best effort:
     /// whatever's being removed goes from Totality whether or not Google is reached.
     public func revoke(_ refreshToken: String) async {

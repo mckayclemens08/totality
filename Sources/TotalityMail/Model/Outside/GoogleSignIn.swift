@@ -62,7 +62,9 @@ public struct GoogleOAuth: Sendable {
     /// To add an account, choosing which Google account. To allow changes, or sending as well, for an
     /// account already added.
     func request(_ purpose: GoogleSignInPurpose = .add) -> GoogleSignInRequest {
-        let scopes = purpose.sends ? [Self.changeScope, Self.sendScope] : [Self.changeScope]
+        // `openid email` add Google's ID token, which instant Gmail sync shows the push service once to
+        // prove the address is this person's (CLAUDE.md rule 8, owner 2026-11-19: "Yes, option A").
+        let scopes = (purpose.sends ? [Self.changeScope, Self.sendScope] : [Self.changeScope]) + GoogleAccounts.identityScopes
         // What the account already gave Calendar or Photos stays in the new token, so there's still one
         // token per Google account.
         return GoogleSignInRequest(
@@ -74,7 +76,10 @@ public struct GoogleOAuth: Sendable {
     /// and every scope asked for has to have been allowed: Google lets the person untick each one.
     func finish(_ request: GoogleSignInRequest, callback: URL) async throws -> GoogleTokens {
         let tokens = try await Self.mapped { try await signIn.finish(request.authorization, callback: callback) }
-        guard request.scopes.allSatisfy(tokens.granted.contains) else {
+        // Google names `email` back as `userinfo.email`, and never lets the person untick either, so only
+        // Gmail's own scopes are checked.
+        let gmailScopes = request.scopes.filter { !GoogleAccounts.identityScopes.contains($0) }
+        guard gmailScopes.allSatisfy(tokens.granted.contains) else {
             // Taking a token back at Google takes back everything this app was given, so it's only done
             // when nothing was added yet: not for an account that reads and is turning sending on, and not
             // for one Calendar or Photos already uses.

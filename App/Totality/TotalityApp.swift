@@ -6,6 +6,11 @@ import TotalityUI
 
 @main
 struct TotalityApp: App {
+    #if os(iOS)
+    // Instant Gmail sync's push token and wake-ups come through here.
+    @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var pushDelegate
+    #endif
+
     init() {
         // iOS needs this before launch finishes. A run with no library open does nothing.
         SyncSchedule.register()

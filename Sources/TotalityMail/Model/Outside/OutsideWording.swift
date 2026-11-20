@@ -113,4 +113,10 @@ public enum OutsideWording {
         case .unexpected: "\(provider.name) answered in a way Totality didn't expect. Try again later."
         }
     }
+
+    /// Instant Gmail sync's setting, on and off. iCloud can't do this, so it isn't mentioned as instant.
+    static let instantOn = "While your phone is unlocked, new Gmail comes in moments after it arrives. Totality's server learns only that your Gmail got mail and when, never what it says. Your phone fetches it from Gmail and writes the notification itself."
+    /// For a Gmail account added before instant sync. Google's page asks only to confirm it's this address.
+    static let instantNeedsAllow = "Instant Gmail needs one more tap on Google's page. It asks Google only to confirm this address is yours, which opens nothing in your mail."
+    static let instantOff = "Gmail checks for new mail when you open Totality and from time to time in the background."
 }

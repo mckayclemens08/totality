@@ -27,6 +27,8 @@ public actor ServerMailStore: MailStore {
     /// What publishing answered for this store. `.alreadyThere` means the server's mailbox is the one
     /// mail was downloaded from, so what it no longer lists was deleted on purpose.
     private var publication: MailKeyPublication?
+    /// Instant Gmail sync, once the app has said how to reach the push service.
+    private var gmailPush: GmailPushPlan?
     private var hasConflict = false
     /// Which message each attachment came from, so its bytes are read back out of the vault when asked.
     private var attachmentSources: [UUID: UUID] = [:]
@@ -974,9 +976,57 @@ extension ServerMailStore: OutsideAccountStore {
         let address = try? await vault.outsideAccounts().first(where: { $0.id == id })?.address
         try await vault.removeOutside(id)
         if case .google(let grant) = credential, let google {
+            if let plan = gmailPush, let address {
+                await stopGmailPush(id, address: address, grant: grant, google: google, plan: plan)
+            }
             await google.revoke(grant.refreshToken)
             if let address { google.unshare(address) }
         }
+    }
+
+    /// Keeps each Gmail account's watch going while instant sync is on, renewing it before Gmail's 7 days
+    /// run out and linking its address for push, or stops them all while it's off. Quiet: an account
+    /// that can't be reached just tries again next time.
+    public func keepGmailWatching(_ plan: GmailPushPlan) async {
+        gmailPush = plan
+        guard let google, let accounts = try? await vault.outsideAccounts() else { return }
+        let gmail = accounts.filter { $0.provider == .gmail }
+        for account in gmail {
+            guard !Task.isCancelled, case .google(let grant) = try? await vault.credential(for: account.id) else { continue }
+            if !plan.settings.isOn {
+                if plan.book.expiry(account.id) != nil {
+                    await stopGmailPush(account.id, address: account.address, grant: grant, google: google, plan: plan)
+                }
+                continue
+            }
+            guard plan.book.needsRenewal(account.id, now: now()) else { continue }
+            do {
+                let fresh = try await google.signIn.refreshed(refreshToken: grant.refreshToken)
+                // Linked first, so the first note after the watch starts has somewhere to go.
+                guard let idToken = fresh.idToken else {
+                    plan.book.setNeedsAllow(account.id, true)
+                    continue
+                }
+                plan.book.setNeedsAllow(account.id, false)
+                try await plan.push.linkGmail(idToken: idToken)
+                let expiry = try await google.watch(topic: plan.topic, accessToken: fresh.accessToken)
+                plan.book.set(account.id, expiry: expiry)
+            } catch {
+                continue
+            }
+        }
+        // Watches recorded for accounts no longer here.
+        let here = Set(gmail.map(\.id))
+        for id in plan.book.watched() where !here.contains(id) { plan.book.set(id, expiry: nil) }
+        for account in gmail where !plan.settings.isOn { plan.book.setNeedsAllow(account.id, false) }
+    }
+
+    private func stopGmailPush(_ id: UUID, address: String, grant: GoogleGrant, google: GoogleOAuth, plan: GmailPushPlan) async {
+        if let fresh = try? await google.signIn.refreshed(refreshToken: grant.refreshToken) {
+            await google.stopWatching(accessToken: fresh.accessToken)
+        }
+        try? await plan.push.unlinkGmail(address: address)
+        plan.book.set(id, expiry: nil)
     }
 
     /// What else uses this Gmail account's Google connection on this device, for the screen to say

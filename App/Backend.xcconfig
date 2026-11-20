@@ -11,3 +11,7 @@ TOTALITY_SEALED_STORE_URL = https:/$()/usetotality.com/blobs/
 // an installed app can't keep a secret, so it has none, and PKCE protects each sign-in instead. Empty
 // means Gmail can't be added in this build.
 TOTALITY_GOOGLE_CLIENT_ID = 973899545310-9lefpoa9mm5sdel8kpf6mte6n6r6rg1f.apps.googleusercontent.com
+
+// Instant Gmail sync (issue 164): the Pub/Sub topic Gmail posts to, `projects/<project>/topics/<topic>`.
+// It's a name, not a secret. Empty keeps instant sync off.
+TOTALITY_GMAIL_PUSH_TOPIC = projects/turnkey-point-514103-d9/topics/gmail-push
