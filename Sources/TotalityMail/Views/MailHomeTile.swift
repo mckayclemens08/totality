@@ -101,7 +101,7 @@ public struct MailHomeTile: View {
                     .font(Typeface.headline)
                     .foregroundStyle(theme.textSecondary.color)
             }
-            TileList(shown) { row($0) }
+            TileList(shown, isCentered: true) { row($0) }
         }
     }
 

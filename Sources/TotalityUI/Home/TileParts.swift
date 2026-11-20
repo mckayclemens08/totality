@@ -178,22 +178,36 @@ extension View {
 
 /// A tile's list: as many rows as fit, always at the same gap and from the top, like the canvas.
 /// Rows never spread to fill the tile: stretched gaps looked loose (owner, 2026-11-18).
+/// A centred list sits in the middle of the space it's given, so a tile showing fewer rows than it
+/// holds has no empty band at the bottom (owner, 2026-11-20).
 public struct TileList<Item: Identifiable, Row: View>: View {
     let items: [Item]
     let spacing: CGFloat
+    let isCentered: Bool
     let row: (Item) -> Row
 
-    public init(_ items: [Item], spacing: CGFloat = Metric.tileRowGap, @ViewBuilder row: @escaping (Item) -> Row) {
+    public init(
+        _ items: [Item],
+        spacing: CGFloat = Metric.tileRowGap,
+        isCentered: Bool = false,
+        @ViewBuilder row: @escaping (Item) -> Row
+    ) {
         self.items = items
         self.spacing = spacing
+        self.isCentered = isCentered
         self.row = row
     }
 
     public var body: some View {
-        ViewThatFits(in: .vertical) {
+        let list = ViewThatFits(in: .vertical) {
             ForEach(Array(stride(from: items.count, to: 0, by: -1)), id: \.self) { count in
                 rows(count)
             }
+        }
+        if isCentered {
+            list.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        } else {
+            list
         }
     }
 
