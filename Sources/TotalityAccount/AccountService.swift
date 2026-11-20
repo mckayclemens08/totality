@@ -49,8 +49,8 @@ public protocol AccountService: Sendable {
     /// checked and rebuilt on this device, never shown as the server's file.
     func lookUpProfile(_ username: Username) async throws -> PublicProfile?
     /// Makes sure this account has its Matrix address, so other people can find and message it before it
-    /// ever opens Messages. Safe to repeat.
-    func setUpMessagesAccount() async throws
+    /// ever opens Messages. Safe to repeat. Returns the username the Matrix server set up, from its answer.
+    func setUpMessagesAccount() async throws -> String
 }
 
 public enum SignOutResult: Equatable, Sendable {

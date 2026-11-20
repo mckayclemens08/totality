@@ -257,10 +257,14 @@ public final class AccountModel {
         settingUpMessages = true
         defer { settingUpMessages = false }
         do {
-            try await service.setUpMessagesAccount()
-            marks.set(Array(messagesReady.union([username])).sorted(), forKey: Self.messagesReadyKey)
+            // The account can change while this waits, so the name marked is the one the server set up.
+            let done = try await service.setUpMessagesAccount()
+            marks.set(Array(messagesReady.union([done])).sorted(), forKey: Self.messagesReadyKey)
         } catch {}
     }
+
+    /// Whether this username's Matrix address is known to exist.
+    func messagesIsReady(_ username: String) -> Bool { messagesReady.contains(username) }
 
     private var messagesReady: Set<String> {
         Set(marks.stringArray(forKey: Self.messagesReadyKey) ?? [])

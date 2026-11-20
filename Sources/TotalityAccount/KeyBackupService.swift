@@ -123,10 +123,13 @@ extension SupabaseAccountService: KeyBackupService {
     /// server/tuwunel.toml), so this signs in and straight back out. Nothing is left behind: no token is
     /// kept, the device is removed at once, and no keys are made. Messages makes this device's own keys on
     /// the device when it first opens. The password plays no part; the pass comes from the sign-in token.
-    public func setUpMessagesAccount() async throws {
+    public func setUpMessagesAccount() async throws -> String {
         try await mapErrors {
             let session = try await MatrixSession.signIn(with: try await matrixPass(), deviceName: "Totality setup")
             await session.signOut()
+            // "@name:usetotality.com" -> "name": whoever the pass really was for, even if the account changed.
+            guard session.userID.hasPrefix("@"), let colon = session.userID.firstIndex(of: ":") else { throw AccountError.failed }
+            return String(session.userID[session.userID.index(after: session.userID.startIndex)..<colon])
         }
     }
 

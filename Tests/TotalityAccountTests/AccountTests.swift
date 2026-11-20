@@ -38,9 +38,18 @@ actor FakeAccountService: AccountService {
     private(set) var messagesAccounts: [String] = []
     var messagesError: AccountError?
     func failMessages(_ error: AccountError?) { messagesError = error }
-    func setUpMessagesAccount() async throws {
+    private var holdingMessages = false
+    private var heldMessages: CheckedContinuation<Void, Never>?
+    func holdMessages() { holdingMessages = true }
+    func waitForHeldMessages() async { while heldMessages == nil { await Task.yield() } }
+    func releaseMessages() { holdingMessages = false; heldMessages?.resume(); heldMessages = nil }
+    /// Like the server, the name comes from the pass, which is made when the call starts.
+    func setUpMessagesAccount() async throws -> String {
         if let messagesError { throw messagesError }
-        if let username { messagesAccounts.append(username) }
+        guard let name = username else { throw AccountError.failed }
+        if holdingMessages { await withCheckedContinuation { heldMessages = $0 } }
+        messagesAccounts.append(name)
+        return name
     }
 
     init(username: String? = nil) { self.username = username }
@@ -319,6 +328,25 @@ actor FakeAccountService: AccountService {
         await model.load()
         await model.signOut()
         await model.signIn(username: "priya", password: password)
+        #expect(await service.messagesAccounts == ["jonah", "priya"])
+    }
+
+    @Test("An account switch mid-set-up marks only the account the server set up")
+    func switchMidSetUpMarksTheRightAccount() async {
+        let service = FakeAccountService(username: "jonah")
+        let model = AccountModel(service: service, marks: freshMarks())
+        await service.holdMessages()
+        async let first: Void = model.load()
+        await service.waitForHeldMessages()
+        await model.signOut()
+        await service.failMessages(.offline)
+        await model.signIn(username: "priya", password: password)
+        await service.releaseMessages()
+        await first
+        #expect(model.messagesIsReady("jonah"))
+        #expect(!model.messagesIsReady("priya"), "Priya was never set up")
+        await service.failMessages(nil)
+        await model.setUpMessagesIfNeeded()
         #expect(await service.messagesAccounts == ["jonah", "priya"])
     }
 
