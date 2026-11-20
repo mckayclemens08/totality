@@ -141,7 +141,7 @@ public struct TasksHomeTile: View {
                 }
             }
             lines(Self.mostRows)
-                .frame(maxHeight: .infinity)
+                .frame(maxHeight: .infinity, alignment: .top)
             addButton
         }
     }
@@ -179,7 +179,7 @@ public struct TasksHomeTile: View {
                 .font(Typeface.callout)
                 .foregroundStyle(Theme.current.textSecondary.color)
         } else {
-            TileList(shown, spacing: Metric.tileItemGap, isCentered: true) { task in
+            TileList(shown, spacing: Metric.tileItemGap) { task in
                 TileTaskLine(model: model, task: task, onOpen: onOpen)
             }
             .motion(Motion.smooth, value: shown.map(\.id))
