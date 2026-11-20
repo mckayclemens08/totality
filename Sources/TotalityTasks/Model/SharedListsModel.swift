@@ -125,7 +125,7 @@ public final class SharedListsModel {
     }
 
     private func show(_ error: any Error) {
-        notice = (error as? SharedRoomError)?.message ?? "That didn't go through. Check your connection and try again."
+        notice = (error as? SharedRoomError)?.message ?? "That didn't go through. Try again."
     }
 
     /// Runs a change, then reads the room again so the screen shows what everyone now sees.
