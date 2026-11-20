@@ -158,27 +158,38 @@ struct FollowListView: View {
     private func row(_ person: SocialPerson) -> some View {
         let theme = Theme.current
         let relationship = Relationship(person, me: model.me)
+        let tags = Self.tags(person, isMine: list.isMine, closeFriends: model.closeFriends)
         return HStack(spacing: Space.s2) {
             Button { open(.profile(person.username)) } label: {
                 HStack(spacing: Space.s3) {
                     PersonFace(photo: list.photos[person.username] ?? model.photos[person.username], name: person.name, diameter: Metric.headerButton)
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: Space.s1 / 2) {
                         Text(person.name).font(Typeface.headline).foregroundStyle(theme.textPrimary.color)
-                        Text(subtitle(person)).font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
+                            .lineLimit(1)
+                        Text(Handle.display(person.username)).font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if !tags.isEmpty {
+                            HStack(spacing: Space.s1) {
+                                ForEach(tags, id: \.self) { TagBadge(tag: $0) }
+                            }
+                            .padding(.top, Space.s1 / 2)
+                        }
                     }
-                    .lineLimit(1)
+                    .layoutPriority(1)
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(SoftPress())
+            .accessibilityElement(children: .combine)
             relationshipButton(relationship, person)
             if list.isMine {
                 Button { acting = person } label: {
                     Image(systemName: "ellipsis")
                         .font(Typeface.body.weight(.semibold))
                         .foregroundStyle(theme.textSecondary.color)
-                        .frame(width: Space.s6, height: Metric.headerButton)
+                        .frame(width: Metric.headerButton, height: Metric.headerButton)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(SoftPress())
@@ -187,32 +198,79 @@ struct FollowListView: View {
         }
         .padding(.vertical, Space.s2)
         .padding(.leading, Space.s3)
-        .padding(.trailing, list.isMine ? Space.s1 : Space.s3)
+        .padding(.trailing, list.isMine ? 0 : Space.s2)
         .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
     }
 
-    private func subtitle(_ person: SocialPerson) -> String {
-        var parts = [Handle.display(person.username)]
-        if list.isMine && model.closeFriends.contains(person.username) { parts.append("Close friend") }
-        else if person.iFollow && person.followsMe { parts.append("Friends") }
-        if person.muted { parts.append("Muted") }
-        return parts.joined(separator: " · ")
+    /// The small tags under a row's @username. Close friend comes only from your own Close-friends set,
+    /// only on your own lists, and only for someone the server says the signed-in account follows: no one
+    /// else ever sees it, and a row that doesn't match the signed-in account can't carry it.
+    static func tags(_ person: SocialPerson, isMine: Bool, closeFriends: Set<String>) -> [RowTag] {
+        var tags: [RowTag] = []
+        if isMine && person.iFollow && closeFriends.contains(person.username) { tags.append(.closeFriend) }
+        else if person.iFollow && person.followsMe { tags.append(.friends) }
+        if person.muted { tags.append(.muted) }
+        return tags
+    }
+
+    enum RowTag: Hashable {
+        case closeFriend, friends, muted
+
+        var title: String {
+            switch self {
+            case .closeFriend: "Close friend"
+            case .friends: "Friends"
+            case .muted: "Muted"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .closeFriend: "star.fill"
+            case .friends: "person.2.fill"
+            case .muted: "speaker.slash.fill"
+            }
+        }
     }
 
     @ViewBuilder
     private func relationshipButton(_ relationship: Relationship, _ person: SocialPerson) -> some View {
         switch relationship {
         case .you:
-            Text(relationship.title).font(Typeface.callout).foregroundStyle(Theme.current.textSecondary.color)
-                .padding(.horizontal, Space.s3)
+            Text(relationship.title).font(Typeface.caption.weight(.semibold)).foregroundStyle(Theme.current.textSecondary.color)
+                .padding(.horizontal, Space.s2)
         case .following:
-            RowButton(title: relationship.title, isProminent: false) { confirmingUnfollow = person }
+            RowButton(title: relationship.title, style: .quiet) { confirmingUnfollow = person }
+                .accessibilityHint("Asks before unfollowing")
         case .requested:
-            RowButton(title: relationship.title, isProminent: false) { Task { await list.setFollowing(false, person) } }
+            RowButton(title: relationship.title, style: .quiet) { Task { await list.setFollowing(false, person) } }
                 .accessibilityHint("Takes back your request")
-        case .follow, .followBack:
-            RowButton(title: relationship.title, isProminent: true) { Task { await list.setFollowing(true, person) } }
+        case .follow:
+            RowButton(title: relationship.title, style: .accentText) { Task { await list.setFollowing(true, person) } }
+        case .followBack:
+            RowButton(title: relationship.title, style: .filled) { Task { await list.setFollowing(true, person) } }
         }
+    }
+}
+
+/// A row's small tag: an icon and a word on a soft raised capsule.
+private struct TagBadge: View {
+    let tag: FollowListView.RowTag
+
+    var body: some View {
+        let theme = Theme.current
+        HStack(spacing: Space.s1) {
+            Image(systemName: tag.systemImage)
+                .foregroundStyle(tag == .closeFriend ? theme.accent.color : theme.textSecondary.color)
+                .accessibilityHidden(true)
+            Text(tag.title).foregroundStyle(theme.textSecondary.color)
+        }
+        .font(Typeface.micro)
+        .lineLimit(1)
+        .fixedSize()
+        .padding(.horizontal, Space.s2)
+        .padding(.vertical, Space.s1 / 2)
+        .neumorphic(.subtle, in: Capsule())
     }
 }
 
@@ -239,36 +297,40 @@ private struct ListTab: View {
     }
 }
 
-/// A row's relationship button: accent-filled to follow, raised otherwise.
+/// A row's relationship button: a compact pill with a 44pt tap area. Only Follow back, for someone who
+/// already follows you, is filled with the accent; Follow is a raised pill in the accent; the rest are
+/// raised and quiet.
 private struct RowButton: View {
+    enum Style { case filled, accentText, quiet }
+
     let title: String
-    let isProminent: Bool
+    let style: Style
     let action: () -> Void
 
     var body: some View {
         let theme = Theme.current
-        let shape = RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
         Button(action: action) {
             Text(title)
-                .font(Typeface.callout.weight(.semibold))
+                .font(Typeface.caption.weight(.semibold))
                 .lineLimit(1)
                 .fixedSize()
-                .foregroundStyle(isProminent ? theme.accentOn.color : theme.textPrimary.color)
+                .foregroundStyle(style == .filled ? theme.accentOn.color : style == .accentText ? theme.accent.color : theme.textSecondary.color)
                 .padding(.horizontal, Space.s3)
+                .padding(.vertical, Space.s1 + Space.s1 / 2)
+                .background { if style == .filled { Capsule().fill(theme.accent.color) } }
+                .modifier(RaisedIfPlain(isFilled: style == .filled))
                 .frame(minHeight: Metric.headerButton)
-                .background { if isProminent { shape.fill(theme.accent.color) } }
-                .modifier(RaisedIfPlain(isProminent: isProminent))
-                .contentShape(shape)
+                .contentShape(Rectangle())
         }
         .buttonStyle(SoftPress())
     }
 }
 
 private struct RaisedIfPlain: ViewModifier {
-    let isProminent: Bool
+    let isFilled: Bool
 
     func body(content: Content) -> some View {
-        if isProminent { content } else { content.neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)) }
+        if isFilled { content } else { content.neumorphic(.subtle, in: Capsule()) }
     }
 }
 
