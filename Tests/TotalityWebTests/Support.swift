@@ -93,8 +93,12 @@ func until(_ done: @MainActor () -> Bool, sourceLocation: SourceLocation = #_sou
 extension Bundle {
     /// The target's own bundle isn't reachable by name from the tests, so this looks beside them.
     static func module(named name: String) -> URL? {
-        let tests = Bundle(for: FakeGateway.self).bundleURL.deletingLastPathComponent()
-        return tests.appendingPathComponent("Totality_TotalityWeb.bundle/\(name).json")
+        let bundle = Bundle(for: FakeGateway.self).bundleURL.deletingLastPathComponent()
+            .appendingPathComponent("Totality_TotalityWeb.bundle")
+        // Older SwiftPM puts resources at the bundle's top; Xcode 27's build system uses Contents/Resources.
+        return [bundle, bundle.appendingPathComponent("Contents/Resources")]
+            .map { $0.appendingPathComponent("\(name).json") }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 }
 

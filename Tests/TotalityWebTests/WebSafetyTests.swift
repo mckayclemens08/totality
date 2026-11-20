@@ -77,7 +77,7 @@ import WebKit
         let rule = #"[{"trigger":{"url-filter":"tracker"},"action":{"type":"block"}}]"#
         await blocker.prepare(encoded: rule, identifier: "list-c")
         let rules = try #require(blocker.rules)
-        let page = WebPage(configuration: WebPage.configuration(isPrivate: false, store: .nonPersistent()), isPrivate: false)
+        let page = TotalityWeb.WebPage(configuration: TotalityWeb.WebPage.configuration(isPrivate: false, store: .nonPersistent()), isPrivate: false)
         page.isUnblocked = { $0 == "lisbon.example" }
         page.rules = rules
         #expect(page.blockingIsOn)
@@ -218,8 +218,8 @@ private actor FakeReader: ContentReceiver {
     </body></html>
     """
 
-    private func loaded(_ html: String) async throws -> WebPage {
-        let page = WebPage(configuration: WebPage.configuration(isPrivate: true, store: .nonPersistent()), isPrivate: true)
+    private func loaded(_ html: String) async throws -> TotalityWeb.WebPage {
+        let page = TotalityWeb.WebPage(configuration: TotalityWeb.WebPage.configuration(isPrivate: true, store: .nonPersistent()), isPrivate: true)
         page.webView.loadHTMLString(html, baseURL: URL(string: "https://lisbon.example/trams"))
         try await until { !page.webView.isLoading && page.webView.title?.isEmpty == false }
         return page
@@ -330,7 +330,7 @@ private actor FakeReader: ContentReceiver {
     @Test("A blocked resource is never fetched, and turning a site off lets it through")
     func blocking() async throws {
         let site = try LocalSite(pages: ["/": ("text/html", "", html)])
-        let page = WebPage(configuration: WebPage.configuration(isPrivate: true, store: .nonPersistent()), isPrivate: true)
+        let page = TotalityWeb.WebPage(configuration: TotalityWeb.WebPage.configuration(isPrivate: true, store: .nonPersistent()), isPrivate: true)
         var off = false
         page.isUnblocked = { _ in off }
         page.rules = try await blocked()
@@ -389,9 +389,9 @@ private actor FakeReader: ContentReceiver {
         #expect(!written.contains { $0.contains("tram") })
     }
 
-    private func stalledPage() async throws -> (page: WebPage, shown: URL, stalled: URL, site: LocalSite) {
+    private func stalledPage() async throws -> (page: TotalityWeb.WebPage, shown: URL, stalled: URL, site: LocalSite) {
         let site = try LocalSite(pages: ["/": ("text/html", "", "<html><head><title>Sign in</title></head><body>Hi</body></html>")], silent: ["/stalled"])
-        let page = WebPage(configuration: WebPage.configuration(isPrivate: false, store: .nonPersistent()), isPrivate: false)
+        let page = TotalityWeb.WebPage(configuration: TotalityWeb.WebPage.configuration(isPrivate: false, store: .nonPersistent()), isPrivate: false)
         let shown = try await site.url("/")
         page.load(shown)
         try await until { !page.isLoading && page.title == "Sign in" }
@@ -436,7 +436,7 @@ private actor FakeReader: ContentReceiver {
             "/": ("text/html", "", "<html><head><title>One</title></head><body>Hi</body></html>"),
             "/two": ("text/html", "", "<html><head><title>Two</title></head><body>Hi</body></html>"),
         ])
-        let page = WebPage(configuration: WebPage.configuration(isPrivate: false, store: .nonPersistent()), isPrivate: false)
+        let page = TotalityWeb.WebPage(configuration: TotalityWeb.WebPage.configuration(isPrivate: false, store: .nonPersistent()), isPrivate: false)
         page.load(try await site.url("/"))
         try await until { !page.isLoading && page.title == "One" }
         _ = try await page.webView.evaluateJavaScript("history.pushState({}, '', '/moved'); 1")
