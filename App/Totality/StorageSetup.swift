@@ -55,9 +55,9 @@ enum StorageSetup {
 
     /// Synchronous, because newer SDKs forbid iterating a directory enumerator in async code.
     private nonisolated static func folderSizeNow(_ name: String) -> Int {
-        guard let base = try? FileManager.default
-            .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-            .appendingPathComponent("Totality/\(name)", isDirectory: true),
+        // Only the signed-in account's own copy, which is what it syncs.
+        guard let account = SignedInAccount.shared.id, let shared = try? ContentSetup.sharedBase(),
+            case let base = AccountDataMigration.folder(for: account, in: shared).appendingPathComponent(name, isDirectory: true),
             let files = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey])
         else { return 0 }
         var total = 0
