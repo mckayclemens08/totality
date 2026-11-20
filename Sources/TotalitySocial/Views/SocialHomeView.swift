@@ -26,13 +26,17 @@ public struct SocialHomeView: View {
         NavigationStack(path: $path) {
             tabScreen
             .background(theme.bg.color.ignoresSafeArea())
+            // Swiping in from the left edge goes back to the app's home, as in every other module.
+            .edgeSwipeBack(onClose)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 SocialTabBar(selected: tab, me: model.me, onSelect: select)
             }
             .navigationDestination(for: Route.self) { route in
                 switch route {
                 case .post(let id): PostDetailView(model: model, id: id, open: open)
+                        .edgeSwipeBack(back)
                 case .profile(let name): SocialProfileView(model: model, username: name, open: open)
+                        .edgeSwipeBack(back)
                 }
             }
             .hidesNavigationBar()
@@ -54,6 +58,9 @@ public struct SocialHomeView: View {
     }
 
     func open(_ route: Route) { path.append(route) }
+
+    /// One screen back. The hidden navigation bar turns off the system's own swipe, so this replaces it.
+    func back() { if !path.isEmpty { path.removeLast() } }
 
     /// A tab in the bottom bar: the + opens the composer, the others become the screen showing.
     func select(_ picked: SocialTab) {
