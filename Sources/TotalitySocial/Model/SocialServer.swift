@@ -20,6 +20,11 @@ public enum SocialError: Error, Equatable, Sendable {
 
 /// Social's public side on Totality's server: public posts, follows, likes and comments (issue 149). It
 /// never carries a Friends or Close-friends post: those go through `PrivatePosts`.
+/// How many posts the server sends at a time.
+public enum SocialPage {
+    public static let size = 30
+}
+
 public protocol SocialServer: Sendable {
     func me() async throws -> String
     func forYou(tag: String?) async throws -> [SocialPost]
@@ -256,7 +261,7 @@ public struct RestSocialServer: SocialServer {
     }
 
     public func posts(by username: String, before: Date?) async throws -> [SocialPost] {
-        try await rpc("social_posts_by", ["p_handle": username, "p_before": before.map(Self.text) ?? NSNull(), "p_limit": 30], as: PostRow.self).map(\.post)
+        try await rpc("social_posts_by", ["p_handle": username, "p_before": before.map(Self.text) ?? NSNull(), "p_limit": SocialPage.size], as: PostRow.self).map(\.post)
     }
 
     public func post(_ id: UUID) async throws -> SocialPost? {
