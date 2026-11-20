@@ -173,7 +173,8 @@ services:
       - ./blobs/blobs.mjs:/app/blobs.mjs:ro
       - ./blobs-data:/var/lib/totality-blobs
 
-  # Push (issue 164): wakes a person's phones through Apple's push service with an empty silent push.
+  # Push (issue 164): wakes a person's phones through Apple's push service with an empty silent push,
+  # starting with instant Gmail sync. It keeps only a keyed hash of each linked Gmail address.
   # The Apple key file lives only in ~/totality/secrets/push/, which git ignores, and sending stays off until
   # the key, its ID and the team are all set. It logs nothing.
   push:
@@ -193,6 +194,14 @@ services:
       APNS_KEY_FILE: /run/secrets/apns.p8
       APNS_KEY_ID: ${APNS_KEY_ID:-}
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      # Instant Gmail sync stays off until all of these are set. PUSH_ADDRESS_KEY is a random secret of at
+      # least 32 characters that keys the address hash; changing it unlinks every address until phones
+      # link again. PUBSUB_AUDIENCE and PUBSUB_SENDER are the push subscription's audience and service
+      # account. The client ID is public and already in App/Backend.xcconfig.
+      PUSH_ADDRESS_KEY: ${PUSH_ADDRESS_KEY:-}
+      PUBSUB_AUDIENCE: ${PUBSUB_AUDIENCE:-https://usetotality.com/push/gmail/notify}
+      PUBSUB_SENDER: ${PUBSUB_SENDER:-}
+      GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:-973899545310-9lefpoa9mm5sdel8kpf6mte6n6r6rg1f.apps.googleusercontent.com}
     command: node /app/push.mjs
     logging:
       driver: none

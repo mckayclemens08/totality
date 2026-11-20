@@ -2,10 +2,17 @@
 // push token here, and the server later sends it a silent push that says only "look again". Every push
 // is empty apart from that, so Apple, Cloudflare and this server carry nothing about what changed.
 //
+// Instant Gmail sync is the first user (non-negotiable 8). A phone links a Gmail address by showing a
+// Google ID token for it, which proves the address is that person's and opens nothing in Gmail. Only a
+// keyed hash of the address is kept. When the inbox changes, Google posts to `/push/gmail/notify` through
+// Cloud Pub/Sub with the address and a history number, signed by Google. The server hashes the address,
+// wakes the phones linked to it, and keeps nothing about the note. It never sees mail, subjects, senders,
+// or any Google access or refresh token.
+//
 // The Apple key is on the server only. Its file is mounted from `~/totality/secrets/push/`, which git ignores,
 // and its ID and team come from `.env`. Without them registration still works and nothing is sent.
 // Nothing here logs a request, a token or an account.
-import { createHash, createPrivateKey, sign } from 'node:crypto'
+import { createHash, createHmac, createPrivateKey, createPublicKey, sign, timingSafeEqual, verify } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -19,6 +26,13 @@ export const MAX_DEVICES = 10
 export const DEVICE_DAYS = 60
 // Apple wants its sign-in token remade between 20 and 60 minutes.
 export const APNS_TOKEN_MINUTES = 45
+// Totality accounts one Gmail address can wake. Someone may sign in to Totality with two accounts.
+export const MAX_LINKS = 3
+// Gmail notes for one address closer together than this become one push, sent at the end of the gap,
+// so a burst of mail or a replayed note can't flood a phone or use up Apple's budget for it.
+export const QUIET_SECONDS = 10
+// How far a Google token's times may be off from this server's clock.
+export const SKEW_SECONDS = 300
 
 const DAY = 24 * 60 * 60 * 1000
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -56,7 +70,7 @@ export class PushStore {
   constructor(root, { clock = Date.now } = {}) {
     this.file = root ? join(root, 'push.json') : null
     this.clock = clock
-    this.state = { devices: {} }
+    this.state = { devices: {}, gmail: {} }
     this.loaded = false
     this.writing = Promise.resolve()
   }
@@ -128,6 +142,30 @@ export class PushStore {
       }
     }
     if (changed) await this.save()
+  }
+
+  /** The accounts a hashed Gmail address wakes. */
+  async linked(hash) {
+    await this.load()
+    return this.state.gmail[hash] ?? []
+  }
+
+  async link(hash, account) {
+    await this.load()
+    const list = (this.state.gmail[hash] ?? []).filter((other) => other !== account)
+    list.unshift(account)
+    this.state.gmail[hash] = list.slice(0, MAX_LINKS)
+    await this.save()
+  }
+
+  async unlink(hash, account) {
+    await this.load()
+    const list = this.state.gmail[hash] ?? []
+    const kept = list.filter((other) => other !== account)
+    if (kept.length === list.length) return
+    if (kept.length) this.state.gmail[hash] = kept
+    else delete this.state.gmail[hash]
+    await this.save()
   }
 
   setDevices(account, list) {
@@ -213,6 +251,68 @@ function http2Request() {
   })
 }
 
+/** The keyed hash kept in place of a Gmail address. Without the server's key, the file can't be matched
+ *  against a list of addresses. */
+export function addressHash(key, address) {
+  return createHmac('sha256', key).update(String(address).trim().toLowerCase()).digest('base64url')
+}
+
+const GMAIL = /^[^\s@]{1,64}@[a-z0-9.-]{1,190}$/
+
+/** A JWT signed by Google, checked against Google's published keys. Returns its claims when the signature,
+ *  issuer, audience and times are right, or null. `keys(kid)` returns the matching public key or null. */
+export async function verifyGoogleJWT(jwt, { audiences, keys, now = Date.now() }) {
+  if (typeof jwt !== 'string' || jwt.length > 4096) return null
+  const parts = jwt.split('.')
+  if (parts.length !== 3) return null
+  let header, claims
+  try {
+    header = JSON.parse(Buffer.from(parts[0], 'base64url'))
+    claims = JSON.parse(Buffer.from(parts[1], 'base64url'))
+  } catch {
+    return null
+  }
+  if (header?.alg !== 'RS256' || typeof header.kid !== 'string') return null
+  const key = await keys(header.kid)
+  if (!key) return null
+  const signed = verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), key, Buffer.from(parts[2], 'base64url'))
+  if (!signed) return null
+  const seconds = now / 1000
+  if (!['https://accounts.google.com', 'accounts.google.com'].includes(claims?.iss)) return null
+  if (!audiences.includes(claims.aud)) return null
+  if (typeof claims.exp !== 'number' || claims.exp + SKEW_SECONDS < seconds) return null
+  if (typeof claims.iat !== 'number' || claims.iat - SKEW_SECONDS > seconds) return null
+  return claims
+}
+
+/** Google's signing keys, fetched from `url` and kept as long as Google says. An unknown key ID fetches
+ *  again, at most once a minute, because Google rotates its keys. */
+export function googleKeys({ url = 'https://www.googleapis.com/oauth2/v3/certs', load = fetch, clock = Date.now } = {}) {
+  let held = new Map()
+  let until = 0
+  let tried = 0
+  async function refresh() {
+    tried = clock()
+    const reply = await load(url, { signal: AbortSignal.timeout(6_000) })
+    if (!reply.ok) return
+    const { keys = [] } = await reply.json()
+    const next = new Map()
+    for (const jwk of keys) {
+      if (jwk?.kty !== 'RSA' || typeof jwk.kid !== 'string') continue
+      try { next.set(jwk.kid, createPublicKey({ key: jwk, format: 'jwk' })) } catch {}
+    }
+    held = next
+    const age = /max-age=(\d+)/.exec(reply.headers.get('cache-control') ?? '')?.[1]
+    until = clock() + Math.min(Number(age ?? 3600), 24 * 3600) * 1000
+  }
+  return async (kid) => {
+    if ((clock() > until || !held.has(kid)) && clock() - tried > 60_000) {
+      try { await refresh() } catch {}
+    }
+    return held.get(kid) ?? null
+  }
+}
+
 /** Reads a small request body, or returns null once it passes `limit`. */
 export async function readBody(stream, limit) {
   const chunks = []
@@ -245,19 +345,26 @@ async function jsonBody(body, limit) {
 
 /** No sockets in here, so every rule can be tested. `checkSignIn(token)` returns an account or null and
  *  throws if it can't tell. `apns` is null while the Apple key isn't on the server. */
+const ROUTES = ['/push/device', '/push/device/remove', '/push/gmail/link', '/push/gmail/unlink', '/push/gmail/notify']
+
+/** `gmail` is null until the server has its address key and knows Google's Pub/Sub sender:
+ *  `{ addressKey, keys, clientIDs, pubsubAudience, pubsubSender }`. */
 export class PushGate {
-  constructor({ checkSignIn, store, apns = null }) {
-    Object.assign(this, { checkSignIn, store, apns })
+  constructor({ checkSignIn, store, apns = null, gmail = null, clock = Date.now, later = (fn, ms) => setTimeout(fn, ms).unref?.() }) {
+    Object.assign(this, { checkSignIn, store, apns, gmail, clock, later })
+    this.quiet = new Map()
   }
 
   async respond({ method, path, headers = {}, body }) {
-    if (path === '/push/health') return method === 'GET' ? json(200, { ok: true, sending: Boolean(this.apns) }) : empty(405)
-    if (path !== '/push/device' && path !== '/push/device/remove') return empty(404)
+    if (path === '/push/health') return method === 'GET' ? json(200, { ok: true, sending: Boolean(this.apns), gmail: Boolean(this.gmail) }) : empty(405)
+    if (!ROUTES.includes(path)) return empty(404)
     if (method !== 'POST') return empty(405)
     const token = TOKEN.exec(headers.authorization ?? '')?.[1]
     if (!token) return empty(401)
+    if (path === '/push/gmail/notify') return this.notified(token, body)
     const account = await this.checkSignIn(token)
     if (!account) return empty(401)
+    if (path.startsWith('/push/gmail/')) return this.linking(path, account, body)
     const request = await jsonBody(body, 1_024)
     const device = request?.token
     if (typeof device !== 'string' || !DEVICE.test(device)) return empty(400)
@@ -268,6 +375,71 @@ export class PushGate {
     }
     await this.store.removeDevice(account.id, device)
     return empty(204)
+  }
+
+  /** A phone linking a Gmail address with a Google ID token for it, or unlinking one. Unlinking takes
+   *  the address itself, because the Google sign-in may already be gone, and only ever removes this
+   *  account's own link. */
+  async linking(path, account, body) {
+    if (!this.gmail) return empty(503)
+    const request = await jsonBody(body, 8_192)
+    if (path === '/push/gmail/link') {
+      const claims = await verifyGoogleJWT(request?.idToken, { audiences: this.gmail.clientIDs, keys: this.gmail.keys, now: this.clock() })
+      if (!claims || claims.email_verified !== true || typeof claims.email !== 'string' || !GMAIL.test(claims.email.toLowerCase())) return empty(403)
+      await this.store.link(addressHash(this.gmail.addressKey, claims.email), account.id)
+      return empty(204)
+    }
+    const address = request?.address
+    if (typeof address !== 'string' || !GMAIL.test(address.trim().toLowerCase())) return empty(400)
+    await this.store.unlink(addressHash(this.gmail.addressKey, address), account.id)
+    return empty(204)
+  }
+
+  /** Google's Pub/Sub push. It has to carry an OIDC token Google signed for this endpoint, as the one
+   *  service account Gmail's subscription uses. Anything signed and well formed gets 204 straight away,
+   *  known address or not, so Pub/Sub doesn't retry and the answer says nothing about who is linked. */
+  async notified(token, body) {
+    if (!this.gmail) return empty(503)
+    const { pubsubAudience, pubsubSender, keys } = this.gmail
+    const claims = await verifyGoogleJWT(token, { audiences: [pubsubAudience], keys, now: this.clock() })
+    if (!claims || claims.email_verified !== true || !same(claims.email, pubsubSender)) return empty(401)
+    const request = await jsonBody(body, 16_384)
+    let note
+    try {
+      note = JSON.parse(Buffer.from(request?.message?.data ?? '', 'base64'))
+    } catch {
+      return empty(204)
+    }
+    const address = note?.emailAddress
+    if (typeof address !== 'string' || !GMAIL.test(address.trim().toLowerCase())) return empty(204)
+    this.soon(addressHash(this.gmail.addressKey, address))
+    return empty(204)
+  }
+
+  /** Wakes an address's phones now, or once at the end of the quiet gap if it woke them just before. */
+  soon(hash) {
+    const now = this.clock()
+    const held = this.quiet.get(hash)
+    if (held && now - held.at < QUIET_SECONDS * 1000) {
+      if (!held.waiting) {
+        held.waiting = true
+        this.later(() => {
+          this.quiet.set(hash, { at: this.clock(), waiting: false })
+          this.wakeAddress(hash)
+        }, held.at + QUIET_SECONDS * 1000 - now)
+      }
+      return
+    }
+    this.quiet.set(hash, { at: now, waiting: false })
+    if (this.quiet.size > 10_000) {
+      for (const [key, value] of this.quiet) if (now - value.at > QUIET_SECONDS * 1000 && !value.waiting) this.quiet.delete(key)
+    }
+    this.wakeAddress(hash)
+  }
+
+  wakeAddress(hash) {
+    this.waking = this.store.linked(hash).then((accounts) => this.wake(accounts)).catch(() => 0)
+    return this.waking
   }
 
   /** Wakes every phone of these accounts, and forgets any token Apple says is gone. */
@@ -283,6 +455,13 @@ export class PushGate {
     }
     return sent
   }
+}
+
+function same(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  const left = Buffer.from(a.toLowerCase())
+  const right = Buffer.from(b.toLowerCase())
+  return left.length === right.length && timingSafeEqual(left, right)
 }
 
 function liveGate() {
@@ -311,7 +490,14 @@ function liveGate() {
     }
   }
 
-  return new PushGate({ checkSignIn: rememberingSignIns(checkSignIn), store: new PushStore(root), apns })
+  let gmail = null
+  const { PUSH_ADDRESS_KEY: addressKey, PUBSUB_AUDIENCE: pubsubAudience, PUBSUB_SENDER: pubsubSender } = process.env
+  const clientIDs = (process.env.GOOGLE_CLIENT_IDS ?? '').split(',').map((id) => id.trim()).filter(Boolean)
+  if (addressKey && addressKey.length >= 32 && pubsubAudience && pubsubSender && clientIDs.length) {
+    gmail = { addressKey, keys: googleKeys(), clientIDs, pubsubAudience, pubsubSender }
+  }
+
+  return new PushGate({ checkSignIn: rememberingSignIns(checkSignIn), store: new PushStore(root), apns, gmail })
 }
 
 export function serve(gate, port, host = '0.0.0.0') {
