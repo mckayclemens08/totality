@@ -107,7 +107,7 @@ public struct CalendarHomeTile: View {
             events([])
         } else {
             let next = model.nextEntry
-            TileList(shown, spacing: Space.s2 + Space.s1 / 4) { entry in
+            TileList(shown, spacing: Space.s2 + Space.s1 / 4, isCentered: true) { entry in
                 card(entry, isNext: entry.id == next?.id)
             }
         }

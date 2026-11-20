@@ -94,7 +94,7 @@ public struct MessagesHomeTile: View {
         let shown = Array(model.chats.prefix(rows))
         return VStack(alignment: .leading, spacing: Metric.tileRowGap) {
             TileHeader("Messages", systemImage: "bubble.left")
-            TileList(shown) { chat in
+            TileList(shown, isCentered: true) { chat in
                 MessagesTileRow(chat: chat, photo: photo(of: chat), line: line(for: chat))
                     .tileLink(label(chat)) { open(chat) }
             }
