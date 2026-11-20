@@ -13,6 +13,29 @@ public protocol KeyStore: Sendable {
     func delete(_ name: String) throws
 }
 
+/// A store that can say what it holds, by name only, so its items can be moved to an account.
+public protocol ListableKeyStore: KeyStore {
+    func names() throws -> [String]
+}
+
+/// One account's corner of a shared store: every name is prefixed with the account, so two accounts on
+/// one device never read, overwrite or delete each other's secrets.
+public struct AccountKeyStore: KeyStore {
+    public static func prefix(for account: String) -> String { "account.\(account)." }
+
+    private let base: any KeyStore
+    private let prefix: String
+
+    public init(_ base: any KeyStore, account: String) {
+        self.base = base
+        prefix = Self.prefix(for: account)
+    }
+
+    public func load(_ name: String) throws -> Data? { try base.load(prefix + name) }
+    public func save(_ data: Data, as name: String) throws { try base.save(data, as: prefix + name) }
+    public func delete(_ name: String) throws { try base.delete(prefix + name) }
+}
+
 extension ContentRootKey {
     static let keyStoreName = "content-root-key"
 
@@ -78,5 +101,23 @@ public struct KeychainKeyStore: KeyStore {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeyStoreError.unexpectedStatus(status)
         }
+    }
+}
+
+extension KeychainKeyStore: ListableKeyStore {
+    /// The names of this service's items. Never their contents.
+    public func names() throws -> [String] {
+        let request: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecUseDataProtectionKeychain as String: true,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        var items: CFTypeRef?
+        let status = SecItemCopyMatching(request as CFDictionary, &items)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else { throw KeyStoreError.unexpectedStatus(status) }
+        return (items as? [[String: Any]] ?? []).compactMap { $0[kSecAttrAccount as String] as? String }
     }
 }

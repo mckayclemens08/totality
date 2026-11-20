@@ -13,10 +13,81 @@ import TotalityWeb
 /// they're set up together.
 @MainActor
 enum ContentSetup {
-    private static func base() throws -> URL {
+    /// Nobody is signed in, so there's no one's content to open.
+    struct SignedOut: Error {}
+
+    /// The folder every account's content sits under. Before content was per account, it sat right here.
+    nonisolated static func sharedBase() throws -> URL {
         try FileManager.default
             .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("Totality", isDirectory: true)
+    }
+
+    nonisolated static func sharedCaches() throws -> URL {
+        try FileManager.default
+            .url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("Totality", isDirectory: true)
+    }
+
+    /// The signed-in account's own folder. Each account on a device sees only what's in its own.
+    private static func base() throws -> URL {
+        guard let account = SignedInAccount.shared.id else { throw SignedOut() }
+        return AccountDataMigration.folder(for: account, in: try sharedBase())
+    }
+
+    /// The signed-in account's corner of one of the device's Keychain services.
+    nonisolated static func keys(_ store: KeychainKeyStore) throws -> AccountKeyStore {
+        guard let account = SignedInAccount.shared.id else { throw SignedOut() }
+        return AccountKeyStore(store, account: account)
+    }
+
+    /// The signed-in account's own settings, such as Home's layout and hidden calendars. Signed out, an
+    /// empty set of its own, so nothing of anyone's shows.
+    static func defaults() -> UserDefaults {
+        UserDefaults(suiteName: defaultsName()) ?? .standard
+    }
+
+    nonisolated static func defaultsName() -> String {
+        SignedInAccount.shared.id.map { "app.totality.account.\($0)" } ?? "app.totality.signed-out"
+    }
+
+    /// Moves an install from before content was per account to its owner, then opens `account`'s space.
+    /// Runs before anything reads content, so an account's key is never made beside data still waiting
+    /// to move. The owner is whoever the device's key was claimed for, never simply whoever is here.
+    static func follow(account: String?) {
+        let migration = AccountDataMigration(
+            contentKeys: KeychainKeyStore(),
+            otherKeys: [KeychainKeyStore(service: GoogleAccounts.service), KeychainKeyStore(service: OutsideSecrets.service)],
+            folders: [try? sharedBase(), try? sharedCaches()].compactMap { $0 }
+        )
+        do {
+            if let owner = try migration.run(signedInAccount: account) { moveSettings(to: owner) }
+        } catch {
+            // Left as it was, to try again next time. Its contents never reach the log.
+            SignedInAccount.shared.id = nil
+            return
+        }
+        // Until the move has finished, no one's space opens: a new key there could split the owner's content.
+        SignedInAccount.shared.id = (try? migration.isNeeded()) == false ? account : nil
+    }
+
+    /// The settings that are an account's own, copied once to the owner's set. The device's copies stay.
+    private static func moveSettings(to owner: String) {
+        let mine = UserDefaults(suiteName: "app.totality.account.\(owner)")
+        for key in ["home.layout", HomeChoicesModel.cacheKey, "calendar.hiddenDeviceCalendars", "tasks.splitToday"]
+        where mine?.object(forKey: key) == nil {
+            if let value = UserDefaults.standard.object(forKey: key) { mine?.set(value, forKey: key) }
+        }
+    }
+
+    /// Forgets the signed-in account's outside sign-ins on this device, and nobody else's.
+    nonisolated static func forgetSecrets() {
+        guard let account = SignedInAccount.shared.id else { return }
+        let prefix = AccountKeyStore.prefix(for: account)
+        for service in [GoogleAccounts.service, OutsideSecrets.service] {
+            let store = KeychainKeyStore(service: service)
+            for name in (try? store.names()) ?? [] where name.hasPrefix(prefix) { try? store.delete(name) }
+        }
     }
 
     private static func stores() throws -> (
@@ -42,22 +113,22 @@ enum ContentSetup {
 
     /// This build's Google sign-in, shared by every module, or nil when it has no Google client.
     static func googleAccounts() -> GoogleAccounts? {
-        GoogleSignIn(clientID: Bundle.main.object(forInfoDictionaryKey: "TotalityGoogleClientID") as? String)
-            .map { GoogleAccounts(signIn: $0) }
+        guard let keychain = try? keys(KeychainKeyStore(service: GoogleAccounts.service)) else { return nil }
+        return GoogleSignIn(clientID: Bundle.main.object(forInfoDictionaryKey: "TotalityGoogleClientID") as? String)
+            .map { GoogleAccounts(signIn: $0, keychain: keychain) }
     }
 
     /// Opened Drive files, sealed. In Caches, so they stay out of backups and the system may clear them
     /// when space runs low: they come back from Google on the next open.
     private static func driveCache() throws -> FileBlobStore {
-        try FileBlobStore(directory: FileManager.default
-            .url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            .appendingPathComponent("Totality", isDirectory: true)
+        guard let account = SignedInAccount.shared.id else { throw SignedOut() }
+        return try FileBlobStore(directory: AccountDataMigration.folder(for: account, in: try sharedCaches())
             .appendingPathComponent("GoogleDrive", isDirectory: true))
     }
 
     static func keyRing() throws -> ContentKeyRing {
         let stores = try stores()
-        return ContentKeyRing(keys: KeychainKeyStore(), areas: [
+        return ContentKeyRing(keys: try keys(KeychainKeyStore()), areas: [
             SealedArea(files: stores.reader, purposes: ReaderVault.sealedPurposes, chunked: ReaderVault.chunkedPurposes),
             SealedArea(store: stores.calendar, purposes: CalendarVault.sealedPurposes),
             SealedArea(store: stores.web, purposes: WebVault.sealedPurposes),
@@ -117,7 +188,7 @@ enum ContentSetup {
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
-                vault: calendarVault, devices: devices, google: google, hidden: { CalendarModel.hiddenCalendars(in: .standard) },
+                vault: calendarVault, devices: devices, google: google, hidden: { [suite = defaultsName()] in CalendarModel.hiddenCalendars(in: UserDefaults(suiteName: suite) ?? .standard) },
                 refresh: { await refresh(.calendar) }
             ),
             WebModule(refresh: { await refresh(.web) }),
@@ -139,7 +210,7 @@ enum ContentSetup {
             CalendarModel(
                 vault: calendarVault,
                 devices: devices, reminders: HomeGatedReminders(SystemReminders()),
-                registry: registry, google: google
+                registry: registry, google: google, defaults: defaults()
             ),
             WebModel(
                 client: AccountSetup.searchToken.map { WebSearchClient(token: $0) }, vault: webVault, blocker: WebBlocker(),
@@ -155,6 +226,18 @@ enum ContentSetup {
             PhotosContent(rootKey: rootKey, store: stores.photos),
             home
         )
+    }
+}
+
+/// Who is signed in, for the folders and Keychain names content is kept under. Read from any thread.
+final class SignedInAccount: @unchecked Sendable {
+    static let shared = SignedInAccount()
+    private let lock = NSLock()
+    private var value: String?
+
+    var id: String? {
+        get { lock.withLock { value } }
+        set { lock.withLock { value = newValue } }
     }
 }
 
@@ -244,7 +327,7 @@ final class MailWiring {
         }
         guard vault?.account != account else { return false }
         await vault?.close()
-        vault = MailVault(store: content.store, rootKey: content.rootKey, account: account, secrets: OutsideSecrets.keychain())
+        vault = MailVault(store: content.store, rootKey: content.rootKey, account: account, secrets: AccountKeyStore(OutsideSecrets.keychain(), account: account))
         return true
     }
 
@@ -260,7 +343,7 @@ final class MailWiring {
                 canPublish: { [canPublish] in await canPublish(account) }, username: username,
                 google: GoogleOAuth(
                     clientID: Bundle.main.object(forInfoDictionaryKey: "TotalityGoogleClientID") as? String,
-                    connections: KeychainKeyStore(service: GoogleAccounts.service)
+                    connections: AccountKeyStore(KeychainKeyStore(service: GoogleAccounts.service), account: account)
                 )
             )
         } catch {
@@ -278,9 +361,17 @@ final class DeviceContentKeys: ContentKeyAccess {
     /// True while blobs are being rewritten, so nothing opens them halfway through.
     private(set) var isMoving = false
 
+    /// The signed-in account's own key ring. Someone may have signed in or out since the app last
+    /// looked, and the account screens must never act on the last person's key.
+    private func ring() async throws -> ContentKeyRing {
+        let now = await AccountSetup.accountID?()
+        if now != SignedInAccount.shared.id { ContentSetup.follow(account: now) }
+        return try ContentSetup.keyRing()
+    }
+
     func rootKey() async throws -> ContentRootKey {
-        let ring = try ContentSetup.keyRing()
-        return try await Task.detached { try ring.current() }.value
+        let keyRing = try await ring()
+        return try await Task.detached { try keyRing.current() }.value
     }
 
     func adopt(_ key: ContentRootKey) async throws -> KeyMoveReport {
@@ -290,53 +381,51 @@ final class DeviceContentKeys: ContentKeyAccess {
             didMove()
         }
         await willMove()
-        let ring = try ContentSetup.keyRing()
-        return try await Task.detached { try ring.adopt(key) }.value
+        let keyRing = try await ring()
+        return try await Task.detached { try keyRing.adopt(key) }.value
     }
 
     func keyOwner() async throws -> String? {
-        try ContentSetup.keyRing().owner()
+        try await ring().owner()
     }
 
     func claim(for account: String) async throws {
-        try ContentSetup.keyRing().claim(for: account)
+        try await ring().claim(for: account)
     }
 
     func settleExistingInstall(signedInAccount: String?) async throws {
-        try ContentSetup.keyRing().settleExistingInstall(signedInAccount: signedInAccount)
+        try await ring().settleExistingInstall(signedInAccount: signedInAccount)
     }
 
     func hasSealedContent() async throws -> Bool {
-        try ContentSetup.keyRing().hasSealedContent()
+        try await ring().hasSealedContent()
     }
 
     func reassign(to account: String, provenBy key: ContentRootKey) async throws {
-        try ContentSetup.keyRing().reassign(to: account, provenBy: key)
+        try await ring().reassign(to: account, provenBy: key)
     }
 
     func release(by account: String) async throws {
-        try ContentSetup.keyRing().release(by: account)
-        OutsideSecrets.forgetAll()
-        GoogleAccounts.forgetAll()
+        try await ring().release(by: account)
+        ContentSetup.forgetSecrets()
     }
 
     /// The old key goes, so any open module has to go with it.
     func resetEmptyDevice() async throws {
         await willMove()
         defer { didMove() }
-        try ContentSetup.keyRing().resetEmptyDevice()
-        OutsideSecrets.forgetAll()
-        GoogleAccounts.forgetAll()
+        try await ring().resetEmptyDevice()
+        ContentSetup.forgetSecrets()
         // What the last account agreed with its server means nothing to the next one.
         try? FileManager.default.removeItem(at: ContentSetup.syncStateFile())
     }
 
     func joinedBackup() async throws -> String? {
-        try ContentSetup.keyRing().joinedBackup()
+        try await ring().joinedBackup()
     }
 
     func markJoined(_ fingerprint: String) async throws {
-        try ContentSetup.keyRing().markJoined(fingerprint)
+        try await ring().markJoined(fingerprint)
     }
 }
 

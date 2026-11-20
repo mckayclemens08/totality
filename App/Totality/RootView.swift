@@ -42,7 +42,10 @@ struct RootView: View {
     /// Whichever Photos is current, for settings' storage bars.
     @State private var currentPhotos = CurrentPhotos()
     /// Modules taken off Home, which also skip refresh, reminders and search.
-    @State private var homeChoices = HomeChoicesModel()
+    @State private var homeChoices = HomeChoicesModel(defaults: ContentSetup.defaults())
+    /// The account whose space is open, and its own settings.
+    @State private var followedAccount: String?
+    @State private var accountDefaults = ContentSetup.defaults()
     /// Each module's refresher, which `AppRefresh` reaches through the registry.
     @State private var refreshers = ModuleRefreshers()
     @State private var registry: ModuleRegistry?
@@ -85,36 +88,11 @@ struct RootView: View {
     var body: some View {
         screens
         .task {
-            contentKeys.willMove = {
-                // Photos first, before any wait, so the home tile can't show the old key's photos meanwhile.
-                photosTurn += 1
-                photos = PhotosModel(library: nil)
-                await account?.sync?.pause()
-                await reader?.stopForKeyChange()
-                await calendar?.stopForKeyChange()
-                await web?.stopForKeyChange()
-                await tasks?.stopForKeyChange()
-                reader = nil
-                calendar = nil
-                web = nil
-                tasks = nil
-                sharedLists = nil
-                social = nil
-                await mailWiring.disconnect()
-                mail.keyChanged()
-                photosTurn += 1
-                await photosWiring.disconnect()
-                photos = PhotosModel(library: nil)
-                registry = nil
-                homeChoices.close()
-                messages.people.directory = nil
-                messages.taskMaker = nil
-                AppRefresh.shared.registry = nil
-                syncAreas = []
-                contentProblem = nil
-            }
+            contentKeys.willMove = { await closeContent() }
             contentKeys.didMove = { account?.sync?.resume() }
             watchAccountChanges()
+            // Before anything opens, so it opens in the signed-in account's own space.
+            await followAccount()
             await account?.backup?.settleDevice()
             connectSync()
             await openContentForHome()
@@ -152,6 +130,7 @@ struct RootView: View {
         .onChange(of: showingAccount) {
             if !showingAccount {
                 Task {
+                    await followAccount()
                     await messages.checkAccount()
                     // The recovery key may have just been set up or entered.
                     await messages.settleKeys()
@@ -179,6 +158,7 @@ struct RootView: View {
         .onChange(of: open) {
             guard open == nil else { return }
             Task {
+                await followAccount()
                 await openContentForHome()
                 await account?.sync?.syncNow()
             }
@@ -228,6 +208,9 @@ struct RootView: View {
         } onAccount: {
             showingAccount = true
         }
+        // Home's layout is the signed-in account's own, and a new account's Home starts fresh.
+        .defaultAppStorage(accountDefaults)
+        .id(followedAccount)
     }
 
     @ViewBuilder
@@ -441,7 +424,10 @@ struct RootView: View {
 
     private func contentMessage(onClose: @escaping () -> Void) -> some View {
         let problem = contentProblem ?? .keyUnavailable
-        return ModuleMessage(systemImage: "lock.slash", title: problem.title, detail: problem.detail, onClose: onClose)
+        return ModuleMessage(
+            systemImage: problem == .signedOut ? "person.crop.circle" : "lock.slash", title: problem.title, detail: problem.detail,
+            onSignIn: problem == .signedOut ? { showingAccount = true } : nil, onClose: onClose
+        )
     }
 
     private func prepareContent() {
@@ -499,6 +485,8 @@ struct RootView: View {
             Task { await homeChoices.open(content.home) }
             refreshRecoveryLabels()
             Task { await tellWhoIsHere() }
+        } catch is ContentSetup.SignedOut {
+            contentProblem = .signedOut
         } catch KeyStoreError.keyMissing {
             contentProblem = .keyMissing
         } catch {
@@ -589,6 +577,54 @@ struct RootView: View {
         return model
     }
 
+    /// Closes every module's content, for a key change or an account leaving. Nothing is deleted.
+    private func closeContent() async {
+        // Photos first, before any wait, so the home tile can't show the old key's photos meanwhile.
+        photosTurn += 1
+        photos = PhotosModel(library: nil)
+        await account?.sync?.pause()
+        await reader?.stopForKeyChange()
+        await calendar?.stopForKeyChange()
+        await web?.stopForKeyChange()
+        await tasks?.stopForKeyChange()
+        reader = nil
+        calendar = nil
+        web = nil
+        tasks = nil
+        sharedLists = nil
+        social = nil
+        await mailWiring.disconnect()
+        mail.keyChanged()
+        photosTurn += 1
+        await photosWiring.disconnect()
+        photos = PhotosModel(library: nil)
+        registry = nil
+        homeChoices.close()
+        messages.people.directory = nil
+        messages.taskMaker = nil
+        AppRefresh.shared.registry = nil
+        syncAreas = []
+        contentProblem = nil
+    }
+
+    /// Opens the signed-in account's own space, after anyone else's has closed. Each account on this
+    /// device sees only its own notes, calendar, tasks and Home; signed out, the modules ask to sign in.
+    private func followAccount() async {
+        let now = await AccountSetup.accountID?()
+        guard now != followedAccount || (now != nil && SignedInAccount.shared.id == nil) else { return }
+        if reader != nil || registry != nil {
+            await closeContent()
+            account?.sync?.resume()
+        }
+        ContentSetup.follow(account: now)
+        followedAccount = now
+        homeChoices = HomeChoicesModel(defaults: ContentSetup.defaults())
+        accountDefaults = ContentSetup.defaults()
+        guard now != nil else { return }
+        await account?.backup?.settleDevice()
+        await openContentForHome()
+    }
+
     /// Signing out, or in as someone else, leaves nothing of the last account's behind: Social and shared
     /// lists are made again for whoever is next, and Messages stops the last account's connection. The
     /// content key and Messages' stores stay on the device, as the standing rules say.
@@ -599,6 +635,10 @@ struct RootView: View {
             if open == .social { open = nil }
             Task {
                 await messages.checkAccount()
+                // The last account's reminders stop ringing here. They come back when it signs in again.
+                await SystemTaskReminders.shared.replace(with: [], places: [])
+                await SystemReminders().replace(with: [])
+                await followAccount()
                 await tellWhoIsHere()
             }
         }
@@ -767,12 +807,13 @@ struct RootView: View {
 }
 
 private enum ContentProblem {
-    case keyMissing, keyUnavailable
+    case keyMissing, keyUnavailable, signedOut
 
     var title: String {
         switch self {
         case .keyMissing: "Your key isn't on this device"
         case .keyUnavailable: "This didn't open"
+        case .signedOut: "Sign in to see yours"
         }
     }
 
@@ -782,6 +823,8 @@ private enum ContentProblem {
             "Your items are here, still encrypted, but the key that opens them isn't. Totality has left them untouched and won't make a new key over them."
         case .keyUnavailable:
             "Totality couldn't reach this device's key, and it won't replace one it can't read. Go back and try again."
+        case .signedOut:
+            "Each account on this iPhone has its own notes, calendar and tasks. Sign in to open yours."
         }
     }
 }
@@ -791,6 +834,7 @@ private struct ModuleMessage: View {
     let systemImage: String
     let title: String
     let detail: String
+    var onSignIn: (() -> Void)?
     let onClose: () -> Void
 
     var body: some View {
@@ -807,10 +851,16 @@ private struct ModuleMessage: View {
                 .font(Typeface.body)
                 .foregroundStyle(theme.textSecondary.color)
                 .multilineTextAlignment(.center)
+            if let onSignIn {
+                Button("Sign in", action: onSignIn)
+                    .font(Typeface.headline)
+                    .foregroundStyle(theme.accent.color)
+                    .padding(.top, Space.s3)
+            }
             Button("Home", action: onClose)
                 .font(Typeface.callout)
                 .foregroundStyle(theme.accent.color)
-                .padding(.top, Space.s3)
+                .padding(.top, onSignIn == nil ? Space.s3 : 0)
         }
         .padding(Space.s6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
