@@ -19,6 +19,8 @@ final class FakeServer {
 
     var rooms: [String: Room] = [:]
     var people: Set<String> = []
+    /// Makes the next read of the room list fail, as a connection that's still starting can.
+    var failNextRooms = false
     var chats: [String: [String]] = [:]
     var sentMessages: [(from: String, to: String, text: String)] = []
     private var count = 0
@@ -43,7 +45,7 @@ final class FakeServer {
 @MainActor
 final class FakeRooms: SharedRooms {
     let server: FakeServer
-    let me: String
+    var me: String
     var unavailableReason: String?
 
     init(server: FakeServer, me: String) {
@@ -68,7 +70,11 @@ final class FakeRooms: SharedRooms {
     }
 
     func rooms() async throws -> [String] {
-        server.rooms.filter { $0.value.joined.contains(me) }.keys.sorted()
+        if server.failNextRooms {
+            server.failNextRooms = false
+            throw SharedRoomError.failed("Not connected yet")
+        }
+        return server.rooms.filter { $0.value.joined.contains(me) }.keys.sorted()
     }
 
     func invites() async throws -> [SharedRoomInvite] {

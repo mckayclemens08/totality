@@ -82,6 +82,8 @@ public final class SocialModel {
         if forYou.isEmpty && following.isEmpty { phase = .loading }
         do {
             let me = try await server.me()
+            // Someone else signed in since the last load: nothing of the last account's may stay on screen.
+            if let old = self.me, old != me { forgetAccount() }
             self.me = me
             followingSet = Set(try await server.followed(by: me))
             tags = (try? await server.topTags()) ?? tags
@@ -93,13 +95,35 @@ public final class SocialModel {
         } catch let error as SocialError {
             switch error {
             case .offline: phase = forYou.isEmpty && following.isEmpty ? .failed(error.message) : .offline
-            case .signedOut: phase = .unavailable(error.message)
+            case .signedOut:
+                forgetAccount()
+                phase = .unavailable(error.message)
             default: phase = .failed(error.message)
             }
         } catch {
             phase = .failed("Social didn't open. Pull down to try again.")
         }
         await loadPhotos()
+    }
+
+    /// Drops everything that was the signed-in account's: its feeds, its private posts, its lists of
+    /// friends and follows, its settings and what For You has shown it.
+    func forgetAccount() {
+        me = nil
+        forYou = []
+        following = []
+        privateFeed = []
+        shown = []
+        friends = []
+        closeFriends = []
+        followingSet = []
+        followRequests = []
+        saved = []
+        settings = SocialSettings()
+        photos = [:]
+        requestedProfile = nil
+        requestedPost = nil
+        notice = nil
     }
 
     func loadForYou() async {
