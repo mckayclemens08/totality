@@ -122,7 +122,7 @@ export const privacyPage = () => page('Totality privacy policy', `<h1>Privacy po
 <p>Your posts, comments, likes, and follows are kept until you delete them. Deleting a public post removes it from Totality's database right away, along with its likes and comments. You can delete your own comments, and any comment on your own posts. A report about a post you delete still says who it was about and why, but no longer points to the post. Totality doesn't keep separate backups of its database, so a deleted post is gone from it at once.</p>
 <p>Deleting a Friends or Close-friends post tells everyone in that room to remove it, and their apps stop showing it. The encrypted copy stays on the Matrix server, which can't read it, and anyone who already saw the post may have kept a copy.</p>
 <h2>Deleting your account, and contact</h2>
-<p>The app can't delete a whole account yet. Until it can, email mckayclemens@usetotality.com, from Totality Mail or from anywhere else, to have your account and its data deleted, or with any question about privacy.</p>
+<p>The app can't delete a whole account yet. Until it can, email mckay_clemens@usetotality.com, from Totality Mail or from anywhere else, to have your account and its data deleted, or with any question about privacy.</p>
 
 <h2>Messages</h2>
 <p>Messages, the photos and videos sent in them, group chats, and shared task lists go through Totality's Matrix server and are end-to-end encrypted, so the server can't read them. It does know which accounts are in a conversation and when messages are sent, because it has to deliver them.</p>
