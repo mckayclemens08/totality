@@ -83,3 +83,93 @@ extension ReaderModel {
         return parts.joined(separator: "\n\n")
     }
 }
+
+/// Where the journal is showing (issue 128, owner 2026-11-20): today's page, the search, or one earlier
+/// day on its own, opened from the calendar or a search result. Earlier days never stack above today.
+struct JournalPlace: Equatable {
+    /// The search is open, or a day was opened from it and going back returns to the results.
+    var searching = false
+    /// An earlier day, opened on its own. Nil is today's page or the search.
+    var day: String?
+
+    var isToday: Bool { day == nil && !searching }
+
+    /// Opens a day. Today's own day is today's page.
+    mutating func open(_ day: String, today: String?) {
+        self.day = day == today ? nil : day
+        if self.day == nil { searching = false }
+    }
+
+    mutating func search() {
+        day = nil
+        searching = true
+    }
+
+    /// One step back: from a day to the search it came from, or to today.
+    mutating func back() {
+        if day != nil { day = nil } else { searching = false }
+    }
+
+    mutating func goToToday() {
+        self = JournalPlace()
+    }
+
+    var backLabel: String {
+        if day != nil { return searching ? "Back to search" : "Back to today" }
+        return searching ? "Back to today" : "Back to the Reader"
+    }
+}
+
+/// A day the journal's search found, with a few words around the first match.
+struct JournalHit: Identifiable, Equatable {
+    let day: String
+    let snippet: String
+    var id: String { day }
+}
+
+/// Searching the journal's own words, on this device, after they're opened.
+enum JournalSearch {
+    private static let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+
+    /// Each day with a match once, newest first: its entry's words first, then its notes'.
+    static func hits(_ query: String, entries: [ReaderItem], notes: [String: [ReaderItem]], texts: [UUID: String]) -> [JournalHit] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        var byDay: [String: [ReaderItem]] = notes
+        for entry in entries {
+            guard let day = entry.journal?.day else { continue }
+            byDay[day, default: []].insert(entry, at: 0)
+        }
+        return byDay.keys.sorted(by: >).compactMap { day in
+            for item in byDay[day] ?? [] {
+                if let text = texts[item.id], let snippet = snippet(of: text, around: query) {
+                    return JournalHit(day: day, snippet: snippet)
+                }
+            }
+            return nil
+        }
+    }
+
+    /// The words around the first match on one line, without Markdown's markers, cut at whole words.
+    static func snippet(of text: String, around query: String, before: Int = 40, after: Int = 90) -> String? {
+        let plain = text.split(separator: "\n").map { line in
+            var line = Substring(line.trimmingCharacters(in: .whitespaces))
+            while let first = line.first, "#>-*".contains(first) { line = line.dropFirst() }
+            return line.trimmingCharacters(in: .whitespaces)
+        }
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+        .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard let match = plain.range(of: query, options: options) else { return nil }
+        var start = plain.index(match.lowerBound, offsetBy: -before, limitedBy: plain.startIndex) ?? plain.startIndex
+        var end = plain.index(match.upperBound, offsetBy: after, limitedBy: plain.endIndex) ?? plain.endIndex
+        if start > plain.startIndex, let space = plain[start..<match.lowerBound].firstIndex(of: " ") {
+            start = plain.index(after: space)
+        }
+        if end < plain.endIndex, let space = plain[match.upperBound..<end].lastIndex(of: " ") {
+            end = space
+        }
+        let words = String(plain[start..<end])
+        return (start > plain.startIndex ? "…" : "") + words + (end < plain.endIndex ? "…" : "")
+    }
+}

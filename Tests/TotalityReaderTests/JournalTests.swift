@@ -370,3 +370,84 @@ private final class JournalKeys: KeyStore, @unchecked Sendable {
         #expect(try await moved.journalText(of: draft.id) == "Planted the tomatoes. Watered.")
     }
 }
+
+/// Opening the journal shows today alone. Earlier days open one at a time, from the calendar or the
+/// journal's search (owner, 2026-11-20).
+@Suite struct JournalPlaceTests {
+    @Test("The journal opens on today, and today's own day from the calendar stays there")
+    func opensOnToday() {
+        var place = JournalPlace()
+        #expect(place.isToday)
+        #expect(place.backLabel == "Back to the Reader")
+        place.open("2026-11-20", today: "2026-11-20")
+        #expect(place.isToday)
+    }
+
+    @Test("A day from the calendar opens on its own, and back returns to today")
+    func calendarDay() {
+        var place = JournalPlace()
+        place.open("2026-11-12", today: "2026-11-20")
+        #expect(!place.isToday)
+        #expect(place.day == "2026-11-12")
+        #expect(place.backLabel == "Back to today")
+        place.back()
+        #expect(place.isToday)
+    }
+
+    @Test("A day from the search goes back to the results, then to today")
+    func searchDay() {
+        var place = JournalPlace()
+        place.search()
+        #expect(place.backLabel == "Back to today")
+        place.open("2026-11-12", today: "2026-11-20")
+        #expect(place.backLabel == "Back to search")
+        place.back()
+        #expect(place.searching && place.day == nil)
+        place.open("2026-11-03", today: "2026-11-20")
+        place.goToToday()
+        #expect(place.isToday)
+        place.search()
+        place.open("2026-11-20", today: "2026-11-20")
+        #expect(place.isToday)
+    }
+}
+
+@Suite struct JournalSearchTests {
+    private func item(day: String, about: String? = nil) -> ReaderItem {
+        let date = Date(timeIntervalSince1970: 1_793_000_000)
+        var made = ReaderItem(id: UUID(), kind: .journal, title: "", collection: nil, mime: nil, byteCount: 10,
+                              createdAt: date, updatedAt: date, listenPosition: 0)
+        made.journal = JournalStamp(day: day, zone: "America/Denver", about: about)
+        return made
+    }
+
+    @Test("Each matching day comes once, newest first, with notes found under their day")
+    func hits() {
+        let early = item(day: "2026-11-02")
+        let late = item(day: "2026-11-15")
+        let other = item(day: "2026-11-10")
+        let note = item(day: "2026-11-12", about: "2026-11-10")
+        let texts = [
+            early.id: "Climbed the slab at Rocklands with Sam.",
+            late.id: "# Rest day\n\nSam called about the slab again. The slab, always the slab.",
+            other.id: "Bread rose overnight.",
+            note.id: "Thought about the Slab while the bread baked.",
+        ]
+        let found = JournalSearch.hits("slab", entries: [early, late, other], notes: ["2026-11-10": [note]], texts: texts)
+        #expect(found.map(\.day) == ["2026-11-15", "2026-11-10", "2026-11-02"])
+        #expect(found[0].snippet.hasPrefix("Rest day Sam called about the slab"))
+        #expect(found[1].snippet.contains("Slab while the bread"))
+        #expect(JournalSearch.hits("  ", entries: [early], notes: [:], texts: texts).isEmpty)
+        #expect(JournalSearch.hits("café", entries: [early], notes: [:], texts: [early.id: "Coffee at the cafe."]).count == 1)
+        #expect(JournalSearch.hits("rocklands", entries: [other], notes: [:], texts: texts).isEmpty)
+    }
+
+    @Test("A snippet keeps whole words around the match, on one line, and says where it was cut")
+    func snippet() throws {
+        let text = "- First we drove out before dawn to beat the heat on the approach.\n- Then the crux move went on the third try, which felt like a small miracle after the week we'd had at work and at home."
+        let cut = try #require(JournalSearch.snippet(of: text, around: "crux", before: 20, after: 20))
+        #expect(cut == "…approach. Then the crux move went on the…")
+        #expect(JournalSearch.snippet(of: "Short day.", around: "short") == "Short day.")
+        #expect(JournalSearch.snippet(of: "Short day.", around: "long") == nil)
+    }
+}

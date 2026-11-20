@@ -43,9 +43,9 @@ struct JournalRow: View {
     }
 }
 
-/// The journal (issue 128): one page, oldest day first, opening at today with the cursor ready. Only
-/// today can be written in. Earlier days are read-only, can be listened to, copied and searched, and take
-/// notes added under them.
+/// The journal (issue 128). It opens on today alone, with the cursor ready, and only today can be written
+/// in. Earlier days are reached only by the calendar or the journal's own search (owner, 2026-11-20), and
+/// open one at a time: read-only, and can be listened to, copied, and take notes added under them.
 struct JournalView: View {
     let model: ReaderModel
     /// A day to show first, as from a search. Today when nil.
@@ -58,7 +58,8 @@ struct JournalView: View {
     @State private var noteFor: NoteDraft?
     @State private var showsMonth = false
     @State private var showsExport = false
-    @State private var shownDay: String?
+    @State private var place = JournalPlace()
+    @State private var query = ""
     @Environment(\.dismiss) private var dismiss
 
     struct NoteDraft: Identifiable {
@@ -68,10 +69,9 @@ struct JournalView: View {
 
     private var todayDay: String? { today?.journal?.day }
 
-    /// Days with something in them, oldest first, today's last and apart.
-    private var pastDays: [String] {
-        let days = model.journal.days.union(model.journal.notes.keys)
-        return days.filter { $0 != todayDay }.sorted()
+    /// Days with something in them, other than today.
+    private var pastDays: Set<String> {
+        model.journal.days.union(model.journal.notes.keys).subtracting([todayDay].compactMap { $0 })
     }
 
     var body: some View {
@@ -83,7 +83,18 @@ struct JournalView: View {
                     detail: "This device's copy couldn't be read. Go back and try again."
                 )
             } else if let today {
-                page(today)
+                ZStack {
+                    // Today's page stays put underneath, so its writing page doesn't start over.
+                    todayPage(today)
+                        .opacity(place.isToday ? 1 : 0)
+                        .allowsHitTesting(place.isToday)
+                        .accessibilityHidden(!place.isToday)
+                    if let day = place.day {
+                        dayPage(day)
+                    } else if place.searching {
+                        searchPage
+                    }
+                }
             } else {
                 ProgressView("Opening your journal")
                     .font(Typeface.callout)
@@ -93,7 +104,7 @@ struct JournalView: View {
         .background(theme.bg.color)
         // Outside the scrolling page, so it rides above the keyboard instead of hiding under it.
         .safeAreaInset(edge: .bottom) {
-            if today != nil {
+            if today != nil, place.isToday {
                 WritingFormatBar(controller: editor)
                     .background(theme.bg.color)
             }
@@ -104,12 +115,24 @@ struct JournalView: View {
         // The Journal draws its own header (redesign, 2026-11-17).
         .toolbar(.hidden, for: .navigationBar)
         #endif
-        .safeAreaInset(edge: .top, spacing: 0) { header }
-        .edgeSwipeBack { dismiss() }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            JournalHeader(
+                place: place, streak: model.journalStreak,
+                onBack: back,
+                onToday: { withMotion(Motion.smooth) { place.goToToday() } },
+                onSearch: { withMotion(Motion.smooth) { place.search() } },
+                onCalendar: { showsMonth = true },
+                onExport: { showsExport = true }
+            )
+        }
+        .edgeSwipeBack { back() }
         .sheet(isPresented: $showsMonth) {
             JournalMonthSheet(days: model.journal.days.union(model.journal.notes.keys), today: todayDay) { day in
                 showsMonth = false
-                shownDay = day
+                withMotion(Motion.smooth) {
+                    place.goToToday()
+                    place.open(day, today: todayDay)
+                }
             }
         }
         .sheet(isPresented: $showsExport) {
@@ -135,91 +158,64 @@ struct JournalView: View {
         .onChange(of: model.journal) { Task { await loadTexts() } }
     }
 
-    /// Back to the Reader, the streak, Calendar and Export, then the big title.
-    private var header: some View {
-        let theme = Theme.current
-        let streak = model.journalStreak
-        return VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: Space.s3) {
-                HeaderButton("Back to the Reader", systemImage: "chevron.left") { dismiss() }
-                Spacer(minLength: 0)
-                if streak > 1 {
-                    Text("\(streak)-day streak")
-                        .font(Typeface.caption.weight(.semibold))
-                        .foregroundStyle(theme.accent.color)
-                        .padding(.horizontal, Space.s3)
-                        .padding(.vertical, Space.s2)
-                        .background(theme.highlight.color, in: Capsule())
-                }
-                HeaderButton("Calendar", systemImage: "calendar") { showsMonth = true }
-                HeaderButton("Export", systemImage: "square.and.arrow.up") { showsExport = true }
-            }
-            .frame(minHeight: Metric.headerButton)
-            ScreenTitle("Journal")
-        }
-        .padding(.horizontal, Space.s4)
-        .padding(.top, Space.s2)
-        .padding(.bottom, Space.s2)
-        .background(theme.bg.color)
-    }
-
-    private func page(_ today: ReaderItem) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: Space.s4) {
-                    if pastDays.isEmpty {
-                        Text("Your journal starts today")
-                            .font(Typeface.title)
-                            .foregroundStyle(Theme.current.textPrimary.color)
-                            .padding(.top, Space.s6)
-                    }
-                    ForEach(pastDays, id: \.self) { day in
-                        JournalPastDay(
-                            day: day, entry: entry(on: day), notes: model.journal.notes[day] ?? [], texts: texts,
-                            onListen: { id in Task { await model.startListening(to: id) } },
-                            onAddNote: { addNote(under: day) },
-                            onEditNote: { note in noteFor = NoteDraft(item: note) }
-                        )
-                        .itemCard()
-                        .id(day)
-                    }
-                    todaySection(today)
-                        .id("today")
-                }
-                .padding(.horizontal, Space.s4)
-            }
-            .onChange(of: shownDay) {
-                guard let day = shownDay else { return }
-                shownDay = nil
-                withMotion(Motion.smooth) { proxy.scrollTo(day == todayDay ? "today" : day, anchor: .top) }
-            }
-            .onAppear {
-                if let showing, showing != todayDay { shownDay = showing }
-            }
+    private func back() {
+        if place.isToday {
+            dismiss()
+        } else {
+            withMotion(Motion.smooth) { place.back() }
         }
     }
 
-    private func todaySection(_ today: ReaderItem) -> some View {
-        let theme = Theme.current
-        return VStack(alignment: .leading, spacing: Space.s2) {
-            Text(todayDay.map { "Today · \(JournalClock.heading($0))" } ?? "Today")
-                .font(Typeface.callout.weight(.semibold))
-                .foregroundStyle(theme.accent.color)
-            // Literally true: every journal entry is sealed with ContentCipher before it's written or synced.
-            Label("Sealed on this device before it syncs", systemImage: "lock.fill")
-                .font(Typeface.caption)
-                .foregroundStyle(theme.textSecondary.color)
-            ForEach(model.journal.notes[todayDay ?? ""] ?? []) { note in
-                JournalNoteBlock(note: note, text: texts[note.id] ?? "") { noteFor = NoteDraft(item: note) }
+    private func todayPage(_ today: ReaderItem) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.s4) {
+                if pastDays.isEmpty {
+                    Text("Your journal starts today")
+                        .font(Typeface.title)
+                        .foregroundStyle(Theme.current.textPrimary.color)
+                        .padding(.top, Space.s4)
+                }
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    JournalTodayHeading(day: todayDay, notes: model.journal.notes[todayDay ?? ""] ?? [], texts: texts) { note in
+                        noteFor = NoteDraft(item: note)
+                    }
+                    JournalEditor(
+                        draft: today, model: model, editor: editor, placeholder: "What happened today?", focusOnOpen: showing == nil,
+                        onDayEnd: { Task { await nextDay() } }, showsBar: false
+                    )
+                        // The page's own gutter lines the writing up with the headings above it.
+                        .padding(.horizontal, -Space.s4)
+                        .containerRelativeFrame(.vertical) { height, _ in height * 0.85 }
+                }
             }
-            JournalEditor(
-                draft: today, model: model, editor: editor, placeholder: "What happened today?", focusOnOpen: showing == nil,
-                onDayEnd: { Task { await nextDay() } }, showsBar: false
+            .padding(.horizontal, Space.s4)
+        }
+    }
+
+    /// One earlier day on its own, read-only.
+    private func dayPage(_ day: String) -> some View {
+        ScrollView {
+            JournalDayPage(
+                day: day, entry: entry(on: day), notes: model.journal.notes[day] ?? [], texts: texts,
+                onListen: { id in Task { await model.startListening(to: id) } },
+                onAddNote: { addNote(under: day) },
+                onEditNote: { note in noteFor = NoteDraft(item: note) },
+                onToday: { withMotion(Motion.smooth) { place.goToToday() } }
             )
-                // The page's own gutter lines the writing up with the headings above it.
-                .padding(.horizontal, -Space.s4)
-                .containerRelativeFrame(.vertical) { height, _ in height * 0.85 }
+            .padding(.horizontal, Space.s4)
+            .padding(.top, Space.s2)
         }
+        .background(Theme.current.bg.color)
+    }
+
+    private var searchPage: some View {
+        var all = texts
+        if let today { all[today.id] = editor.text }
+        let hits = JournalSearch.hits(query, entries: model.journal.entries, notes: model.journal.notes, texts: all)
+        return JournalSearchPage(query: $query, hits: hits, today: todayDay) { day in
+            withMotion(Motion.smooth) { place.open(day, today: todayDay) }
+        }
+        .background(Theme.current.bg.color)
     }
 
     private func entry(on day: String) -> ReaderItem? {
@@ -230,13 +226,15 @@ struct JournalView: View {
         do {
             await model.loadJournal()
             today = try await model.journalToday()
+            if let showing { place.open(showing, today: todayDay) }
             await loadTexts()
         } catch {
             failed = true
         }
     }
 
-    /// Past days' words. A closed day's can't change, so it's read once. Notes and open days are read again.
+    /// Earlier days' words, for opening a day and for the search. A closed day's can't change, so it's
+    /// read once. Notes and open days are read again.
     private func loadTexts() async {
         for item in model.journal.entries + model.journal.notes.values.joined() where item.id != today?.id {
             let closed = item.journal?.isClosed(at: Date()) == true
@@ -258,6 +256,173 @@ struct JournalView: View {
                 noteFor = NoteDraft(item: try await model.journalNote(under: day))
             } catch {
                 model.notice = "A note couldn't be added here."
+            }
+        }
+    }
+}
+
+/// The journal's header: back, the streak or a way to today, Search, Calendar and Export, then the title.
+struct JournalHeader: View {
+    let place: JournalPlace
+    let streak: Int
+    let onBack: () -> Void
+    let onToday: () -> Void
+    let onSearch: () -> Void
+    let onCalendar: () -> Void
+    let onExport: () -> Void
+
+    var body: some View {
+        let theme = Theme.current
+        VStack(alignment: .leading, spacing: Space.s3) {
+            HStack(spacing: Space.s3) {
+                HeaderButton(place.backLabel, systemImage: "chevron.left", action: onBack)
+                Spacer(minLength: 0)
+                if !place.isToday {
+                    HeaderPill("Today", action: onToday)
+                } else if streak > 1 {
+                    Text("\(streak)-day streak")
+                        .font(Typeface.caption.weight(.semibold))
+                        .foregroundStyle(theme.accent.color)
+                        .padding(.horizontal, Space.s3)
+                        .padding(.vertical, Space.s2)
+                        .background(theme.highlight.color, in: Capsule())
+                }
+                if !place.searching || place.day != nil {
+                    HeaderButton("Search your journal", systemImage: "magnifyingglass", action: onSearch)
+                }
+                HeaderButton("Calendar", systemImage: "calendar", action: onCalendar)
+                HeaderButton("Export", systemImage: "square.and.arrow.up", action: onExport)
+            }
+            .frame(minHeight: Metric.headerButton)
+            ScreenTitle("Journal")
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s2)
+        .padding(.bottom, Space.s2)
+        .background(theme.bg.color)
+    }
+}
+
+/// Today's date, the seal, and any notes added today, above today's writing page.
+struct JournalTodayHeading: View {
+    let day: String?
+    let notes: [ReaderItem]
+    let texts: [UUID: String]
+    let onEditNote: (ReaderItem) -> Void
+
+    var body: some View {
+        let theme = Theme.current
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text(day.map { "Today · \(JournalClock.heading($0))" } ?? "Today")
+                .font(Typeface.callout.weight(.semibold))
+                .foregroundStyle(theme.accent.color)
+            // Literally true: every journal entry is sealed with ContentCipher before it's written or synced.
+            Label("Sealed on this device before it syncs", systemImage: "lock.fill")
+                .font(Typeface.caption)
+                .foregroundStyle(theme.textSecondary.color)
+            ForEach(notes) { note in
+                JournalNoteBlock(note: note, text: texts[note.id] ?? "") { onEditNote(note) }
+            }
+        }
+    }
+}
+
+/// An earlier day opened on its own: the day in a card, or word that nothing was written, and a way back.
+struct JournalDayPage: View {
+    let day: String
+    let entry: ReaderItem?
+    let notes: [ReaderItem]
+    let texts: [UUID: String]
+    let onListen: (UUID) -> Void
+    let onAddNote: () -> Void
+    let onEditNote: (ReaderItem) -> Void
+    let onToday: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            if entry == nil && notes.isEmpty {
+                ReaderMessage(
+                    systemImage: "calendar", title: "Nothing written that day",
+                    detail: "\(JournalClock.heading(day)) has no entry."
+                )
+            } else {
+                JournalPastDay(
+                    day: day, entry: entry, notes: notes, texts: texts,
+                    onListen: onListen, onAddNote: onAddNote, onEditNote: onEditNote
+                )
+                .itemCard()
+            }
+            Button(action: onToday) {
+                Label("Back to today", systemImage: "arrow.uturn.backward")
+                    .font(Typeface.callout.weight(.semibold))
+                    .foregroundStyle(Theme.current.accent.color)
+            }
+            .buttonStyle(SoftPress())
+        }
+    }
+}
+
+/// The journal's own search: a box, then each day that matches with its date and the words around it.
+struct JournalSearchPage: View {
+    @Binding var query: String
+    let hits: [JournalHit]
+    let today: String?
+    let onOpen: (String) -> Void
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s4) {
+            SearchBox("Search your journal", text: $query)
+                .focused($focused)
+            ScrollView {
+                JournalSearchResults(query: query, hits: hits, today: today, onOpen: onOpen)
+                    .padding(.bottom, Space.s4)
+            }
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.top, Space.s2)
+        .onAppear { focused = true }
+    }
+}
+
+/// What the journal's search found, or why there's nothing to show.
+struct JournalSearchResults: View {
+    let query: String
+    let hits: [JournalHit]
+    let today: String?
+    let onOpen: (String) -> Void
+
+    var body: some View {
+        let theme = Theme.current
+        LazyVStack(alignment: .leading, spacing: Space.s3) {
+            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("Find a day by something you wrote in it. To go to a date, use the calendar.")
+                    .font(Typeface.callout)
+                    .foregroundStyle(theme.textSecondary.color)
+            } else if hits.isEmpty {
+                ReaderMessage(
+                    systemImage: "magnifyingglass", title: "Nothing matches",
+                    detail: "No day in your journal has “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”."
+                )
+            } else {
+                ForEach(hits) { hit in
+                    Button { onOpen(hit.day) } label: {
+                        VStack(alignment: .leading, spacing: Space.s1) {
+                            Text(hit.day == today ? "Today · \(JournalClock.heading(hit.day))" : JournalClock.heading(hit.day))
+                                .font(Typeface.headline)
+                                .foregroundStyle(theme.textPrimary.color)
+                            Text(hit.snippet)
+                                .font(Typeface.callout)
+                                .foregroundStyle(theme.textSecondary.color)
+                                .lineLimit(3)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .itemCard()
+                    }
+                    .buttonStyle(SoftPress())
+                }
             }
         }
     }
