@@ -30,7 +30,7 @@ final class FakeSocialWorld: @unchecked Sendable {
 
     func person(_ name: String) -> FakeSocial {
         lock.withLock { _ = people.insert(name) }
-        return FakeSocial(world: self, me: name)
+        return FakeSocial(world: self, signedIn: SignedIn(name))
     }
 
     func tick() -> Date {
@@ -39,9 +39,16 @@ final class FakeSocialWorld: @unchecked Sendable {
     }
 }
 
+/// Who is signed in on a fake phone, which can change, as signing out and in again does.
+final class SignedIn: @unchecked Sendable {
+    var name: String
+    init(_ name: String) { self.name = name }
+}
+
 struct FakeSocial: SocialServer {
     let world: FakeSocialWorld
-    let me: String
+    let signedIn: SignedIn
+    var me: String { signedIn.name }
 
     private func view(_ row: FakeSocialWorld.Row) -> SocialPost {
         var p = row.post

@@ -365,6 +365,24 @@ actor FakeAccountService: AccountService {
         #expect(!model.deviceRegistered)
     }
 
+    @Test("The app hears each time an account leaves, so it can drop what was that account's")
+    func anAccountLeavingIsAnnounced() async {
+        let service = FakeAccountService(username: "mckay_clemens")
+        let model = AccountModel(service: service)
+        var left: [String] = []
+        model.onAccountLeft = { left.append($0) }
+        await model.load()
+        #expect(left.isEmpty, "opening the app signed in isn't anyone leaving")
+        await model.signOut()
+        await model.signUp(username: "applereview", password: password, confirmation: password)
+        await model.load()
+        #expect(left == ["mckay_clemens"], "loading again as the same account isn't a change")
+        await model.signOut()
+        await model.signUp(username: "applereview2", password: password, confirmation: password)
+        #expect(left == ["mckay_clemens", "applereview"])
+        #expect(model.phase == .signedIn(username: "applereview2"))
+    }
+
     @Test func signingOutReturnsToTheStart() async {
         let model = AccountModel(service: FakeAccountService(username: "owner"))
         await model.load()

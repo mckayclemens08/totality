@@ -114,6 +114,7 @@ struct RootView: View {
                 contentProblem = nil
             }
             contentKeys.didMove = { account?.sync?.resume() }
+            watchAccountChanges()
             await account?.backup?.settleDevice()
             connectSync()
             await openContentForHome()
@@ -585,12 +586,29 @@ struct RootView: View {
                 bringUp(.messages)
             }
         }
+        return model
+    }
+
+    /// Signing out, or in as someone else, leaves nothing of the last account's behind: Social and shared
+    /// lists are made again for whoever is next, and Messages stops the last account's connection. The
+    /// content key and Messages' stores stay on the device, as the standing rules say.
+    private func watchAccountChanges() {
+        account?.onAccountLeft = { _ in
+            social = nil
+            if sharedLists != nil, let registry { sharedLists = makeSharedLists(directory: registry.profiles) }
+            if open == .social { open = nil }
+            Task {
+                await messages.checkAccount()
+                await tellWhoIsHere()
+            }
+        }
+        // Always the Social of whoever is signed in now, never a model made for someone before them.
         account?.onOpenSocialProfile = {
             showingAccount = false
-            Task { model.requestedProfile = await AccountSetup.username?() }
+            if social == nil { social = makeSocial() }
+            Task { social?.requestedProfile = await AccountSetup.username?() }
             bringUp(.social)
         }
-        return model
     }
 
     private func makeSharedLists(directory: (any ProfileDirectory)?) -> SharedListsModel? {

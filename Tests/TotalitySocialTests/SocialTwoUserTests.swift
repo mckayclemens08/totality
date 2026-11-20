@@ -14,6 +14,30 @@ import TotalityCore
         SocialModel(server: world.person(name), privateRooms: matrix.device(for: name))
     }
 
+    @Test("Signing in as someone else on the same phone shows nothing of the last account's")
+    func anotherAccountOnTheSamePhoneSeesNothingOfTheLast() async throws {
+        let maya = device("maya"), jonah = device("jonah")
+        for (a, b) in [(jonah, "maya"), (maya, "jonah")] { await a.load(); #expect(await a.setFollowing(true, b)) }
+        await maya.load()
+        #expect(await maya.publish(.friends, title: "", body: "Only for friends: the spare key is under the fern."))
+        #expect(await maya.publish(.everyone, title: "Trailhead at dawn", body: "Frost on the boardwalk."))
+
+        // Jonah's phone, one Social model, then Jonah signs out and Priya signs up on it.
+        let server = world.person("jonah"), rooms = matrix.device(for: "jonah")
+        let phone = SocialModel(server: server, privateRooms: rooms)
+        await phone.load()
+        #expect(phone.me == "jonah")
+        #expect(phone.following.contains { $0.audience == .friends })
+        server.signedIn.name = "priya"
+        // Messages hasn't connected Priya yet, so Social can't read any private rooms for her.
+        rooms.me = "priya"
+        rooms.unavailableReason = "Messages is still connecting."
+        await phone.load()
+        #expect(phone.me == "priya")
+        #expect(!phone.following.contains { $0.audience == .friends }, "Jonah's Friends posts never reach Priya")
+        #expect(phone.friends.isEmpty && phone.followingSet.isEmpty)
+    }
+
     @Test func friendsPostsReachOnlyFriends() async throws {
         let maya = device("maya"), jonah = device("jonah"), priya = device("priya")
         // Jonah and Maya follow each other; Priya follows Maya but Maya doesn't follow back.

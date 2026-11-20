@@ -43,7 +43,7 @@ final class FakeServer {
 @MainActor
 final class FakeRooms: SharedRooms {
     let server: FakeServer
-    let me: String
+    var me: String
     var unavailableReason: String?
 
     init(server: FakeServer, me: String) {

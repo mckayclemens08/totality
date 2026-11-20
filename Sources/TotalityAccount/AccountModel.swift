@@ -17,7 +17,16 @@ public final class AccountModel {
     /// The server's hash only reads this many bytes, and it refuses anything longer.
     private static let maximumPasswordBytes = 72
 
-    public private(set) var phase = Phase.loading
+    public private(set) var phase = Phase.loading {
+        didSet {
+            guard case .signedIn(let old) = oldValue, phase != oldValue else { return }
+            onAccountLeft?(old)
+        }
+    }
+    /// Called once the signed-in account signs out or is replaced, with the username that left. Anything
+    /// the app keeps per account (Social, shared lists, Messages' connection) must drop it here, so the
+    /// next account never sees or acts as this one.
+    public var onAccountLeft: (@MainActor (String) -> Void)?
     public private(set) var isWorking = false
     /// False after sign-in if this device could not be added. Signing in still counts.
     public private(set) var deviceRegistered = false

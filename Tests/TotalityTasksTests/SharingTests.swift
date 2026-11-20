@@ -36,6 +36,23 @@ import TotalityCore
         return (room, me, priya, maya)
     }
 
+    @Test("Signing in as someone else on the same phone drops the last account's shared lists")
+    func anotherAccountOnTheSamePhone() async throws {
+        let rooms = server.device(for: "mckay")
+        _ = server.device(for: "priya")
+        let phone = SharedListsModel(rooms: rooms, now: { agreed })
+        await phone.refresh()
+        let (list, tasks) = project()
+        _ = try #require(await phone.share(list, tasks: tasks, with: ["priya": .editor]))
+        await phone.refresh()
+        #expect(phone.lists.count == 1)
+        rooms.me = "applereview2"
+        server.failNextRooms = true
+        await phone.refresh()
+        #expect(phone.own == "applereview2")
+        #expect(phone.lists.isEmpty, "even when the new account's rooms can't be read yet")
+    }
+
     @Test("Sharing puts the list and only its tasks in the room, without area, reminders or snoozes")
     func share() async throws {
         let (room, me, _, _) = try await shared()

@@ -74,7 +74,15 @@ public final class SharedListsModel {
         refreshing = true
         defer { refreshing = false }
         if phase == .idle { phase = .loading }
-        own = await rooms.ownUsername
+        let now = await rooms.ownUsername
+        if now != own {
+            // Someone else is signed in to Messages now, so the last account's lists and invites go.
+            lists = []
+            invites = []
+            profiles = [:]
+            notice = nil
+        }
+        own = now
         do {
             invites = try await rooms.invites()
             var loaded: [SharedListState] = []
