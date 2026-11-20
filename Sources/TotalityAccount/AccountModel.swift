@@ -54,11 +54,17 @@ public final class AccountModel {
     /// Browsers paired with the website, listed under Devices with Remove.
     public var browsers: BrowsersModel?
     private let service: any AccountService
+    /// Usernames whose Matrix address is known to exist, so it's set up once and not on every launch.
+    private let marks: UserDefaults
+    private static let messagesReadyKey = "account.messagesAccountReady"
+    private var settingUpMessages = false
 
     public init(
-        service: any AccountService, backup: BackupModel? = nil, sync: SyncModel? = nil, syncRemote: (any SyncRemote)? = nil
+        service: any AccountService, backup: BackupModel? = nil, sync: SyncModel? = nil, syncRemote: (any SyncRemote)? = nil,
+        marks: UserDefaults = .standard
     ) {
         self.service = service
+        self.marks = marks
         self.backup = backup
         self.sync = sync
         self.syncRemote = syncRemote
@@ -239,6 +245,29 @@ public final class AccountModel {
         await registerDevice()
         await loadProfile()
         await loadWebPage()
+        await setUpMessagesIfNeeded()
+    }
+
+    /// Owner, 2026-11-20 ("Yes, at sign-up"): a new account can be found in Messages straight away, not
+    /// only once it first opens Messages. This runs after the profile, since the Matrix pass is made from
+    /// its handle. It's quiet: if the Matrix server is down, signing up or in still works and nothing shows,
+    /// and the next sign-in or return to the app tries again.
+    public func setUpMessagesIfNeeded() async {
+        guard case .signedIn(let username) = phase, !settingUpMessages, !messagesReady.contains(username) else { return }
+        settingUpMessages = true
+        defer { settingUpMessages = false }
+        do {
+            // The account can change while this waits, so the name marked is the one the server set up.
+            let done = try await service.setUpMessagesAccount()
+            marks.set(Array(messagesReady.union([done])).sorted(), forKey: Self.messagesReadyKey)
+        } catch {}
+    }
+
+    /// Whether this username's Matrix address is known to exist.
+    func messagesIsReady(_ username: String) -> Bool { messagesReady.contains(username) }
+
+    private var messagesReady: Set<String> {
+        Set(marks.stringArray(forKey: Self.messagesReadyKey) ?? [])
     }
 
     private func registerDevice() async {

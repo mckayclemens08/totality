@@ -34,6 +34,23 @@ actor FakeAccountService: AccountService {
     private(set) var signIns: [String] = []
     private(set) var signUps: [String] = []
     private(set) var devices = 0
+    /// Accounts given a Matrix address, in order. Stands in for the Matrix server's directory.
+    private(set) var messagesAccounts: [String] = []
+    var messagesError: AccountError?
+    func failMessages(_ error: AccountError?) { messagesError = error }
+    private var holdingMessages = false
+    private var heldMessages: CheckedContinuation<Void, Never>?
+    func holdMessages() { holdingMessages = true }
+    func waitForHeldMessages() async { while heldMessages == nil { await Task.yield() } }
+    func releaseMessages() { holdingMessages = false; heldMessages?.resume(); heldMessages = nil }
+    /// Like the server, the name comes from the pass, which is made when the call starts.
+    func setUpMessagesAccount() async throws -> String {
+        if let messagesError { throw messagesError }
+        guard let name = username else { throw AccountError.failed }
+        if holdingMessages { await withCheckedContinuation { heldMessages = $0 } }
+        messagesAccounts.append(name)
+        return name
+    }
 
     init(username: String? = nil) { self.username = username }
     func fail(signIn: AccountError? = nil, signUp: AccountError? = nil, device: AccountError? = nil, signOut: AccountError? = nil) {
@@ -267,6 +284,79 @@ actor FakeAccountService: AccountService {
         #expect(model.phase == .signedIn(username: "owner"))
         #expect(await service.signUps == ["owner"])
         #expect(await service.devices == 1)
+    }
+
+    private func freshMarks() -> UserDefaults { UserDefaults(suiteName: "test.\(UUID().uuidString)")! }
+
+    @Test("A new account gets its Matrix address at sign-up, before it ever opens Messages")
+    func signUpSetsUpMessages() async {
+        let service = FakeAccountService()
+        let model = AccountModel(service: service, marks: freshMarks())
+        await model.signUp(username: "Applereview", password: password, confirmation: password)
+        #expect(await service.messagesAccounts == ["applereview"])
+    }
+
+    @Test("Matrix being down never stops sign-up, and a later return to the app tries again")
+    func messagesDownStillSignsUp() async {
+        let service = FakeAccountService()
+        await service.failMessages(.offline)
+        let model = AccountModel(service: service, marks: freshMarks())
+        await model.signUp(username: "owner", password: password, confirmation: password)
+        #expect(model.phase == .signedIn(username: "owner"))
+        #expect(model.notice == nil, "nothing shows for it")
+        #expect(await service.messagesAccounts.isEmpty)
+        await service.failMessages(nil)
+        await model.setUpMessagesIfNeeded()
+        #expect(await service.messagesAccounts == ["owner"])
+    }
+
+    @Test("An existing account that never opened Messages is set up once, on launch, then left alone")
+    func existingAccountSetUpOnce() async {
+        let service = FakeAccountService(username: "owner")
+        let marks = freshMarks()
+        let model = AccountModel(service: service, marks: marks)
+        await model.load()
+        await model.setUpMessagesIfNeeded()
+        await AccountModel(service: service, marks: marks).load()
+        #expect(await service.messagesAccounts == ["owner"])
+    }
+
+    @Test("Each account on the phone is set up for itself")
+    func eachAccountSetUp() async {
+        let service = FakeAccountService(username: "jonah")
+        let model = AccountModel(service: service, marks: freshMarks())
+        await model.load()
+        await model.signOut()
+        await model.signIn(username: "priya", password: password)
+        #expect(await service.messagesAccounts == ["jonah", "priya"])
+    }
+
+    @Test("An account switch mid-set-up marks only the account the server set up")
+    func switchMidSetUpMarksTheRightAccount() async {
+        let service = FakeAccountService(username: "jonah")
+        let model = AccountModel(service: service, marks: freshMarks())
+        await service.holdMessages()
+        async let first: Void = model.load()
+        await service.waitForHeldMessages()
+        await model.signOut()
+        await service.failMessages(.offline)
+        await model.signIn(username: "priya", password: password)
+        await service.releaseMessages()
+        await first
+        #expect(model.messagesIsReady("jonah"))
+        #expect(!model.messagesIsReady("priya"), "Priya was never set up")
+        await service.failMessages(nil)
+        await model.setUpMessagesIfNeeded()
+        #expect(await service.messagesAccounts == ["jonah", "priya"])
+    }
+
+    @Test("Nobody signed in, nothing set up")
+    func signedOutSetsUpNothing() async {
+        let service = FakeAccountService()
+        let model = AccountModel(service: service, marks: freshMarks())
+        await model.load()
+        await model.setUpMessagesIfNeeded()
+        #expect(await service.messagesAccounts.isEmpty)
     }
 
     @Test("A reserved name gets the plain answer and never reaches the server", arguments: ["Admin", "postmaster", "mckayclemens"])
