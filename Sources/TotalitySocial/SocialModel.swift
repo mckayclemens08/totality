@@ -344,8 +344,18 @@ public final class SocialModel {
     }
 
     /// Stops someone following you. They aren't told; they just stop seeing a private account's posts.
+    /// They also leave your encrypted Friends room and your Close friends straight away, so your next
+    /// Friends or Close-friends post doesn't reach them.
     public func removeFollower(_ username: String) async -> Bool {
-        do { try await server.removeFollower(username); return true } catch { notice = Self.message(error); return false }
+        do { try await server.removeFollower(username) } catch { notice = Self.message(error); return false }
+        if let privatePosts, privateReason == nil {
+            friends = Set((try? await server.friends()) ?? Array(friends.subtracting([username])))
+            if closeFriends.contains(username) { _ = await setCloseFriends(closeFriends.subtracting([username])) }
+            if (try? await privatePosts.members(.friends))?.contains(username) == true {
+                try? await privatePosts.setMembers(friends, of: .friends)
+            }
+        }
+        return true
     }
 
     /// Muting hides their posts from your feeds. They aren't told.
