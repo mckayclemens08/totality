@@ -17,6 +17,8 @@ final class FakeSocialWorld: @unchecked Sendable {
     var reports: [(from: String, about: String, post: UUID?, comment: UUID?, reason: String)] = []
     var requests: [String: Set<String>] = [:]
     var ids: [String: UUID] = [:]
+    /// Display names, for lists that show them.
+    var names: [String: String] = [:]
 
     func id(_ name: String) -> UUID {
         if let id = ids[name] { return id }
@@ -134,6 +136,25 @@ struct FakeSocial: SocialServer {
 
     func followers(of username: String) async throws -> [String] { world.lock.withLock { world.follows.filter { $0[1] == username }.map { $0[0] }.sorted() } }
     func followed(by username: String) async throws -> [String] { world.lock.withLock { world.follows.filter { $0[0] == username }.map { $0[1] }.sorted() } }
+
+    /// Like `social_people`: a private account's lists are empty to anyone but it and its followers. The
+    /// fake has no follow times, so it pages by username instead.
+    func people(of username: String, followers: Bool, query: String?, after: PeopleCursor?, limit: Int) async throws -> [SocialPerson] {
+        world.lock.withLock {
+            if world.settings[username]?.privateAccount == true, me != username, !world.follows.contains([me, username]) { return [] }
+            let names = world.follows.filter { followers ? $0[1] == username : $0[0] == username }.map { followers ? $0[0] : $0[1] }
+            let q = query?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@ "))
+            return names.sorted()
+                .filter { q == nil || q!.isEmpty || $0.hasPrefix(q!) }
+                .filter { after == nil || $0 > after!.username }
+                .prefix(limit)
+                .map { name in
+                    SocialPerson(username: name, displayName: world.names[name], iFollow: world.follows.contains([me, name]), followsMe: world.follows.contains([name, me]),
+                                 requested: world.requests[name]?.contains(me) ?? false,
+                                 muted: world.mutes[me]?.contains(world.id(name)) ?? false, accountID: world.id(name))
+                }
+        }
+    }
 
     func markSeen(_ posts: [UUID], notInterested: Bool) async throws {
         world.lock.withLock { world.seen[me, default: []].formUnion(posts) }

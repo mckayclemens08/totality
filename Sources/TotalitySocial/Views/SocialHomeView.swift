@@ -19,6 +19,8 @@ public struct SocialHomeView: View {
     enum Route: Hashable {
         case post(UUID)
         case profile(String)
+        /// Someone's Followers (or Following) list.
+        case people(String, followers: Bool)
     }
 
     public var body: some View {
@@ -39,6 +41,9 @@ public struct SocialHomeView: View {
                         .edgeSwipeBack(back)
                         .noticeBanner($model.notice)
                 case .profile(let name): SocialProfileView(model: model, username: name, open: open)
+                        .edgeSwipeBack(back)
+                        .noticeBanner($model.notice)
+                case .people(let name, let followers): FollowListView(model: model, username: name, followers: followers, open: open)
                         .edgeSwipeBack(back)
                         .noticeBanner($model.notice)
                 }
