@@ -10,7 +10,7 @@ iPhone super app, with a website planned in place of a Mac app (owner, 2026-11-1
 5. Encryption labels must be literally true.
 6. The AI starts with access to nothing. Send, post, pay and delete always stop for approval.
 7. Modules never import each other. Cross-module work goes through `ContentRef` and `ModuleRegistry`.
-8. Plaid is read-only, and Google scopes are minimal, except Gmail `gmail.modify` and full Drive access for the Reader (see the full rules).
+8. Plaid is read-only, and Google scopes are minimal, except Gmail `gmail.modify` and full Drive access for the Reader (see the full rules). For instant Gmail sync the server learns only that a Gmail address got mail, and when. It stores a keyed hash of the address mapped to push tokens, and logs nothing (owner, 2026-11-18: "we can change the rule, i just want instant gmail sync").
 
 Social is native: Totality's own network, not Bluesky or atproto. On federation the owner chose "Native now, maybe later" (2026-11-17, issue 149). Public posts are readable Supabase rows so For You can rank them; Friends and Close-friends posts go through Matrix, end-to-end encrypted.
 
@@ -39,7 +39,7 @@ Never start the next module on a broken one.
 - Themes: Light (default), Blush, Sky, Sage, Lilac and Graphite, picked per device and followed by every screen. The owner wants "not just a white background, but red, blue, green, etc as well" and said "add a gray theme for dark mode" (2026-11-17), which reverses the 2026-10-31 dark-mode removal. Tinted themes stay pale, light and neumorphic with a matching accent; Graphite is dark grey. Every theme meets AA, checked by `TokenTests`. Colours come from `Theme.current` only.
 
 ## Cost
-Stages A and B cost $0. Flag anything that would cost money; don't decide it. The only exceptions are the domain (about $10 a year) and Cloudflare Workers Paid ($5 a month). Never upgrade Oracle to paid.
+Stages A and B cost $0. Flag anything that would cost money; don't decide it. The only exceptions are the domain (about $10 a year), Cloudflare Workers Paid ($5 a month) and the Apple Developer Program ($99 a year, for push and TestFlight; owner enrolled 2026-11-18, approved 2026-11-19). Never upgrade Oracle to paid.
 
 ## Working
 - Work lands through PRs, and `main` is treated as protected. Merge by hand only when every check passes.

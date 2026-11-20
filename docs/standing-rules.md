@@ -59,6 +59,16 @@ These fail review, full stop. There is no "just for now" version of any of them.
    rule"): the Reader may ask for full Google Drive access, so the person can link Drive folders of their
    choice and open, edit and import their files. Totality shows only the folders the person linked, the
    device talks to Google directly, and Totality's server never sees Drive files or the sign-in.
+   A third exception, for instant Gmail sync, which the owner agreed on 2026-11-18 ("we can change the
+   rule, i just want instant gmail sync") and asked to build on 2026-11-19 ("update gmail to sync
+   automatically"), issue 164. The phone asks Gmail to watch the inbox, Google tells Totality's server
+   through Cloud Pub/Sub when the inbox changes, and the server wakes that person's phones through
+   Apple's push service. The phone then fetches the new mail straight from Gmail with its own sign-in.
+   - **The server sees** only that a Gmail address got mail, and when.
+   - **The server never sees** mail content, subjects, senders, or the Google sign-in or token.
+   - **It stores** a keyed hash of the address mapped to that person's push tokens, never the address
+     in plain text, and it logs nothing.
+   - The notification text is built on the phone, so the server never sees it either.
    Nothing else gets these exceptions.
 
 ## Definition of done (every module)
@@ -129,13 +139,18 @@ done at $0, it waits or gets redesigned — it does not quietly start a subscrip
 decide it. There are two named exceptions. The domain, `usetotality.com`, which the owner bought on
 2026-10-30 at roughly $10 a year (proposal §11-L). And Cloudflare Workers Paid at $5 a month plus usage,
 which the owner chose on 2026-11-02 to send mail to outside addresses ("just increase my cloudflare the
-$5 a month").
+$5 a month"). And the Apple Developer Program at $99 a year, which the owner joined on
+2026-11-18 (approved 2026-11-19) so the app can get push, TestFlight and installs that don't expire
+weekly, starting with instant Gmail sync ("we can change the rule, i just want instant gmail sync").
 
 ## Running the app
 
 The app target is `App/Totality.xcodeproj`, one target for iPhone and Mac. Set
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` if `xcode-select` points at Command Line Tools.
-The project signs with the owner's free Personal Team, and command-line builds need
+The project signs with the owner's free Personal Team until the owner switches it to the paid Apple
+Developer team (enrolled 2026-11-18, approved 2026-11-19). The iPhone build carries the Push
+Notifications entitlement (`App/Totality-iOS.entitlements`), which a Personal Team can't sign, so it needs
+the paid team. Command-line builds need
 `-allowProvisioningUpdates -allowProvisioningDeviceRegistration`. An ad-hoc Mac build gets `-34018` from
 the Keychain, so the Reader shows its key error by design: never fall back to a weaker keychain to get
 around that. `keychain-access-groups` is pinned in the entitlements so a team change cannot hide the key.
@@ -170,7 +185,7 @@ $0 hosting. Social follows the website and is iPhone-only at first; Articles fol
 with a Lemon8-style discovery homepage. Docs are a content type inside the Reader — there is no Docs
 module. Listen is a button inside the Reader — there is no Speechify module. Shopping is
 Amazon-*like*, never an Amazon wrapper. Home is a two-column grid of tiles the person arranges, each showing live content (owner, 2026-10-31). The flower stays as the alternative, one button away, and a setting picks which opens first; tiles are the default. Holding a tile enters edit mode. Web search is a module; search inside Totality is a magnifying glass on the home page, not a module.
-Mail is Totality's own email: every account gets `username@usetotality.com`, and sign-up still asks for no email (owner, 2026-11-02, issue 37). Outside accounts (iCloud and Gmail first, Outlook later) can sit beside that address. The device connects to them directly, Totality's server never sees their mail or sign-in, and they never replace the Totality address (owner, 2026-11-05, issue 43).
+Mail is Totality's own email: every account gets `username@usetotality.com`, and sign-up still asks for no email (owner, 2026-11-02, issue 37). Outside accounts (iCloud and Gmail first, Outlook later) can sit beside that address. The device connects to them directly, Totality's server never sees their mail or sign-in, and they never replace the Totality address (owner, 2026-11-05, issue 43). For instant Gmail sync the server learns only that a Gmail address got mail, and when (non-negotiable 8, owner 2026-11-18, issue 164).
 E2E is a principle, not a feature. Federation was one too, until the owner chose a native Social on 2026-11-17:
 "I don't want to use bluesky", "not using bluesky, i want it native", and for federation **"Native now, maybe
 later"** (issue 149). Social is Totality's own network with no outside server, and federating public posts stays
