@@ -15,7 +15,7 @@ extension GoogleOAuth {
         request.setValue("message/rfc822", forHTTPHeaderField: "Content-Type")
         request.httpBody = raw
         struct Sent: Decodable { let id: String }
-        guard let sent = try? JSONDecoder().decode(Sent.self, from: try await gmailAnswer(request)), Self.isGmailID(sent.id) else {
+        guard let sent = try? JSONDecoder().decode(Sent.self, from: try await gmailAnswer(request, idempotent: false)), Self.isGmailID(sent.id) else {
             throw OutsideMailProblem.unexpected
         }
         return sent.id

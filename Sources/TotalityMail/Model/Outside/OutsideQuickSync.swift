@@ -8,6 +8,8 @@ enum OutsideQuickSync {
     static let relist: TimeInterval = 7 * 86_400
     /// More pages of history than this and a full listing is quicker.
     static let mostHistoryPages = 10
+    /// Gmail labels listed at once on a full listing.
+    static let listingInFlight = 4
 }
 
 /// What changed in Gmail since a history point.
@@ -169,13 +171,36 @@ extension OutsideReader {
         var membership: [String: [String]] = [:]
         var order: [String] = [], ordered = Set<String>()
         var truncated = Set<String>()
-        for label in OutsideAccountPlaces.marking + labels.map(\.id) {
-            try Task.checkCancellation()
-            let listed: (ids: [String], truncated: Bool)
-            do {
-                listed = try await google.ids(in: label, accessToken: token, since: since, limit: OutsideReading.mostListed)
-            } catch let problem as OutsideMailProblem where label != "INBOX" && problem != .expired && problem != .offline {
-                // One label that won't list doesn't stop the rest. What's in it is just less certain.
+        // A few labels are listed at once, then put together in their own order, Inbox first.
+        let all = OutsideAccountPlaces.marking + labels.map(\.id)
+        var lists = [(ids: [String], truncated: Bool)?](repeating: nil, count: all.count)
+        try await withThrowingTaskGroup(of: (Int, (ids: [String], truncated: Bool)?).self) { group in
+            var next = 0
+            func list(_ index: Int) -> @Sendable () async throws -> (Int, (ids: [String], truncated: Bool)?) {
+                let label = all[index]
+                return {
+                    do {
+                        return (index, try await google.ids(in: label, accessToken: token, since: since, limit: OutsideReading.mostListed))
+                    } catch let problem as OutsideMailProblem where label != "INBOX" && problem != .expired && problem != .offline {
+                        // One label that won't list doesn't stop the rest. What's in it is just less certain.
+                        return (index, nil)
+                    }
+                }
+            }
+            while next < min(OutsideQuickSync.listingInFlight, all.count) {
+                group.addTask(operation: list(next))
+                next += 1
+            }
+            while let answer = try await group.next() {
+                lists[answer.0] = answer.1
+                if next < all.count {
+                    group.addTask(operation: list(next))
+                    next += 1
+                }
+            }
+        }
+        for (label, listed) in zip(all, lists) {
+            guard let listed else {
                 truncated.insert(label)
                 continue
             }

@@ -92,6 +92,12 @@ public struct OutsideAccountPlaces: Codable, Equatable, Sendable {
 public enum OutsideReading {
     public static let days = 90
     public static let mostPerOpen = 500
+    /// Gmail is fetched several at a time under its quota, so one open gets through more: about a minute's worth.
+    public static let mostPerGmailOpen = 2_500
+    /// Gmail messages being fetched at once.
+    static let gmailInFlight = 8
+    /// How often, in messages, a Gmail download notes where it's got to.
+    static let gmailSaveEvery = 250
     /// How many IDs are listed from one place, to know what's where. Listing is cheap; downloading isn't.
     public static let mostListed = 2_000
 
@@ -162,10 +168,11 @@ extension GoogleOAuth {
     }
 
     /// One message as Gmail keeps it, with whether it's unread there.
-    func message(_ id: String, accessToken: String) async throws -> (raw: Data, received: Date, isUnread: Bool, isStarred: Bool, labels: [String]) {
+    func message(_ id: String, accessToken: String) async throws -> GmailMessage {
         guard Self.isGmailID(id) else { throw OutsideMailProblem.unexpected }
         var components = URLComponents(url: Self.messagesURL.appendingPathComponent(id), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "format", value: "raw")]
+        // Only what's kept: the message as Gmail has it, when it came, and its labels.
+        components.queryItems = [URLQueryItem(name: "format", value: "raw"), URLQueryItem(name: "fields", value: "raw,internalDate,labelIds")]
         struct Message: Decodable {
             let raw: String
             let internalDate: String?
@@ -177,7 +184,7 @@ extension GoogleOAuth {
         guard let raw = Data(base64Encoded: base64) else { throw OutsideMailProblem.unexpected }
         let received = message.internalDate.flatMap(Double.init).map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date()
         let labels = (message.labelIds ?? []).filter(Self.isLabelID)
-        return (raw, received, labels.contains("UNREAD"), labels.contains("STARRED"), labels)
+        return GmailMessage(raw: raw, received: received, isUnread: labels.contains("UNREAD"), isStarred: labels.contains("STARRED"), labels: labels)
     }
 
     /// Gmail's IDs are hex. Anything else never goes into a path.
@@ -198,31 +205,58 @@ extension GoogleOAuth {
         return answer
     }
 
-    /// Sends a request to Gmail and returns its answer, waiting out "too fast" and naming every other no.
-    func gmailAnswer(_ request: URLRequest) async throws -> Data {
-        var wait = pause
-        for attempt in 0... {
-            let (data, response) = try await sendRequest(request)
-            switch response.statusCode {
-            case 200: return data
-            case 401: throw OutsideMailProblem.expired
-            case 400:
-                throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(GmailRefusal(data).message ?? "Gmail said no (400)."))
-            case 403, 429:
-                let refusal = GmailRefusal(data)
-                // Gmail says "too fast" with a 403 as well as a 429. That's waited out, not a missing permission.
-                guard response.statusCode == 429 || refusal.isTooFast else {
-                    if refusal.isMissingPermission { throw OutsideMailProblem.notAllowed }
-                    throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(refusal.message ?? "Gmail said no (\(response.statusCode))."))
+    /// Sends a request to Gmail and returns its answer, quietly waiting out "too fast", Gmail's own
+    /// troubles and a dropped connection, and naming every other no. A request that isn't safe to repeat
+    /// (`idempotent` false, as for sending) is tried again only after "too fast", which Gmail says before
+    /// doing anything.
+    func gmailAnswer(_ request: URLRequest, idempotent: Bool = true) async throws -> Data {
+        var waited = Duration.zero
+        var failures = 0
+        while true {
+            try Task.checkCancellation()
+            try await pace?.take()
+            var retryAfter: Duration?
+            let problem: OutsideMailProblem
+            do {
+                let (data, response) = try await signIn.send(request)
+                switch response.statusCode {
+                case 200: return data
+                case 401: throw OutsideMailProblem.expired
+                case 400:
+                    throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(GmailRefusal(data).message ?? "Gmail said no (400)."))
+                case 403, 429:
+                    let refusal = GmailRefusal(data)
+                    // Gmail says "too fast" with a 403 as well as a 429. That's waited out, not a missing permission.
+                    guard response.statusCode == 429 || refusal.isTooFast else {
+                        if refusal.isMissingPermission { throw OutsideMailProblem.notAllowed }
+                        throw OutsideMailProblem.refused(OutsideMailProblem.providerSaid(refusal.message ?? "Gmail said no (\(response.statusCode))."))
+                    }
+                    retryAfter = GmailRetry.retryAfter(response)
+                    problem = .unreachable
+                case 404: throw GmailMissing.message
+                case 500...599 where idempotent:
+                    retryAfter = GmailRetry.retryAfter(response)
+                    problem = .unreachable
+                default: throw OutsideMailProblem.unreachable
                 }
-                guard attempt < 4 else { throw OutsideMailProblem.unreachable }
-                try await Task.sleep(for: wait)
-                wait *= 2
-            case 404: throw GmailMissing.message
-            default: throw OutsideMailProblem.unreachable
+            } catch let error as URLError where idempotent && GmailRetry.passes(error) {
+                problem = OutsideMailProblem.from(error)
+            } catch let error as OutsideMailProblem {
+                throw error
+            } catch GmailMissing.message {
+                throw GmailMissing.message
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw OutsideMailProblem.from(error)
             }
+            failures += 1
+            let wait = retry.wait(after: failures, retryAfter: retryAfter)
+            // Past this, it isn't passing: it's said.
+            guard failures < retry.mostTries, waited + wait <= retry.patience else { throw problem }
+            try await retry.sleep(wait)
+            waited += wait
         }
-        throw OutsideMailProblem.unreachable
     }
 }
 
@@ -230,6 +264,15 @@ extension GoogleOAuth {
 public enum OutsideProviderView: Sendable {
     case gmail(OutsideAccountPlaces)
     case imap(OutsideIMAPInbox)
+}
+
+/// One message as Gmail gave it.
+struct GmailMessage: Sendable, Equatable {
+    let raw: Data
+    let received: Date
+    let isUnread: Bool
+    let isStarred: Bool
+    let labels: [String]
 }
 
 /// Gmail no longer has the message: deleted forever there.
@@ -379,6 +422,40 @@ struct OutsideReader: Sendable {
     let maker: any OutsideWireMaker
     let google: GoogleOAuth?
 
+    /// Fetches each of `ids`, up to `inFlight` at once, and hands each to `keep` in the order given, so
+    /// the newest still comes first. A fetch that answers nil is handed on as nil. Nothing runs too far
+    /// ahead of what's been handed on, so a slow one doesn't pile the rest up in memory.
+    static func fetchGmail(
+        _ ids: [String], inFlight: Int,
+        fetch: @escaping @Sendable (String) async throws -> GmailMessage?,
+        keep: (String, GmailMessage?) async throws -> Void
+    ) async throws {
+        let inFlight = max(1, inFlight)
+        try await withThrowingTaskGroup(of: (Int, GmailMessage?).self) { group in
+            var next = 0, handed = 0
+            var ready: [Int: GmailMessage?] = [:]
+            while next < min(inFlight, ids.count) {
+                let index = next, id = ids[index]
+                group.addTask { (index, try await fetch(id)) }
+                next += 1
+            }
+            while let answer = try await group.next() {
+                let (index, message) = answer
+                ready[index] = .some(message)
+                while let message = ready.removeValue(forKey: handed) {
+                    try Task.checkCancellation()
+                    try await keep(ids[handed], message)
+                    handed += 1
+                }
+                while next < ids.count, next - handed < inFlight * 4, next - handed - ready.count < inFlight {
+                    let index = next, id = ids[index]
+                    group.addTask { (index, try await fetch(id)) }
+                    next += 1
+                }
+            }
+        }
+    }
+
     /// Downloads what's in the open folder and not here yet, newest first. A message that's here already
     /// under another UID, because it moved, isn't downloaded again.
     private func download(
@@ -432,23 +509,41 @@ struct OutsideReader: Sendable {
             }
             places.waiting = order
             try await seen(.gmail(places))
-            var downloaded = 0, done = Set<String>()
-            for id in order where downloaded < OutsideReading.mostPerOpen {
+            // What's here already is passed over without asking Gmail.
+            var done = Set<String>(), wanted: [String] = []
+            for id in order {
+                guard wanted.count < OutsideReading.mostPerGmailOpen else { break }
                 try Task.checkCancellation()
-                done.insert(id)
-                guard try await !have(id) else { continue }
-                downloaded += 1
-                let message: (raw: Data, received: Date, isUnread: Bool, isStarred: Bool, labels: [String])
-                do {
-                    message = try await google.message(id, accessToken: token)
-                } catch GmailMissing.message {
-                    // Deleted at Gmail since it was listed.
-                    continue
+                if try await have(id) { done.insert(id) } else { wanted.append(id) }
+            }
+            var kept = 0
+            do {
+                try await Self.fetchGmail(wanted, inFlight: OutsideReading.gmailInFlight) { id in
+                    do {
+                        return try await google.message(id, accessToken: token)
+                    } catch GmailMissing.message {
+                        // Deleted at Gmail since it was listed.
+                        return nil
+                    }
+                } keep: { id, message in
+                    if let message {
+                        try await keep(OutsideFetchedMessage(
+                            outside: account.id, providerID: id, received: message.received, raw: message.raw, isUnread: message.isUnread,
+                            isStarred: message.isStarred, labels: message.labels
+                        ))
+                    }
+                    done.insert(id)
+                    kept += 1
+                    // Now and then, where it's got to, so a download cut short starts again from here.
+                    if kept % OutsideReading.gmailSaveEvery == 0 {
+                        places.waiting = order.filter { !done.contains($0) }
+                        try await seen(.gmail(places))
+                    }
                 }
-                try await keep(OutsideFetchedMessage(
-                    outside: account.id, providerID: id, received: message.received, raw: message.raw, isUnread: message.isUnread,
-                    isStarred: message.isStarred, labels: message.labels
-                ))
+            } catch {
+                places.waiting = order.filter { !done.contains($0) }
+                try? await seen(.gmail(places))
+                throw error
             }
             // What's left waits for the next open.
             places.waiting = order.filter { !done.contains($0) }

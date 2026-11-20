@@ -45,6 +45,10 @@ public struct GoogleOAuth: Sendable {
     let accounts: GoogleAccounts?
     /// How long to wait the first time Gmail says it's being asked too fast. Doubles each time after.
     let pause: Duration
+    /// How Gmail's passing troubles are waited out, quietly, before one is shown.
+    var retry: GmailRetry
+    /// Keeps requests under Gmail's quota. Shared by every copy, so requests running together count together.
+    var pace: GmailPace?
 
     public var clientID: String { signIn.clientID }
 
@@ -55,6 +59,8 @@ public struct GoogleOAuth: Sendable {
         self.signIn = signIn
         accounts = connections.map { GoogleAccounts(signIn: signIn, keychain: $0) }
         self.pause = pause
+        retry = GmailRetry(first: pause)
+        pace = GmailPace()
     }
 
     var callbackScheme: String { signIn.callbackScheme }
