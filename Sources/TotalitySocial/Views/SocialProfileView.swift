@@ -14,6 +14,9 @@ struct SocialProfileView: View {
     @State private var profile: SocialProfile?
     @State private var posts: [SocialPost] = []
     @State private var problem: String?
+    /// Whether the server may have older posts than the ones shown.
+    @State private var hasMore = false
+    @State private var loadingMore = false
     @State private var busy = false
     @State private var confirmingUnfollow = false
     @State private var editingCloseFriends = false
@@ -55,7 +58,9 @@ struct SocialProfileView: View {
                         EmptyFeed(systemImage: "square.and.pencil", title: "No posts yet",
                                   detail: isMe ? "Your posts show here, whoever you share them with." : "When \(profile.name) posts, it shows here.")
                     } else {
-                        PostGrid(posts: posts, photos: model.photos, onShow: { _ in }) { open(.post($0.id)) }
+                        PostGrid(posts: posts, photos: model.photos, onShow: { post in
+                            if post.id == posts.last?.id { Task { await loadMore() } }
+                        }) { open(.post($0.id)) }
                     }
                 } else if let problem {
                     ProblemView(systemImage: "person.crop.circle.badge.questionmark", title: "This profile didn't open", detail: problem) {
@@ -132,7 +137,7 @@ struct SocialProfileView: View {
             // approved followers; others see the same numbers without the tap.
             let canOpen = isMe || !profile.isClosed
             HStack(spacing: 0) {
-                stat(profile.posts, Self.label(profile.posts, "post", "posts"))
+                stat(model.postCount(profile), Self.label(model.postCount(profile), "post", "posts"))
                 stat(profile.followers, Self.label(profile.followers, "follower", "followers"), canOpen: canOpen) {
                     open(.people(username, followers: true))
                 }
@@ -207,11 +212,24 @@ struct SocialProfileView: View {
         do {
             profile = try await model.profile(username)
             posts = try await model.posts(by: username)
+            hasMore = model.hasMore(after: posts)
             model.remember(posts)
             problem = nil
         } catch {
             problem = SocialModel.message(error)
         }
+    }
+
+    /// The next page, once the oldest post shown scrolls into view.
+    private func loadMore() async {
+        guard hasMore, !loadingMore, let oldest = posts.last?.date else { return }
+        loadingMore = true
+        defer { loadingMore = false }
+        guard let page = try? await model.posts(by: username, before: oldest) else { return }
+        let shown = Set(posts.map(\.id))
+        posts += page.filter { !shown.contains($0.id) }
+        hasMore = model.hasMore(after: page)
+        model.remember(page)
     }
 
     private func follow(_ on: Bool) async {

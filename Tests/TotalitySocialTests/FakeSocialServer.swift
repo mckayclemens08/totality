@@ -74,7 +74,10 @@ struct FakeSocial: SocialServer {
     }
 
     func posts(by username: String, before: Date?) async throws -> [SocialPost] {
-        world.lock.withLock { world.posts.values.filter { $0.post.author == username }.map(view) }
+        world.lock.withLock {
+            Array(world.posts.values.filter { $0.post.author == username && (before == nil || $0.post.date < before!) }
+                .map(view).sorted { $0.date > $1.date }.prefix(SocialPage.size))
+        }
     }
 
     func post(_ id: UUID) async throws -> SocialPost? { world.lock.withLock { world.posts[id].map(view) } }

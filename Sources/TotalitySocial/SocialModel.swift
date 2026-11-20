@@ -136,21 +136,26 @@ public final class SocialModel {
 
     func loadFollowing() async throws {
         let publicPosts = try await server.following(before: nil)
-        if let privatePosts, privatePosts.unavailableReason == nil, let me {
-            do {
-                let timelines = try await privatePosts.refresh(following: followingSet)
-                privateFeed = timelines.flatMap(\.posts)
-                friends = Set(try await server.friends())
-                closeFriends = (try? await privatePosts.members(.closeFriends)) ?? closeFriends
-                // Your Friends room follows who your friends are now. Anyone no longer one stops getting new posts.
-                if timelines.contains(where: { $0.owner == me && $0.audience == .friends }) {
-                    try? await privatePosts.setMembers(friends, of: .friends)
-                }
-            } catch {
-                notice = "Friends posts didn't load: \((error as? SharedRoomError)?.message ?? "try again")."
-            }
+        do {
+            try await loadPrivate()
+        } catch {
+            notice = "Friends posts didn't load: \((error as? SharedRoomError)?.message ?? "try again")."
         }
         following = (publicPosts + privateFeed).sorted { $0.date > $1.date }
+    }
+
+    /// Reads the encrypted rooms this person is in: their own, and those of people they follow who let
+    /// them in. Nothing here is fetched beyond that membership. Does nothing when Messages can't connect.
+    private func loadPrivate() async throws {
+        guard let privatePosts, privatePosts.unavailableReason == nil, let me else { return }
+        let timelines = try await privatePosts.refresh(following: followingSet)
+        privateFeed = timelines.flatMap(\.posts)
+        friends = Set(try await server.friends())
+        closeFriends = (try? await privatePosts.members(.closeFriends)) ?? closeFriends
+        // Your Friends room follows who your friends are now. Anyone no longer one stops getting new posts.
+        if timelines.contains(where: { $0.owner == me && $0.audience == .friends }) {
+            try? await privatePosts.setMembers(friends, of: .friends)
+        }
     }
 
     public func refresh() async { await load() }
@@ -302,11 +307,45 @@ public final class SocialModel {
         return profile
     }
 
-    public func posts(by username: String) async throws -> [SocialPost] {
-        let publicPosts = try await server.posts(by: username, before: nil)
-        let privateOnes = privateFeed.filter { $0.author == username }
+    /// A profile's posts, newest first, one page at a time: the public ones from Totality's server and the
+    /// Friends and Close-friends ones from rooms this person is already in. On your own profile that's all
+    /// of yours. On anyone else's it's only what their rooms let you read, so a post you aren't let in on
+    /// never shows, not even as a gap. The first page reads the rooms again, so it isn't left to whatever
+    /// the feed last managed to read.
+    public func posts(by username: String, before: Date? = nil) async throws -> [SocialPost] {
+        if before == nil {
+            do { try await loadPrivate() } catch {
+                notice = "Friends posts didn't load: \((error as? SharedRoomError)?.message ?? "try again")."
+            }
+        }
+        let publicPosts = try await server.posts(by: username, before: before)
+        var privateOnes = decrypted(by: username).filter { post in before.map { post.date < $0 } ?? true }
+        // A full public page stops at its oldest post; private ones older than that wait for the next page,
+        // so the two stay in date order across pages and none shows twice.
+        if publicPosts.count >= SocialPage.size, let oldest = publicPosts.map(\.date).min() {
+            privateOnes = privateOnes.filter { $0.date >= oldest }
+        }
         return (publicPosts + privateOnes).sorted { $0.date > $1.date }
     }
+
+    /// Whether a page of a profile's posts could be followed by another.
+    public func hasMore(after page: [SocialPost]) -> Bool {
+        page.filter { $0.audience == .everyone }.count >= SocialPage.size
+    }
+
+    /// The count on a profile. Yours counts everything you've posted, whoever it's for. Anyone else's is
+    /// Totality's public count and nothing more, so it never hints at Friends or Close-friends posts.
+    public func postCount(_ profile: SocialProfile) -> Int {
+        guard let me, Self.same(profile.username, me) else { return profile.posts }
+        return profile.posts + decrypted(by: me).count
+    }
+
+    /// Decrypted posts written by this person. The author is the room's owner, checked as the room was read.
+    private func decrypted(by username: String) -> [SocialPost] {
+        privateFeed.filter { Self.same($0.author, username) }
+    }
+
+    private static func same(_ a: String, _ b: String) -> Bool { a.lowercased() == b.lowercased() }
 
     public func setFollowing(_ follow: Bool, _ username: String) async -> Bool {
         do {

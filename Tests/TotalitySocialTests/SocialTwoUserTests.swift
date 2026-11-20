@@ -113,4 +113,82 @@ import TotalityCore
         await maya.delete(try #require(maya.following.first))
         #expect(world.posts.isEmpty)
     }
+
+    // MARK: Profiles
+
+    /// The two servers keep separate clocks; this keeps their posts in the order they were made.
+    func step() {
+        let later = max(world.clock, matrix.clock).addingTimeInterval(60)
+        world.clock = later
+        matrix.clock = later
+    }
+
+    /// Maya posts one of each: Public, then Friends (Jonah), then Close friends (Priya).
+    func mayaPostsOneOfEach() async throws -> (maya: SocialModel, jonah: SocialModel, priya: SocialModel, sam: SocialModel) {
+        let maya = device("maya"), jonah = device("jonah"), priya = device("priya"), sam = device("sam")
+        // Jonah and Priya are Maya's friends; Priya is also a close friend. Sam follows Maya, who doesn't follow back.
+        for (a, b) in [(jonah, "maya"), (priya, "maya"), (sam, "maya"), (maya, "jonah"), (maya, "priya")] {
+            await a.load(); #expect(await a.setFollowing(true, b))
+        }
+        await maya.load()
+        #expect(await maya.setCloseFriends(["priya"]))
+        step(); #expect(await maya.publish(.everyone, title: "Trailhead", body: "Public."))
+        step(); #expect(await maya.publish(.friends, title: "Spare key", body: "Friends."))
+        step(); #expect(await maya.publish(.closeFriends, title: "Kyoto list", body: "Close friends."))
+        return (maya, jonah, priya, sam)
+    }
+
+    @Test("Your own profile shows every post you made, newest first, whoever it's for")
+    func ownProfileShowsEveryAudience() async throws {
+        let (maya, _, _, _) = try await mayaPostsOneOfEach()
+        let posts = try await maya.posts(by: "maya")
+        #expect(posts.map(\.audience) == [.closeFriends, .friends, .everyone])
+        let profile = try await maya.profile("maya")
+        #expect(maya.postCount(profile) == 3)
+    }
+
+    @Test("Someone else's profile shows only what their rooms let you read, and the count stays public")
+    func othersSeeOnlyWhatMembershipAllows() async throws {
+        let (_, jonah, priya, sam) = try await mayaPostsOneOfEach()
+        #expect(try await jonah.posts(by: "maya").map(\.title) == ["Spare key", "Trailhead"])
+        #expect(try await priya.posts(by: "maya").map(\.title) == ["Kyoto list", "Spare key", "Trailhead"])
+        #expect(try await sam.posts(by: "maya").map(\.title) == ["Trailhead"], "a follower who isn't a friend sees public only")
+        // No viewer's count hints at a post they can't see, and none depends on which rooms they're in.
+        for viewer in [jonah, priya, sam] {
+            #expect(viewer.postCount(try await viewer.profile("maya")) == 1)
+        }
+    }
+
+    @Test("A profile reads the rooms itself when the feed couldn't, as when Messages was still connecting")
+    func profileReadsRoomsWhenTheFeedCouldNot() async throws {
+        let (_, _, _, _) = try await mayaPostsOneOfEach()
+        let rooms = matrix.device(for: "maya")
+        rooms.unavailableReason = "Messages is still connecting."
+        let phone = SocialModel(server: world.person("maya"), privateRooms: rooms)
+        await phone.load()
+        #expect(!phone.following.contains { $0.audience != .everyone })
+        rooms.unavailableReason = nil
+        #expect(try await phone.posts(by: "maya").count == 3)
+    }
+
+    @Test("Paging a profile keeps public and private posts in date order, each once")
+    func pagingMergesBothSourcesByDate() async throws {
+        let maya = device("maya"), jonah = device("jonah")
+        for (a, b) in [(jonah, "maya"), (maya, "jonah")] { await a.load(); _ = await a.setFollowing(true, b) }
+        await maya.load()
+        for n in 0..<40 {
+            step()
+            #expect(await maya.publish(n % 4 == 0 ? .friends : .everyone, title: "", body: "Post \(n)"))
+        }
+        for viewer in [maya, jonah] {
+            var page = try await viewer.posts(by: "maya")
+            var all = page
+            #expect(viewer.hasMore(after: page))
+            while viewer.hasMore(after: page), let oldest = all.last?.date {
+                page = try await viewer.posts(by: "maya", before: oldest)
+                all += page
+            }
+            #expect(all.map(\.body) == (0..<40).reversed().map { "Post \($0)" })
+        }
+    }
 }
