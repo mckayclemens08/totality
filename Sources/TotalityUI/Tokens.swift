@@ -240,6 +240,11 @@ public enum Metric {
     public static let headerButton: CGFloat = 44
     /// The accent round + at the bottom right of a screen.
     public static let addButton: CGFloat = 56
+    /// A bottom tab bar's height, as on the approved Social bar canvas (2026-11-19).
+    public static let tabBar: CGFloat = 76
+    /// One tab in a bottom tab bar: its icon over its name.
+    public static let tabItemWidth: CGFloat = 60
+    public static let tabItemHeight: CGFloat = 58
     /// The remove button on a tile while Home is being edited.
     public static let removeButton: CGFloat = 26
     /// A progress ring's stroke.
