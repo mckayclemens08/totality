@@ -212,25 +212,38 @@ private final class PageWatcher: NSObject, WKNavigationDelegate {
 
     /// Nothing listens on the real proxy, so this swaps in a listener to see what would have reached it.
     /// It proves mail to real addresses goes there, which a local address can't, as those skip proxies.
+    /// The proxy is the last layer, so it's tested on its own: the rule list here blocks nothing and the
+    /// page has no policy, so an image WebKit certainly asks for has nowhere to go but the proxy. If the
+    /// proxy were ignored, the image would go out directly and nothing would reach the listener.
+    /// (A preconnect used to be the request here, but WebKit 27's rule list stops those too.)
     @Test(arguments: ["https://example.com", "http://example.com"])
     func whatGetsPastThePageGoesToTheProxyAndNotOut(address: String) async throws {
         let tripwire = try Tripwire()
         let port = try await tripwire.start()
         defer { tripwire.stop() }
-        // A web view with the proxy but no link removal, as the page text is written here by hand.
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let rules = try #require(await MailRules(directory: directory).list(allowingImages: false))
         let view = WKWebView(
             frame: CGRect(x: 0, y: 0, width: 400, height: 600),
-            configuration: MailWebView.configuration(rules: rules, allowingImages: false, proxy: .hostPort(host: "127.0.0.1", port: port))
+            configuration: MailWebView.configuration(rules: try await Self.blockingNothing(), allowingImages: false, proxy: .hostPort(host: "127.0.0.1", port: port))
         )
         let watcher = PageWatcher()
         view.navigationDelegate = watcher
-        view.loadHTMLString(#"<link rel="preconnect" href="\#(address)"><p>Hello</p>"#, baseURL: nil)
+        view.loadHTMLString(#"<img src="\#(address)/open.gif"><link rel="preconnect" href="\#(address)"><p>Hello</p>"#, baseURL: nil)
         await watcher.waitForFinish()
         try await Task.sleep(for: Self.settle)
         #expect(tripwire.count > 0)
         withExtendedLifetime(view) {}
+    }
+
+    /// A rule list that matches nothing, so a test can look at the proxy without the rules in front of it.
+    private static func blockingNothing() async throws -> WKContentRuleList {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = try #require(WKContentRuleListStore(url: directory))
+        let rules = #"[{"trigger":{"url-filter":"^never-a-scheme:"},"action":{"type":"block"}}]"#
+        return try await withCheckedThrowingContinuation { done in
+            store.compileContentRuleList(forIdentifier: "nothing", encodedContentRuleList: rules) { list, error in
+                if let list { done.resume(returning: list) } else { done.resume(throwing: error ?? CancellationError()) }
+            }
+        }
     }
 
     @Test func aRedirectInTheMessageGoesNowhere() async throws {
