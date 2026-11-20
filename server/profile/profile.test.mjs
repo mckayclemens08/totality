@@ -178,6 +178,18 @@ test('the homepage and privacy policy are fixed pages anyone can read', async ()
   assert.match(policy, /Limited Use requirements/)
   assert.match(policy, /isn't used for ads/)
   assert.match(policy, /no ads, no analytics, and no tracking/)
+  // Public Social posts are readable rows (issue 149), so the policy must never say all content is sealed,
+  // and it has to say which posts are public and which are end-to-end encrypted.
+  assert.doesNotMatch(policy, /<li>Your content is encrypted/)
+  assert.match(policy, /Everyone posts are public/)
+  assert.match(policy, /Friends and Close-friends posts, and the likes and comments on them, go through Totality's Matrix server in end-to-end encrypted rooms/)
+  assert.match(policy, /Reports are stored readable on the server/)
+  // Nothing is described that the app doesn't do: no calls exist, and no push is sent yet.
+  assert.doesNotMatch(policy, /calls go through/)
+  assert.match(policy, /doesn't send push notifications yet/)
+  assert.doesNotMatch(homePage(), /What you keep in Totality is sealed/)
+  // Every open question was answered before the page went out.
+  assert.doesNotMatch(policy, /\[OWNER/)
   assert.ok(homePage().includes('Privacy policy'))
   assert.equal((await ask(profiles, 'GET', '/privacy/')).status, 404)
 })
