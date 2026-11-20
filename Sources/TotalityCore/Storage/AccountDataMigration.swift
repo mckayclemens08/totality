@@ -27,6 +27,13 @@ public struct AccountDataMigration: Sendable {
         base.appendingPathComponent(accountsFolder, isDirectory: true).appendingPathComponent(account, isDirectory: true)
     }
 
+    /// True while the content key itself is still waiting to move. Only this stops an account's space
+    /// opening, because a key made there meanwhile could split the owner's content in two. Anything else
+    /// left over is retried, but never locks anyone out.
+    public func blocksOpening() throws -> Bool {
+        try !legacyNames(contentKeys).isEmpty
+    }
+
     /// True while anything from before is left to move.
     public func isNeeded() throws -> Bool {
         if try !legacyNames(contentKeys).isEmpty { return true }
@@ -83,7 +90,8 @@ public struct AccountDataMigration: Sendable {
             // old one is set aside under the owner instead of being lost or overwriting it.
             let aside = destination.deletingLastPathComponent()
                 .appendingPathComponent(destination.lastPathComponent + ".before-accounts")
-            if !files.fileExists(atPath: aside.path) { try files.moveItem(at: source, to: aside) }
+            let free = files.fileExists(atPath: aside.path) ? aside.appendingPathExtension(UUID().uuidString) : aside
+            try files.moveItem(at: source, to: free)
             return
         }
         for child in try files.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) {
@@ -95,11 +103,12 @@ public struct AccountDataMigration: Sendable {
     // MARK: Keys
 
     private func legacyNames(_ store: any ListableKeyStore) throws -> [String] {
-        try store.names().filter { !$0.hasPrefix("account.") }
+        try store.names().filter { !$0.hasPrefix(AccountKeyStore.marker) && !$0.hasPrefix(AccountKeyStore.quarantine) }
     }
 
     /// Copies each item to the owner's name, reads it back, and only then deletes the old one. An item
-    /// the owner already holds with different contents is never overwritten: both stay, and the move stops.
+    /// the owner already holds with different contents, such as one an older build wrote again, is never
+    /// overwritten: the old one is set aside under a quarantine name, kept but never used, and the move goes on.
     private func moveKeys(in store: any ListableKeyStore, to owner: String, last: String?) throws {
         let prefix = AccountKeyStore.prefix(for: owner)
         let legacy = try legacyNames(store)
@@ -107,7 +116,11 @@ public struct AccountDataMigration: Sendable {
         for name in names {
             guard let data = try store.load(name) else { continue }
             if let existing = try store.load(prefix + name) {
-                guard existing == data else { throw AccountDataMigrationError.conflict(name) }
+                if existing != data {
+                    let aside = AccountKeyStore.quarantine + owner + "/" + UUID().uuidString + "/" + name
+                    try store.save(data, as: aside)
+                    guard try store.load(aside) == data else { throw AccountDataMigrationError.notSaved(name) }
+                }
             } else {
                 try store.save(data, as: prefix + name)
                 guard try store.load(prefix + name) == data else { throw AccountDataMigrationError.notSaved(name) }
@@ -118,8 +131,6 @@ public struct AccountDataMigration: Sendable {
 }
 
 public enum AccountDataMigrationError: Error, Equatable {
-    /// The owner already has a different item by this name. Neither is touched.
-    case conflict(String)
     /// The copy didn't read back the same, so the original stays.
     case notSaved(String)
 }

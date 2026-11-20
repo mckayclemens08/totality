@@ -61,7 +61,7 @@ final class ListedKeys: ListableKeyStore, @unchecked Sendable {
         let plain = try ContentCipher.open(sealed, key: ring.current().objectKey(for: note, purpose: .content), objectID: note)
         #expect(String(decoding: plain, as: UTF8.self) == "Wittgenstein, §243")
         #expect(try AccountKeyStore(google, account: owner).load("owner@example.com") != nil)
-        #expect(try content.names().allSatisfy { $0.hasPrefix("account.") }, "nothing is left under the old names")
+        #expect(try content.names().allSatisfy { $0.hasPrefix(AccountKeyStore.marker) }, "nothing is left under the old names")
     }
 
     @Test("A move that stopped halfway finishes on the next launch, losing nothing")
@@ -94,11 +94,53 @@ final class ListedKeys: ListableKeyStore, @unchecked Sendable {
         #expect(try migration().run(signedInAccount: owner) == owner)
     }
 
-    @Test("A different key already in the owner's space is never overwritten")
-    func conflictTouchesNothing() throws {
+    @Test("A different key already in the owner's space is never overwritten, and nobody is locked out")
+    func conflictIsSetAside() throws {
         let (key, _) = try oldInstall()
-        try AccountKeyStore(content, account: owner).save(ContentRootKey.generate().bytes, as: ContentRootKey.keyStoreName)
-        #expect(throws: AccountDataMigrationError.conflict(ContentRootKey.keyStoreName)) { try migration().run(signedInAccount: nil) }
-        #expect(try content.load(ContentRootKey.keyStoreName) == key.bytes)
+        let theirs = try ContentRootKey.generate()
+        try AccountKeyStore(content, account: owner).save(theirs.bytes, as: ContentRootKey.keyStoreName)
+        #expect(try migration().run(signedInAccount: nil) == owner)
+        #expect(try !migration().blocksOpening())
+        #expect(try !migration().isNeeded(), "it doesn't stay pending for ever")
+        #expect(try AccountKeyStore(content, account: owner).load(ContentRootKey.keyStoreName) == theirs.bytes)
+        let aside = try content.names().filter { $0.hasPrefix(AccountKeyStore.quarantine + owner + "/") && $0.hasSuffix(ContentRootKey.keyStoreName) }
+        #expect(try aside.count == 1 && content.load(aside[0]) == key.bytes, "the old key is kept, not lost")
+    }
+
+    @Test("An older build writing the old names again is picked up on the next launch")
+    func rewrittenItemMovesAgain() throws {
+        _ = try oldInstall()
+        try migration().run(signedInAccount: nil)
+        try google.save(Data("newer-token".utf8), as: "account.owner@example.com")
+        #expect(try migration().isNeeded() && !migration().blocksOpening())
+        // The key's claim has already moved, so leftovers go to whoever is signed in, as a claim would.
+        #expect(try migration().run(signedInAccount: owner) == owner)
+        #expect(try AccountKeyStore(google, account: owner).load("account.owner@example.com") == Data("newer-token".utf8))
+        #expect(try !migration().isNeeded())
+    }
+
+    @Test("Google's own items, named account. and an address, move like everything else")
+    func googleTokensMove() throws {
+        _ = try oldInstall()
+        let index = Data(#"["owner@gmail.com"]"#.utf8)
+        try google.save(index, as: "connected")
+        try google.save(Data("token-placeholder".utf8), as: "account.owner@gmail.com")
+        try migration().run(signedInAccount: nil)
+        let mine = AccountKeyStore(google, account: owner)
+        #expect(try mine.load("account.owner@gmail.com") == Data("token-placeholder".utf8))
+        #expect(try mine.load("connected") == index)
+        #expect(try google.load("account.owner@gmail.com") == nil, "no orphan left behind")
+    }
+
+    @Test("Giving up sign-ins forgets your own and any from before, never another account's")
+    func forgettingIsScoped() {
+        let names = [
+            AccountKeyStore.prefix(for: owner) + "account.owner@gmail.com",
+            AccountKeyStore.prefix(for: "applereview2") + "account.review@gmail.com",
+            AccountKeyStore.quarantine + owner + "/x/account.old@gmail.com",
+            AccountKeyStore.quarantine + "applereview2/x/account.other@gmail.com",
+            "account.legacy@gmail.com",
+        ]
+        #expect(Set(AccountKeyStore.toForget(in: names, account: owner)) == [names[0], names[2], names[4]])
     }
 }

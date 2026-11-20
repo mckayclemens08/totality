@@ -60,15 +60,11 @@ enum ContentSetup {
             otherKeys: [KeychainKeyStore(service: GoogleAccounts.service), KeychainKeyStore(service: OutsideSecrets.service)],
             folders: [try? sharedBase(), try? sharedCaches()].compactMap { $0 }
         )
-        do {
-            if let owner = try migration.run(signedInAccount: account) { moveSettings(to: owner) }
-        } catch {
-            // Left as it was, to try again next time. Its contents never reach the log.
-            SignedInAccount.shared.id = nil
-            return
-        }
-        // Until the move has finished, no one's space opens: a new key there could split the owner's content.
-        SignedInAccount.shared.id = (try? migration.isNeeded()) == false ? account : nil
+        // A failure is left as it was, to try again next time. Its contents never reach the log.
+        if let owner = try? migration.run(signedInAccount: account) { moveSettings(to: owner) }
+        // Until the content key has moved, no one's space opens: a new key there could split the owner's
+        // content. Anything else still waiting is retried later and never keeps anyone out.
+        SignedInAccount.shared.id = (try? migration.blocksOpening()) == false ? account : nil
     }
 
     /// The settings that are an account's own, copied once to the owner's set. The device's copies stay.
@@ -80,13 +76,13 @@ enum ContentSetup {
         }
     }
 
-    /// Forgets the signed-in account's outside sign-ins on this device, and nobody else's.
+    /// Forgets the signed-in account's outside sign-ins on this device, and nobody else's, along with any
+    /// left under the names from before accounts had their own (an older build may have written some).
     nonisolated static func forgetSecrets() {
         guard let account = SignedInAccount.shared.id else { return }
-        let prefix = AccountKeyStore.prefix(for: account)
         for service in [GoogleAccounts.service, OutsideSecrets.service] {
             let store = KeychainKeyStore(service: service)
-            for name in (try? store.names()) ?? [] where name.hasPrefix(prefix) { try? store.delete(name) }
+            for name in AccountKeyStore.toForget(in: (try? store.names()) ?? [], account: account) { try? store.delete(name) }
         }
     }
 

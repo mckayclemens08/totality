@@ -21,7 +21,22 @@ public protocol ListableKeyStore: KeyStore {
 /// One account's corner of a shared store: every name is prefixed with the account, so two accounts on
 /// one device never read, overwrite or delete each other's secrets.
 public struct AccountKeyStore: KeyStore {
-    public static func prefix(for account: String) -> String { "account.\(account)." }
+    /// No name from before accounts had their own corners starts this way. Google's own items are named
+    /// "account." plus an address, so a prefix like that would mistake them for moved ones.
+    public static let marker = "totality-user:"
+    public static func prefix(for account: String) -> String { marker + account + "/" }
+    /// Where an item from before goes when the account already has a different one by that name.
+    /// Kept, never deleted, and never read as the account's own.
+    public static let quarantine = "totality-conflict:"
+
+    /// What an account forgets when it gives up its outside sign-ins: its own items, its quarantined ones,
+    /// and any from before accounts had corners. Never another account's.
+    public static func toForget(in names: [String], account: String) -> [String] {
+        names.filter { name in
+            name.hasPrefix(prefix(for: account)) || name.hasPrefix(quarantine + account + "/")
+                || (!name.hasPrefix(marker) && !name.hasPrefix(quarantine))
+        }
+    }
 
     private let base: any KeyStore
     private let prefix: String
