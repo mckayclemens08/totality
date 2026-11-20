@@ -1,0 +1,344 @@
+// Push: wakes a person's phones through Apple's push service (issue 164). A signed-in phone registers its
+// push token here, and the server later sends it a silent push that says only "look again". Every push
+// is empty apart from that, so Apple, Cloudflare and this server carry nothing about what changed.
+//
+// The Apple key is on the server only. Its file is mounted from `~/totality/secrets/push/`, which git ignores,
+// and its ID and team come from `.env`. Without them registration still works and nothing is sent.
+// Nothing here logs a request, a token or an account.
+import { createHash, createPrivateKey, sign } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import { connect } from 'node:http2'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+// Phones one account can register. A new one past this replaces the one seen longest ago.
+export const MAX_DEVICES = 10
+// A phone that hasn't registered again in this long is dropped. The app registers every time it opens.
+export const DEVICE_DAYS = 60
+// Apple wants its sign-in token remade between 20 and 60 minutes.
+export const APNS_TOKEN_MINUTES = 45
+
+const DAY = 24 * 60 * 60 * 1000
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+// Apple's device tokens are 32 bytes today; the length may grow, so this allows up to 100.
+const DEVICE = /^[0-9a-f]{64,200}$/
+const TOKEN = /^Bearer ([A-Za-z0-9._-]{1,4096})$/
+
+/** The account behind a sign-in, or null if it doesn't look like a Totality account. */
+export function accountFrom(user) {
+  const name = /^([a-z0-9_]{3,24})@totality\.invalid$/.exec(user?.email ?? '')?.[1]
+  if (!name || !ID.test(user?.id ?? '')) return null
+  return { name, id: user.id }
+}
+
+/** Remembers good sign-ins for a minute. Only a hash of the token is kept. */
+export function rememberingSignIns(checkSignIn, { clock = Date.now, seconds = 60, most = 1_000 } = {}) {
+  const known = new Map()
+  return async (token) => {
+    const key = createHash('sha256').update(token).digest('base64')
+    const held = known.get(key)
+    if (held && held.until > clock()) return held.account
+    known.delete(key)
+    const account = await checkSignIn(token)
+    if (account) {
+      if (known.size >= most) known.delete(known.keys().next().value)
+      known.set(key, { account, until: clock() + seconds * 1_000 })
+    }
+    return account
+  }
+}
+
+/** What push keeps, in one small file: each account's phones (`{ token, sandbox, seen }`). It's written
+ *  whole to a new file and renamed into place, so a crash never leaves half of it. */
+export class PushStore {
+  constructor(root, { clock = Date.now } = {}) {
+    this.file = root ? join(root, 'push.json') : null
+    this.clock = clock
+    this.state = { devices: {} }
+    this.loaded = false
+    this.writing = Promise.resolve()
+  }
+
+  async load() {
+    if (this.loaded) return
+    this.loaded = true
+    if (!this.file) return
+    try {
+      const saved = JSON.parse(await readFile(this.file, 'utf8'))
+      this.state = { ...this.state, ...saved }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+  }
+
+  async save() {
+    if (!this.file) return
+    const text = JSON.stringify(this.state)
+    this.writing = this.writing.then(async () => {
+      const next = `${this.file}.next`
+      await writeFile(next, text, { mode: 0o600 })
+      await rename(next, this.file)
+    })
+    await this.writing
+  }
+
+  async devices(account) {
+    await this.load()
+    const cutoff = this.clock() - DEVICE_DAYS * DAY
+    return (this.state.devices[account] ?? []).filter((device) => device.seen >= cutoff)
+  }
+
+  /** Adds or refreshes a phone. A token belongs to one account at a time, so a phone that signs in to
+   *  another account moves with it. */
+  async addDevice(account, token, sandbox) {
+    await this.load()
+    for (const [other, list] of Object.entries(this.state.devices)) {
+      if (other === account) continue
+      const kept = list.filter((device) => device.token !== token)
+      if (kept.length !== list.length) this.setDevices(other, kept)
+    }
+    const mine = (await this.devices(account)).filter((device) => device.token !== token)
+    mine.push({ token, sandbox, seen: this.clock() })
+    mine.sort((a, b) => b.seen - a.seen)
+    this.setDevices(account, mine.slice(0, MAX_DEVICES))
+    await this.save()
+  }
+
+  async removeDevice(account, token) {
+    await this.load()
+    const list = this.state.devices[account] ?? []
+    const kept = list.filter((device) => device.token !== token)
+    if (kept.length === list.length) return false
+    this.setDevices(account, kept)
+    await this.save()
+    return true
+  }
+
+  /** Drops a token Apple said is gone, from whichever account has it. */
+  async forget(token) {
+    await this.load()
+    let changed = false
+    for (const [account, list] of Object.entries(this.state.devices)) {
+      const kept = list.filter((device) => device.token !== token)
+      if (kept.length !== list.length) {
+        this.setDevices(account, kept)
+        changed = true
+      }
+    }
+    if (changed) await this.save()
+  }
+
+  setDevices(account, list) {
+    if (list.length) this.state.devices[account] = list
+    else delete this.state.devices[account]
+  }
+}
+
+/** Apple's sign-in for its push service: a JWT signed with the team's push key (ES256). */
+export function apnsToken({ key, keyId, teamId, now = Date.now() }) {
+  const part = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
+  const data = `${part({ alg: 'ES256', kid: keyId })}.${part({ iss: teamId, iat: Math.floor(now / 1000) })}`
+  const signature = sign('sha256', Buffer.from(data), { key, dsaEncoding: 'ieee-p1363' })
+  return `${data}.${signature.toString('base64url')}`
+}
+
+/** What every push says: nothing but "wake up and look". */
+export const WAKE = Buffer.from(JSON.stringify({ aps: { 'content-available': 1 } }))
+
+/** Sends silent pushes over one HTTP/2 connection per Apple host. `request(host, headers, body)` returns
+ *  `{ status, reason }`, and is swapped out in tests. */
+export class APNs {
+  constructor({ key, keyId, teamId, topic, clock = Date.now, request = http2Request() }) {
+    Object.assign(this, { key, keyId, teamId, topic, clock, request })
+    this.made = null
+  }
+
+  bearer() {
+    const now = this.clock()
+    if (!this.made || now - this.made.at > APNS_TOKEN_MINUTES * 60_000) {
+      this.made = { at: now, token: apnsToken({ key: this.key, keyId: this.keyId, teamId: this.teamId, now }) }
+    }
+    return this.made.token
+  }
+
+  /** `'sent'`, `'gone'` when Apple says the token no longer works, or `'failed'`. */
+  async wake({ token, sandbox }) {
+    const host = sandbox ? 'api.sandbox.push.apple.com' : 'api.push.apple.com'
+    try {
+      const { status, reason } = await this.request(host, {
+        ':method': 'POST',
+        ':path': `/3/device/${token}`,
+        authorization: `bearer ${this.bearer()}`,
+        'apns-topic': this.topic,
+        'apns-push-type': 'background',
+        'apns-priority': '5',
+        'apns-expiration': '0',
+        'content-type': 'application/json',
+      }, WAKE)
+      if (status === 200) return 'sent'
+      if (status === 410 || (status === 400 && (reason === 'BadDeviceToken' || reason === 'DeviceTokenNotForTopic'))) return 'gone'
+      return 'failed'
+    } catch {
+      return 'failed'
+    }
+  }
+}
+
+function http2Request() {
+  const sessions = new Map()
+  return (host, headers, body) => new Promise((resolve, reject) => {
+    let session = sessions.get(host)
+    if (!session || session.closed || session.destroyed) {
+      session = connect(`https://${host}`)
+      session.on('error', () => sessions.delete(host))
+      session.on('close', () => sessions.delete(host))
+      session.setTimeout(10 * 60_000, () => session.close())
+      sessions.set(host, session)
+    }
+    const stream = session.request(headers)
+    stream.setTimeout(10_000, () => stream.close())
+    let status = 0
+    const chunks = []
+    stream.on('response', (answer) => { status = answer[':status'] })
+    stream.on('data', (chunk) => chunks.push(chunk))
+    stream.on('end', () => {
+      let reason
+      try { reason = JSON.parse(Buffer.concat(chunks).toString()).reason } catch {}
+      resolve({ status, reason })
+    })
+    stream.on('error', reject)
+    stream.end(body)
+  })
+}
+
+/** Reads a small request body, or returns null once it passes `limit`. */
+export async function readBody(stream, limit) {
+  const chunks = []
+  let total = 0
+  for await (const chunk of stream ?? []) {
+    total += chunk.length
+    if (total > limit) return null
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks, total)
+}
+
+function json(status, value) {
+  return { status, headers: { 'Content-Type': 'application/json' }, body: Buffer.from(JSON.stringify(value)) }
+}
+
+function empty(status) {
+  return { status, headers: {}, body: Buffer.alloc(0) }
+}
+
+async function jsonBody(body, limit) {
+  const text = await readBody(body, limit)
+  if (!text) return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+/** No sockets in here, so every rule can be tested. `checkSignIn(token)` returns an account or null and
+ *  throws if it can't tell. `apns` is null while the Apple key isn't on the server. */
+export class PushGate {
+  constructor({ checkSignIn, store, apns = null }) {
+    Object.assign(this, { checkSignIn, store, apns })
+  }
+
+  async respond({ method, path, headers = {}, body }) {
+    if (path === '/push/health') return method === 'GET' ? json(200, { ok: true, sending: Boolean(this.apns) }) : empty(405)
+    if (path !== '/push/device' && path !== '/push/device/remove') return empty(404)
+    if (method !== 'POST') return empty(405)
+    const token = TOKEN.exec(headers.authorization ?? '')?.[1]
+    if (!token) return empty(401)
+    const account = await this.checkSignIn(token)
+    if (!account) return empty(401)
+    const request = await jsonBody(body, 1_024)
+    const device = request?.token
+    if (typeof device !== 'string' || !DEVICE.test(device)) return empty(400)
+    if (path === '/push/device') {
+      if (typeof request.sandbox !== 'boolean') return empty(400)
+      await this.store.addDevice(account.id, device, request.sandbox)
+      return empty(204)
+    }
+    await this.store.removeDevice(account.id, device)
+    return empty(204)
+  }
+
+  /** Wakes every phone of these accounts, and forgets any token Apple says is gone. */
+  async wake(accounts) {
+    if (!this.apns) return 0
+    let sent = 0
+    for (const account of new Set(accounts)) {
+      for (const device of await this.store.devices(account)) {
+        const result = await this.apns.wake(device)
+        if (result === 'sent') sent += 1
+        if (result === 'gone') await this.store.forget(device.token)
+      }
+    }
+    return sent
+  }
+}
+
+function liveGate() {
+  const supabase = process.env.SUPABASE_URL.replace(/\/+$/, '')
+  const publicKey = process.env.SUPABASE_ANON_KEY
+  const root = process.env.PUSH_ROOT ?? '/var/lib/totality-push'
+
+  async function checkSignIn(token) {
+    const reply = await fetch(`${supabase}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: publicKey },
+      signal: AbortSignal.timeout(6_000),
+    })
+    if (reply.status >= 400 && reply.status < 500) return null
+    if (!reply.ok) throw new Error('sign-in check failed')
+    return accountFrom(await reply.json())
+  }
+
+  let apns = null
+  const { APNS_KEY_FILE: keyFile, APNS_KEY_ID: keyId, APNS_TEAM_ID: teamId } = process.env
+  if (keyFile && keyId && teamId) {
+    try {
+      const key = createPrivateKey(readFileSync(keyFile))
+      apns = new APNs({ key, keyId, teamId, topic: process.env.APNS_TOPIC || 'app.totality.ios' })
+    } catch {
+      apns = null
+    }
+  }
+
+  return new PushGate({ checkSignIn: rememberingSignIns(checkSignIn), store: new PushStore(root), apns })
+}
+
+export function serve(gate, port, host = '0.0.0.0') {
+  const server = createServer(async (request, response) => {
+    let answer
+    try {
+      const path = new URL(request.url ?? '/', 'http://local').pathname
+      answer = await gate.respond({ method: request.method, path, headers: request.headers, body: request })
+    } catch {
+      answer = empty(503)
+    }
+    if (!request.complete) response.on('finish', () => request.destroy())
+    response.writeHead(answer.status, {
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Length': String(answer.body.length),
+      ...answer.headers,
+    })
+    response.end(answer.body)
+  })
+  server.requestTimeout = 30_000
+  server.listen(port, host)
+  return server
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const root = process.env.PUSH_ROOT ?? '/var/lib/totality-push'
+  await mkdir(root, { recursive: true })
+  serve(liveGate(), Number(process.env.PORT ?? 8080))
+}

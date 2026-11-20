@@ -106,6 +106,17 @@ jobs:
         with:
           node-version: 24
       - run: node --test blobs.test.mjs
+  push-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/push
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test push.test.mjs
   matrix-tests:
     # Messages' two-user test on a throwaway Matrix server with the production config. Its signing
     # key is made fresh for each run, so no secret is needed.

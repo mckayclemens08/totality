@@ -165,6 +165,7 @@ The only public paths are the ones in `server/cloudflared.yml`, and the only ope
 SearXNG runs there too, reachable only through the gateway in `server/gateway/`, and neither one logs searches.
 Mail arrives through `server/mail/`, from the Cloudflare Worker in `server/mail-worker/`, and is sealed before it reaches `~/totality/mailboxes`. Rspamd checks it first, on a network with no way out. Neither one logs anything.
 Sealed photos and Reader files go through `server/blobs/` to `~/totality/blobs-data`, one folder per account, and it logs nothing either.
+Push in `server/push/` keeps each account's phone push tokens in `~/totality/push-data` and wakes them with an empty silent push. Its Apple key file is in `~/totality/secrets/push/` (ignored by git), and it logs nothing.
 Never upgrade the Oracle account to paid: that's the owner's decision under the cost rule.
 
 ## Working discipline
