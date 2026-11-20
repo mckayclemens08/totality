@@ -127,10 +127,14 @@ struct SocialProfileView: View {
             if let bio = profile.bio, !bio.isEmpty {
                 Text(bio).font(Typeface.body).foregroundStyle(theme.textPrimary.color)
             }
-            HStack(spacing: Space.s5) {
+            HStack(spacing: Space.s3) {
                 count(profile.posts, "posts")
-                count(profile.followers, profile.followers == 1 ? "follower" : "followers")
-                count(profile.following, "following")
+                // A private account's lists are only for it and its approved followers; others see plain numbers.
+                let canOpen = isMe || !profile.isClosed
+                countButton(profile.followers, profile.followers == 1 ? "follower" : "followers", canOpen: canOpen) {
+                    open(.people(username, followers: true))
+                }
+                countButton(profile.following, "following", canOpen: canOpen) { open(.people(username, followers: false)) }
             }
             HStack(spacing: Space.s3) {
                 if isMe {
@@ -175,6 +179,30 @@ struct SocialProfileView: View {
             Text(label).font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// A count that opens its list: a soft raised capsule with a chevron. Plain when it can't open.
+    @ViewBuilder
+    private func countButton(_ value: Int, _ label: String, canOpen: Bool, action: @escaping () -> Void) -> some View {
+        if canOpen {
+            Button(action: action) {
+                HStack(spacing: Space.s2) {
+                    count(value, label)
+                    Image(systemName: "chevron.right")
+                        .font(Typeface.micro)
+                        .foregroundStyle(Theme.current.textSecondary.color)
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, Space.s3)
+                .padding(.vertical, Space.s2)
+                .neumorphic(.subtle, in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(SoftPress())
+            .accessibilityHint("Opens the list")
+        } else {
+            count(value, label).padding(.horizontal, Space.s3)
+        }
     }
 
     private func load() async {

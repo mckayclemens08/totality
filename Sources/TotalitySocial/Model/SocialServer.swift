@@ -37,6 +37,9 @@ public protocol SocialServer: Sendable {
     func friends() async throws -> [String]
     func followers(of username: String) async throws -> [String]
     func followed(by username: String) async throws -> [String]
+    /// A page of someone's Followers (or Following), newest first, each with how you relate to them.
+    /// A private account's lists come back empty unless you're it or one of its approved followers.
+    func people(of username: String, followers: Bool, query: String?, after: PeopleCursor?, limit: Int) async throws -> [SocialPerson]
     func markSeen(_ posts: [UUID], notInterested: Bool) async throws
     func topTags() async throws -> [String]
     func searchPeople(_ query: String) async throws -> [SocialProfile]
@@ -143,6 +146,18 @@ public struct RestSocialServer: SocialServer {
     struct HandleRow: Decodable {
         let handle: String
         let display_name: String?
+    }
+
+    struct PersonRow: Decodable {
+        let id: UUID?
+        let handle: String
+        let display_name: String?
+        let avatar_key: String?
+        let followed_at: String
+        let i_follow: Bool
+        let follows_me: Bool
+        let requested: Bool
+        let muted: Bool?
     }
 
     struct TagRow: Decodable { let tag: String }
@@ -312,6 +327,16 @@ public struct RestSocialServer: SocialServer {
 
     public func followed(by username: String) async throws -> [String] {
         try await rpc("social_people", ["p_handle": username, "p_followers": false], as: HandleRow.self).map(\.handle)
+    }
+
+    public func people(of username: String, followers: Bool, query: String?, after: PeopleCursor?, limit: Int) async throws -> [SocialPerson] {
+        try await rpc("social_people", [
+            "p_handle": username, "p_followers": followers, "p_query": query ?? NSNull(),
+            "p_before_at": after?.followedAt ?? NSNull(), "p_before_handle": after?.username ?? NSNull(), "p_limit": limit,
+        ], as: PersonRow.self).map {
+            SocialPerson(username: $0.handle, displayName: $0.display_name, photoKey: $0.avatar_key, followedAt: $0.followed_at,
+                         iFollow: $0.i_follow, followsMe: $0.follows_me, requested: $0.requested, muted: $0.muted ?? false, accountID: $0.id)
+        }
     }
 
     public func markSeen(_ posts: [UUID], notInterested: Bool) async throws {

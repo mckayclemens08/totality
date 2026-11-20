@@ -359,7 +359,7 @@ Three notes that matter more than the SQL:
 |---|---|---|---|
 | Email, auth metadata | `auth.users` | Supabase Auth needs it to authenticate | who has an account |
 | Handle, display name, avatar, bio | `profiles` | it's the public directory; that's its job | nothing — public by design |
-| Public posts, their likes and comments, who follows whom | `social_posts`, `social_likes`, `social_comments`, `social_follows` (issue 149, owner agreed 2026-11-17) | For You ranks public posts on the server; follower lists are public | nothing beyond what's public by design. Friends and Close-friends posts are never here: they're in Matrix |
+| Public posts, their likes and comments, who follows whom | `social_posts`, `social_likes`, `social_comments`, `social_follows` (issue 149, owner agreed 2026-11-17) | For You ranks public posts on the server; follower lists are public, except a private account's, which only it and its approved followers can read (2026-11-19) | nothing beyond what's public by design. Friends and Close-friends posts are never here: they're in Matrix |
 | MXID, DID | `profiles` | must be resolvable by other servers | the federation addresses |
 | Contact graph (who ↔ who, state) | `contacts` | RLS needs it to evaluate `contacts` visibility | **the social graph** |
 | Device names, platform, last-seen | `devices` | key management UI needs it | device inventory, activity times |
