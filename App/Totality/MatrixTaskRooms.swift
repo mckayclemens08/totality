@@ -99,8 +99,10 @@ final class MatrixTaskRooms: SharedRooms {
             // enforces these. Whether a post is an edit is checked again by every device. Everyone asked in
             // now gets their role in the room's first power levels, which the server sets before it sends
             // any invite, so nobody ever holds more than they were given.
-            var users = [service.userID: Int32(SharedRole.owner.rawValue)]
-            for (name, role) in invitees { users[Self.userID(name)] = Int32(Self.invitedLevel(role)) }
+            // The creator isn't listed: Totality's server makes room version 12 rooms, where the creator
+            // already outranks everyone and the server refuses power levels that name them
+            // (M_INVALID_PARAM). `history` reads the creator from the room's `creators` instead.
+            let users = Self.invitedPowerLevels(invitees.map { (Self.userID($0.key), $0.value) })
             let levels = PowerLevels(
                 usersDefault: 0, eventsDefault: 0, stateDefault: Int32(SharedRole.owner.rawValue),
                 ban: Int32(SharedRole.owner.rawValue), kick: Int32(SharedRole.owner.rawValue),
@@ -152,6 +154,11 @@ final class MatrixTaskRooms: SharedRooms {
             if case .MatrixApi(_, let code, _, _) = error, code == "M_NOT_FOUND" { throw SharedRoomError.noSuchPerson(username) }
             throw error
         }
+    }
+
+    /// A new room's `users` power levels: only the people invited, never its creator (room version 12).
+    nonisolated static func invitedPowerLevels(_ invitees: [(userID: String, role: SharedRole)]) -> [String: Int32] {
+        Dictionary(invitees.map { ($0.userID, Int32(invitedLevel($0.role))) }, uniquingKeysWith: { first, _ in first })
     }
 
     /// An invite never hands over the room: someone asked in as owner joins as an editor until `setRole`.
