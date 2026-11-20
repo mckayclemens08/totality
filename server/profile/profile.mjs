@@ -80,47 +80,78 @@ function page(title, inner, { kind = '', indexed = false } = {}) {
 
 /** usetotality.com itself. Fixed text, nothing from a request. */
 export const homePage = () => page('Totality', `<h1>Totality</h1>
-<p class="lead">One app for iPhone and Mac: reading and listening, a calendar, mail, messages, and photos.</p>
-<p>What you keep in Totality is sealed on your own device before it goes anywhere, with a key only your devices hold. Messages are end-to-end encrypted. Every account gets its own address at usetotality.com, and you can add Gmail or iCloud beside it.</p>
+<p class="lead">One app for iPhone, with a website beside it: reading and listening, a calendar, mail, messages, photos, and social.</p>
+<p>What you keep privately in Totality is sealed on your own device before it goes anywhere, with a key only your devices hold. Messages are end-to-end encrypted. Social posts you share with Everyone are public. Every account gets its own address at usetotality.com, and you can add Gmail or iCloud beside it.</p>
 <p>Totality is in early testing and isn't in the App Store yet.</p>
 <p><a href="/privacy">Privacy policy</a></p>`, { kind: 'doc', indexed: true })
 
 /** What Totality keeps and where. Every line has to be literally true of the code. */
 export const privacyPage = () => page('Totality privacy policy', `<h1>Privacy policy</h1>
-<p class="lead">Last updated 8 November 2026. This covers the Totality app and its servers at usetotality.com.</p>
+<p class="lead">Last updated 19 November 2026. This covers the Totality app, the website at app.usetotality.com, and Totality's servers at usetotality.com.</p>
 
 <h2>The short version</h2>
 <ul>
-<li>Your content is encrypted on your device before it's uploaded. Totality's servers hold it sealed and can't read it.</li>
+<li>Your private content is encrypted on your device before it's uploaded. Totality's servers hold it sealed and can't read it.</li>
+<li>Social posts you share with Everyone are public. They're stored readable on Totality's server, so other people can see them and For You can rank them. Friends and Close-friends posts are end-to-end encrypted.</li>
 <li>There are no ads, no analytics, and no tracking, and nothing is sold or shared for marketing.</li>
-<li>Gmail and iCloud accounts you add connect from your device straight to Google or Apple. Totality's servers never see that mail or those sign-ins.</li>
+<li>Gmail, iCloud, and the Google services you connect are reached from your device straight to Google or Apple. Totality's servers never see that mail. Anything else from them that syncs, your sign-in included, reaches the servers only sealed, where they can't read it.</li>
 </ul>
 
 <h2>Your account</h2>
 <p>An account is a username and a password. Totality doesn't ask for an email address or a phone number. Your password goes over HTTPS only to the account server, which keeps a one-way hash of it. The app never stores it, and it's never used to encrypt anything.</p>
+<p>The account server also keeps your profile (your username, and the name, bio, and photo you choose to add), the people you've added or blocked, and the devices and browsers you've signed in on, with a name like "Safari on Mac" and when each was last used. Other people signed in to Totality can see your username, name, bio, and photo, so they can find you. Your profile photo isn't encrypted, and anyone who has its link can open it.</p>
 
 <h2>What you keep in Totality</h2>
-<p>Things like Reader documents, calendar events, bookmarks, photos, and mail settings are encrypted on your device before upload. The servers keep the sealed copy and what's needed to sync it: an ID, which kind of thing it is, which account it belongs to, its size, and when it changed. The keys stay on your devices. A backup of them is kept on the server, sealed with a recovery key that only you have.</p>
+<p>Private things like Reader documents, calendar events, tasks, bookmarks, photos, and mail settings are encrypted on your device before upload. The servers keep the sealed copy and what's needed to sync it: an ID, which kind of thing it is, which account it belongs to, its size, and when it changed. The keys stay on your devices. A backup of them is kept on the server, sealed with a recovery key that only you have.</p>
+
+<h2>Social</h2>
+<p>When you post in Social, you choose who it's for: Everyone, Friends (people you follow who follow you back), or Close friends (a list you choose).</p>
+<p>Everyone posts are public. They're stored on Totality's server as readable text, not encrypted, so that other people can see them, For You can rank them, and search can find them. The same goes for their tags, the likes and comments on them, and who made each one. Anyone signed in to Totality can see them, unless one of you has blocked the other. If you make your account private, only followers you approve can see your posts. Who you follow and who follows you can also be seen by people signed in to Totality. Public posts aren't on the open web: you need a Totality account to see them.</p>
+<p>Friends and Close-friends posts, and the likes and comments on them, go through Totality's Matrix server in end-to-end encrypted rooms, so the server can't read them. It does know who is in each room and when something is posted, because it has to deliver it. It can't tell a Friends room from a Close-friends one.</p>
+<p>Your Social settings, such as whether your account is private and who can comment on your posts, can be read by people signed in to Totality, because they decide what others can do on your posts. They hold choices, not content.</p>
+
+<h2>For You</h2>
+<p>For You is Totality's own ranking. It looks only at public posts from the last 30 days, and only at what happens inside Social: how new a post is, how many likes and comments it has, whether people you follow follow its author, the tags of posts you've liked, and the tags of posts you said Not interested to. It never shows you your own posts or people you've muted, and each post in it says why it's there. Friends and Close-friends posts are never used for ranking.</p>
+<p>To work, For You remembers which posts it has already shown you and which you said Not interested to. That list, the posts you save, and the people you mute are stored on the server unencrypted. Only you can see them in Totality, and nobody else is told.</p>
+
+<h2>Blocking, muting, and reports</h2>
+<p>Blocking works across Totality: neither of you sees the other's posts, likes, comments, or follows, it covers Messages too, and they aren't told. Muting hides someone's posts from your feeds without telling them.</p>
+<p>You can report a person, a post, or a comment. A report holds who sent it, who it's about, the public post or comment it's about if there is one, the reason you picked, and when. Reports are stored readable on the server and go to Totality's moderator, who for now is the person who runs Totality. The person you report can't see your report. Friends and Close-friends posts are end-to-end encrypted, so a report about one gives the moderator only the person and the reason, never the post. Nothing deletes reports on a timer: each one is kept until the moderator deletes it.</p>
+
+<h2>Keeping and deleting Social posts</h2>
+<p>Your posts, comments, likes, and follows are kept until you delete them. Deleting a public post removes it from Totality's database right away, along with its likes and comments. You can delete your own comments, and any comment on your own posts. A report about a post you delete still says who it was about and why, but no longer points to the post. Totality doesn't keep separate backups of its database, so a deleted post is gone from it at once.</p>
+<p>Deleting a Friends or Close-friends post tells everyone in that room to remove it, and their apps stop showing it. The encrypted copy stays on the Matrix server, which can't read it, and anyone who already saw the post may have kept a copy.</p>
+<h2>Deleting your account, and contact</h2>
+<p>The app can't delete a whole account yet. Until it can, email mckayclemens@usetotality.com, from Totality Mail or from anywhere else, to have your account and its data deleted, or with any question about privacy.</p>
 
 <h2>Messages</h2>
-<p>Messages, groups, and calls go through Totality's Matrix server and are end-to-end encrypted, so the server can't read them. It does know which accounts are in a conversation and when messages are sent, because it has to deliver them.</p>
+<p>Messages, the photos and videos sent in them, group chats, and shared task lists go through Totality's Matrix server and are end-to-end encrypted, so the server can't read them. It does know which accounts are in a conversation and when messages are sent, because it has to deliver them.</p>
 
 <h2>Totality Mail</h2>
 <p>Every account has an address at usetotality.com. Mail between Totality accounts is sealed end to end. Mail from outside Totality arrives readable, as all email does. The mail server checks it for spam and holds it in memory for a moment, then seals it to your key before it's written anywhere. Mail you send to an outside address has to reach the other side readable, so it passes through Cloudflare's email service unsealed. Neither step keeps a log of the mail.</p>
 
 <h2>Gmail and iCloud</h2>
-<p>When you add a Gmail or iCloud account, your device connects to it directly. Gmail uses Google sign-in, and iCloud uses an app-specific password. The sign-in is kept in your device's Keychain. Mail downloaded from these accounts is stored encrypted on that device only, and isn't uploaded to Totality's servers.</p>
-<p>From the device, Totality reads your mail and labels or folders so they show in the app. It also sends back the changes you make in the app: read or unread, starred, archived, spam, and moving to Trash. It never deletes mail for good there. It only sends mail from these accounts after you turn on sending for that account, and then only each message you send. When you remove an account, its mail and sign-in are deleted from your devices, and Totality's access is withdrawn at Google.</p>
-<p>Totality's use and transfer of information received from Google APIs follows the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including its Limited Use requirements. Gmail data is used only to show and manage your mail in the app. It isn't used for ads, it isn't sold or given to anyone, nobody at Totality reads it, and it isn't used to train AI models.</p>
+<p>When you add a Gmail or iCloud account, your device connects to it directly. Gmail uses Google sign-in, and iCloud uses an app-specific password. The sign-in is kept in your device's Keychain. So the account works on your other devices too, a copy of the sign-in syncs sealed with your key, which Totality's servers can't open. Mail downloaded from these accounts is stored encrypted on that device only, and isn't uploaded to Totality's servers.</p>
+<p>From the device, Totality reads your mail and labels or folders so they show in the app. It also sends back the changes you make in the app: read or unread, starred, archived, spam, and moving to Trash. It never deletes mail for good there. It only sends mail from these accounts after you turn on sending for that account, and then only each message you send. When you remove an account, its mail and sign-in are deleted from your devices, and Totality's access is withdrawn at Google. That also ends that Google account's connection to Calendar, Photos, and Drive in Totality.</p>
 
-<h2>Public profile</h2>
-<p>Your profile has a public web page at usetotality.com/@username only after you press Share. The page shows only your name, photo, and bio, and you can take it down at any time.</p>
+<h2>Google Calendar, Google Photos, and Google Drive</h2>
+<p>These connect from your device straight to Google, with the same Google sign-in. Totality's servers get only sealed copies of what you bring in from them, and can't read those. Google Calendar events are read on each device and kept there encrypted, and you can add, change, or delete events on calendars you own. From Google Photos, Totality gets only the photos and videos you pick, and they're added to your library like any other photo, encrypted before upload. For Google Drive, Totality asks for full Drive access so you can link folders of your choice and open, edit, and import their files. It shows only the folders you link. The list of linked folders syncs sealed, and a file you import becomes an encrypted Reader file like any other.</p>
+<p>Totality's use and transfer of information received from Google APIs follows the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including its Limited Use requirements. Data from Gmail and other Google services is used only to show and manage it in the app. It isn't used for ads, it isn't sold or given to anyone, nobody at Totality reads it, and it isn't used to train AI models.</p>
+
+<h2>The website</h2>
+<p>You sign in to the website at app.usetotality.com by scanning a code with your iPhone, which hands your key to that browser sealed so only it can open it. On a computer you say is yours, the browser keeps the key and your sign-in. On a shared computer it keeps nothing once you close the tab or leave it idle for 30 minutes. You can remove any browser from your iPhone, and within five minutes it signs out and wipes what it kept.</p>
+
+<h2>Notifications</h2>
+<p>Task and calendar reminders are scheduled on your device by the app. Totality doesn't send push notifications yet.</p>
+
+<h2>Public profile page</h2>
+<p>Your profile has a public web page at usetotality.com/@username only after you press Share. The page shows only your name, photo, and bio, and you can take it down at any time. Your posts are never on it.</p>
 
 <h2>Web search</h2>
 <p>Searches go through Totality's own search gateway, which passes them to search engines without your account or address attached. Neither the gateway nor the search service logs what you search for.</p>
 
 <h2>Where it's kept</h2>
-<p>Totality's servers run on Supabase (the account and sealed sync data), Oracle Cloud (messages, mail, and sealed files), and Cloudflare (the connection to those servers and email delivery). Each of them holds only what's described above.</p>
+<p>Totality's servers run on Supabase (the account, profile photos, public Social posts, and sealed sync data), Oracle Cloud (messages, Friends and Close-friends posts, mail, and sealed files), and Cloudflare (the connection to those servers, the website, and email delivery). Each of them holds only what's described above.</p>
 
 <h2>Changes</h2>
 <p>If this policy changes, the date at the top changes with it.</p>`, { kind: 'doc', indexed: true })
