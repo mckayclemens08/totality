@@ -78,7 +78,14 @@ public final class SocialModel {
     @ObservationIgnored private var mediaOrder: [String] = []
     static let mediaCacheSize = 40
 
-    public init(server: any SocialServer, privateRooms: (any SharedRooms)? = nil, profiles: (any ProfileDirectory)? = nil) {
+    /// Where this device remembers each account's Close friends, so the list shows at once after the app
+    /// opens, before Messages has loaded the room it lives in. Usernames only, kept on this device.
+    let remembered: UserDefaults
+
+    public init(server: any SocialServer, privateRooms: (any SharedRooms)? = nil, profiles: (any ProfileDirectory)? = nil,
+                remembered: UserDefaults? = nil) {
+        // The app passes its own defaults; anything else (tests, previews) remembers only for this model.
+        self.remembered = remembered ?? UserDefaults(suiteName: "social.unsaved." + UUID().uuidString) ?? .standard
         self.server = server
         privatePosts = privateRooms.map(PrivatePosts.init)
         self.profiles = profiles
@@ -93,6 +100,7 @@ public final class SocialModel {
             // Someone else signed in since the last load: nothing of the last account's may stay on screen.
             if let old = self.me, old != me { forgetAccount() }
             self.me = me
+            if closeFriends.isEmpty { closeFriends = rememberedCloseFriends(of: me) }
             followingSet = Set(try await server.followed(by: me))
             tags = (try? await server.topTags()) ?? tags
             settings = (try? await server.settings()) ?? settings
@@ -162,7 +170,7 @@ public final class SocialModel {
         privateFeed = timelines.flatMap(\.posts)
         friends = Set(try await server.friends())
         // A room that hasn't loaded yet leaves the list as it was, rather than emptying it.
-        if case let found?? = try? await privatePosts.members(.closeFriends) { closeFriends = found }
+        if case let found?? = try? await privatePosts.members(.closeFriends) { closeFriends = found; remember(closeFriends: found) }
         // Your Friends room follows who your friends are now. Anyone no longer one stops getting new posts.
         if timelines.contains(where: { $0.owner == me && $0.audience == .friends }) {
             try? await privatePosts.setMembers(friends, of: .friends)
@@ -415,6 +423,15 @@ public final class SocialModel {
         return (try? await server.searchPeople(query)) ?? []
     }
 
+    private func rememberedCloseFriends(of account: String) -> Set<String> {
+        Set(remembered.stringArray(forKey: "social.closeFriends." + account) ?? [])
+    }
+
+    private func remember(closeFriends people: Set<String>) {
+        guard let me else { return }
+        remembered.set(people.sorted(), forKey: "social.closeFriends." + me)
+    }
+
     /// Close friends are chosen from the people you follow. They're the members of your Close-friends room.
     public func setCloseFriends(_ people: Set<String>) async -> Bool {
         guard let privatePosts, privateReason == nil else {
@@ -422,8 +439,15 @@ public final class SocialModel {
             return false
         }
         do {
+            // A list this device remembers means the room exists; if it hasn't loaded yet, wait rather than
+            // make a second, empty one beside it.
+            if try await privatePosts.members(.closeFriends) == nil, let me, !rememberedCloseFriends(of: me).isEmpty {
+                notice = "Close friends are still loading. Try again in a moment."
+                return false
+            }
             try await privatePosts.setMembers(people, of: .closeFriends)
             closeFriends = people
+            remember(closeFriends: people)
             return true
         } catch {
             notice = Self.message(error)

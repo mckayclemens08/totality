@@ -574,7 +574,7 @@ struct RootView: View {
         #else
         let rooms: (any SharedRooms)? = nil
         #endif
-        let model = SocialModel(server: server, privateRooms: rooms, profiles: AccountSetup.profiles)
+        let model = SocialModel(server: server, privateRooms: rooms, profiles: AccountSetup.profiles, remembered: .standard)
         model.taskMaker = registry?.taskMaker
         model.receiver = registry?.receiver(for: .social)
         model.onMessage = { name in

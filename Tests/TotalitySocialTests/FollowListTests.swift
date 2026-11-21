@@ -33,6 +33,19 @@ import TotalityCore
         #expect(try await again.privatePosts!.members(.closeFriends) == ["eli"])
     }
 
+    @Test func closeFriendsShowBeforeTheirRoomLoads() async throws {
+        let shared = try #require(UserDefaults(suiteName: "social.test." + UUID().uuidString))
+        let ana = SocialModel(server: world.person("ana"), privateRooms: matrix.device(for: "ana"), remembered: shared)
+        let eli = device("eli")
+        await eli.load(); _ = await eli.setFollowing(true, "ana")
+        await ana.load(); _ = await ana.setFollowing(true, "eli")
+        #expect(await ana.setCloseFriends(["eli"]))
+        // Reopened with Messages not reachable yet: the remembered list shows, and saving waits.
+        let again = SocialModel(server: world.person("ana"), privateRooms: nil, remembered: shared)
+        await again.load()
+        #expect(again.closeFriends == ["eli"])
+    }
+
     @Test func removingAFollowerTakesThemOutOfYourRoomsAtOnce() async throws {
         let (ana, _) = await friends()
         #expect(await ana.setCloseFriends(["eli"]))
