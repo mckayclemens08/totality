@@ -363,6 +363,7 @@ struct EmptyFeed: View {
         }
         .padding(.top, Space.s7)
         .padding(.horizontal, Space.s5)
+        .frame(maxWidth: .infinity)
     }
 }
 
