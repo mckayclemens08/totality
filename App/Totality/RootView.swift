@@ -95,9 +95,9 @@ struct RootView: View {
             await followAccount()
             await account?.backup?.settleDevice()
             connectSync()
-            await openContentForHome()
             // So the Messages tile shows who's written without opening Messages first. Not while it's off Home.
             if !homeChoices.removed.contains(.messages) { Task { await messages.connect() } }
+            await openContentForHome()
             await refreshAhead()
             await openSocialForHome()
             await account?.sync?.syncNow()
@@ -501,12 +501,17 @@ struct RootView: View {
     private func openContentForHome() async {
         guard reader == nil else { return }
         prepareContent()
-        await reader?.load()
-        await calendar?.load()
-        await tasks?.load()
+        // Who's here first, so Mail opens its own mailbox straight away, without waiting on the others.
         await tellWhoIsHere()
         // So the Mail tile has something to show before Mail is opened.
-        if mail.current.phase != .ready, !homeChoices.removed.contains(.mail) { await mail.current.refresh() }
+        if mail.current.phase != .ready, !homeChoices.removed.contains(.mail) {
+            let mail = mail.current
+            Task { await mail.refresh() }
+        }
+        async let reader: Void = self.reader?.load() ?? ()
+        async let calendar: Void = self.calendar?.load() ?? ()
+        async let tasks: Void = self.tasks?.load() ?? ()
+        _ = await (reader, calendar, tasks)
     }
 
     /// Each module that keeps itself up to date fetches what's new, quietly.

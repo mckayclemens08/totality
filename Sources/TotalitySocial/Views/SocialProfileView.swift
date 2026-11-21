@@ -165,6 +165,7 @@ struct SocialProfileView: View {
                     messageButton(profile)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: isMe ? .leading : .center)
             if isMe {
                 Text("Your profile is public: anyone on Totality can see your photo, name, bio and public posts. Edit them from Account.")
                     .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
