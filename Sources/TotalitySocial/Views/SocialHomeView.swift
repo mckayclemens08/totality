@@ -53,6 +53,14 @@ public struct SocialHomeView: View {
         .sheet(isPresented: $composing) { ComposeView(model: model) { composing = false } }
         .task { if model.phase == .loading { await model.load() } }
         .onDisappear { Task { await model.flushShown() } }
+        .onChange(of: model.homeRequest, initial: true) { _, request in
+            guard let request else { return }
+            model.homeRequest = nil
+            switch request {
+            case .compose: composing = true
+            case .search: tab = .search
+            }
+        }
         .onChange(of: model.requestedPost, initial: true) { _, id in
             guard let id else { return }
             model.requestedPost = nil

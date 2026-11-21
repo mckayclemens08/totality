@@ -370,6 +370,9 @@ struct RootView: View {
             // library here already belongs to the device's owner. While the library opens, the tile says so.
             if case .signedOut = account?.phase { return nil }
             return AnyView(PhotosHomeTile(model: photos, size: size) { bringUp(.photos) })
+        case .social:
+            guard let social, case .signedIn = account?.phase else { return nil }
+            return AnyView(SocialHomeTile(model: social, size: size) { bringUp(.social) })
         default:
             return nil
         }
