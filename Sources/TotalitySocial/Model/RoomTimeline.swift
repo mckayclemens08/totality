@@ -7,7 +7,7 @@ public enum RoomMessage: Equatable, Sendable {
     /// The room's first post, from its owner: which audience it's for. It's inside the encryption, so the
     /// server can't tell a Friends room from a Close-friends one.
     case timeline(Audience)
-    case post(id: UUID, title: String?, body: String, tags: [String], date: Date)
+    case post(id: UUID, title: String?, body: String, tags: [String], date: Date, media: [PostMedia] = [])
     case delete(post: UUID)
     case like(post: UUID, on: Bool)
     case comment(id: UUID, post: UUID, parent: UUID?, body: String)
@@ -25,14 +25,16 @@ public enum RoomMessage: Equatable, Sendable {
         var tags: [String]?
         var date: Double?
         var on: Bool?
+        /// Each item's key rides here, inside the encryption.
+        var media: [PostMedia]?
     }
 
     public var encoded: String {
         var w: Wire
         switch self {
         case .timeline(let audience): w = Wire(type: "timeline", audience: audience.rawValue)
-        case .post(let id, let title, let body, let tags, let date):
-            w = Wire(type: "post", id: id, title: title, body: body, tags: tags, date: date.timeIntervalSince1970)
+        case .post(let id, let title, let body, let tags, let date, let media):
+            w = Wire(type: "post", id: id, title: title, body: body, tags: tags, date: date.timeIntervalSince1970, media: media.isEmpty ? nil : media)
         case .delete(let post): w = Wire(type: "delete", post: post)
         case .like(let post, let on): w = Wire(type: "like", post: post, on: on)
         case .comment(let id, let post, let parent, let body): w = Wire(type: "comment", id: id, post: post, parent: parent, body: body)
@@ -52,11 +54,13 @@ public enum RoomMessage: Equatable, Sendable {
             guard let a = w.audience.flatMap(Audience.init(rawValue:)), a.isEncrypted else { return nil }
             self = .timeline(a)
         case "post":
+            let media = w.media ?? []
             guard let id = w.id, let body = w.body, let date = w.date,
-                  PostLimits.problem(title: w.title ?? "", body: body) == nil else { return nil }
+                  PostLimits.problem(title: w.title ?? "", body: body, hasMedia: !media.isEmpty) == nil,
+                  MediaLimits.problem(media, encrypted: true) == nil else { return nil }
             let tags = (w.tags ?? []).filter { $0.range(of: "^[a-z0-9_]{1,30}$", options: .regularExpression) != nil }
             self = .post(id: id, title: (w.title?.isEmpty ?? true) ? nil : w.title, body: body, tags: Array(tags.prefix(PostTags.limit)),
-                         date: Date(timeIntervalSince1970: date))
+                         date: Date(timeIntervalSince1970: date), media: media)
         case "delete":
             guard let post = w.post else { return nil }
             self = .delete(post: post)
@@ -118,10 +122,10 @@ public struct RoomTimeline: Equatable, Sendable {
                     guard isOwner, audience == nil else { continue }
                     owner = sender
                     audience = a
-                case .post(let id, let title, let body, let tags, _):
+                case .post(let id, let title, let body, let tags, _, let media):
                     guard isOwner, let audience, posts[id] == nil, !deleted.contains(id) else { continue }
                     // The server's time, not the one written in the post, so an author can't backdate.
-                    posts[id] = SocialPost(id: id, author: sender, audience: audience, title: title, body: body, tags: tags, date: date, room: room)
+                    posts[id] = SocialPost(id: id, author: sender, audience: audience, title: title, body: body, tags: tags, date: date, room: room, media: media)
                     order.append(id)
                 case .delete(let id):
                     guard isOwner else { continue }
@@ -233,10 +237,10 @@ public final class PrivatePosts {
         for person in current.subtracting(people).sorted() { try await rooms.remove(person, from: room) }
     }
 
-    public func publish(_ audience: Audience, title: String?, body: String, tags: [String], date: Date = Date()) async throws -> UUID {
+    public func publish(_ audience: Audience, title: String?, body: String, tags: [String], media: [PostMedia] = [], date: Date = Date()) async throws -> UUID {
         let room = try await ownRoom(audience)
         let id = UUID()
-        try await rooms.post(RoomMessage.post(id: id, title: title, body: body, tags: tags, date: date).encoded, to: room)
+        try await rooms.post(RoomMessage.post(id: id, title: title, body: body, tags: tags, date: date, media: media).encoded, to: room)
         return id
     }
 

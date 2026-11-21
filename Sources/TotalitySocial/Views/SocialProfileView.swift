@@ -26,6 +26,13 @@ struct SocialProfileView: View {
     @State private var confirmingBlock = false
     /// On your own profile: your posts, or the public posts you saved. Only you see your saves.
     @State private var showingSaved = false
+    /// The Photos or Audio tab: only posts that carry that kind of media.
+    @State private var mediaTab: PostMedia.Kind?
+
+    private var shownPosts: [SocialPost] {
+        guard let mediaTab else { return posts }
+        return posts.filter { $0.media.contains { $0.kind == mediaTab } }
+    }
 
     var body: some View {
         let theme = Theme.current
@@ -38,9 +45,11 @@ struct SocialProfileView: View {
                 }
                 if let profile {
                     header(profile)
-                    if isMe {
-                        HStack(spacing: Space.s2) {
-                            FilterPill("Posts", isSelected: !showingSaved) { showingSaved = false }
+                    HStack(spacing: Space.s2) {
+                        FilterPill("Posts", isSelected: !showingSaved && mediaTab == nil) { showingSaved = false; mediaTab = nil }
+                        FilterPill("Photos", isSelected: !showingSaved && mediaTab == .photo) { showingSaved = false; mediaTab = .photo }
+                        FilterPill("Audio", isSelected: !showingSaved && mediaTab == .audio) { showingSaved = false; mediaTab = .audio }
+                        if isMe {
                             FilterPill("Saved", isSelected: showingSaved) { showingSaved = true; Task { await model.loadSaved() } }
                         }
                     }
@@ -52,13 +61,16 @@ struct SocialProfileView: View {
                         if model.saved.isEmpty {
                             EmptyFeed(systemImage: "bookmark", title: "Nothing saved yet", detail: "Tap Save on a public post to keep it here. Only you can see what you saved.")
                         } else {
-                            PostGrid(posts: model.saved, photos: model.photos, onShow: { _ in }) { open(.post($0.id)) }
+                            PostGrid(model: model, posts: model.saved, photos: model.photos, onShow: { _ in }) { open(.post($0.id)) }
                         }
+                    } else if shownPosts.isEmpty, let mediaTab {
+                        EmptyFeed(systemImage: mediaTab == .photo ? "photo" : "mic", title: mediaTab == .photo ? "No photos yet" : "No audio yet",
+                                  detail: isMe ? "Posts with \(mediaTab == .photo ? "photos" : "audio") show here." : "When \(profile.name) posts \(mediaTab == .photo ? "photos" : "audio"), they show here.")
                     } else if posts.isEmpty {
                         EmptyFeed(systemImage: "square.and.pencil", title: "No posts yet",
                                   detail: isMe ? "Your posts show here, whoever you share them with." : "When \(profile.name) posts, it shows here.")
                     } else {
-                        PostGrid(posts: posts, photos: model.photos, onShow: { post in
+                        PostGrid(model: model, posts: shownPosts, photos: model.photos, onShow: { post in
                             if post.id == posts.last?.id { Task { await loadMore() } }
                         }) { open(.post($0.id)) }
                     }

@@ -19,6 +19,8 @@ final class FakeSocialWorld: @unchecked Sendable {
     var ids: [String: UUID] = [:]
     /// Display names, for lists that show them.
     var names: [String: String] = [:]
+    /// The `social-media` bucket: path to bytes as stored.
+    var files: [String: Data] = [:]
 
     func id(_ name: String) -> UUID {
         if let id = ids[name] { return id }
@@ -82,11 +84,38 @@ struct FakeSocial: SocialServer {
 
     func post(_ id: UUID) async throws -> SocialPost? { world.lock.withLock { world.posts[id].map(view) } }
 
-    func publish(title: String?, body: String, tags: [String]) async throws -> UUID {
-        world.lock.withLock {
+    func publish(title: String?, body: String, tags: [String], media: [PostMedia]) async throws -> UUID {
+        // As `private.social_media_valid` does: no keys, only the author's own folder.
+        let folder = world.lock.withLock { world.id(me).uuidString.lowercased() }
+        guard MediaLimits.problem(media, encrypted: false) == nil, media.allSatisfy({ $0.path.hasPrefix(folder + "/") }) else {
+            throw SocialError.refused("bad media")
+        }
+        return world.lock.withLock {
             let id = UUID()
-            world.posts[id] = .init(post: SocialPost(id: id, author: me, audience: .everyone, title: title, body: body, tags: tags, date: world.tick()))
+            world.posts[id] = .init(post: SocialPost(id: id, author: me, audience: .everyone, title: title, body: body, tags: tags,
+                                                     date: world.tick(), media: media))
             return id
+        }
+    }
+
+    func uploadMedia(_ data: Data, contentType: String) async throws -> String {
+        guard data.count <= MediaLimits.fileBytes + MediaLimits.sealOverhead else { throw SocialError.refused("That file is too big to post.") }
+        return world.lock.withLock {
+            let path = world.id(me).uuidString.lowercased() + "/" + UUID().uuidString.lowercased()
+            world.files[path] = data
+            return path
+        }
+    }
+
+    func media(at path: String) async throws -> Data {
+        guard let data = world.lock.withLock({ world.files[path] }) else { throw SocialError.failed("That file isn't there any more.") }
+        return data
+    }
+
+    func removeMedia(_ paths: [String]) async throws {
+        world.lock.withLock {
+            let folder = world.id(me).uuidString.lowercased() + "/"
+            for path in paths where path.hasPrefix(folder) { world.files[path] = nil }
         }
     }
 

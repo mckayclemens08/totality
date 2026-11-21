@@ -24,7 +24,7 @@
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Place reminders in Tasks: this iPhone watches for the places you pick, even while Totality is closed, and rings the reminder when you arrive or leave. Where you are never leaves the iPhone.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Records sound for a short video you send in Messages, and lets a site you're on use your microphone when you agree. Totality keeps nothing you don't send.</string>
+	<string>Records sound for a short video you send in Messages or a voice clip you post in Social, and lets a site you're on use your microphone when you agree. Totality keeps nothing you don't send.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Only if you turn on Sync this iPhone in Photos: brings your photos into Totality, sealed on this iPhone before they upload. Sync never changes or deletes anything in your library.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

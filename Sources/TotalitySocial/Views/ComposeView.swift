@@ -1,21 +1,44 @@
+import PhotosUI
 import SwiftUI
 import TotalityCore
 import TotalityUI
+import UniformTypeIdentifiers
 
-/// A new text post. You pick who sees it, each choice with its agreed label, and nothing is sent until
-/// you press Post (non-negotiable 6). Photos, video and audio come in later steps of issue 149.
+/// A new post: text, up to four photos, or one audio clip. You pick who sees it, each choice with its agreed
+/// label, and nothing is sent until you press Post (non-negotiable 6). Video comes in a later step.
 struct ComposeView: View {
+    enum Kind: String, CaseIterable, Identifiable {
+        case text = "Text", photo = "Photo", audio = "Audio"
+        var id: String { rawValue }
+    }
+
     let model: SocialModel
     let onClose: () -> Void
+    @State private var kind: Kind = .text
     @State private var title = ""
     @State private var text = ""
     @State private var audience: Audience = .everyone
     @State private var posting = false
     @State private var editingCloseFriends = false
+    @State private var photos: [Attachment] = []
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var preparing = false
+    @State private var photoProblem: String?
+    @State private var capture = AudioCapture()
+    @State private var importingAudio = false
+
+    private var attachments: [Attachment] {
+        switch kind {
+        case .text: []
+        case .photo: photos
+        case .audio: capture.clip.map { [$0] } ?? []
+        }
+    }
 
     var body: some View {
         let theme = Theme.current
         let tags = PostTags.find(in: title + " " + text)
+        let attachments = attachments
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.s4) {
@@ -27,18 +50,33 @@ struct ComposeView: View {
                         HeaderPill(posting ? "Posting…" : "Post", isProminent: true) {
                             Task {
                                 posting = true
-                                if await model.publish(audience, title: title, body: text) { onClose() }
+                                if await model.publish(audience, title: title, body: text, attachments: attachments) {
+                                    capture.discard()
+                                    onClose()
+                                }
                                 posting = false
                             }
                         }
-                        .disabled(posting || PostLimits.problem(title: title, body: text) != nil)
+                        .disabled(posting || preparing || capture.state == .recording
+                                  || PostLimits.problem(title: title, body: text, hasMedia: !attachments.isEmpty) != nil)
+                    }
+                    HStack(spacing: Space.s2) {
+                        ForEach(Kind.allCases) { choice in
+                            FilterPill(choice.rawValue, isSelected: kind == choice) { kind = choice }
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    switch kind {
+                    case .text: EmptyView()
+                    case .photo: photoSection
+                    case .audio: audioSection
                     }
                     VStack(alignment: .leading, spacing: Space.s2) {
                         Text("Title").font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
                         TextField("Optional", text: $title).font(Typeface.headline).raisedField()
                     }
                     VStack(alignment: .leading, spacing: Space.s2) {
-                        Text("Post").font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
+                        Text(kind == .text ? "Post" : "Caption").font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
                         TextField("What's on your mind? Add #tags anywhere.", text: $text, axis: .vertical)
                             .lineLimit(6...20)
                             .raisedField(.block)
@@ -72,8 +110,176 @@ struct ComposeView: View {
             .background(theme.bg.color.ignoresSafeArea())
             .hidesNavigationBar()
             .sheet(isPresented: $editingCloseFriends) { CloseFriendsView(model: model) { editingCloseFriends = false } }
+            .fileImporter(isPresented: $importingAudio, allowedContentTypes: [.audio]) { result in
+                if case .success(let url) = result { Task { await capture.pick(url) } }
+            }
+            .onChange(of: picked) { _, items in Task { await addPhotos(items) } }
         }
-        .interactiveDismissDisabled(!text.isEmpty || !title.isEmpty)
+        .interactiveDismissDisabled(!text.isEmpty || !title.isEmpty || !photos.isEmpty || capture.clip != nil)
+        .onDisappear { capture.discard() }
+    }
+
+    // MARK: Photos
+
+    private var photoSection: some View {
+        let theme = Theme.current
+        let tile = RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+        return VStack(alignment: .leading, spacing: Space.s2) {
+            ScrollView(.horizontal) {
+                HStack(spacing: Space.s3) {
+                    ForEach(photos) { photo in
+                        ZStack(alignment: .topTrailing) {
+                            if let image = PhotoDecode.image(photo.data, side: 320) {
+                                Image(image, scale: 1, label: Text("Photo to post")).resizable().scaledToFill()
+                                    .frame(width: 104, height: 104).clipShape(tile)
+                            }
+                            Button { photos.removeAll { $0.id == photo.id } } label: {
+                                Image(systemName: "xmark").font(Typeface.micro)
+                                    .foregroundStyle(theme.textPrimary.color)
+                                    .frame(width: Space.s6, height: Space.s6)
+                                    .neumorphic(.subtle, in: Circle())
+                            }
+                            .buttonStyle(SoftPress())
+                            .padding(Space.s1)
+                            .accessibilityLabel("Remove this photo")
+                        }
+                    }
+                    if photos.count < MediaLimits.photos {
+                        PhotosPicker(selection: $picked, maxSelectionCount: MediaLimits.photos - photos.count, matching: .images) {
+                            AddPhotosLabel(count: photos.count, preparing: preparing)
+                        }
+                        .buttonStyle(SoftPress())
+                        .disabled(preparing)
+                        .accessibilityLabel("Add photos")
+                    }
+                }
+                .padding(Space.s1)
+            }
+            .scrollIndicators(.hidden)
+            if let photoProblem {
+                Text(photoProblem).font(Typeface.caption).foregroundStyle(theme.danger.color)
+            } else if photos.isEmpty {
+                Text("Up to \(MediaLimits.photos) photos. They're made smaller on this iPhone, and where and when they were taken is left off.")
+                    .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
+            }
+        }
+    }
+
+    private func addPhotos(_ items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
+        preparing = true
+        photoProblem = nil
+        for item in items where photos.count < MediaLimits.photos {
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else { throw SocialError.failed("That photo couldn't be opened.") }
+                let prepared = try await Task.detached(priority: .userInitiated) { try Attachment.photo(data) }.value
+                photos.append(prepared)
+            } catch {
+                photoProblem = (error as? SocialError)?.message ?? "That photo couldn't be opened."
+            }
+        }
+        picked = []
+        preparing = false
+    }
+
+    // MARK: Audio
+
+    private var audioSection: some View {
+        let theme = Theme.current
+        let recording = capture.state == .recording
+        let seconds = capture.clip?.duration ?? capture.elapsed
+        return VStack(spacing: Space.s3) {
+            HStack(spacing: Space.s2) {
+                if recording { Circle().fill(theme.danger.color).frame(width: Space.s2, height: Space.s2) }
+                Text(recording ? "Recording" : capture.clip == nil ? "Up to two minutes" : "Ready to post")
+            }
+            .font(Typeface.caption.weight(.semibold)).foregroundStyle(theme.accent.color)
+            Text(ClipTime.text(seconds)).font(Typeface.display.monospacedDigit())
+                .foregroundStyle(theme.textPrimary.color)
+            ProgressTrack(fraction: seconds / MediaLimits.audioSeconds) { _ in }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            HStack(spacing: Space.s5) {
+                RoundIcon("arrow.counterclockwise", label: "Start over") { capture.discard() }
+                    .disabled(capture.clip == nil && !recording)
+                Button {
+                    if recording { capture.stop() } else { Task { await capture.start() } }
+                } label: {
+                    Image(systemName: recording ? "stop.fill" : "mic.fill")
+                        .font(Typeface.title).foregroundStyle(theme.accentOn.color)
+                        .frame(width: 72, height: 72)
+                        .background(theme.accent.color, in: Circle())
+                }
+                .buttonStyle(SoftPress())
+                .accessibilityLabel(recording ? "Stop recording" : "Record")
+                ListenBack(clip: capture.clip)
+            }
+            Button("Or upload an audio file") { importingAudio = true }
+                .font(Typeface.caption.weight(.semibold)).foregroundStyle(theme.accent.color)
+                .disabled(recording)
+            if case .failed(let message) = capture.state {
+                Text(message).font(Typeface.caption).foregroundStyle(theme.danger.color).multilineTextAlignment(.center)
+            }
+        }
+        .padding(Space.s4)
+        .frame(maxWidth: .infinity)
+        .background(theme.highlight.color, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+    }
+}
+
+/// The raised "+" tile at the end of the photo row, with how many are picked.
+private struct AddPhotosLabel: View {
+    let count: Int
+    let preparing: Bool
+
+    var body: some View {
+        let theme = Theme.current
+        VStack(spacing: Space.s1) {
+            if preparing { ProgressView() } else {
+                Image(systemName: "plus").font(Typeface.title).foregroundStyle(theme.accent.color)
+            }
+            Text("\(count) of \(MediaLimits.photos)").font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
+        }
+        .frame(width: 104, height: 104)
+        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+    }
+}
+
+/// A small raised round button with one symbol.
+private struct RoundIcon: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+
+    init(_ symbol: String, label: String, action: @escaping () -> Void) {
+        self.symbol = symbol
+        self.label = label
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).foregroundStyle(Theme.current.textSecondary.color)
+                .frame(width: Space.s7, height: Space.s7)
+                .neumorphic(.subtle, in: Circle())
+        }
+        .buttonStyle(SoftPress())
+        .accessibilityLabel(label)
+    }
+}
+
+/// Plays back the clip you just recorded or picked, before you post it.
+private struct ListenBack: View {
+    let clip: Attachment?
+    @State private var player = ClipPlayer()
+
+    var body: some View {
+        RoundIcon(player.playing ? "pause.fill" : "play.fill", label: player.playing ? "Pause" : "Listen back") {
+            if let clip { player.toggle(clip.data) }
+        }
+        .disabled(clip == nil)
+        .onChange(of: clip?.id) { player.stop() }
     }
 }
 

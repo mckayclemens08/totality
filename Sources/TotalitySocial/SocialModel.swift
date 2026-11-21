@@ -72,6 +72,11 @@ public final class SocialModel {
     private var privateFeed: [SocialPost] = []
     /// What For You has put on screen and hasn't told the server about yet.
     private var shown: Set<UUID> = []
+    /// Opened photos and clips by path, a few at a time, so scrolling back doesn't fetch them again. Kept
+    /// only in memory and dropped when the account changes.
+    @ObservationIgnored private var mediaCache: [String: Data] = [:]
+    @ObservationIgnored private var mediaOrder: [String] = []
+    static let mediaCacheSize = 40
 
     public init(server: any SocialServer, privateRooms: (any SharedRooms)? = nil, profiles: (any ProfileDirectory)? = nil) {
         self.server = server
@@ -112,6 +117,8 @@ public final class SocialModel {
     /// Drops everything that was the signed-in account's: its feeds, its private posts, its lists of
     /// friends and follows, its settings and what For You has shown it.
     func forgetAccount() {
+        mediaCache = [:]
+        mediaOrder = []
         me = nil
         forYou = []
         following = []
@@ -202,34 +209,71 @@ public final class SocialModel {
     // MARK: Posting
 
     /// Posts after the person pressed Post. Public goes to the server; the rest into their encrypted room.
-    public func publish(_ audience: Audience, title: String, body: String) async -> Bool {
+    /// Media upload first: readable for a public post, sealed on this device for the other two, each with
+    /// its own key, which goes only into the encrypted room post.
+    public func publish(_ audience: Audience, title: String, body: String, attachments: [Attachment] = []) async -> Bool {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let problem = PostLimits.problem(title: cleanTitle, body: cleanBody) {
+        if let problem = PostLimits.problem(title: cleanTitle, body: cleanBody, hasMedia: !attachments.isEmpty) {
             notice = problem
             return false
         }
         let tags = PostTags.find(in: cleanTitle + " " + cleanBody)
+        var uploaded: [String] = []
         do {
+            if audience.isEncrypted, privatePosts == nil || privateReason != nil { throw SocialError.failed(privateReason ?? "") }
+            var media: [PostMedia] = []
+            for item in attachments {
+                guard item.data.count <= MediaLimits.fileBytes else { throw SocialError.refused("That file is too big to post.") }
+                var bytes = item.data
+                var key: String?
+                if audience.isEncrypted { (bytes, key) = try MediaSeal.seal(item.data) }
+                let path = try await server.uploadMedia(bytes, contentType: audience.isEncrypted ? "application/octet-stream" : item.contentType)
+                uploaded.append(path)
+                media.append(PostMedia(kind: item.kind, path: path, size: bytes.count, width: item.width, height: item.height,
+                                       duration: item.duration, key: key))
+                remember(item.data, at: path)
+            }
+            if let problem = MediaLimits.problem(media, encrypted: audience.isEncrypted) { throw SocialError.refused(problem) }
             switch audience {
             case .everyone:
-                _ = try await server.publish(title: cleanTitle.isEmpty ? nil : cleanTitle, body: cleanBody, tags: tags)
+                _ = try await server.publish(title: cleanTitle.isEmpty ? nil : cleanTitle, body: cleanBody, tags: tags, media: media)
             case .friends, .closeFriends:
-                guard let privatePosts, privateReason == nil else { throw SocialError.failed(privateReason ?? "") }
+                guard let privatePosts else { throw SocialError.failed(privateReason ?? "") }
                 if audience == .friends { try await privatePosts.setMembers(Set(try await server.friends()), of: .friends) }
-                _ = try await privatePosts.publish(audience, title: cleanTitle.isEmpty ? nil : cleanTitle, body: cleanBody, tags: tags)
+                _ = try await privatePosts.publish(audience, title: cleanTitle.isEmpty ? nil : cleanTitle, body: cleanBody, tags: tags, media: media)
             }
             try? await loadFollowing()
             return true
         } catch {
+            // Nothing half-posted stays in the bucket.
+            try? await server.removeMedia(uploaded)
             notice = Self.message(error)
             return false
         }
     }
 
+    /// A post's photo or clip, ready to show: fetched from the bucket and, for an encrypted post, opened
+    /// on this device with the key from its room post.
+    public func mediaData(_ item: PostMedia) async throws -> Data {
+        if let found = mediaCache[item.path] { return found }
+        let stored = try await server.media(at: item.path)
+        let data = try item.key.map { try MediaSeal.open(stored, key: $0) } ?? stored
+        remember(data, at: item.path)
+        return data
+    }
+
+    private func remember(_ data: Data, at path: String) {
+        if mediaCache[path] == nil { mediaOrder.append(path) }
+        mediaCache[path] = data
+        while mediaOrder.count > Self.mediaCacheSize { mediaCache[mediaOrder.removeFirst()] = nil }
+    }
+
     public func delete(_ post: SocialPost) async {
         do {
             if post.audience == .everyone { try await server.delete(post.id) } else { try await privatePosts?.delete(post) }
+            // Its files go too, once the post is gone. Only your own folder can be emptied.
+            if post.author == me { try? await server.removeMedia(post.media.map(\.path)) }
             forYou.removeAll { $0.id == post.id }
             following.removeAll { $0.id == post.id }
         } catch {

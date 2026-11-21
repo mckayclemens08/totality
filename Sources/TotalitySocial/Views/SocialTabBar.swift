@@ -119,7 +119,7 @@ struct SavedPostsView: View {
                     EmptyFeed(systemImage: "bookmark", title: "Nothing saved yet", detail: "Tap Save on a public post to keep it here. Only you can see what you saved.")
                         .frame(maxWidth: .infinity)
                 } else {
-                    PostGrid(posts: model.saved, photos: model.photos, onShow: { _ in }) { open(.post($0.id)) }
+                    PostGrid(model: model, posts: model.saved, photos: model.photos, onShow: { _ in }) { open(.post($0.id)) }
                 }
             }
             .padding(Space.s4)

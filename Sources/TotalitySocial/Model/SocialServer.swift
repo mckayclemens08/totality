@@ -31,7 +31,13 @@ public protocol SocialServer: Sendable {
     func following(before: Date?) async throws -> [SocialPost]
     func posts(by username: String, before: Date?) async throws -> [SocialPost]
     func post(_ id: UUID) async throws -> SocialPost?
-    func publish(title: String?, body: String, tags: [String]) async throws -> UUID
+    func publish(title: String?, body: String, tags: [String], media: [PostMedia]) async throws -> UUID
+    /// Puts one file in your folder of the `social-media` bucket and returns its path. A file for an
+    /// encrypted post is already sealed when it gets here.
+    func uploadMedia(_ data: Data, contentType: String) async throws -> String
+    /// A file from the bucket, as stored: readable for a public post, sealed for the others.
+    func media(at path: String) async throws -> Data
+    func removeMedia(_ paths: [String]) async throws
     func delete(_ id: UUID) async throws
     func setLiked(_ liked: Bool, post: UUID) async throws
     func comments(on post: UUID) async throws -> [SocialComment]
@@ -67,6 +73,13 @@ public protocol SocialServer: Sendable {
 /// `SocialServer` over Supabase's REST interface. Everything is a call to one of the `social_*` functions
 /// or a write the row rules allow, made with the signed-in person's own token, so the server decides what
 /// they may see. Nothing here logs.
+public extension SocialServer {
+    /// A post with text only.
+    func publish(title: String?, body: String, tags: [String]) async throws -> UUID {
+        try await publish(title: title, body: body, tags: tags, media: [])
+    }
+}
+
 public struct RestSocialServer: SocialServer {
     let base: URL
     let key: String
@@ -101,6 +114,7 @@ public struct RestSocialServer: SocialServer {
         let liked: Bool
         let reason: String?
         let saved: Bool?
+        let media: [PostMedia]?
 
         var post: SocialPost {
             var post = SocialPost(
@@ -110,6 +124,9 @@ public struct RestSocialServer: SocialServer {
             )
             post.likesHidden = likes == nil
             post.saved = saved ?? false
+            // A public row never carries keys; drop anything that claims to.
+            let media = (media ?? []).filter { !$0.isSealed }
+            if MediaLimits.problem(media, encrypted: false) == nil { post.media = media }
             return post
         }
     }
@@ -194,16 +211,23 @@ public struct RestSocialServer: SocialServer {
         if !query.isEmpty { components.queryItems = query }
         var request = URLRequest(url: components.url!)
         request.httpMethod = method
-        request.timeoutInterval = 20
-        let token: String
-        do { token = try await self.token() } catch { throw SocialError.signedOut }
-        request.setValue(key, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let prefer { request.setValue(prefer, forHTTPHeaderField: "Prefer") }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        return try await send(request, signedIn: true)
+    }
+
+    func send(_ request: URLRequest, signedIn: Bool, timeout: TimeInterval = 20) async throws -> Data {
+        var request = request
+        request.timeoutInterval = timeout
+        request.setValue(key, forHTTPHeaderField: "apikey")
+        if signedIn {
+            let token: String
+            do { token = try await self.token() } catch { throw SocialError.signedOut }
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         let data: Data
         let response: URLResponse
@@ -219,6 +243,22 @@ public struct RestSocialServer: SocialServer {
         return data
     }
 
+    /// The bucket that holds posts' photos and audio. It's public to read, so a public post's media show
+    /// to anyone; only you can add to or remove from your own folder.
+    static let bucket = "social-media"
+
+    /// The signed-in account's ID, the `sub` of its token, which names its folder in the bucket.
+    static func account(fromToken token: String) -> String? {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var text = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while text.count % 4 != 0 { text += "=" }
+        guard let data = Data(base64Encoded: text),
+              let sub = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["sub"] as? String,
+              let id = UUID(uuidString: sub) else { return nil }
+        return id.uuidString.lowercased()
+    }
+
     /// The server's refusal in plain words. Its own text is only matched, never shown, so nothing it says
     /// reaches the screen unchecked.
     static func error(status: Int, data: Data) -> SocialError {
@@ -230,6 +270,7 @@ public struct RestSocialServer: SocialServer {
         if message.contains("no such user") { return .refused("That person isn't on Totality.") }
         if message.contains("yourself") { return .refused("You can't follow yourself.") }
         if message.contains("duplicate") { return .refused("Already done.") }
+        if status == 413 || message.contains("exceeded the maximum allowed size") { return .refused("That file is too big to post.") }
         if message.contains("row-level security") { return .refused("That post isn't available any more.") }
         return .failed("Social couldn't do that just now. Try again.")
     }
@@ -268,13 +309,48 @@ public struct RestSocialServer: SocialServer {
         try await rpc("social_post", ["p_id": id.uuidString.lowercased()], as: PostRow.self).first?.post
     }
 
-    public func publish(title: String?, body: String, tags: [String]) async throws -> UUID {
+    public func publish(title: String?, body: String, tags: [String], media: [PostMedia]) async throws -> UUID {
+        let items = try JSONSerialization.jsonObject(with: JSONEncoder().encode(media.map(\.forServer)))
         let data = try await request("social_posts", query: [URLQueryItem(name: "select", value: "id")],
-                                     body: ["title": title ?? NSNull(), "body": body, "tags": tags], prefer: "return=representation")
+                                     body: ["title": title ?? NSNull(), "body": body, "tags": tags, "media": items], prefer: "return=representation")
         guard let row = try? JSONDecoder().decode([IDRow].self, from: data).first else {
             throw SocialError.failed("The post went up but its address didn't come back. Pull to refresh.")
         }
         return row.id
+    }
+
+    public func uploadMedia(_ data: Data, contentType: String) async throws -> String {
+        guard data.count <= MediaLimits.fileBytes + MediaLimits.sealOverhead else { throw SocialError.refused("That file is too big to post.") }
+        let token: String
+        do { token = try await self.token() } catch { throw SocialError.signedOut }
+        guard let account = Self.account(fromToken: token) else { throw SocialError.signedOut }
+        let path = account + "/" + UUID().uuidString.lowercased()
+        var request = URLRequest(url: base.appendingPathComponent("storage/v1/object/\(Self.bucket)/" + path))
+        request.httpMethod = "POST"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue("false", forHTTPHeaderField: "x-upsert")
+        request.httpBody = data
+        _ = try await send(request, signedIn: true, timeout: 60)
+        return path
+    }
+
+    public func media(at path: String) async throws -> Data {
+        guard MediaLimits.path.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil else {
+            throw SocialError.failed("That file has a bad address.")
+        }
+        let request = URLRequest(url: base.appendingPathComponent("storage/v1/object/public/\(Self.bucket)/" + path))
+        let data = try await send(request, signedIn: false, timeout: 60)
+        guard data.count <= MediaLimits.fileBytes + MediaLimits.sealOverhead else { throw SocialError.failed("That file is bigger than Social allows.") }
+        return data
+    }
+
+    public func removeMedia(_ paths: [String]) async throws {
+        guard !paths.isEmpty else { return }
+        var request = URLRequest(url: base.appendingPathComponent("storage/v1/object/\(Self.bucket)"))
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["prefixes": paths])
+        _ = try await send(request, signedIn: true)
     }
 
     public func delete(_ id: UUID) async throws {
