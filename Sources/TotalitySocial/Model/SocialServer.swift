@@ -271,7 +271,6 @@ public struct RestSocialServer: SocialServer {
         if message.contains("yourself") { return .refused("You can't follow yourself.") }
         if message.contains("duplicate") { return .refused("Already done.") }
         if status == 413 || message.contains("exceeded the maximum allowed size") { return .refused("That file is too big to post.") }
-        if message.contains("media storage full") { return .refused("Your Social photos and audio have filled their space. Delete some posts first.") }
         if message.contains("row-level security") { return .refused("That post isn't available any more.") }
         return .failed("Social couldn't do that just now. Try again.")
     }

@@ -9,41 +9,18 @@
 -- overwritten. No new table: `social_posts` gains a `media` column, so the invariants check is unchanged.
 --
 -- Cost rule: Supabase's free plan has 1 GB of Storage. Each file is capped at 4 MB by the bucket, photos
--- are made smaller on the device (1600 px, at most 1.5 MB) and audio stops at two minutes. Each account may
--- hold at most 150 MB in the bucket. When it's full, uploads are refused with "media storage full".
+-- are made smaller on the device (1600 px, at most 1.5 MB) and audio stops at two minutes. Posts don't count
+-- against an account's storage (owner, 2026-11-21); media moves to the Oracle box before the free 1 GB fills.
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('social-media', 'social-media', true, 4194304, array['image/jpeg', 'audio/mp4', 'application/octet-stream'])
 on conflict (id) do nothing;
-
--- Bytes one account holds in the bucket. A file whose size isn't recorded yet counts as the largest allowed.
-create function private.social_media_used(p_owner uuid) returns bigint
-language sql stable security definer set search_path = '' as $$
-  select coalesce(sum(coalesce((o.metadata->>'size')::bigint, 4194304)), 0)::bigint
-  from storage.objects o
-  where o.bucket_id = 'social-media' and (storage.foldername(o.name))[1] = p_owner::text;
-$$;
-revoke all on function private.social_media_used(uuid) from public, anon;
-grant execute on function private.social_media_used(uuid) to authenticated;
-
-create function private.social_media_room(p_owner uuid) returns boolean
-language plpgsql stable security definer set search_path = '' as $$
-begin
-  if private.social_media_used(p_owner) >= 150 * 1024 * 1024 then
-    raise exception 'media storage full';
-  end if;
-  return true;
-end;
-$$;
-revoke all on function private.social_media_room(uuid) from public, anon;
-grant execute on function private.social_media_room(uuid) to authenticated;
 
 create policy social_media_insert on storage.objects for insert to authenticated
 with check (
   bucket_id = 'social-media'
   and (storage.foldername(name))[1] = (select auth.uid())::text
   and array_length(storage.foldername(name), 1) = 1
-  and private.social_media_room((select auth.uid()))
 );
 
 -- Storage's remove reads the rows it deletes, so you can list your own folder (anyone can fetch a file by its path).
