@@ -64,7 +64,7 @@ import TotalityCore
         #expect(RoomMessage(#"{"v":1,"type":"post","id":"\#(UUID())","body":"\#(String(repeating: "a", count: 5001))","date":1}"#) == nil)
         #expect(RoomMessage("not json") == nil)
         let tags = RoomMessage(#"{"v":1,"type":"post","id":"\#(UUID())","body":"x","tags":["ok","Not OK"],"date":1}"#)
-        if case .post(_, _, _, let t, _)? = tags { #expect(t == ["ok"]) } else { Issue.record("not a post") }
+        if case .post(_, _, _, let t, _, _)? = tags { #expect(t == ["ok"]) } else { Issue.record("not a post") }
     }
 }
 

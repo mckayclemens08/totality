@@ -191,4 +191,44 @@ import TotalityCore
             #expect(all.map(\.body) == (0..<40).reversed().map { "Post \($0)" })
         }
     }
+
+    @Test("A Friends photo opens on a friend's phone, and the bucket only ever holds ciphertext")
+    func friendsPhotosReachOnlyFriendsAndStaySealed() async throws {
+        let maya = device("maya"), jonah = device("jonah"), priya = device("priya")
+        for (a, b) in [(jonah, "maya"), (maya, "jonah"), (priya, "maya")] { await a.load(); #expect(await a.setFollowing(true, b)) }
+        await maya.load()
+        let photo = try Attachment.photo(sampleJPEG(width: 1200, height: 900))
+        #expect(await maya.publish(.friends, title: "", body: "The saddle at first light.", attachments: [photo]))
+        #expect(world.posts.isEmpty, "a Friends post is never a row on Totality's server")
+        #expect(world.files.count == 1 && world.files.values.allSatisfy { $0 != photo.data }, "the bucket holds only the sealed file")
+
+        await jonah.load()
+        let seen = try #require(jonah.following.first)
+        let item = try #require(seen.photos.first)
+        #expect(item.isSealed)
+        #expect(try await jonah.mediaData(item) == photo.data, "the key from the encrypted room opens it on a friend's phone")
+
+        await priya.load()
+        #expect(priya.following.isEmpty, "a follower who isn't a friend never learns the file's address or key")
+        // Even with the address, the bytes are only ciphertext without the key.
+        let stored = try await world.person("priya").media(at: item.path)
+        #expect(stored != photo.data)
+    }
+
+    @Test func publicAudioIsReadableByAnyone() async throws {
+        let maya = device("maya"), priya = device("priya")
+        await maya.load()
+        let clip = Attachment(kind: .audio, data: Data(repeating: 3, count: 4000), duration: 40)
+        #expect(await maya.publish(.everyone, title: "Kant's first Critique in ten minutes", body: "", attachments: [clip]))
+        let id = try #require(world.posts.keys.first)
+        await priya.load()
+        await priya.fetchPost(id)
+        let post = try #require(priya.post(id))
+        let audio = try #require(post.audio)
+        #expect(!audio.isSealed && audio.duration == 40)
+        #expect(try await priya.mediaData(audio) == clip.data)
+        // Priya can't remove Maya's file.
+        try await world.person("priya").removeMedia([audio.path])
+        #expect(world.files[audio.path] != nil)
+    }
 }
