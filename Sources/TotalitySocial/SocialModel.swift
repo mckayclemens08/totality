@@ -46,6 +46,9 @@ public final class SocialModel {
     public var requestedProfile: String?
     /// A post asked for from outside Social, such as a task's link back to where it came from.
     public var requestedPost: UUID?
+    /// A screen the home tile asked for: the composer or Search.
+    public var homeRequest: HomeRequest?
+    public enum HomeRequest: Equatable { case compose, search }
 
     // Connections to the other modules (issue 149 §7), set by the app through the registry, so Social
     // imports none of them.
