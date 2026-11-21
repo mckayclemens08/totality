@@ -161,7 +161,8 @@ public final class SocialModel {
         let timelines = try await privatePosts.refresh(following: followingSet)
         privateFeed = timelines.flatMap(\.posts)
         friends = Set(try await server.friends())
-        closeFriends = (try? await privatePosts.members(.closeFriends)) ?? closeFriends
+        // A room that hasn't loaded yet leaves the list as it was, rather than emptying it.
+        if case let found?? = try? await privatePosts.members(.closeFriends) { closeFriends = found }
         // Your Friends room follows who your friends are now. Anyone no longer one stops getting new posts.
         if timelines.contains(where: { $0.owner == me && $0.audience == .friends }) {
             try? await privatePosts.setMembers(friends, of: .friends)
