@@ -214,17 +214,40 @@ public final class PrivatePosts {
     func ownRoom(_ audience: Audience) async throws -> String {
         guard audience.isEncrypted else { throw SocialError.failed("Public posts don't go in a room.") }
         guard let me = await rooms.ownUsername else { throw SocialError.signedOut }
-        if let found = timelines.values.first(where: { $0.owner == me && $0.audience == audience }) { return found.room }
+        if let found = try await ownRooms(audience, me: me).first { return found }
         let room = try await rooms.create(inviting: [:])
         try await rooms.post(RoomMessage.timeline(audience).encoded, to: room)
         timelines[room] = RoomTimeline(room: room, owner: me, audience: audience, posts: [], comments: [:], unreadable: 0)
         return room
     }
 
-    /// Who's in your room for an audience, invited or joined, apart from you.
-    public func members(_ audience: Audience) async throws -> Set<String> {
+    /// Your rooms for an audience, the one with the most people first. Usually there's one, but a room made
+    /// before Messages had synced the old one can sit beside it, and the fuller one is the list you chose.
+    /// When none is known yet, the rooms are read again first, so a new room isn't made beside one that
+    /// simply hadn't loaded.
+    private func ownRooms(_ audience: Audience, me: String) async throws -> [String] {
+        func mine() -> [RoomTimeline] { timelines.values.filter { $0.owner == me && $0.audience == audience } }
+        if mine().isEmpty {
+            for room in try await rooms.rooms() where timelines[room] == nil {
+                guard let history = try? await rooms.history(of: room) else { continue }
+                let timeline = RoomTimeline.build(room: room, history: history, me: me)
+                if timeline.owner == me, timeline.audience != nil { timelines[room] = timeline }
+            }
+        }
+        let found = mine()
+        if found.count < 2 { return found.map(\.room) }
+        var counted: [(room: String, people: Int)] = []
+        for timeline in found {
+            counted.append((timeline.room, (try? await rooms.history(of: timeline.room).members.count) ?? 0))
+        }
+        return counted.sorted { $0.people != $1.people ? $0.people > $1.people : $0.room < $1.room }.map(\.room)
+    }
+
+    /// Who's in your room for an audience, invited or joined, apart from you. Nil when your room for it
+    /// can't be found right now, which isn't the same as an empty list.
+    public func members(_ audience: Audience) async throws -> Set<String>? {
         guard let me = await rooms.ownUsername else { throw SocialError.signedOut }
-        guard let room = timelines.values.first(where: { $0.owner == me && $0.audience == audience })?.room else { return [] }
+        guard let room = try await ownRooms(audience, me: me).first else { return nil }
         return Set(try await rooms.history(of: room).members.map(\.username)).subtracting([me])
     }
 
@@ -232,7 +255,7 @@ public final class PrivatePosts {
     /// friends, your list. Someone removed keeps what they already saw, and gets nothing new.
     public func setMembers(_ people: Set<String>, of audience: Audience) async throws {
         let room = try await ownRoom(audience)
-        let current = try await members(audience)
+        let current = try await members(audience) ?? []
         for person in people.subtracting(current).sorted() { try await rooms.invite(person, as: .viewer, to: room) }
         for person in current.subtracting(people).sorted() { try await rooms.remove(person, from: room) }
     }

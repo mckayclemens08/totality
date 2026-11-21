@@ -21,14 +21,26 @@ import TotalityCore
         return (ana, eli)
     }
 
+    @Test func closeFriendsAreThereAfterOpeningAgain() async throws {
+        let (ana, _) = await friends()
+        #expect(await ana.setCloseFriends(["eli"]))
+        // Opening Social again starts with nothing in memory: the list comes back from the room.
+        let again = device("ana")
+        await again.load()
+        #expect(again.closeFriends == ["eli"])
+        // Saving again uses the same room rather than making a second one.
+        #expect(await again.setCloseFriends(["eli"]))
+        #expect(try await again.privatePosts!.members(.closeFriends) == ["eli"])
+    }
+
     @Test func removingAFollowerTakesThemOutOfYourRoomsAtOnce() async throws {
         let (ana, _) = await friends()
         #expect(await ana.setCloseFriends(["eli"]))
-        #expect(try await ana.privatePosts!.members(.friends).contains("eli"))
+        #expect(try await ana.privatePosts!.members(.friends)?.contains("eli") == true)
         #expect(await ana.removeFollower("eli"))
         // No refresh or publish in between: the rooms change with the remove itself.
-        #expect(try await !ana.privatePosts!.members(.friends).contains("eli"))
-        #expect(try await !ana.privatePosts!.members(.closeFriends).contains("eli"))
+        #expect(try await ana.privatePosts!.members(.friends)?.contains("eli") != true)
+        #expect(try await ana.privatePosts!.members(.closeFriends)?.contains("eli") != true)
         #expect(!ana.closeFriends.contains("eli"))
         #expect(!ana.friends.contains("eli"))
     }
