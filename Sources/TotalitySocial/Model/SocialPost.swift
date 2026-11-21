@@ -69,11 +69,13 @@ public struct SocialPost: Identifiable, Hashable, Sendable {
     public var reason: String?
     /// The encrypted room it lives in, for one that isn't public.
     public let room: String?
+    /// Its photos or audio clip, if any. A sealed item carries its key, which only an encrypted room holds.
+    public var media: [PostMedia] = []
 
     public init(
         id: UUID, author: String, authorName: String? = nil, audience: Audience, title: String? = nil, body: String,
         tags: [String] = [], date: Date, edited: Bool = false, likes: Int = 0, comments: Int = 0, liked: Bool = false,
-        reason: String? = nil, room: String? = nil
+        reason: String? = nil, room: String? = nil, media: [PostMedia] = []
     ) {
         self.id = id
         self.author = author
@@ -89,7 +91,11 @@ public struct SocialPost: Identifiable, Hashable, Sendable {
         self.liked = liked
         self.reason = reason
         self.room = room
+        self.media = media
     }
+
+    public var photos: [PostMedia] { media.filter { $0.kind == .photo } }
+    public var audio: PostMedia? { media.first { $0.kind == .audio } }
 
     public var displayName: String {
         guard let authorName, !authorName.trimmingCharacters(in: .whitespaces).isEmpty else { return author }
@@ -99,6 +105,8 @@ public struct SocialPost: Identifiable, Hashable, Sendable {
     /// A headline for the grid: the title, or the start of the text.
     public var headline: String {
         if let title, !title.isEmpty { return title }
+        if body.isEmpty, audio != nil { return "Audio" }
+        if body.isEmpty, !photos.isEmpty { return photos.count == 1 ? "Photo" : "\(photos.count) photos" }
         return body
     }
 }
@@ -210,10 +218,11 @@ public enum PostLimits {
     public static let body = 5000
     public static let comment = 1000
 
-    public static func problem(title: String, body: String) -> String? {
+    /// With media, the text may be empty: a photo or a clip is a post on its own.
+    public static func problem(title: String, body: String, hasMedia: Bool = false) -> String? {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let body = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        if title.isEmpty && body.isEmpty { return "Write something first." }
+        if title.isEmpty && body.isEmpty && !hasMedia { return "Write something first." }
         if title.count > Self.title { return "The title is \(title.count - Self.title) characters too long." }
         if body.count > Self.body { return "The post is \(body.count - Self.body) characters too long." }
         return nil
