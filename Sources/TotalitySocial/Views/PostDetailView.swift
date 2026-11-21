@@ -28,9 +28,12 @@ struct PostDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Space.s4) {
                         author(post)
+                        if !post.media.isEmpty { PostMediaView(model: model, post: post) }
                         VStack(alignment: .leading, spacing: Space.s3) {
                             if let title = post.title { Text(title).font(Typeface.title).foregroundStyle(theme.textPrimary.color) }
-                            Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).textSelection(.enabled)
+                            if !post.body.isEmpty {
+                                Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).textSelection(.enabled)
+                            }
                             if !post.tags.isEmpty {
                                 Text(post.tags.map { "#" + $0 }.joined(separator: " ")).font(Typeface.callout).foregroundStyle(theme.accent.color)
                             }

@@ -133,7 +133,7 @@ public struct SocialHomeView: View {
                                 detail: model.tag == nil ? "You've seen every recent public post. Check back later, or post something yourself." : "No new posts tagged #\(model.tag!)."
                             )
                         } else {
-                            PostGrid(posts: model.forYou, photos: model.photos, onShow: model.didShow) { open(.post($0.id)) }
+                            PostGrid(model: model, posts: model.forYou, photos: model.photos, onShow: model.didShow) { open(.post($0.id)) }
                         }
                     } else if model.following.isEmpty {
                         EmptyFeed(
@@ -142,7 +142,7 @@ public struct SocialHomeView: View {
                         )
                     } else {
                         ForEach(model.following) { post in
-                            FollowingCard(post: post, photo: model.photos[post.author], onAuthor: { open(.profile(post.author)) }) {
+                            FollowingCard(model: model, post: post, photo: model.photos[post.author], onAuthor: { open(.profile(post.author)) }) {
                                 open(.post(post.id))
                             } onLike: {
                                 Task { await model.toggleLike(post) }
@@ -197,6 +197,7 @@ struct FeedTab: View {
 
 /// The Lemon8-style two columns. Posts alternate between them, so the newest stay near the top of both.
 struct PostGrid: View {
+    let model: SocialModel
     let posts: [SocialPost]
     let photos: [String: Data]
     let onShow: (SocialPost) -> Void
@@ -207,7 +208,7 @@ struct PostGrid: View {
             ForEach(0..<2, id: \.self) { column in
                 LazyVStack(spacing: Space.s3) {
                     ForEach(Array(posts.enumerated()).filter { $0.offset % 2 == column }.map(\.element)) { post in
-                        GridCard(post: post) { onOpen(post) }
+                        GridCard(model: model, post: post) { onOpen(post) }
                             .onAppear { onShow(post) }
                     }
                 }
@@ -218,6 +219,7 @@ struct PostGrid: View {
 
 /// One post in the grid: its headline, the start of its text, who wrote it and its likes.
 struct GridCard: View {
+    let model: SocialModel
     let post: SocialPost
     let action: () -> Void
     @AppStorage(LikeCountsPreference.key) private var hideEverywhere = false
@@ -226,14 +228,15 @@ struct GridCard: View {
         let theme = Theme.current
         Button(action: action) {
             VStack(alignment: .leading, spacing: Space.s2) {
+                if !post.media.isEmpty { GridCover(model: model, post: post) }
                 if post.audience != .everyone { AudienceTag(audience: post.audience) }
                 if let title = post.title, !title.isEmpty {
                     Text(title).font(Typeface.headline).foregroundStyle(theme.textPrimary.color).lineLimit(3)
                     if !post.body.isEmpty {
                         Text(post.body).font(Typeface.caption).foregroundStyle(theme.textSecondary.color).lineLimit(4)
                     }
-                } else {
-                    Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).lineLimit(8)
+                } else if !post.body.isEmpty || post.media.isEmpty {
+                    Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).lineLimit(post.media.isEmpty ? 8 : 3)
                 }
                 HStack {
                     Text(Handle.display(post.author)).lineLimit(1)
@@ -257,6 +260,7 @@ struct GridCard: View {
 
 /// One post in Following: author, audience, text, and the like and comment counts.
 struct FollowingCard: View {
+    let model: SocialModel
     let post: SocialPost
     let photo: Data?
     let onAuthor: () -> Void
@@ -285,12 +289,15 @@ struct FollowingCard: View {
             Button(action: onOpen) {
                 VStack(alignment: .leading, spacing: Space.s2) {
                     if let title = post.title { Text(title).font(Typeface.headline).foregroundStyle(theme.textPrimary.color) }
-                    Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).lineLimit(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !post.body.isEmpty {
+                        Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).lineLimit(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(SoftPress())
+            if !post.media.isEmpty { PostMediaView(model: model, post: post, photoHeight: 260) }
             HStack(spacing: Space.s5) {
                 Button(action: onLike) {
                     Label(LikeText.count(post, hideEverywhere: hideEverywhere), systemImage: post.liked ? "heart.fill" : "heart")
