@@ -18,13 +18,8 @@ public struct ModuleEntry: Identifiable, Sendable, Equatable {
         self.keeps = keeps
     }
 
-    /// The chosen module first, then the rest in their usual order, so the ring stays familiar.
-    public static func arranged(_ modules: [ModuleEntry], around center: ModuleID) -> [ModuleEntry] {
-        modules.filter { $0.id == center } + modules.filter { $0.id != center }
-    }
-
-    // SF Symbols stand in until the owner decides SF Symbols vs Lucide (proposal §11-E). The ring
-    // order is a placeholder too. The centre is whichever module was used last.
+    // SF Symbols stand in until the owner decides SF Symbols vs Lucide (proposal §11-E). The order
+    // is a placeholder too.
     public static let all: [ModuleEntry] = [
         .init(id: .messages, name: "Messages", systemImage: "bubble.left",
               summary: "End-to-end encrypted chats and groups.", keeps: "Your chats"),

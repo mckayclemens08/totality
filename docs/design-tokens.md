@@ -181,7 +181,7 @@ spaced, with headings at the body's size.
 | `motionStandard` | 320 ms | spring(response 0.4, damping 0.82) | navigation, bubble open |
 
 One motion vocabulary. `matchedGeometryEffect` for bubble → module transitions. Honour
-`accessibilityReduceMotion`: the home flower swaps its centre module without animating.
+`accessibilityReduceMotion`.
 
 ## Icons
 

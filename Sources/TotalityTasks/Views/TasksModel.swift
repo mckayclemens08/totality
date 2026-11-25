@@ -186,7 +186,7 @@ public final class TasksModel {
         }
     }
 
-    /// What the home tile and the flower show: today's tasks first, then what's overdue and due next.
+    /// What the home tile shows: today's tasks first, then what's overdue and due next.
     public var glance: ModuleGlance? {
         guard phase == .ready else { return nil }
         let todays = tasks(in: .today)
