@@ -207,7 +207,8 @@ describe('contact requests', () => {
                              'social_for_you', 'social_friends', 'social_mark_seen', 'social_my_settings',
                              'social_people', 'social_post', 'social_posts_by', 'social_profile',
                              'social_remove_follower', 'social_report', 'social_saved', 'social_search_people',
-                             'social_set_settings', 'social_top_tags', 'social_unfollow'])
+                             'social_set_settings', 'social_stories', 'social_story_viewers', 'social_top_tags',
+                             'social_unfollow', 'social_view_story'])
   })
 
   // Issue 118: Messages shows the other person's photo and name, read the way the app reads them.
