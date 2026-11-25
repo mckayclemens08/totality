@@ -18,6 +18,35 @@ services:
       - ./tuwunel.toml:/etc/tuwunel.toml:ro
       - ./data:/var/lib/tuwunel
 
+  # Every Matrix client request passes through here on its way to Tuwunel, and anything that would invite
+  # someone is checked against their "Who can message me" first (issue 149, step 8). It logs nothing.
+  matrix-guard:
+    image: node:24-alpine@sha256:e643984449ad25c88c0ff45094c74916806c9ee9dd1bc26c3593686ba2b853e4
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    memswap_limit: 128m
+    ulimits:
+      core: 1
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?}
+      MESSAGE_GATE_SECRET: ${MESSAGE_GATE_SECRET:?}
+      UPSTREAM: http://tuwunel:8008
+    command: node /app/guard.mjs
+    depends_on: [tuwunel]
+    logging:
+      driver: none
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/guard/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./matrix-guard/guard.mjs:/app/guard.mjs:ro
+
   # Reaches out to Cloudflare, so the server needs no open ports. credentials.json is the tunnel's
   # secret and exists only on the server.
   cloudflared:
@@ -27,7 +56,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
-    depends_on: [tuwunel, gateway, mail, profile, blobs, social-media, push]
+    depends_on: [matrix-guard, gateway, mail, profile, blobs, social-media, push]
     volumes:
       - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
       - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
