@@ -169,6 +169,7 @@ The only public paths are the ones in `server/cloudflared.yml`, and the only ope
 SearXNG runs there too, reachable only through the gateway in `server/gateway/`, and neither one logs searches.
 Mail arrives through `server/mail/`, from the Cloudflare Worker in `server/mail-worker/`, and is sealed before it reaches `~/totality/mailboxes`. Rspamd checks it first, on a network with no way out. Neither one logs anything.
 Sealed photos and Reader files go through `server/blobs/` to `~/totality/blobs-data`, one folder per account, and it logs nothing either.
+Social's photos and voice clips go through `server/social-media/` to `~/totality/social-media-data`, apart from the blob store so posts never count against anyone's storage. Friends and Close-friends files arrive sealed, with the key only in the Matrix post. Every read needs a sign-in, and it logs nothing.
 Push in `server/push/` keeps each account's phone push tokens in `~/totality/push-data` and wakes them with an empty silent push. For instant Gmail sync it keeps a keyed hash of each linked address (never the address) and checks Google's signature on every Pub/Sub note (`docs/gmail-push-security-review.md`). Its Apple key file is in `~/totality/secrets/push/` (ignored by git), and it logs nothing.
 Never upgrade the Oracle account to paid: that's the owner's decision under the cost rule.
 
