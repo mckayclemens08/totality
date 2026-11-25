@@ -33,6 +33,8 @@ public struct DriveRefresh: Equatable, Sendable {
     public var problems: [String: DriveProblem] = [:]
     /// Accounts with linked folders that no longer allow Drive.
     public var needsAllowing: Set<String> = []
+    /// The Google sign-ins on this device couldn't be read, so nothing was refreshed and nothing forgotten.
+    public var signInUnreadable = false
 }
 
 /// A connected Google account, as the Drive screens need it: whether it has allowed Drive yet.
@@ -90,9 +92,10 @@ public actor GoogleDrive {
 
     // MARK: Connecting
 
-    /// Every Google account on this device, and whether each allows Drive yet.
-    public func connections() -> [DriveAccount] {
-        ((try? accounts?.connections()) ?? []).map {
+    /// Every Google account on this device, and whether each allows Drive yet. A Keychain read that fails
+    /// throws: it must never read as "not connected", which would offer Connect and forget linked folders.
+    public func connections() throws -> [DriveAccount] {
+        try (accounts?.connections() ?? []).map {
             DriveAccount(address: $0.address, allowsDrive: $0.allows([DriveAPI.scope]))
         }
     }
@@ -132,7 +135,7 @@ public actor GoogleDrive {
     /// The linked folders of every Google account still connected, in the order they were linked.
     public func links() throws -> [DriveLink] {
         guard !isClosed else { throw ReaderError.closed }
-        let connected = Set(connections().map(\.address))
+        let connected = Set(try connections().map(\.address))
         return try loadLinks().filter { connected.contains($0.account) }
     }
 
@@ -223,7 +226,11 @@ public actor GoogleDrive {
         var result = DriveRefresh()
         try? publishHeld(force: false)
         guard !isClosed, var state = try? loadState() else { return result }
-        let connections = connections()
+        // Unreadable is not disconnected: forgetting from it would take the folders off every device.
+        guard let connections = try? connections() else {
+            result.signInUnreadable = true
+            return result
+        }
         let allowed = Set(connections.filter(\.allowsDrive).map(\.address))
         result.needsAllowing = Set(connections.filter { !$0.allowsDrive }.map(\.address))
             .intersection(state.links.map(\.account))

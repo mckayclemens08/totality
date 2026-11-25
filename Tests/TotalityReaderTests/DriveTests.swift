@@ -10,8 +10,13 @@ let driveOwner = "mckay.clemens@gmail.com"
 final class MemoryKeys: KeyStore, @unchecked Sendable {
     private let lock = NSLock()
     private var items: [String: Data] = [:]
+    /// Fails every read, as a Keychain can just after launch or while the device is locked.
+    var failLoads = false
 
-    func load(_ name: String) throws -> Data? { lock.withLock { items[name] } }
+    func load(_ name: String) throws -> Data? {
+        if failLoads { throw KeyStoreError.unexpectedStatus(-25308) }
+        return lock.withLock { items[name] }
+    }
     func save(_ data: Data, as name: String) throws { lock.withLock { items[name] = data } }
     func delete(_ name: String) throws { _ = lock.withLock { items.removeValue(forKey: name) } }
 }
@@ -247,7 +252,7 @@ final class Clock: @unchecked Sendable {
     @Test func anAccountConnectedForCalendarIsOneTapAwayFromDrive() async throws {
         let fake = FakeDrive()
         let setup = try makeDrive(fake, granted: ["https://www.googleapis.com/auth/calendar.readonly"])
-        #expect(await setup.drive.connections() == [DriveAccount(address: driveOwner, allowsDrive: false)])
+        #expect(try await setup.drive.connections() == [DriveAccount(address: driveOwner, allowsDrive: false)])
         let authorization = try #require(await setup.drive.authorization(for: driveOwner))
         let asked = try #require(URLComponents(url: authorization.url, resolvingAgainstBaseURL: false)?.queryItems)
         let value = { (name: String) in asked.first { $0.name == name }?.value }
@@ -475,6 +480,35 @@ final class Clock: @unchecked Sendable {
         #expect(try store.names().count == 2)
         try setup.accounts.keep(address: driveOwner, refreshToken: "1//again", granted: [DriveAPI.scope])
         #expect(try await setup.drive.links().isEmpty)
+    }
+
+    /// The crash of 2026-11-21: a Keychain read that failed just after launch read as "not connected",
+    /// and the refresh then forgot the linked folders on every device. Unreadable is not disconnected.
+    @MainActor @Test func anUnreadableSignInForgetsNothingAndNeverOffersConnect() async throws {
+        let fake = FakeDrive()
+        fake.children["1notes"] = [driveFile("1essay", "Essay.md", mime: "text/markdown", size: 2_400)]
+        let keys = MemoryKeys()
+        let setup = try makeDrive(fake, keys: keys)
+        try await setup.drive.link(DriveEntry(id: "1notes", name: "School notes", mime: DriveEntry.folderMime), account: driveOwner)
+        try await setup.drive.refresh("1notes", account: driveOwner)
+
+        keys.failLoads = true
+        await #expect(throws: KeyStoreError.self) { try await setup.drive.connections() }
+        let result = await setup.drive.refreshAll()
+        #expect(result.signInUnreadable)
+        let model = DriveModel(drive: setup.drive)
+        await model.load()
+        #expect(model.signInUnreadable)
+        #expect(!model.needsConnecting(driveOwner))
+        #expect(model.links.map(\.folderID) == ["1notes"])
+        #expect(await model.refreshAll(force: true) == .failed(DriveModel.signInUnreadableMessage))
+
+        keys.failLoads = false
+        _ = await setup.drive.refreshAll()
+        #expect(try await setup.drive.links().map(\.folderID) == ["1notes"])
+        #expect(try await setup.drive.kept("1notes", account: driveOwner)?.entries.count == 1)
+        await model.load()
+        #expect(!model.signInUnreadable && !model.needsConnecting(driveOwner))
     }
 
     @MainActor @Test func theQuietRefreshAsksGoogleOnlyEveryFewMinutes() async throws {

@@ -28,7 +28,8 @@ extension GoogleDrive {
 
     /// Accounts that can be searched: connected here, allowing Drive, and with a linked folder.
     private func searchableAccounts(_ state: State) -> Set<String> {
-        let allowed = Set(connections().filter(\.allowsDrive).map { $0.address.lowercased() })
+        // Read-only: a sign-in that can't be read just finds nothing this time.
+        let allowed = Set(((try? connections()) ?? []).filter(\.allowsDrive).map { $0.address.lowercased() })
         return Set(state.links.map { $0.account.lowercased() }).intersection(allowed)
     }
 
