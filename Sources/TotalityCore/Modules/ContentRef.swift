@@ -36,10 +36,13 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     case homeLayout = "home_layout"
     /// The places saved in Weather, names and coordinates, as one sealed record per person (issue 203).
     case weatherPlaces = "weather_places"
+    /// The Clock's world cities, timer presets and stopwatch laps, as one sealed record per person (issue
+    /// 204). Alarms aren't in it: an alarm rings on the device that set it.
+    case clockItems = "clock_items"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {
-    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks, weather
+    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks, weather, clock
 }
 
 /// Where an object's key lives, matching `content_objects.key_ref`.
