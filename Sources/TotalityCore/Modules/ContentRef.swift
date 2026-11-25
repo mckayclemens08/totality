@@ -34,10 +34,12 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     /// Which modules the person removed from Home, as one sealed record per person, so the choice follows
     /// them to each device. The tiles' sizes and places stay on each device.
     case homeLayout = "home_layout"
+    /// The places saved in Weather, names and coordinates, as one sealed record per person (issue 203).
+    case weatherPlaces = "weather_places"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {
-    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks
+    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks, weather
 }
 
 /// Where an object's key lives, matching `content_objects.key_ref`.

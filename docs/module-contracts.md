@@ -841,3 +841,17 @@ Agreed with the owner on 2026-11-15, in issue 129. A person can take a module of
 - Which modules are removed is `HomeChoices` in `TotalityCore`: each module's last removal and last return, merged by keeping the later of each. It's one sealed record per person (`home_layout`, purpose `home-layout`) through `SealedRecordStore`, which moved from the Reader to `TotalityCore` for this, and it syncs. Tile sizes and places stay on each device in `home.layout`.
 - Before the content key opens, Home shows a copy of the choices kept on the device: module names and times, never content, marked with whose record it came from so one person's choices never join another's.
 - Every module can be removed. Account and settings aren't modules, so they can't be.
+
+## Weather
+
+Spec: issue 203. Mockup: https://claude.ai/artifact/47x26DUHY5GkZ65DRrgtKv (artboard Main), plus the extras canvas linked from the PR.
+
+- `TotalityWeather` imports only `TotalityCore` and `TotalityUI`. `ModuleID.weather` and `ContentKind.weatherPlaces` (`weather_places`) are added.
+- **Places** are `WeatherPlaces`, one sealed record per person through `SealedRecordStore` (kind `weather_places`, purpose `weather-places`, label `weather-places`). Each place keeps its last change, and a removed place stays as a marker, so two devices merge by keeping the later of each; a tie goes to the removal, then the larger order. It syncs like `home_layout`: meta only, no body.
+- **The cached forecast** is `ForecastCache`: one sealed blob per place (purpose `weather-cache`), named by an ID derived from the key and the place, in its own folder that never syncs.
+- **Location** is read "While Using the App" only, rounded to two decimal places (about 1 km) at once, and kept in memory only. It's never saved or sent to Totality's server. Background refresh never asks for it.
+- **Sources** sit behind `ForecastSource`. Open-Meteo is the default (free, no key, non-commercial, credited). `WeatherKitSource` is used only when Info.plist has `TotalityWeatherKit = YES`, which waits for the WeatherKit capability on the App ID. Air quality and pollen come from Open-Meteo's air-quality service; alerts from the National Weather Service for US points only. Every request carries the rounded coordinate; city search sends only the words typed. The privacy line names every recipient.
+- **Refresh** goes through `Refresher` and `AppRefresh`. All places are fetched together, three at a time; the automatic refresh skips forecasts under 15 minutes old, a pull always fetches.
+- **Alerts** show in the app. With the setting on, a new severe or extreme alert makes a local notification on the iPhone; announced alerts are remembered as short hashes. No push: that would need the server to know the person's places.
+- **Contract `ForecastProvider`** (in `TotalityCore`): `forecast(on:) -> DayForecast?`, from the cache only, for where the person is or else the first saved place. It never fetches, so asking sends nothing. `ModuleRegistry.forecast(on:)` asks each provider. The Calendar shows it as a chip beside the selected day in Day and Week.
+- `WeatherModule` is a `ModuleRefresher`, a `ModuleSearcher` (saved places by name) and a `ForecastProvider`.
