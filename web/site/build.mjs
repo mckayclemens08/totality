@@ -24,7 +24,7 @@ await build({
 });
 await cp("public", "dist", { recursive: true });
 // The page may talk to the account server and nowhere else.
-const headersFile = (await readFile("dist/_headers", "utf8")).replace("connect-src 'self'", `connect-src 'self'${supabaseUrl ? " " + supabaseUrl : ""} ${[...new Set([new URL(blobUrl).origin, new URL(mailUrl).origin])].join(" ")} https://matrix.usetotality.com`);
+const headersFile = (await readFile("dist/_headers", "utf8")).replace("connect-src 'self'", `connect-src 'self'${supabaseUrl ? " " + supabaseUrl : ""} ${[...new Set([new URL(blobUrl).origin, new URL(mailUrl).origin])].join(" ")} https://matrix.usetotality.com https://api.open-meteo.com`);
 await writeFile("dist/_headers", headersFile);
 
 const sri = (bytes) => "sha384-" + createHash("sha384").update(bytes).digest("base64");

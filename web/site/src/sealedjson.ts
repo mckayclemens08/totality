@@ -6,7 +6,7 @@ import * as vault from "./keystore";
 import { fromByteaLiteral, metaOnlyHash, openBlob, sealBlob, toByteaLiteral } from "./sealed";
 import { uuidBytes } from "./pairing/protocol";
 
-export type MetaPurpose = "event" | "task" | "task-list";
+export type MetaPurpose = "event" | "task" | "task-list" | "weather-places";
 const dec = new TextDecoder();
 const enc = new TextEncoder();
 

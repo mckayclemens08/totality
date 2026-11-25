@@ -276,3 +276,14 @@ button.link-btn { align-self: flex-start; }
 .msg .row, .request .row { justify-content: flex-start; gap: 8px; align-items: center; }
 .msg.own .row { justify-content: flex-end; }
 .msg-card .badge svg { fill: none; color: var(--accent); }
+
+/* Weather (issue 203): raised cards, the big temperature, and the ten days. */
+.weather-places { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 18px; }
+.weather-now { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
+.weather-temp { font-size: 48px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.weather-days { list-style: none; margin: 0; padding: 0; }
+.weather-days li { display: grid; grid-template-columns: 52px 1fr 40px 84px; gap: 8px; align-items: center; min-height: 34px; }
+.weather-day { font-weight: 600; }
+.weather-chance { color: var(--accent); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.weather-range { text-align: right; font-variant-numeric: tabular-nums; }
+.sub.small { font-size: 12px; margin-top: 14px; }

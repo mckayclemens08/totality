@@ -338,3 +338,13 @@ export async function deleteBlob(token: string, id: string): Promise<void> {
   const res = await blobCall(token, id, { method: "DELETE" });
   if (res.status !== 204 && res.status !== 404) throw blobFailed(res.status);
 }
+
+/** Weather's forecast, straight from Open-Meteo (issue 203). No token, cookie or referrer go with it: only
+ *  the rounded coordinate in the URL. Any other host is refused. */
+export async function getForecast(url: string): Promise<unknown | null> {
+  if (new URL(url).origin !== "https://api.open-meteo.com") throw new Error("host");
+  try {
+    const res = await fetch(url, { credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
