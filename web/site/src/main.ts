@@ -60,7 +60,7 @@ function intro(): HTMLElement {
       svg("svg", { width: "26", height: "26", viewBox: "0 0 24 24", "aria-hidden": "true" },
         ...[[12, 6], [6.5, 10], [17.5, 10], [8.5, 16.5], [15.5, 16.5], [12, 12]].map(([x, y]) => svg("circle", { cx: String(x), cy: String(y), r: x === 12 && y === 12 ? "3" : "3.2" })))),
     h("h1", {}, "Your Totality, on a bigger screen."),
-    h("p", { class: "lede" }, "Reader, Mail, Calendar, Messages, Tasks and Photos, with the same account and the same keys as your iPhone."));
+    h("p", { class: "lede" }, "Reader, Mail, Calendar, Messages, Tasks, Photos and Clock, with the same account and the same keys as your iPhone."));
 }
 
 function signInScreen(message = ""): Node {
