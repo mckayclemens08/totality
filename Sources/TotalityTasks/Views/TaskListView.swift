@@ -173,6 +173,9 @@ struct TaskRows: View {
                         Task { await model.toggle(task.id) }
                     }
                     Button("Schedule", systemImage: "calendar") { scheduling = ScheduleTarget(id: task.id, kind: .when) }
+                    if let draft = model.alarmOffer(for: task) {
+                        Button("Set an alarm", systemImage: "alarm") { model.alarmDraft = draft }
+                    }
                     Button("Delete", systemImage: "trash", role: .destructive) {
                         Task { await model.delete(tasks: [task.id]) }
                     }

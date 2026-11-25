@@ -172,6 +172,9 @@ public struct TasksHomeView: View {
         .sheet(item: $addingTo) { bucket in
             QuickAddView(model: model, bucket: bucket) { addingTo = nil }
         }
+        .setAlarmSheet(Binding(get: { model.alarmDraft }, set: { model.alarmDraft = $0 }), maker: model.alarmMaker) { made in
+            model.notice = made.line
+        }
         .alert("Tasks", isPresented: noticeShown) {
             Button("OK", role: .cancel) { model.notice = nil }
         } message: {

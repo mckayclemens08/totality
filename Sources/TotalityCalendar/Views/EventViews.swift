@@ -13,7 +13,19 @@ struct EventDetailView: View {
     @State private var editingGoogle = false
     @State private var confirmingGoogleDelete = false
     @State private var googleProblem: String?
+    @State private var alarmDraft: AlarmDraft?
+    @State private var alarmSet: String?
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+
+    /// An hour before a timed event that's still ahead, through the Clock (issue 204).
+    private var alarmOffer: AlarmDraft? {
+        guard model.alarmMaker != nil, !entry.isAllDay, entry.start > Date() else { return nil }
+        let early = entry.start.addingTimeInterval(-3600)
+        return AlarmDraft(
+            label: entry.title, fireDate: early > Date() ? early : entry.start,
+            source: TaskSource(module: .calendar, itemID: entry.id, title: entry.title)
+        )
+    }
 
     private var google: GoogleEventKey? {
         if case .device(let event) = entry.source { event.google } else { nil }
@@ -59,6 +71,15 @@ struct EventDetailView: View {
                 }
                 if let minutes = occurrence?.event.reminderMinutes {
                     Label(ReminderText.name(minutes), systemImage: "bell")
+                }
+                if let offer = alarmOffer {
+                    Button { alarmDraft = offer } label: {
+                        Label("Set an alarm", systemImage: "alarm")
+                    }
+                    .foregroundStyle(theme.accent.color)
+                }
+                if let alarmSet {
+                    Text(alarmSet).font(Typeface.caption)
                 }
                 if !notes.isEmpty {
                     Text(notes)
@@ -129,6 +150,7 @@ struct EventDetailView: View {
                 }
             }
         }
+        .setAlarmSheet($alarmDraft, maker: model.alarmMaker) { made in alarmSet = made.line }
         .sheet(isPresented: $editingGoogle) {
             if let google {
                 NavigationStack {
