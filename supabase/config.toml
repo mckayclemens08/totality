@@ -13,3 +13,7 @@ enable_confirmations = false
 # It checks the caller itself, so this works with the project's asymmetric signing keys.
 [functions.matrix-login]
 verify_jwt = false
+
+# Called only by Totality's Matrix guard, which proves itself with a shared secret, not a sign-in.
+[functions.message-gate]
+verify_jwt = false
