@@ -45,6 +45,7 @@ server/data/
 server/mailboxes/
 server/profiles/
 server/blobs-data/
+server/social-media-data/
 server/push-data/
 server/cloudflared/
 .wrangler/

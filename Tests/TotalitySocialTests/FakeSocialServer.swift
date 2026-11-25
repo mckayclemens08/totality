@@ -19,8 +19,12 @@ final class FakeSocialWorld: @unchecked Sendable {
     var ids: [String: UUID] = [:]
     /// Display names, for lists that show them.
     var names: [String: String] = [:]
-    /// The `social-media` bucket: path to bytes as stored.
+    /// Totality's media server: path to bytes as stored.
     var files: [String: Data] = [:]
+    /// The old Supabase bucket, which posts made before the move still read from.
+    var oldFiles: [String: Data] = [:]
+    /// Set to make removals fail, as if the server were unreachable.
+    var removalsFail = false
 
     func id(_ name: String) -> UUID {
         if let id = ids[name] { return id }
@@ -107,15 +111,19 @@ struct FakeSocial: SocialServer {
         }
     }
 
-    func media(at path: String) async throws -> Data {
-        guard let data = world.lock.withLock({ world.files[path] }) else { throw SocialError.failed("That file isn't there any more.") }
-        return data
+    func media(_ item: PostMedia) async throws -> Data {
+        let found = world.lock.withLock { item.store == .totality ? world.files[item.path] : world.oldFiles[item.path] }
+        guard let found else { throw SocialError.failed("That file isn't there any more.") }
+        return found
     }
 
-    func removeMedia(_ paths: [String]) async throws {
-        world.lock.withLock {
-            let folder = world.id(me).uuidString.lowercased() + "/"
-            for path in paths where path.hasPrefix(folder) { world.files[path] = nil }
+    func removeMedia(_ items: [PostMedia]) async throws {
+        try world.lock.withLock {
+            if world.removalsFail { throw SocialError.offline }
+            let folder = world.id(me).uuidString.lowercased()
+            for item in items where item.folder == folder {
+                if item.store == .totality { world.files[item.path] = nil } else { world.oldFiles[item.path] = nil }
+            }
         }
     }
 

@@ -108,6 +108,7 @@ public final class SocialModel {
             await loadForYou()
             try await loadFollowing()
             phase = .ready
+            await removeLeftoverMedia()
         } catch let error as SocialError {
             switch error {
             case .offline: phase = forYou.isEmpty && following.isEmpty ? .failed(error.message) : .offline
@@ -228,7 +229,7 @@ public final class SocialModel {
             return false
         }
         let tags = PostTags.find(in: cleanTitle + " " + cleanBody)
-        var uploaded: [String] = []
+        var uploaded: [PostMedia] = []
         do {
             if audience.isEncrypted, privatePosts == nil || privateReason != nil { throw SocialError.failed(privateReason ?? "") }
             var media: [PostMedia] = []
@@ -238,9 +239,10 @@ public final class SocialModel {
                 var key: String?
                 if audience.isEncrypted { (bytes, key) = try MediaSeal.seal(item.data) }
                 let path = try await server.uploadMedia(bytes, contentType: audience.isEncrypted ? "application/octet-stream" : item.contentType)
-                uploaded.append(path)
-                media.append(PostMedia(kind: item.kind, path: path, size: bytes.count, width: item.width, height: item.height,
-                                       duration: item.duration, key: key))
+                let stored = PostMedia(kind: item.kind, path: path, size: bytes.count, width: item.width, height: item.height,
+                                       duration: item.duration, key: key, store: .totality)
+                uploaded.append(stored)
+                media.append(stored)
                 remember(item.data, at: path)
             }
             if let problem = MediaLimits.problem(media, encrypted: audience.isEncrypted) { throw SocialError.refused(problem) }
@@ -255,8 +257,8 @@ public final class SocialModel {
             try? await loadFollowing()
             return true
         } catch {
-            // Nothing half-posted stays in the bucket.
-            try? await server.removeMedia(uploaded)
+            // Nothing half-posted stays on the server; what can't go now goes on a later load.
+            await removeMedia(uploaded)
             notice = Self.message(error)
             return false
         }
@@ -266,7 +268,7 @@ public final class SocialModel {
     /// on this device with the key from its room post.
     public func mediaData(_ item: PostMedia) async throws -> Data {
         if let found = mediaCache[item.path] { return found }
-        let stored = try await server.media(at: item.path)
+        let stored = try await server.media(item)
         let data = try item.key.map { try MediaSeal.open(stored, key: $0) } ?? stored
         remember(data, at: item.path)
         return data
@@ -282,7 +284,7 @@ public final class SocialModel {
         do {
             if post.audience == .everyone { try await server.delete(post.id) } else { try await privatePosts?.delete(post) }
             // Its files go too, once the post is gone. Only your own folder can be emptied.
-            if post.author == me { try? await server.removeMedia(post.media.map(\.path)) }
+            if post.author == me { await removeMedia(post.media) }
             forYou.removeAll { $0.id == post.id }
             following.removeAll { $0.id == post.id }
         } catch {
@@ -421,6 +423,44 @@ public final class SocialModel {
     public func search(_ query: String) async -> [SocialProfile] {
         guard query.trimmingCharacters(in: .whitespaces).count >= 1 else { return [] }
         return (try? await server.searchPeople(query)) ?? []
+    }
+
+    // MARK: Leftover files
+
+    /// Removes files that belong to no post any more. Any that can't go now are remembered on this device,
+    /// without their keys, and tried again on the next load, so a failed removal never leaves a file
+    /// behind silently.
+    func removeMedia(_ items: [PostMedia]) async {
+        let items = items.map(\.forServer)
+        guard !items.isEmpty else { return }
+        do {
+            try await server.removeMedia(items)
+        } catch {
+            rememberLeftovers(Array(Set(leftoverMedia() + items)))
+        }
+    }
+
+    /// Tries again to remove what an earlier removal couldn't.
+    func removeLeftoverMedia() async {
+        let waiting = leftoverMedia()
+        guard !waiting.isEmpty else { return }
+        do {
+            try await server.removeMedia(waiting)
+            rememberLeftovers([])
+        } catch {}
+    }
+
+    /// Paths and sizes only: a sealed file's key is never written here.
+    func leftoverMedia() -> [PostMedia] {
+        guard let me, let data = remembered.data(forKey: "social.leftoverMedia." + me) else { return [] }
+        return (try? JSONDecoder().decode([PostMedia].self, from: data)) ?? []
+    }
+
+    private func rememberLeftovers(_ items: [PostMedia]) {
+        guard let me else { return }
+        let key = "social.leftoverMedia." + me
+        if items.isEmpty { remembered.removeObject(forKey: key); return }
+        remembered.set(try? JSONEncoder().encode(items.map(\.forServer).sorted { $0.path < $1.path }), forKey: key)
     }
 
     private func rememberedCloseFriends(of account: String) -> Set<String> {

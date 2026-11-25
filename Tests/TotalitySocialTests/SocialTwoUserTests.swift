@@ -211,7 +211,7 @@ import TotalityCore
         await priya.load()
         #expect(priya.following.isEmpty, "a follower who isn't a friend never learns the file's address or key")
         // Even with the address, the bytes are only ciphertext without the key.
-        let stored = try await world.person("priya").media(at: item.path)
+        let stored = try await world.person("priya").media(item)
         #expect(stored != photo.data)
     }
 
@@ -228,7 +228,7 @@ import TotalityCore
         #expect(!audio.isSealed && audio.duration == 40)
         #expect(try await priya.mediaData(audio) == clip.data)
         // Priya can't remove Maya's file.
-        try await world.person("priya").removeMedia([audio.path])
+        try await world.person("priya").removeMedia([audio])
         #expect(world.files[audio.path] != nil)
     }
 }

@@ -3,12 +3,19 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// A photo or a voice clip in a post (issue 149 §2). The bytes live in Supabase Storage's `social-media`
-/// bucket under the author's own folder. A public post's media are stored readable, so For You can show
-/// them to anyone. A Friends or Close-friends post's media are sealed on the device first with a fresh key
-/// per file, and that key travels only inside the post's end-to-end encrypted Matrix event.
+/// A photo or a voice clip in a post (issue 149 §2). The bytes live on Totality's own server
+/// (`server/social-media/`) under the author's own folder; posts made before that kept theirs in Supabase
+/// Storage's `social-media` bucket, which is still read. A public post's media are stored readable, so For
+/// You can show them to anyone signed in. A Friends or Close-friends post's media are sealed on the device
+/// first with a fresh key per file, and that key travels only inside the post's end-to-end encrypted Matrix
+/// event.
 public struct PostMedia: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable { case photo, audio }
+    /// Where the bytes are kept.
+    public enum Store: String, Codable, Sendable {
+        /// Totality's own server, for everything posted from this version on.
+        case totality
+    }
 
     public let kind: Kind
     /// `<author's account ID>/<random ID>`. It says nothing about the file.
@@ -21,9 +28,13 @@ public struct PostMedia: Codable, Hashable, Sendable {
     /// The AES-256-GCM key, base64, for a sealed file. Nil means the file is stored readable, which only a
     /// public post may do. It's never written to Totality's server.
     public var key: String?
+    /// Nil for a file in Supabase Storage, where posts made before the move keep theirs.
+    public var store: Store?
 
-    public init(kind: Kind, path: String, size: Int, width: Int? = nil, height: Int? = nil, duration: Double? = nil, key: String? = nil) {
+    public init(kind: Kind, path: String, size: Int, width: Int? = nil, height: Int? = nil, duration: Double? = nil, key: String? = nil,
+                store: Store? = .totality) {
         self.kind = kind
+        self.store = store
         self.path = path
         self.size = size
         self.width = width
@@ -34,6 +45,9 @@ public struct PostMedia: Codable, Hashable, Sendable {
 
     public var isSealed: Bool { key != nil }
 
+    /// The author's account ID, the first part of the path.
+    public var folder: String { String(path.prefix { $0 != "/" }) }
+
     /// The same file as Totality's server is told about it: no key.
     public var forServer: PostMedia {
         var copy = self
@@ -43,7 +57,7 @@ public struct PostMedia: Codable, Hashable, Sendable {
 }
 
 /// What a post may carry, matching `private.social_media_valid` and the bucket's limits, so a refusal is
-/// caught before sending. The caps keep Social inside Supabase's free 1 GB of storage (cost rule).
+/// caught before sending. The caps keep Social small on the free Oracle server (cost rule).
 public enum MediaLimits {
     public static let photos = 4
     /// Longest side of a posted photo, in pixels.
@@ -51,7 +65,8 @@ public enum MediaLimits {
     public static let photoBytes = 1_500_000
     /// Recorded or picked audio stops at two minutes.
     public static let audioSeconds: Double = 120
-    /// The bucket's own per-file limit; picked audio re-encoded at the system's AAC rate fits inside it.
+    /// The per-file limit on Totality's server, as it was on the old bucket; picked audio re-encoded at the
+    /// system's AAC rate fits inside it.
     public static let fileBytes = 4 * 1024 * 1024
     /// Sealing adds the nonce and the tag.
     public static let sealOverhead = 28

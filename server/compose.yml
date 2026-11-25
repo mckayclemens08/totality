@@ -27,7 +27,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
-    depends_on: [tuwunel, gateway, mail, profile, blobs, push]
+    depends_on: [tuwunel, gateway, mail, profile, blobs, social-media, push]
     volumes:
       - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
       - ./cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
@@ -172,6 +172,37 @@ services:
     volumes:
       - ./blobs/blobs.mjs:/app/blobs.mjs:ro
       - ./blobs-data:/var/lib/totality-blobs
+
+  # Social's photos and voice clips (issue 149). A public post's file is kept readable; a Friends or
+  # Close-friends post's file arrives sealed, its key only in the encrypted Matrix post. Its own folder,
+  # apart from the blob store, because posts never count against anyone's storage. Every read needs a
+  # sign-in, so nothing can be hotlinked. It logs nothing.
+  social-media:
+    image: node:24-alpine@sha256:e643984449ad25c88c0ff45094c74916806c9ee9dd1bc26c3593686ba2b853e4
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    memswap_limit: 128m
+    ulimits:
+      core: 1
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://app.usetotality.com,https://web-next.totality-site.pages.dev}
+    command: node /app/media.mjs
+    logging:
+      driver: none
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/social/media/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./social-media/media.mjs:/app/media.mjs:ro
+      - ./social-media-data:/var/lib/totality-social-media
 
   # Push (issue 164): wakes a person's phones through Apple's push service with an empty silent push,
   # starting with instant Gmail sync. It keeps only a keyed hash of each linked Gmail address.

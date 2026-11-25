@@ -32,12 +32,14 @@ public protocol SocialServer: Sendable {
     func posts(by username: String, before: Date?) async throws -> [SocialPost]
     func post(_ id: UUID) async throws -> SocialPost?
     func publish(title: String?, body: String, tags: [String], media: [PostMedia]) async throws -> UUID
-    /// Puts one file in your folder of the `social-media` bucket and returns its path. A file for an
+    /// Puts one file in your folder on Totality's media server and returns its path. A file for an
     /// encrypted post is already sealed when it gets here.
     func uploadMedia(_ data: Data, contentType: String) async throws -> String
-    /// A file from the bucket, as stored: readable for a public post, sealed for the others.
-    func media(at path: String) async throws -> Data
-    func removeMedia(_ paths: [String]) async throws
+    /// A file as stored, from wherever `item.store` says: readable for a public post, sealed for the others.
+    func media(_ item: PostMedia) async throws -> Data
+    /// Removes your own files, and throws if any of them couldn't be removed, so the caller can try again.
+    /// Files in someone else's folder are skipped: they were never yours to remove.
+    func removeMedia(_ items: [PostMedia]) async throws
     func delete(_ id: UUID) async throws
     func setLiked(_ liked: Bool, post: UUID) async throws
     func comments(on post: UUID) async throws -> [SocialComment]
@@ -86,12 +88,16 @@ public struct RestSocialServer: SocialServer {
     let token: @Sendable () async throws -> String
     let username: @Sendable () async -> String?
     let session: URLSession
+    /// Totality's own media server, `server/social-media/`.
+    let mediaBase: URL
+    public static let standardMediaBase = URL(string: "https://usetotality.com/social/media/")!
 
     public init(
-        base: URL, publishableKey: String, session: URLSession = .shared,
+        base: URL, publishableKey: String, session: URLSession = .shared, mediaBase: URL = RestSocialServer.standardMediaBase,
         token: @escaping @Sendable () async throws -> String, username: @escaping @Sendable () async -> String?
     ) {
         self.base = base
+        self.mediaBase = mediaBase
         key = publishableKey
         self.token = token
         self.username = username
@@ -220,10 +226,10 @@ public struct RestSocialServer: SocialServer {
         return try await send(request, signedIn: true)
     }
 
-    func send(_ request: URLRequest, signedIn: Bool, timeout: TimeInterval = 20) async throws -> Data {
+    func send(_ request: URLRequest, signedIn: Bool, timeout: TimeInterval = 20, toSupabase: Bool = true) async throws -> Data {
         var request = request
         request.timeoutInterval = timeout
-        request.setValue(key, forHTTPHeaderField: "apikey")
+        if toSupabase { request.setValue(key, forHTTPHeaderField: "apikey") }
         if signedIn {
             let token: String
             do { token = try await self.token() } catch { throw SocialError.signedOut }
@@ -243,8 +249,8 @@ public struct RestSocialServer: SocialServer {
         return data
     }
 
-    /// The bucket that holds posts' photos and audio. It's public to read, so a public post's media show
-    /// to anyone; only you can add to or remove from your own folder.
+    /// The Supabase bucket that held posts' photos and audio before they moved to Totality's own server.
+    /// Older posts' files are still read from it and removed from it; nothing new goes there.
     static let bucket = "social-media"
 
     /// The signed-in account's ID, the `sub` of its token, which names its folder in the bucket.
@@ -271,6 +277,10 @@ public struct RestSocialServer: SocialServer {
         if message.contains("yourself") { return .refused("You can't follow yourself.") }
         if message.contains("duplicate") { return .refused("Already done.") }
         if status == 413 || message.contains("exceeded the maximum allowed size") { return .refused("That file is too big to post.") }
+        if status == 415 { return .refused("That file isn't a photo or clip Social can post.") }
+        if status == 429 { return .refused("That's a lot of photos and clips today. Try again tomorrow.") }
+        if status == 507 { return .refused("There's no room for more photos and clips just now. Try again later.") }
+        if status == 403 { return .refused("That file isn't yours to change.") }
         if message.contains("row-level security") { return .refused("That post isn't available any more.") }
         return .failed("Social couldn't do that just now. Try again.")
     }
@@ -321,36 +331,59 @@ public struct RestSocialServer: SocialServer {
 
     public func uploadMedia(_ data: Data, contentType: String) async throws -> String {
         guard data.count <= MediaLimits.fileBytes + MediaLimits.sealOverhead else { throw SocialError.refused("That file is too big to post.") }
-        let token: String
-        do { token = try await self.token() } catch { throw SocialError.signedOut }
-        guard let account = Self.account(fromToken: token) else { throw SocialError.signedOut }
+        let account = try await myAccount()
         let path = account + "/" + UUID().uuidString.lowercased()
-        var request = URLRequest(url: base.appendingPathComponent("storage/v1/object/\(Self.bucket)/" + path))
-        request.httpMethod = "POST"
+        var request = URLRequest(url: mediaBase.appendingPathComponent(path))
+        request.httpMethod = "PUT"
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        request.setValue("false", forHTTPHeaderField: "x-upsert")
         request.httpBody = data
-        _ = try await send(request, signedIn: true, timeout: 60)
+        _ = try await send(request, signedIn: true, timeout: 60, toSupabase: false)
         return path
     }
 
-    public func media(at path: String) async throws -> Data {
-        guard MediaLimits.path.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil else {
-            throw SocialError.failed("That file has a bad address.")
+    public func media(_ item: PostMedia) async throws -> Data {
+        guard Self.isMediaPath(item.path) else { throw SocialError.failed("That file has a bad address.") }
+        let data: Data
+        switch item.store {
+        case .totality:
+            // Signed in, so a file can't be hotlinked from elsewhere on the web.
+            data = try await send(URLRequest(url: mediaBase.appendingPathComponent(item.path)), signedIn: true, timeout: 60, toSupabase: false)
+        case nil:
+            data = try await send(URLRequest(url: base.appendingPathComponent("storage/v1/object/public/\(Self.bucket)/" + item.path)),
+                                  signedIn: false, timeout: 60)
         }
-        let request = URLRequest(url: base.appendingPathComponent("storage/v1/object/public/\(Self.bucket)/" + path))
-        let data = try await send(request, signedIn: false, timeout: 60)
         guard data.count <= MediaLimits.fileBytes + MediaLimits.sealOverhead else { throw SocialError.failed("That file is bigger than Social allows.") }
         return data
     }
 
-    public func removeMedia(_ paths: [String]) async throws {
-        guard !paths.isEmpty else { return }
+    public func removeMedia(_ items: [PostMedia]) async throws {
+        guard !items.isEmpty else { return }
+        let account = try await myAccount()
+        let mine = items.filter { $0.folder == account && Self.isMediaPath($0.path) }
+        for item in mine where item.store == .totality {
+            var request = URLRequest(url: mediaBase.appendingPathComponent(item.path))
+            request.httpMethod = "DELETE"
+            _ = try await send(request, signedIn: true, toSupabase: false)
+        }
+        let legacy = mine.filter { $0.store == nil }.map(\.path)
+        guard !legacy.isEmpty else { return }
         var request = URLRequest(url: base.appendingPathComponent("storage/v1/object/\(Self.bucket)"))
         request.httpMethod = "DELETE"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["prefixes": paths])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["prefixes": legacy])
         _ = try await send(request, signedIn: true)
+    }
+
+    static func isMediaPath(_ path: String) -> Bool {
+        MediaLimits.path.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil
+    }
+
+    /// The signed-in account's ID, which names its folder.
+    func myAccount() async throws -> String {
+        let token: String
+        do { token = try await self.token() } catch { throw SocialError.signedOut }
+        guard let account = Self.account(fromToken: token) else { throw SocialError.signedOut }
+        return account
     }
 
     public func delete(_ id: UUID) async throws {
