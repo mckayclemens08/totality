@@ -8,6 +8,7 @@ import { showTasks, stopTasks } from "./tasks/view";
 import { showPhotos, stopPhotos } from "./photos/view";
 import { showMail, stopMail } from "./mail/view";
 import { showMessages, stopMessages, endMessages } from "./messages/view";
+import { showWeather, stopWeather } from "./weather/view";
 
 interface Module { id: string; name: string; icon: string[]; ready: boolean; blurb: string }
 const MODULES: Module[] = [
@@ -17,6 +18,7 @@ const MODULES: Module[] = [
   { id: "messages", name: "Messages", icon: ["M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"], ready: true, blurb: "Your chats, end-to-end encrypted." },
   { id: "tasks", name: "Tasks", icon: ["M4 4h16v16H4z", "m8 12 3 3 5-6"], ready: true, blurb: "Today, Upcoming, lists and steps." },
   { id: "photos", name: "Photos", icon: ["M3 5h18v15H3z", "m21 17-5-5-9 8"], ready: true, blurb: "Your library, newest first." },
+  { id: "weather", name: "Weather", icon: ["M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 6 11.5 3.3 3.3 0 0 0 7 18z"], ready: true, blurb: "The forecast in your saved places." },
 ];
 const HOME_ICON = ["M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"];
 
@@ -32,6 +34,7 @@ export function teardownShell(): void {
   stopCalendar();
   stopTasks();
   stopPhotos();
+  stopWeather();
   stopMail();
   void endMessages();
 }
@@ -43,7 +46,7 @@ export function renderShell(into: HTMLElement, ctx: Ctx & { ownComputer: boolean
 
   const route = () => {
     const [, mod = "home", id = null] = location.hash.split("/");
-    const current = mod === "reader" || mod === "calendar" || mod === "tasks" || mod === "photos" || mod === "mail" || mod === "messages" ? mod : "home";
+    const current = mod === "reader" || mod === "calendar" || mod === "tasks" || mod === "photos" || mod === "mail" || mod === "messages" || mod === "weather" ? mod : "home";
     nav.replaceChildren(
       h("div", { class: "brand" }, h("span", { class: "badge small" }, svg("svg", { width: "18", height: "18", viewBox: "0 0 24 24", "aria-hidden": "true" },
         ...[[12, 6], [6.5, 10], [17.5, 10], [8.5, 16.5], [15.5, 16.5]].map(([x, y]) => svg("circle", { cx: String(x), cy: String(y), r: "3.2" })), svg("circle", { cx: "12", cy: "12", r: "3" }))), h("span", { class: "brand-name" }, "Totality")),
@@ -53,12 +56,13 @@ export function renderShell(into: HTMLElement, ctx: Ctx & { ownComputer: boolean
         : h("span", { class: "nav-item soon", "aria-disabled": "true" }, icon(m.icon), h("span", {}, m.name), h("span", { class: "soon-tag" }, "Soon"))),
       h("div", { class: "who" }, h("div", { class: "who-name" }, `@${username}`),
         h("button", { type: "button", class: "quiet small-btn", onclick: onSignOut }, "Sign out")));
-    stopCalendar(); stopReader(); stopTasks(); stopPhotos(); stopMail(); stopMessages();
+    stopCalendar(); stopReader(); stopTasks(); stopPhotos(); stopWeather(); stopMail(); stopMessages();
     if (current === "reader") { void showReader(main, ctx, id && /^[0-9a-f-]{36}$/.test(id) ? id : null); return; }
     if (current === "calendar") { void showCalendar(main, ctx); return; }
     if (current === "mail") { const [, , m = null] = location.hash.split("/"); void showMail(main, ctx, m && /^[0-9a-f-]{36}$/.test(m) ? m : null); return; }
     if (current === "messages") { let room: string | null = null; try { room = id ? decodeURIComponent(id) : null; } catch { /* ignored */ } void showMessages(main, ctx, room && /^![A-Za-z0-9._~-]+:usetotality\.com$/.test(room) ? room : null); return; }
     if (current === "photos") { void showPhotos(main, ctx); return; }
+    if (current === "weather") { void showWeather(main, ctx); return; }
     if (current === "tasks") { const [, , v = null, t = null] = location.hash.split("/"); void showTasks(main, ctx, v && /^[a-z0-9-]+$/.test(v) ? v : null, t && /^[0-9a-f-]{36}$/.test(t) ? t : null); return; }
     main.replaceChildren(
       h("div", { class: "page-head" }, h("h1", {}, "Home")),

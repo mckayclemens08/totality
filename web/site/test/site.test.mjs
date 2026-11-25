@@ -22,7 +22,9 @@ test("everything loads from our own domain, with integrity", () => {
     const body = readFileSync(`dist/${f}`, "utf8");
     const own = (process.env.SUPABASE_URL ?? "").replace(/^https?:\/\//, "");
     // matrix.to/# is a link prefix inside the Matrix SDK, never fetched (connect-src would refuse it anyway).
-    const allowed = ["www\\.w3\\.org", "usetotality\\.com/(blobs|mail)/", "matrix\\.usetotality\\.com", "matrix\\.to/#"].concat(own ? [own.replace(/\./g, "\\.")] : []).join("|");
+    const allowed = ["www\\.w3\\.org", "usetotality\\.com/(blobs|mail)/", "matrix\\.usetotality\\.com", "matrix\\.to/#",
+      // Weather's forecast, and the credit link Open-Meteo's licence asks for (issue 203).
+      "(api\\.)?open-meteo\\.com\\b"].concat(own ? [own.replace(/\./g, "\\.")] : []).join("|");
     const hit = body.match(new RegExp("https?://(?!" + allowed + ")[a-z0-9][^\"'`\\s)]{0,60}"));
     assert.equal(hit, null, `${f} reaches another host: ${hit && hit[0]}`);
   }
@@ -40,8 +42,9 @@ test("CSP is strict", () => {
   assert.match(csp, /style-src 'self' 'unsafe-inline';/, "inline styles only, for mail frames (owner, 2026-11-18)");
   // The page may talk to its own domain, the account server (when built with one) and the blob store. Nothing else.
   const hosts = [...csp.matchAll(/https?:\/\/[^\s;]+/g)].map((m) => m[0]);
-  assert.deepEqual(hosts.filter((h) => h !== "https://usetotality.com" && h !== "https://matrix.usetotality.com"), process.env.SUPABASE_URL ? [process.env.SUPABASE_URL] : []);
+  assert.deepEqual(hosts.filter((h) => h !== "https://usetotality.com" && h !== "https://matrix.usetotality.com" && h !== "https://api.open-meteo.com"), process.env.SUPABASE_URL ? [process.env.SUPABASE_URL] : []);
   assert.ok(hosts.includes("https://matrix.usetotality.com"), "Messages talks to the Matrix server");
+  assert.ok(hosts.includes("https://api.open-meteo.com"), "Weather fetches its forecast straight from Open-Meteo (issue 203)");
   assert.doesNotMatch(csp.replace(/connect-src[^;]*/, ""), /https?:/, "only connect-src names another host");
 });
 

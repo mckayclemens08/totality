@@ -233,6 +233,9 @@ public final class CalendarModel {
     private var linkedByDay: [CalendarDay: [CalendarEntry]] = [:]
     /// What's planned for the selected day with no time yet, which can be dragged onto one (step 4).
     public private(set) var unplanned: [AgendaItem] = []
+    /// The selected day's weather from Weather's last forecast, through the registry (issue 203). In
+    /// memory only; asking never fetches.
+    public private(set) var dayForecast: DayForecast?
     /// Opens another module's item, like a task, in its own module. Set by the app.
     @ObservationIgnored public var onOpenLinked: ((AgendaItem) -> Void)?
     private var built: (first: CalendarDay, last: CalendarDay)?
@@ -1039,6 +1042,7 @@ extension CalendarModel {
         var waiting: [AgendaItem] = []
         for planner in registry.planners { waiting += await planner.unplanned(on: selectedDay.start(in: display)) }
         unplanned = waiting
+        dayForecast = await registry.forecast(on: selectedDay.start(in: display))
     }
 
     /// Gives an untimed item a time on the selected day, dropped at `minute` past midnight. It's blocked

@@ -257,6 +257,20 @@ describe('contact requests', () => {
     assert.equal(await canSee(u1, theirs.id), false)
   })
 
+  // Issue 203: the places saved in Weather are one sealed record of theirs.
+  test('one user\'s weather places never reach another', async () => {
+    const [u1, u2] = await trio()
+    const places = await addObject(db, u1, { kind: 'weather_places', storage_key: null })
+    await as(db, u1, (q) => q('update public.content_objects set meta_cipher = $1 where id = $2', [Buffer.from('sealed places'), places.id]))
+    assert.equal(await canSee(u1, places.id), true)
+    assert.equal(await canSee(u2, places.id), false)
+    // User 2 can't replace it or delete it.
+    await as(db, u2, (q) => q('update public.content_objects set meta_cipher = $1 where id = $2', [Buffer.from('forged'), places.id]))
+    await as(db, u2, (q) => q('delete from public.content_objects where id = $1', [places.id]))
+    const [kept] = await as(db, u1, (q) => q('select meta_cipher from public.content_objects where id = $1', [places.id]))
+    assert.equal(Buffer.from(kept.meta_cipher).toString(), 'sealed places')
+  })
+
   test('a blocked user cannot see public content or the profile', async () => {
     const [u1, u2, u3] = await trio()
     const o = await addObject(db, u1, { visibility: 'public', key_ref: 'plain:' })
