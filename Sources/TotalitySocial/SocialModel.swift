@@ -40,6 +40,9 @@ public final class SocialModel {
         return privatePosts.unavailableReason
     }
     public private(set) var closeFriends: Set<String> = []
+    /// Posts already copied to the Reader from this device, so a second tap doesn't make a second note.
+    public private(set) var savedToReader: Set<UUID> = []
+    private var savingToReader: Set<UUID> = []
     public private(set) var friends: Set<String> = []
     /// Who you follow, for the Following feed and for which rooms' invites to accept.
     public private(set) var followingSet: Set<String> = []
@@ -101,6 +104,7 @@ public final class SocialModel {
             if let old = self.me, old != me { forgetAccount() }
             self.me = me
             if closeFriends.isEmpty { closeFriends = rememberedCloseFriends(of: me) }
+            savedToReader.formUnion(rememberedReaderSaves(of: me))
             followingSet = Set(try await server.followed(by: me))
             tags = (try? await server.topTags()) ?? tags
             settings = (try? await server.settings()) ?? settings
@@ -134,6 +138,7 @@ public final class SocialModel {
         shown = []
         friends = []
         closeFriends = []
+        savedToReader = []
         followingSet = []
         followRequests = []
         saved = []
@@ -292,6 +297,12 @@ public final class SocialModel {
 
     // MARK: Likes and comments
 
+    /// Only ever adds a like: what a double tap does. A post that's already liked stays liked.
+    public func like(_ post: SocialPost) async {
+        guard !(self.post(post.id) ?? post).liked else { return }
+        await toggleLike(post)
+    }
+
     public func toggleLike(_ post: SocialPost) async {
         let liked = !post.liked
         update(post.id) { $0.liked = liked; $0.likes += liked ? 1 : -1 }
@@ -427,6 +438,10 @@ public final class SocialModel {
         Set(remembered.stringArray(forKey: "social.closeFriends." + account) ?? [])
     }
 
+    private func rememberedReaderSaves(of account: String) -> Set<UUID> {
+        Set((remembered.stringArray(forKey: "social.readerSaves." + account) ?? []).compactMap(UUID.init(uuidString:)))
+    }
+
     private func remember(closeFriends people: Set<String>) {
         guard let me else { return }
         remembered.set(people.sorted(), forKey: "social.closeFriends." + me)
@@ -559,16 +574,28 @@ public final class SocialModel {
 
     /// A copy of the post as a Reader note. It's yours from then on: sealed in the Reader, and it stays
     /// even if the author deletes the post.
+    public func isSavedToReader(_ post: SocialPost) -> Bool { savedToReader.contains(post.id) }
+    public func isSavingToReader(_ post: SocialPost) -> Bool { savingToReader.contains(post.id) }
+
     public func saveToReader(_ post: SocialPost) async {
         guard let receiver else {
             notice = "The Reader isn't open on this phone yet."
             return
         }
+        guard !savingToReader.contains(post.id) else { return }
+        if savedToReader.contains(post.id) {
+            notice = "Already saved to the Reader."
+            return
+        }
+        savingToReader.insert(post.id)
+        defer { savingToReader.remove(post.id) }
         let title = post.title ?? String(post.body.prefix(60))
         let tags = post.tags.isEmpty ? "" : "\n\n" + post.tags.map { "#" + $0 }.joined(separator: " ")
         let body = post.body + tags + "\n\n— \(post.displayName) (\(Handle.display(post.author))), \(post.date.formatted(date: .abbreviated, time: .shortened)), \(post.audience.name) on Social"
         do {
             _ = try await receiver.receive(noteTitled: title, body: body)
+            savedToReader.insert(post.id)
+            if let me { remembered.set(savedToReader.map(\.uuidString).sorted(), forKey: "social.readerSaves." + me) }
             notice = "Saved to the Reader."
         } catch {
             notice = "That didn't reach the Reader. Try again."
