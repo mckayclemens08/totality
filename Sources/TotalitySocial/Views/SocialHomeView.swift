@@ -39,7 +39,6 @@ public struct SocialHomeView: View {
                 switch route {
                 case .post(let id): PostDetailView(model: model, id: id, open: open)
                         .edgeSwipeBack(back)
-                        .noticeBanner($model.notice)
                 case .profile(let name): SocialProfileView(model: model, username: name, open: open)
                         .edgeSwipeBack(back)
                         .noticeBanner($model.notice)
@@ -154,6 +153,8 @@ public struct SocialHomeView: View {
                                 open(.post(post.id))
                             } onLike: {
                                 Task { await model.toggleLike(post) }
+                            } onDoubleTap: {
+                                Task { await model.like(post) }
                             }
                         }
                     }
@@ -234,8 +235,7 @@ struct GridCard: View {
 
     var body: some View {
         let theme = Theme.current
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: Space.s2) {
+        VStack(alignment: .leading, spacing: Space.s2) {
                 if !post.media.isEmpty { GridCover(model: model, post: post) }
                 if post.audience != .everyone { AudienceTag(audience: post.audience) }
                 if let title = post.title, !title.isEmpty {
@@ -259,10 +259,9 @@ struct GridCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .neumorphic(.raised, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-        }
-        .buttonStyle(SoftPress())
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens the post")
+            .likesOnDoubleTap(onOpen: action) { Task { await model.like(post) } }
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens the post. Double tap likes it.")
     }
 }
 
@@ -274,6 +273,8 @@ struct FollowingCard: View {
     let onAuthor: () -> Void
     let onOpen: () -> Void
     let onLike: () -> Void
+    /// A double tap on the text: only ever adds the like.
+    let onDoubleTap: () -> Void
     @AppStorage(LikeCountsPreference.key) private var hideEverywhere = false
 
     var body: some View {
@@ -294,17 +295,14 @@ struct FollowingCard: View {
                 Spacer(minLength: 0)
                 AudienceTag(audience: post.audience)
             }
-            Button(action: onOpen) {
-                VStack(alignment: .leading, spacing: Space.s2) {
-                    if let title = post.title { Text(title).font(Typeface.headline).foregroundStyle(theme.textPrimary.color) }
-                    if !post.body.isEmpty {
-                        Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).lineLimit(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+            VStack(alignment: .leading, spacing: Space.s2) {
+                if let title = post.title { Text(title).font(Typeface.headline).foregroundStyle(theme.textPrimary.color) }
+                if !post.body.isEmpty {
+                    Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).lineLimit(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(SoftPress())
+            .likesOnDoubleTap(onOpen: onOpen, onLike: onDoubleTap)
             if !post.media.isEmpty { PostMediaView(model: model, post: post, photoHeight: 260) }
             HStack(spacing: Space.s5) {
                 Button(action: onLike) {

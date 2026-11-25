@@ -43,6 +43,7 @@ struct PostDetailView: View {
                             }
                         }
                         .itemCard()
+                        .likesOnDoubleTap { Task { await model.like(post) } }
                         actions(post)
                         commentList
                     }
@@ -80,6 +81,8 @@ struct PostDetailView: View {
             }
         }
         .background(theme.bg.color.ignoresSafeArea())
+        // The post screen shows its own notice, so "Saved to the Reader." appears where it was asked for.
+        .noticeBanner(Binding(get: { model.notice }, set: { model.notice = $0 }))
         .addToTasksSheet($taskDraft, maker: model.taskMaker) { _ in model.notice = "Added to Tasks." }
     }
 
@@ -104,7 +107,10 @@ struct PostDetailView: View {
                     Button("Add to Tasks", systemImage: "checklist") { taskDraft = model.taskDraft(post) }
                 }
                 if model.receiver != nil {
-                    Button("Save to Reader", systemImage: "books.vertical") { Task { await model.saveToReader(post) } }
+                    Button(model.isSavedToReader(post) ? "Saved to Reader" : "Save to Reader", systemImage: "books.vertical") {
+                        Task { await model.saveToReader(post) }
+                    }
+                    .disabled(model.isSavingToReader(post) || model.isSavedToReader(post))
                 }
                 if post.author == model.me {
                     Button("Delete post", systemImage: "trash", role: .destructive) { confirmingDelete = true }

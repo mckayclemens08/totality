@@ -133,6 +133,83 @@ import TotalityCore
         #expect(draft.source.module == .social && draft.source.itemID == post.id.uuidString)
     }
 
+    final class SlowReader: ContentReceiver, @unchecked Sendable {
+        let module = ModuleID.reader
+        let kinds: Set<ContentKind> = [.note]
+        var notes = 0
+        func attachable() async throws -> [ContentRef] { [] }
+        func current(_ ref: ContentRef) async throws -> ContentRef? { ref }
+        func receive(noteTitled title: String, body: String) async throws -> ContentRef {
+            try await Task.sleep(for: .milliseconds(100))
+            notes += 1
+            return ContentRef(module: .reader, kind: .note, id: UUID(), keyRef: .plain, preview: .init(title: title))
+        }
+        func receive(file data: Data, named filename: String) async throws -> ContentRef { throw CancellationError() }
+    }
+
+    @Test func savingToTheReaderTwiceMakesOneNote() async throws {
+        let world = FakeSocialWorld()
+        _ = try await world.person("maya").publish(title: "Kyoto ramen list", body: "Ichiran.", tags: [])
+        let model = SocialModel(server: world.person("jonah"))
+        let reader = Reader()
+        model.receiver = reader
+        await model.load()
+        let post = try #require(model.forYou.first)
+        await model.saveToReader(post)
+        #expect(model.notice == "Saved to the Reader.")
+        #expect(model.isSavedToReader(post))
+        await model.saveToReader(post)
+        #expect(reader.notes.count == 1)
+        #expect(model.notice == "Already saved to the Reader.")
+    }
+
+    @Test func twoTapsDuringASaveMakeOneNote() async throws {
+        let world = FakeSocialWorld()
+        _ = try await world.person("maya").publish(title: "Kyoto ramen list", body: "Ichiran.", tags: [])
+        let model = SocialModel(server: world.person("jonah"))
+        let reader = SlowReader()
+        model.receiver = reader
+        await model.load()
+        let post = try #require(model.forYou.first)
+        async let first: Void = model.saveToReader(post)
+        async let second: Void = model.saveToReader(post)
+        _ = await (first, second)
+        #expect(reader.notes == 1)
+        #expect(!model.isSavingToReader(post))
+    }
+
+    @Test func savedPostsAreRememberedOnThisDevice() async throws {
+        let world = FakeSocialWorld()
+        _ = try await world.person("maya").publish(title: "Kyoto ramen list", body: "Ichiran.", tags: [])
+        let defaults = try #require(UserDefaults(suiteName: "social.test." + UUID().uuidString))
+        let model = SocialModel(server: world.person("jonah"), remembered: defaults)
+        let reader = Reader()
+        model.receiver = reader
+        await model.load()
+        let post = try #require(model.forYou.first)
+        await model.saveToReader(post)
+        let later = SocialModel(server: world.person("jonah"), remembered: defaults)
+        later.receiver = reader
+        await later.load()
+        #expect(later.isSavedToReader(post))
+        await later.saveToReader(post)
+        #expect(reader.notes.count == 1)
+    }
+
+    @Test func aDoubleTapLikesButNeverUnlikes() async throws {
+        let world = FakeSocialWorld()
+        _ = try await world.person("maya").publish(title: nil, body: "Sourdough attempt #4.", tags: [])
+        let model = SocialModel(server: world.person("jonah"))
+        await model.load()
+        let post = try #require(model.forYou.first)
+        await model.like(post)
+        await model.like(post)
+        #expect(model.forYou[0].liked && model.forYou[0].likes == 1)
+        #expect(world.posts[post.id]?.likedBy == ["jonah"])
+        await model.toggleLike(model.forYou[0])
+        #expect(!model.forYou[0].liked, "the Like button still unlikes")
+    }
+
     @Test func aLinkedPostLoadsWhenItIsNotInAFeed() async throws {
         let world = FakeSocialWorld()
         let id = try await world.person("maya").publish(title: nil, body: "Old post.", tags: [])
