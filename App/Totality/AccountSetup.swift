@@ -69,7 +69,12 @@ enum AccountSetup {
             let secret = await MainActor.run { AccountSetup.messagesRecovery }
             return await secret?(account)
         }
-        return MessagesModule.makeModel(account: accountID, connector: connector, recoverySecret: recovery)
+        // "Who can message me" and message requests, with the signed-in person's own Supabase token.
+        var privacy: (any MessagePrivacyService)?
+        if let config, let token = searchToken {
+            privacy = RestMessagePrivacy(base: config.url, publishableKey: config.publishableKey, token: token)
+        }
+        return MessagesModule.makeModel(account: accountID, connector: connector, recoverySecret: recovery, privacy: privacy)
         #else
         return MessagesModule.makeModel(
             account: accountID, connector: nil,

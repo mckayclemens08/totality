@@ -10,14 +10,17 @@ public enum MessagesModule {
         account: (@Sendable () async -> String?)?,
         connector: MessagesConnector?,
         unavailableReason: String? = nil,
-        recoverySecret: @escaping @Sendable (_ account: String) async -> String? = { _ in nil }
+        recoverySecret: @escaping @Sendable (_ account: String) async -> String? = { _ in nil },
+        privacy: (any MessagePrivacyService)? = nil
     ) -> MessagesModel {
         guard let account else { return MessagesModel(account: { nil }, connector: nil) }
-        return MessagesModel(
+        let model = MessagesModel(
             account: account, connector: connector, unavailableReason: connector == nil ? unavailableReason : nil,
             recoverySecret: recoverySecret,
             peopleFile: { try? MessagesStorePaths(account: $0).cache.appendingPathComponent("people.json") }
         )
+        model.privacy = privacy
+        return model
     }
 }
 

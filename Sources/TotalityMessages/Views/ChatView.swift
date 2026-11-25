@@ -784,6 +784,7 @@ struct NewMessageView: View {
                 Text("If you haven't talked before, they'll see a request to accept first.")
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
+                RequestOffer(model: model)
                 if let notice = model.notice {
                     Text(notice)
                         .font(Typeface.caption)
@@ -814,7 +815,13 @@ struct NewMessageView: View {
         .tint(theme.accent.color)
         .onAppear {
             model.notice = nil
+            model.needsRequest = nil
+            model.sentRequestTo = nil
             focused = true
+        }
+        .onChange(of: username) {
+            model.needsRequest = nil
+            model.sentRequestTo = nil
         }
     }
 
