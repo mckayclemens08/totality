@@ -196,9 +196,12 @@ describe('contact requests', () => {
       where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')
       order by 1`)).rows.map((r) => r.proname)
     // The social_* functions hide a block both ways; social.test.js checks each against a block.
+    // The message_* functions answer 'unknown' across a block; message-requests.test.js checks it.
     // The browser_* and *_browser(s) functions touch only the caller's own browsers, never anyone else's.
     assert.deepEqual(names, ['accept_contact', 'block_contact', 'browser_check_in', 'browser_forget',
-                             'browser_set_matrix_device', 'claim_handle', 'export_my_data', 'my_browsers',
+                             'browser_set_matrix_device', 'claim_handle', 'export_my_data',
+                             'message_my_reach', 'message_reach', 'message_request_answer', 'message_request_send',
+                             'message_requests_accepted', 'message_requests_incoming', 'message_set_reach', 'my_browsers',
                              'redeem_invite', 'remove_browser', 'request_contact', 'social_approve_follower',
                              'social_comments_of', 'social_follow', 'social_follow_requests', 'social_following_feed',
                              'social_for_you', 'social_friends', 'social_mark_seen', 'social_my_settings',

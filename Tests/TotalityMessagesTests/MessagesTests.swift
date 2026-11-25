@@ -1321,3 +1321,158 @@ func homeSquareHeart() async {
     await chat.toggleReaction(QuickReactions.heart, on: message)
     #expect(channel.reactions == ["❤️@$1"])
 }
+
+// MARK: Who can message me (issue 149, step 8)
+
+private final class FakePrivacy: MessagePrivacyService, @unchecked Sendable {
+    private let lock = NSLock()
+    var answers: [String: ReachAnswer] = [:]
+    var reachValue: MessageReach = .anyone
+    var waiting: [MessageRequest] = []
+    var acceptedNames: [String] = []
+    var offline = false
+    var failSave = false
+    private(set) var actions: [String] = []
+
+    private func record(_ a: String) { lock.withLock { actions.append(a) } }
+    func myReach() async throws -> MessageReach { reachValue }
+    func setReach(_ reach: MessageReach) async throws {
+        if failSave { throw MessagesError.offline }
+        record("set \(reach.rawValue)")
+        reachValue = reach
+    }
+    func reach(_ username: String) async throws -> ReachAnswer {
+        if offline { throw MessagesError.offline }
+        return answers[username] ?? .allowed
+    }
+    func sendRequest(to username: String) async throws { record("ask \(username)") }
+    func incoming() async throws -> [MessageRequest] { waiting }
+    func answer(_ username: String, accept: Bool) async throws { record("\(accept ? "accept" : "decline") \(username)") }
+    func accepted() async throws -> [String] { acceptedNames }
+}
+
+@MainActor
+private func privacyModel(_ privacy: FakePrivacy, chats: [ChatSummary] = []) async -> (MessagesModel, FakeService) {
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: chats)
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    model.privacy = privacy
+    await model.connect()
+    await settle()
+    return (model, service)
+}
+
+@MainActor
+@Test func someoneWhoseSettingLeavesYouOutIsOfferedARequestNotAChat() async {
+    let privacy = FakePrivacy()
+    privacy.answers["ana_ruiz"] = .ask
+    let (model, service) = await privacyModel(privacy)
+    #expect(await model.startChat(with: "@ana_ruiz") == nil)
+    #expect(model.needsRequest == "ana_ruiz")
+    #expect(model.notice == nil)
+    #expect(service.actions.isEmpty)
+
+    #expect(await model.sendRequest())
+    #expect(privacy.actions == ["ask ana_ruiz"])
+    #expect(model.needsRequest == nil)
+    #expect(model.sentRequestTo == "ana_ruiz")
+}
+
+@MainActor
+@Test func aWaitingRequestOrAnUnknownNameStartsNothing() async {
+    let privacy = FakePrivacy()
+    privacy.answers = ["ana_ruiz": .asked, "ghost_name": .unknown]
+    let (model, service) = await privacyModel(privacy)
+    #expect(await model.startChat(with: "ana_ruiz") == nil)
+    #expect(model.notice?.contains("waiting") == true)
+    #expect(await model.startChat(with: "ghost_name") == nil)
+    #expect(model.notice == MessagesError.noSuchPerson.message)
+    #expect(service.actions.isEmpty)
+}
+
+@MainActor
+@Test func anAllowedPersonAndAnExistingChatOpenAsBefore() async {
+    let privacy = FakePrivacy()
+    privacy.answers["ana_ruiz"] = .ask
+    let (model, service) = await privacyModel(privacy, chats: [
+        ChatSummary(id: "!dm-ana_ruiz", title: "ana_ruiz", otherPerson: "@ana_ruiz:usetotality.com"),
+    ])
+    // Ana's setting changed after you started talking: your chat keeps working.
+    #expect(await model.startChat(with: "ana_ruiz") == "!dm-ana_ruiz")
+    #expect(await model.startChat(with: "mckay_test") == "!dm-mckay_test")
+    #expect(service.actions == ["start ana_ruiz", "start mckay_test"])
+}
+
+@MainActor
+@Test func whenTheSettingCantBeAskedTheServerDecides() async {
+    let privacy = FakePrivacy()
+    privacy.offline = true
+    let (model, service) = await privacyModel(privacy)
+    #expect(await model.startChat(with: "ana_ruiz") == "!dm-ana_ruiz")
+    #expect(service.actions == ["start ana_ruiz"])
+}
+
+@MainActor
+@Test func acceptingARequestStartsTheChatAndDeletingOneSaysNothing() async {
+    let privacy = FakePrivacy()
+    privacy.waiting = [MessageRequest(username: "ana_ruiz", sent: nil), MessageRequest(username: "mckay_test", sent: nil)]
+    let (model, service) = await privacyModel(privacy)
+    #expect(model.messageRequests.map(\.username) == ["ana_ruiz", "mckay_test"])
+
+    await model.accept(model.messageRequests[0])
+    #expect(privacy.actions == ["accept ana_ruiz"])
+    #expect(service.actions == ["start ana_ruiz"])
+    #expect(model.requestedChat == "!dm-ana_ruiz")
+
+    await model.decline(model.messageRequests[0])
+    #expect(privacy.actions == ["accept ana_ruiz", "decline mckay_test"])
+    #expect(model.messageRequests.isEmpty)
+}
+
+@MainActor
+@Test func theChatYouAskedForIsJoinedAtOnceButNothingElse() async {
+    let privacy = FakePrivacy()
+    privacy.acceptedNames = ["ana_ruiz"]
+    let (_, service) = await privacyModel(privacy, chats: [
+        ChatSummary(id: "!from-ana", title: "ana_ruiz", isRequest: true, from: "@ana_ruiz:usetotality.com"),
+        ChatSummary(id: "!group-ana", title: "Climbing", isRequest: true, from: "@ana_ruiz:usetotality.com", isGroup: true),
+        ChatSummary(id: "!from-other", title: "spammer", isRequest: true, from: "@spammer:usetotality.com"),
+    ])
+    await settle()
+    #expect(service.actions == ["accept !from-ana"])
+}
+
+@MainActor
+@Test func aGroupWithSomeoneWhoHasntLetYouInDoesntStart() async {
+    let privacy = FakePrivacy()
+    privacy.answers["ana_ruiz"] = .ask
+    let (model, service) = await privacyModel(privacy)
+    #expect(await model.startGroup(with: "ana_ruiz, mckay_test") == nil)
+    #expect(model.notice?.contains("@ana_ruiz") == true)
+    #expect(service.actions.isEmpty)
+    privacy.answers = [:]
+    #expect(await model.startGroup(with: "ana_ruiz, mckay_test") == "!group")
+}
+
+@MainActor
+@Test func theSettingLoadsAndAFailedSaveGoesBack() async {
+    let privacy = FakePrivacy()
+    privacy.reachValue = .followers
+    let (model, _) = await privacyModel(privacy)
+    #expect(model.reach == .followers)
+    await model.setReach(.friends)
+    #expect(model.reach == .friends)
+    #expect(privacy.actions == ["set friends"])
+    privacy.failSave = true
+    await model.setReach(.anyone)
+    #expect(model.reach == .friends)
+    #expect(model.notice != nil)
+}
+
+@Test func theServersRefusalsReadPlainly() throws {
+    let body = { (m: String) in (try? JSONSerialization.data(withJSONObject: ["message": m])) ?? Data() }
+    #expect(RestMessagePrivacy.error(status: 400, data: body("too many message requests")).message.contains("tomorrow"))
+    #expect(RestMessagePrivacy.error(status: 400, data: body("no such user")) == .noSuchPerson)
+    #expect(RestMessagePrivacy.error(status: 401, data: Data()) == .notSignedIn)
+    #expect(RestMessagePrivacy.error(status: 500, data: body("secret detail")).message == "That didn't go through. Try again.")
+    #expect(MessageReach.allCases.map(\.title) == ["Anyone", "Followers", "Friends"])
+}

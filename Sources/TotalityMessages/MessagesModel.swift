@@ -25,6 +25,19 @@ public final class MessagesModel {
     public private(set) var blockedPeople: [String] = []
     /// The last thing that went wrong with an action, shown until the next one.
     public var notice: String?
+    /// People asking to message you whom your setting doesn't let in (issue 149, step 8).
+    public internal(set) var messageRequests: [MessageRequest] = []
+    /// Your "Who can message me", once loaded.
+    public internal(set) var reach: MessageReach?
+    /// Someone whose setting doesn't include you yet, so New message offers to send a request.
+    public var needsRequest: String?
+    /// Who your last request went to, so the screen can say it was sent.
+    public var sentRequestTo: String?
+    /// The setting and message requests, on Totality's server. Nil without backend settings.
+    @ObservationIgnored public var privacy: (any MessagePrivacyService)?
+    /// People who accepted your requests: their invite to the chat you asked for is joined at once.
+    @ObservationIgnored var acceptedBy: Set<String> = []
+    @ObservationIgnored var autoJoined: Set<String> = []
     /// Makes tasks from messages, through the registry (issue 123, step 4).
     @ObservationIgnored public var taskMaker: (any TaskMaker)?
     public private(set) var keys: MessageKeys = .checking
@@ -37,9 +50,9 @@ public final class MessagesModel {
     private let account: @Sendable () async -> String?
     private let connector: MessagesConnector?
     private let unavailableReason: String?
-    private var service: (any MessagesService)?
+    private(set) var service: (any MessagesService)?
     /// Bumped on every connect, so a slow old connection can't write into a newer one's lists.
-    private var generation = 0
+    private(set) var generation = 0
 
     public init(
         account: @escaping @Sendable () async -> String?,
@@ -58,6 +71,10 @@ public final class MessagesModel {
             guard let self else { return .done }
             await self.connect()
             if case .failed(let message) = self.phase { return .failed(message) }
+            return .done
+        }
+        refresher.add("requests") { [weak self] in
+            await self?.loadPrivacy()
             return .done
         }
         // Profiles are kept for a day; a pull fetches everyone again.
@@ -119,6 +136,7 @@ public final class MessagesModel {
             if mine == generation {
                 phase = .ready
                 await settleKeys()
+                await loadPrivacy()
             }
         } catch {
             if mine == generation { phase = .failed(Self.describe(error)) }
@@ -147,6 +165,12 @@ public final class MessagesModel {
         keys = .checking
         chats = []
         requests = []
+        messageRequests = []
+        reach = nil
+        needsRequest = nil
+        sentRequestTo = nil
+        acceptedBy = []
+        autoJoined = []
         connection = .connecting
         people.close()
         closeHome()
@@ -174,6 +198,22 @@ public final class MessagesModel {
         }
         do {
             notice = nil
+            needsRequest = nil
+            sentRequestTo = nil
+            if !hasChat(with: username), let answer = await reachAnswer(for: username) {
+                switch answer {
+                case .allowed: break
+                case .ask:
+                    needsRequest = username
+                    return nil
+                case .asked:
+                    notice = "Your request to @\(username) is waiting for them to accept."
+                    return nil
+                case .unknown:
+                    notice = MessagesError.noSuchPerson.message
+                    return nil
+                }
+            }
             return try await service.startChat(with: username)
         } catch {
             notice = Self.describe(error)
@@ -205,6 +245,10 @@ public final class MessagesModel {
         do {
             notice = nil
             let names = try GroupMembers.parse(typed, own: MessagesUsername.display(service.userID))
+            if let blocked = await notReachable(names) {
+                notice = blocked
+                return nil
+            }
             let prepared = try photo.map { original in
                 try GroupPhoto.prepare(original)
             }
@@ -345,6 +389,7 @@ public final class MessagesModel {
     private func show(_ all: [ChatSummary]) {
         requests = all.filter(\.isRequest).sorted(by: ChatSummary.newestFirst)
         chats = all.filter { !$0.isRequest }.sorted(by: ChatSummary.newestFirst)
+        joinAcceptedRequests()
         let others = Array(Set(chats.compactMap(\.otherPerson) + chats.filter(\.isGroup).compactMap(\.lastSender)))
         if !others.isEmpty { Task { await people.want(matrixIDs: others) } }
     }

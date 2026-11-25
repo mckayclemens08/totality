@@ -4,9 +4,10 @@ tunnel: e4887556-fad1-46ac-b6c4-b1996a4fce65
 credentials-file: /etc/cloudflared/credentials.json
 
 ingress:
+  # Matrix goes through the guard, which checks every invite against "Who can message me".
   - hostname: matrix.usetotality.com
     path: ^/_matrix/(client|media)/
-    service: http://tuwunel:8008
+    service: http://matrix-guard:8080
   - hostname: usetotality.com
     path: ^/\.well-known/matrix/
     service: http://tuwunel:8008

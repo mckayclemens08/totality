@@ -16,6 +16,7 @@ public struct MessagesHomeView: View {
     @State private var taken: TakenMedia?
     @State private var makingGroup = false
     @State private var showingBlocked = false
+    @State private var showingPrivacy = false
     @AppStorage(MessagesPreferences.shareReadAndTypingKey) private var shareReadAndTyping = true
 
     private let onOpenAccount: (() -> Void)?
@@ -100,6 +101,9 @@ public struct MessagesHomeView: View {
         .sheet(isPresented: $showingBlocked) {
             BlockedView(model: model) { showingBlocked = false }
         }
+        .sheet(isPresented: $showingPrivacy) {
+            MessagePrivacyView(model: model) { showingPrivacy = false }
+        }
         .task { await model.connect() }
         .onAppear(perform: openRequested)
         .onChange(of: model.requestedChat) { openRequested() }
@@ -149,9 +153,15 @@ public struct MessagesHomeView: View {
                         }
                     }
                 }
+                if !composing {
+                    RequestOffer(model: model)
+                }
                 SearchBox("Search", text: $query)
-                if !model.requests.isEmpty && query.isEmpty {
+                if (!model.requests.isEmpty || !model.messageRequests.isEmpty) && query.isEmpty {
                     SectionTitle("Requests")
+                    ForEach(model.messageRequests) { request in
+                        MessageRequestRow(request: request, model: model)
+                    }
                     ForEach(model.requests) { request in
                         RequestRow(request: request, model: model)
                     }
@@ -185,6 +195,7 @@ public struct MessagesHomeView: View {
             .padding(.horizontal, Space.s4)
             .padding(.vertical, Space.s3)
             .motion(Motion.snappy, value: model.requests)
+            .motion(Motion.snappy, value: model.messageRequests)
             .motion(Motion.snappy, value: model.connection)
         }
     }
@@ -229,6 +240,7 @@ public struct MessagesHomeView: View {
     private var settingsMenu: some View {
         HeaderMenu("Messages settings", systemImage: "gearshape.fill") {
             Button("New group", systemImage: "person.3") { makingGroup = true }
+            Button("Who can message me", systemImage: "person.crop.circle.badge.checkmark") { showingPrivacy = true }
             Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
             Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
             if model.keys == .backedUp {

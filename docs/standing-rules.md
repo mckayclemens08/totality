@@ -171,6 +171,7 @@ Mail arrives through `server/mail/`, from the Cloudflare Worker in `server/mail-
 Sealed photos and Reader files go through `server/blobs/` to `~/totality/blobs-data`, one folder per account, and it logs nothing either.
 Social's photos and voice clips go through `server/social-media/` to `~/totality/social-media-data`, apart from the blob store so posts never count against anyone's storage. Friends and Close-friends files arrive sealed, with the key only in the Matrix post. Every read needs a sign-in, and it logs nothing.
 Push in `server/push/` keeps each account's phone push tokens in `~/totality/push-data` and wakes them with an empty silent push. For instant Gmail sync it keeps a keyed hash of each linked address (never the address) and checks Google's signature on every Pub/Sub note (`docs/gmail-push-security-review.md`). Its Apple key file is in `~/totality/secrets/push/` (ignored by git), and it logs nothing.
+Matrix client traffic reaches Tuwunel through `server/matrix-guard/`, which checks every invite against the invitee's "Who can message me" by asking the `message-gate` edge function (shared secret `MESSAGE_GATE_SECRET` in `.env` and Supabase's secrets). It fails closed and logs nothing.
 Never upgrade the Oracle account to paid: that's the owner's decision under the cost rule.
 
 ## Working discipline
