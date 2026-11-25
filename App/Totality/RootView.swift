@@ -57,9 +57,7 @@ struct RootView: View {
     @State private var showingSearch = false
     /// Someone's profile, opened from their link.
     @State private var linkedProfile: LinkedProfile?
-    @AppStorage(HomeStyle.defaultKey) private var defaultHomeStyle = HomeStyle.tiles
     // What the home page's button chose, until the app restarts or the default changes.
-    @State private var chosenHomeStyle: HomeStyle?
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -115,7 +113,6 @@ struct RootView: View {
             refreshers[.photos] = photos.refresher
             currentPhotos.model = photos
         }
-        .onChange(of: defaultHomeStyle) { chosenHomeStyle = nil }
         .onChange(of: homeChoices.removed, initial: true) { old, removed in
             AppRefresh.shared.removed = removed
             // Calendar coming off Home clears the reminders already waiting.
@@ -197,7 +194,7 @@ struct RootView: View {
 
     private var home: some View {
         HomeView(
-            center: recentModule, glances: glances, bigTile: bigTile, lineLink: lineLink, style: homeStyle,
+            glances: glances, bigTile: bigTile, lineLink: lineLink,
             removed: homeChoices.removed,
             onRemove: { module in Task { await homeChoices.remove(module) } },
             onRestore: { module in Task { await homeChoices.restore(module) } }
@@ -318,14 +315,6 @@ struct RootView: View {
         guard let pendingOpen else { return }
         self.pendingOpen = nil
         open = pendingOpen
-    }
-
-    private var homeStyle: Binding<HomeStyle> {
-        Binding {
-            chosenHomeStyle ?? defaultHomeStyle
-        } set: {
-            chosenHomeStyle = $0
-        }
     }
 
     /// Modules without a screen yet say so. A module that can't open shows no lines at all, because

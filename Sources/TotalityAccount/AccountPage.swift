@@ -25,7 +25,6 @@ struct AccountPage: View {
                 NavigationLink { ThemePickerView() } label: {
                     SettingsRow("Theme", value: ThemeStore.shared.choice.name)
                 }
-                HomeStyleRow()
             }
 
             SettingsGroup("Keys and devices") {
@@ -181,23 +180,6 @@ private struct Chevron: View {
             .font(Typeface.caption.weight(.semibold))
             .foregroundStyle(Theme.current.textSecondary.color)
             .accessibilityHidden(true)
-    }
-}
-
-/// Which home page Totality opens on, as a row that opens a menu. It's on this device and needs no account.
-private struct HomeStyleRow: View {
-    @AppStorage(HomeStyle.defaultKey) private var defaultHome = HomeStyle.tiles
-
-    var body: some View {
-        Menu {
-            Picker("Home opens to", selection: $defaultHome) {
-                ForEach(HomeStyle.allCases) { style in
-                    Text(style.name).tag(style)
-                }
-            }
-        } label: {
-            SettingsRow("Home opens to", value: defaultHome.name)
-        }
     }
 }
 

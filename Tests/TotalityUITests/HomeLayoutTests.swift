@@ -268,12 +268,6 @@ struct HomeLayoutTests {
         #expect(HomeGreeting.title(at: try at(21), calendar: calendar) == "Good evening")
     }
 
-    @Test("Tiles are the default home page and Flower is the other choice")
-    func styles() {
-        #expect(HomeStyle.allCases == [.tiles, .flower])
-        #expect(HomeStyle.allCases.map(\.name) == ["Tiles", "Flower"])
-    }
-
     @Test("A point finds the tile under it, and a gap finds nothing")
     func findsTiles() throws {
         let layout = layout([(.reader, .small), (.calendar, .small), (.mail, .medium)])

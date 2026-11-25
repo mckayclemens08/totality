@@ -236,7 +236,7 @@ public enum CoverTone {
 
 /// Fixed sizes of the shared controls in the redesign (owner approved the canvas on 2026-11-17).
 public enum Metric {
-    /// A round header button: the flower and search buttons on Home, and each screen's header.
+    /// A round header button: the search button on Home, and each screen's header.
     public static let headerButton: CGFloat = 44
     /// The accent round + at the bottom right of a screen.
     public static let addButton: CGFloat = 56

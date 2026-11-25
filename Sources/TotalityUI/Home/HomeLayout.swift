@@ -47,20 +47,6 @@ public struct TilePlacement: Equatable, Sendable, Identifiable {
     public let rows: Int
 }
 
-/// Which home page shows. Tiles unless the person sets another default in Settings. The button on the
-/// home page switches for the moment and leaves the default alone.
-public enum HomeStyle: String, CaseIterable, Sendable, Identifiable {
-    case tiles, flower
-
-    public static let defaultKey = "home.defaultStyle"
-
-    public var id: Self { self }
-
-    public var name: String {
-        rawValue.capitalized
-    }
-}
-
 /// The home page as the person arranged it, saved on this device. It holds module names and sizes,
 /// never content.
 public struct HomeLayout: Equatable, Sendable {
