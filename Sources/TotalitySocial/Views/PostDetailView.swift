@@ -43,6 +43,7 @@ struct PostDetailView: View {
                             }
                         }
                         .itemCard()
+                        .likesOnDoubleTap { Task { await model.like(post) } }
                         actions(post)
                         commentList
                     }
