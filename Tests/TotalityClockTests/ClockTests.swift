@@ -344,8 +344,10 @@ let friday = moment(2026, 11, 20, 14, 35)
         model.dropFinishedTimers()
         #expect(model.timers.isEmpty)
         await model.startTimer(seconds: 60, label: "Laundry")
-        await model.cancel(try #require(model.timers.first?.id))
-        #expect(fake.timers.isEmpty)
+        let laundry = try #require(model.timers.first?.id)
+        await model.cancel(laundry)
+        #expect(fake.timers[laundry] == nil)
+        #expect(model.timers.isEmpty)
         _ = book
     }
 
