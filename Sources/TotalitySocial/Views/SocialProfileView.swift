@@ -133,7 +133,8 @@ struct SocialProfileView: View {
         let theme = Theme.current
         return VStack(alignment: .leading, spacing: Space.s3) {
             HStack(spacing: Space.s4) {
-                PersonFace(photo: model.photos[username], name: profile.name, diameter: Space.s8 + Space.s4)
+                StoryFace(photo: model.photos[username], name: profile.name, ring: model.ring(for: username), diameter: Space.s8 + Space.s4)
+                    .onTapGesture { if model.ring(for: username) != nil { model.requestedStories = username } }
                 VStack(alignment: .leading, spacing: Space.s1) {
                     Text(profile.name).font(Typeface.title).foregroundStyle(theme.textPrimary.color)
                     Text(Handle.display(profile.username)).font(Typeface.callout).foregroundStyle(theme.textSecondary.color)

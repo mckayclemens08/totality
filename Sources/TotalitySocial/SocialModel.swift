@@ -47,6 +47,8 @@ public final class SocialModel {
     /// Who you follow, for the Following feed and for which rooms' invites to accept.
     public private(set) var followingSet: Set<String> = []
     public var requestedProfile: String?
+    /// Someone whose stories to play, asked for by a ringed photo outside the story row.
+    public var requestedStories: String?
     /// A post asked for from outside Social, such as a task's link back to where it came from.
     public var requestedPost: UUID?
     /// A screen the home tile asked for: the composer or Search.
@@ -73,6 +75,11 @@ public final class SocialModel {
     let profiles: (any ProfileDirectory)?
     public private(set) var photos: [String: Data] = [:]
     private var privateFeed: [SocialPost] = []
+    /// Live stories: public ones from the server and encrypted ones from the rooms, each marked viewed or not.
+    public internal(set) var stories: [SocialStory] = []
+    var privateStories: [SocialStory] = []
+    /// Videos opened for playing, written to this app's own caches, a few at a time (`VideoFiles`).
+    @ObservationIgnored let videoFiles = VideoFiles()
     /// What For You has put on screen and hasn't told the server about yet.
     private var shown: Set<UUID> = []
     /// Opened photos and clips by path, a few at a time, so scrolling back doesn't fetch them again. Kept
@@ -132,6 +139,9 @@ public final class SocialModel {
     func forgetAccount() {
         mediaCache = [:]
         mediaOrder = []
+        videoFiles.clear()
+        stories = []
+        privateStories = []
         me = nil
         forYou = []
         following = []
@@ -166,6 +176,7 @@ public final class SocialModel {
             notice = "Friends posts didn't load: \((error as? SharedRoomError)?.message ?? "try again")."
         }
         following = (publicPosts + privateFeed).sorted { $0.date > $1.date }
+        await loadStories()
     }
 
     /// Reads the encrypted rooms this person is in: their own, and those of people they follow who let
@@ -174,6 +185,7 @@ public final class SocialModel {
         guard let privatePosts, privatePosts.unavailableReason == nil, let me else { return }
         let timelines = try await privatePosts.refresh(following: followingSet)
         privateFeed = timelines.flatMap(\.posts)
+        privateStories = timelines.flatMap(\.stories)
         friends = Set(try await server.friends())
         // A room that hasn't loaded yet leaves the list as it was, rather than emptying it.
         if case let found?? = try? await privatePosts.members(.closeFriends) { closeFriends = found; remember(closeFriends: found) }
@@ -239,7 +251,7 @@ public final class SocialModel {
             if audience.isEncrypted, privatePosts == nil || privateReason != nil { throw SocialError.failed(privateReason ?? "") }
             var media: [PostMedia] = []
             for item in attachments {
-                guard item.data.count <= MediaLimits.fileBytes else { throw SocialError.refused("That file is too big to post.") }
+                guard item.data.count <= MediaLimits.most(item.kind) - MediaLimits.sealOverhead else { throw SocialError.refused("That file is too big to post.") }
                 var bytes = item.data
                 var key: String?
                 if audience.isEncrypted { (bytes, key) = try MediaSeal.seal(item.data) }
@@ -248,7 +260,7 @@ public final class SocialModel {
                                        duration: item.duration, key: key, store: .totality)
                 uploaded.append(stored)
                 media.append(stored)
-                remember(item.data, at: path)
+                if item.kind != .video { remember(item.data, at: path) }
             }
             if let problem = MediaLimits.problem(media, encrypted: audience.isEncrypted) { throw SocialError.refused(problem) }
             switch audience {
@@ -275,8 +287,19 @@ public final class SocialModel {
         if let found = mediaCache[item.path] { return found }
         let stored = try await server.media(item)
         let data = try item.key.map { try MediaSeal.open(stored, key: $0) } ?? stored
-        remember(data, at: item.path)
+        // Videos are too big to keep in memory; `videoFile` keeps them on disk instead.
+        if item.kind != .video { remember(data, at: item.path) }
         return data
+    }
+
+    /// A video ready to play from a file: fetched, opened on this device if it was sealed, and written to
+    /// this app's caches, where it stays only while it's one of the last few played and is cleared when
+    /// the account changes.
+    public func videoFile(_ item: PostMedia) async throws -> URL {
+        guard item.kind == .video else { throw SocialError.failed("That isn't a video.") }
+        if let found = videoFiles.file(for: item.path) { return found }
+        let data = try await mediaData(item)
+        return try videoFiles.keep(data, for: item.path)
     }
 
     private func remember(_ data: Data, at path: String) {

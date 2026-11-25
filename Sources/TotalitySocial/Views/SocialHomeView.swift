@@ -10,6 +10,9 @@ public struct SocialHomeView: View {
     @State private var path = NavigationPath()
     @State private var composing = false
     @State private var tab = SocialTab.feed
+    @State private var newStory = false
+    /// The stories open in the viewer, taken when it opened, and whose to start with.
+    @State private var watching: StoryWatch?
 
     public init(model: SocialModel, onClose: @escaping () -> Void) {
         self.model = model
@@ -50,6 +53,15 @@ public struct SocialHomeView: View {
             .hidesNavigationBar()
         }
         .sheet(isPresented: $composing) { ComposeView(model: model) { composing = false } }
+        .sheet(isPresented: $newStory) { StoryComposer(model: model) { newStory = false } }
+        .storyCover(item: $watching) { watch in
+            StoryViewer(model: model, rings: watch.rings, start: watch.author) { watching = nil }
+        }
+        .onChange(of: model.requestedStories, initial: true) { _, author in
+            guard let author else { return }
+            model.requestedStories = nil
+            openStories(author)
+        }
         .task { if model.phase == .loading { await model.load() } }
         .onDisappear { Task { await model.flushShown() } }
         .onChange(of: model.homeRequest, initial: true) { _, request in
@@ -73,6 +85,12 @@ public struct SocialHomeView: View {
     }
 
     func open(_ route: Route) { path.append(route) }
+
+    func openStories(_ author: String) {
+        let rings = model.storyRings
+        guard rings.contains(where: { $0.author == author }) else { return }
+        watching = StoryWatch(rings: rings, author: author)
+    }
 
     /// One screen back. The hidden navigation bar turns off the system's own swipe, so this replaces it.
     func back() { if !path.isEmpty { path.removeLast() } }
@@ -142,19 +160,24 @@ public struct SocialHomeView: View {
                         } else {
                             PostGrid(model: model, posts: model.forYou, photos: model.photos, onShow: model.didShow) { open(.post($0.id)) }
                         }
-                    } else if model.following.isEmpty {
-                        EmptyFeed(
-                            systemImage: "person.badge.plus", title: "Nothing here yet",
-                            detail: "Follow people from For You or search, and their posts show up here, newest first."
-                        )
                     } else {
-                        ForEach(model.following) { post in
-                            FollowingCard(model: model, post: post, photo: model.photos[post.author], onAuthor: { open(.profile(post.author)) }) {
-                                open(.post(post.id))
-                            } onLike: {
-                                Task { await model.toggleLike(post) }
-                            } onDoubleTap: {
-                                Task { await model.like(post) }
+                        // Stories sit in a row of rings at the top of Following (owner, 2026-11-17).
+                        StoryRowView(model: model, onOpen: openStories) { newStory = true }
+                        if model.following.isEmpty {
+                            EmptyFeed(
+                                systemImage: "person.badge.plus", title: "Nothing here yet",
+                                detail: "Follow people from For You or search, and their posts show up here, newest first."
+                            )
+                        } else {
+                            ForEach(model.following) { post in
+                                FollowingCard(model: model, post: post, photo: model.photos[post.author], ring: model.ring(for: post.author),
+                                              onAuthor: { open(.profile(post.author)) }) {
+                                    open(.post(post.id))
+                                } onLike: {
+                                    Task { await model.toggleLike(post) }
+                                } onDoubleTap: {
+                                    Task { await model.like(post) }
+                                }
                             }
                         }
                     }
@@ -270,6 +293,8 @@ struct FollowingCard: View {
     let model: SocialModel
     let post: SocialPost
     let photo: Data?
+    /// Their live stories, which ring their photo; tapping the photo then plays them.
+    var ring: StoryRing?
     let onAuthor: () -> Void
     let onOpen: () -> Void
     let onLike: () -> Void
@@ -283,7 +308,8 @@ struct FollowingCard: View {
             HStack(spacing: Space.s3) {
                 Button(action: onAuthor) {
                     HStack(spacing: Space.s3) {
-                        PersonFace(photo: photo, name: post.displayName, diameter: Space.s6 + Space.s1)
+                        StoryFace(photo: photo, name: post.displayName, ring: ring, diameter: Space.s6 + Space.s1)
+                            .onTapGesture { if ring != nil { model.requestedStories = post.author } else { onAuthor() } }
                         VStack(alignment: .leading, spacing: 0) {
                             Text(post.displayName).font(Typeface.headline).foregroundStyle(theme.textPrimary.color)
                             Text("\(Handle.display(post.author)) · \(post.date.formatted(.relative(presentation: .numeric)))")

@@ -25,6 +25,12 @@ final class FakeSocialWorld: @unchecked Sendable {
     var oldFiles: [String: Data] = [:]
     /// Set to make removals fail, as if the server were unreachable.
     var removalsFail = false
+    /// Public stories, and who opened any story (public or encrypted) by its ID.
+    var stories: [UUID: SocialStory] = [:]
+    var storyViews: [UUID: Set<String>] = [:]
+    var storyAuthors: [UUID: String] = [:]
+    /// The story shelf: path to bytes as stored.
+    var storyFiles: [String: Data] = [:]
 
     func id(_ name: String) -> UUID {
         if let id = ids[name] { return id }
@@ -102,17 +108,24 @@ struct FakeSocial: SocialServer {
         }
     }
 
-    func uploadMedia(_ data: Data, contentType: String) async throws -> String {
-        guard data.count <= MediaLimits.fileBytes + MediaLimits.sealOverhead else { throw SocialError.refused("That file is too big to post.") }
+    func uploadMedia(_ data: Data, contentType: String, store: PostMedia.Store) async throws -> String {
+        let most = contentType == "video/mp4" || contentType == "application/octet-stream" ? MediaLimits.most(.video) : MediaLimits.most(.photo)
+        guard data.count <= most else { throw SocialError.refused("That file is too big to post.") }
         return world.lock.withLock {
             let path = world.id(me).uuidString.lowercased() + "/" + UUID().uuidString.lowercased()
-            world.files[path] = data
+            if store == .stories { world.storyFiles[path] = data } else { world.files[path] = data }
             return path
         }
     }
 
     func media(_ item: PostMedia) async throws -> Data {
-        let found = world.lock.withLock { item.store == .totality ? world.files[item.path] : world.oldFiles[item.path] }
+        let found = world.lock.withLock {
+            switch item.store {
+            case .totality: world.files[item.path]
+            case .stories: world.storyFiles[item.path]
+            case nil: world.oldFiles[item.path]
+            }
+        }
         guard let found else { throw SocialError.failed("That file isn't there any more.") }
         return found
     }
@@ -122,7 +135,11 @@ struct FakeSocial: SocialServer {
             if world.removalsFail { throw SocialError.offline }
             let folder = world.id(me).uuidString.lowercased()
             for item in items where item.folder == folder {
-                if item.store == .totality { world.files[item.path] = nil } else { world.oldFiles[item.path] = nil }
+                switch item.store {
+                case .totality: world.files[item.path] = nil
+                case .stories: world.storyFiles[item.path] = nil
+                case nil: world.oldFiles[item.path] = nil
+                }
             }
         }
     }
@@ -243,5 +260,46 @@ struct FakeSocial: SocialServer {
     }
     func saved() async throws -> [SocialPost] {
         world.lock.withLock { (world.saves[me] ?? []).compactMap { world.posts[$0].map(view) }.map { var p = $0; p.saved = true; return p } }
+    }
+
+    // As `social_stories` and friends do: public only, the author's own folder on the story shelf, no keys.
+    func stories() async throws -> [SocialStory] {
+        world.lock.withLock {
+            let followed = Set(world.follows.filter { $0[0] == me }.map { $0[1] })
+            return world.stories.values.filter { $0.author == me || followed.contains($0.author) }
+                .map { var s = $0; s.viewed = world.storyViews[s.id]?.contains(me) ?? false; return s }
+                .sorted { $0.date < $1.date }
+        }
+    }
+
+    func postStory(kind: SocialStory.Kind, text: String, background: StoryBackground?, media: [PostMedia]) async throws -> UUID {
+        let folder = world.lock.withLock { world.id(me).uuidString.lowercased() }
+        guard StoryLimits.problem(kind: kind, text: text, media: media, encrypted: false) == nil,
+              media.allSatisfy({ $0.path.hasPrefix(folder + "/") }) else { throw SocialError.refused("bad story") }
+        return world.lock.withLock {
+            let id = UUID()
+            world.stories[id] = SocialStory(id: id, author: me, audience: .everyone, kind: kind, text: text, background: background,
+                                            media: media, date: Date())
+            return id
+        }
+    }
+
+    func deleteStory(_ id: UUID) async throws {
+        world.lock.withLock { if world.stories[id]?.author == me { world.stories[id] = nil } }
+    }
+
+    func viewStory(_ id: UUID, author: String) async throws {
+        world.lock.withLock {
+            guard author != me else { return }
+            world.storyViews[id, default: []].insert(me)
+            world.storyAuthors[id] = author
+        }
+    }
+
+    func storyViewers(_ id: UUID) async throws -> [String] {
+        world.lock.withLock {
+            guard world.storyAuthors[id] == me || world.stories[id]?.author == me else { return [] }
+            return (world.storyViews[id] ?? []).sorted()
+        }
     }
 }

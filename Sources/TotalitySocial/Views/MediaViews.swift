@@ -269,7 +269,31 @@ struct GridCover: View {
     var body: some View {
         let theme = Theme.current
         let shape = RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-        if let first = post.photos.first {
+        if let video = post.video {
+            // The grid shows a video's cover and its length; it plays once the post is open.
+            Group {
+                if let cover = post.photos.first {
+                    PostPhoto(model: model, item: cover, side: 600)
+                } else {
+                    Rectangle().fill(theme.surface.color)
+                }
+            }
+            .aspectRatio(0.8, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .clipShape(shape)
+            .overlay {
+                ZStack {
+                    Circle().fill(theme.accent.color)
+                    Image(systemName: "play.fill").font(Typeface.callout).foregroundStyle(theme.accentOn.color)
+                }
+                .frame(width: Space.s6, height: Space.s6)
+            }
+            .overlay(alignment: .topTrailing) {
+                VideoChip(text: ClipTime.text(video.duration ?? 0), systemImage: "video").padding(Space.s2)
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Video post, \(ClipTime.text(video.duration ?? 0))")
+        } else if let first = post.photos.first {
             let ratio = Double(first.height ?? 1) / Double(max(first.width ?? 1, 1))
             PostPhoto(model: model, item: first, side: 600)
                 .aspectRatio(1 / min(max(ratio, 0.75), 1.33), contentMode: .fit)
@@ -306,14 +330,16 @@ struct GridCover: View {
     }
 }
 
-/// A post's media in a feed or opened: photos swiped through, or the audio card.
+/// A post's media in a feed or opened: a video playing muted, photos swiped through, or the audio card.
 struct PostMediaView: View {
     let model: SocialModel
     let post: SocialPost
     var photoHeight: CGFloat = 330
 
     var body: some View {
-        if !post.photos.isEmpty {
+        if let video = post.video {
+            VideoCard(model: model, item: video, cover: post.photos.first, height: photoHeight)
+        } else if !post.photos.isEmpty {
             PostPhotos(model: model, photos: post.photos, height: photoHeight)
         } else if let audio = post.audio {
             AudioCard(model: model, item: audio)

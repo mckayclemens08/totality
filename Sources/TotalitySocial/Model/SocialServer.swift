@@ -34,7 +34,7 @@ public protocol SocialServer: Sendable {
     func publish(title: String?, body: String, tags: [String], media: [PostMedia]) async throws -> UUID
     /// Puts one file in your folder on Totality's media server and returns its path. A file for an
     /// encrypted post is already sealed when it gets here.
-    func uploadMedia(_ data: Data, contentType: String) async throws -> String
+    func uploadMedia(_ data: Data, contentType: String, store: PostMedia.Store) async throws -> String
     /// A file as stored, from wherever `item.store` says: readable for a public post, sealed for the others.
     func media(_ item: PostMedia) async throws -> Data
     /// Removes your own files, and throws if any of them couldn't be removed, so the caller can try again.
@@ -70,6 +70,16 @@ public protocol SocialServer: Sendable {
     // Saves
     func setSaved(_ saved: Bool, post: UUID) async throws
     func saved() async throws -> [SocialPost]
+
+    // Stories (issue 149, owner's answer 3). Only public ones; the others go through `PrivatePosts`.
+    /// Your public stories and those of people you follow, still inside their day.
+    func stories() async throws -> [SocialStory]
+    func postStory(kind: SocialStory.Kind, text: String, background: StoryBackground?, media: [PostMedia]) async throws -> UUID
+    func deleteStory(_ id: UUID) async throws
+    /// Tells the author you opened one of their stories, public or encrypted. Only they can read it.
+    func viewStory(_ id: UUID, author: String) async throws
+    /// Who opened one of your stories, newest first.
+    func storyViewers(_ id: UUID) async throws -> [String]
 }
 
 /// `SocialServer` over Supabase's REST interface. Everything is a call to one of the `social_*` functions
@@ -79,6 +89,11 @@ public extension SocialServer {
     /// A post with text only.
     func publish(title: String?, body: String, tags: [String]) async throws -> UUID {
         try await publish(title: title, body: body, tags: tags, media: [])
+    }
+
+    /// A post's file, on the shelf that keeps it.
+    func uploadMedia(_ data: Data, contentType: String) async throws -> String {
+        try await uploadMedia(data, contentType: contentType, store: .totality)
     }
 }
 
@@ -90,14 +105,19 @@ public struct RestSocialServer: SocialServer {
     let session: URLSession
     /// Totality's own media server, `server/social-media/`.
     let mediaBase: URL
+    /// The story shelf on the same server, whose files go after a day.
+    let storyBase: URL
     public static let standardMediaBase = URL(string: "https://usetotality.com/social/media/")!
+    public static let standardStoryBase = URL(string: "https://usetotality.com/social/stories/")!
 
     public init(
         base: URL, publishableKey: String, session: URLSession = .shared, mediaBase: URL = RestSocialServer.standardMediaBase,
+        storyBase: URL = RestSocialServer.standardStoryBase,
         token: @escaping @Sendable () async throws -> String, username: @escaping @Sendable () async -> String?
     ) {
         self.base = base
         self.mediaBase = mediaBase
+        self.storyBase = storyBase
         key = publishableKey
         self.token = token
         self.username = username
@@ -272,6 +292,7 @@ public struct RestSocialServer: SocialServer {
         if status == 401 { return .signedOut }
         if message.contains("too many posts") { return .refused("That's a lot of posts this hour. Try again later.") }
         if message.contains("too many comments") { return .refused("That's a lot of comments this hour. Try again later.") }
+        if message.contains("too many stories") { return .refused("That's a lot of stories today. Try again tomorrow.") }
         if message.contains("too many follows") { return .refused("You've followed a lot of people today. Try again tomorrow.") }
         if message.contains("no such user") { return .refused("That person isn't on Totality.") }
         if message.contains("yourself") { return .refused("You can't follow yourself.") }
@@ -329,30 +350,35 @@ public struct RestSocialServer: SocialServer {
         return row.id
     }
 
-    public func uploadMedia(_ data: Data, contentType: String) async throws -> String {
-        guard data.count <= MediaLimits.fileBytes + MediaLimits.sealOverhead else { throw SocialError.refused("That file is too big to post.") }
+    public func uploadMedia(_ data: Data, contentType: String, store: PostMedia.Store) async throws -> String {
+        let most = contentType == "image/jpeg" || contentType == "audio/mp4" ? MediaLimits.most(.photo) : MediaLimits.most(.video)
+        guard data.count <= most else { throw SocialError.refused("That file is too big to post.") }
         let account = try await myAccount()
         let path = account + "/" + UUID().uuidString.lowercased()
-        var request = URLRequest(url: mediaBase.appendingPathComponent(path))
+        var request = URLRequest(url: shelf(store).appendingPathComponent(path))
         request.httpMethod = "PUT"
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.httpBody = data
-        _ = try await send(request, signedIn: true, timeout: 60, toSupabase: false)
+        // A video can take a while on a slow connection.
+        _ = try await send(request, signedIn: true, timeout: data.count > MediaLimits.fileBytes ? 600 : 60, toSupabase: false)
         return path
     }
+
+    func shelf(_ store: PostMedia.Store) -> URL { store == .stories ? storyBase : mediaBase }
 
     public func media(_ item: PostMedia) async throws -> Data {
         guard Self.isMediaPath(item.path) else { throw SocialError.failed("That file has a bad address.") }
         let data: Data
         switch item.store {
-        case .totality:
+        case .totality, .stories:
             // Signed in, so a file can't be hotlinked from elsewhere on the web.
-            data = try await send(URLRequest(url: mediaBase.appendingPathComponent(item.path)), signedIn: true, timeout: 60, toSupabase: false)
+            data = try await send(URLRequest(url: shelf(item.store ?? .totality).appendingPathComponent(item.path)), signedIn: true,
+                                  timeout: item.kind == .video ? 600 : 60, toSupabase: false)
         case nil:
             data = try await send(URLRequest(url: base.appendingPathComponent("storage/v1/object/public/\(Self.bucket)/" + item.path)),
                                   signedIn: false, timeout: 60)
         }
-        guard data.count <= MediaLimits.fileBytes + MediaLimits.sealOverhead else { throw SocialError.failed("That file is bigger than Social allows.") }
+        guard data.count <= MediaLimits.most(item.kind) else { throw SocialError.failed("That file is bigger than Social allows.") }
         return data
     }
 
@@ -360,8 +386,8 @@ public struct RestSocialServer: SocialServer {
         guard !items.isEmpty else { return }
         let account = try await myAccount()
         let mine = items.filter { $0.folder == account && Self.isMediaPath($0.path) }
-        for item in mine where item.store == .totality {
-            var request = URLRequest(url: mediaBase.appendingPathComponent(item.path))
+        for item in mine where item.store != nil {
+            var request = URLRequest(url: shelf(item.store ?? .totality).appendingPathComponent(item.path))
             request.httpMethod = "DELETE"
             _ = try await send(request, signedIn: true, toSupabase: false)
         }
@@ -533,5 +559,55 @@ public struct RestSocialServer: SocialServer {
 
     public func saved() async throws -> [SocialPost] {
         try await rpc("social_saved", as: PostRow.self).map(\.post)
+    }
+
+    // MARK: Stories
+
+    struct StoryRow: Decodable {
+        let id: UUID
+        let handle: String
+        let display_name: String?
+        let kind: String
+        let body: String
+        let background: String?
+        let media: [PostMedia]?
+        let created_at: String
+        let viewed: Bool
+
+        /// Nil for anything this version can't show or that breaks the limits.
+        var story: SocialStory? {
+            guard let kind = SocialStory.Kind(rawValue: kind), let date = RestSocialServer.date(created_at) else { return nil }
+            let media = media ?? []
+            guard StoryLimits.problem(kind: kind, text: body, media: media, encrypted: false) == nil else { return nil }
+            return SocialStory(id: id, author: handle, authorName: display_name, audience: .everyone, kind: kind, text: body,
+                               background: background.flatMap(StoryBackground.init(rawValue:)), media: media, date: date, viewed: viewed)
+        }
+    }
+
+    public func stories() async throws -> [SocialStory] {
+        try await rpc("social_stories", as: StoryRow.self).compactMap(\.story)
+    }
+
+    public func postStory(kind: SocialStory.Kind, text: String, background: StoryBackground?, media: [PostMedia]) async throws -> UUID {
+        let items = try JSONSerialization.jsonObject(with: JSONEncoder().encode(media.map(\.forServer)))
+        let data = try await request("social_stories", query: [URLQueryItem(name: "select", value: "id")], body: [
+            "kind": kind.rawValue, "body": text, "background": background?.rawValue ?? NSNull(), "media": items,
+        ], prefer: "return=representation")
+        guard let row = try? JSONDecoder().decode([IDRow].self, from: data).first else {
+            throw SocialError.failed("The story went up but its address didn't come back. Pull to refresh.")
+        }
+        return row.id
+    }
+
+    public func deleteStory(_ id: UUID) async throws {
+        _ = try await request("social_stories", method: "DELETE", query: [URLQueryItem(name: "id", value: "eq.\(id.uuidString.lowercased())")])
+    }
+
+    public func viewStory(_ id: UUID, author: String) async throws {
+        try await call("social_view_story", ["p_story": id.uuidString.lowercased(), "p_author": author])
+    }
+
+    public func storyViewers(_ id: UUID) async throws -> [String] {
+        try await rpc("social_story_viewers", ["p_story": id.uuidString.lowercased()], as: HandleRow.self).map(\.handle)
     }
 }
