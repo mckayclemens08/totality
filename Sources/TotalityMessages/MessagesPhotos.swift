@@ -10,6 +10,8 @@ public struct OutgoingPhoto: Sendable, Equatable {
     public let height: Int
     public let thumbnailWidth: Int
     public let thumbnailHeight: Int
+    /// Sent to be opened once: no small version goes with it, so nothing is left to look at again.
+    public var viewOnce = false
 }
 
 public enum PhotoPrep {

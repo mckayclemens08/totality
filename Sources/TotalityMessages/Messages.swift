@@ -88,11 +88,17 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
     public let replyTo: ReplyPreview?
     /// The server has it, so it can be replied to.
     public let canReply: Bool
+    /// A photo sent to be opened once.
+    public let viewOnce: Bool
+    /// For a view-once photo: someone other than the sender has opened it (or, on the receiving
+    /// side, you have). Nothing else sets this.
+    public var opened: Bool
 
     public init(
         id: String, sender: String, body: String, isOwn: Bool, time: Date,
         state: State = .sent, decrypted: Bool = true, seen: Bool = false,
-        kind: Kind = .text, reactions: [ChatReaction] = [], replyTo: ReplyPreview? = nil, canReply: Bool = true
+        kind: Kind = .text, reactions: [ChatReaction] = [], replyTo: ReplyPreview? = nil, canReply: Bool = true,
+        viewOnce: Bool = false, opened: Bool = false
     ) {
         self.id = id
         self.sender = sender
@@ -106,6 +112,8 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
         self.reactions = reactions
         self.replyTo = replyTo
         self.canReply = canReply
+        self.viewOnce = viewOnce
+        self.opened = opened
     }
 
     /// Only your own messages, and only once they exist on the server or failed to get there.
@@ -381,10 +389,32 @@ public enum MessagesPreferences {
     }
 }
 
+extension MessagesPreferences {
+    public static let newChatsDisappearKey = "messages.newChatsDisappear"
+
+    /// What a chat you start gets for its timer. Off unless you pick one.
+    public static func newChatsDisappear(_ defaults: UserDefaults = .standard) -> Disappearing {
+        defaults.string(forKey: newChatsDisappearKey).flatMap(Disappearing.init(rawValue:)) ?? .off
+    }
+}
+
+/// View-once photos. The marker is the file's name, which travels inside the encrypted message, and
+/// "opened" is a reaction with a key no emoji picker offers, so the server sees neither.
+public enum ViewOnce {
+    public static let filename = "totality-once.jpg"
+    public static let openedKey = "app.totality.opened"
+
+    public static func isViewOnce(filename: String) -> Bool { filename == Self.filename }
+
+    /// The words under the choice to send one, and in its viewer. Literally what happens.
+    public static let explanation = "Opens once on their phone, then it's deleted for everyone. In a group, the first person to open it removes it for the others. It is removed from the server the next time your app opens this chat. Nothing stops a screenshot or another camera."
+}
+
 /// Disappearing messages, per chat and off by default (owner, 2026-11-05).
 public enum Disappearing: String, Sendable, Equatable, CaseIterable, Identifiable {
     case off
     case afterViewing
+    case hour
     case day
     case week
 
@@ -394,6 +424,7 @@ public enum Disappearing: String, Sendable, Equatable, CaseIterable, Identifiabl
         switch self {
         case .off: "Off"
         case .afterViewing: "After viewing"
+        case .hour: "After 1 hour"
         case .day: "After 24 hours"
         case .week: "After 7 days"
         }
@@ -406,14 +437,36 @@ public enum Disappearing: String, Sendable, Equatable, CaseIterable, Identifiabl
             "Messages stay until someone deletes them."
         case .afterViewing:
             "Messages sent from now on go once they've been read. In a group, the first person to read one removes it for everyone. Someone who doesn't share read receipts never marks one read, so it stays until they do. On your phone, messages you've read go when you leave the chat."
-        case .day, .week:
-            "Messages sent from now on are hidden on everyone's phone \(self == .day ? "after 24 hours" : "after 7 days"). Each person's messages leave the server the next time their own app opens this chat. Earlier messages stay."
+        case .hour, .day, .week:
+            "Messages sent from now on are hidden on everyone's phone \(timeWords). Each person's own messages are deleted for everyone the next time their app opens this chat. Earlier messages stay."
+        }
+    }
+
+    /// How the timer reads in a sentence.
+    public var timeWords: String {
+        switch self {
+        case .hour: "after 1 hour"
+        case .day: "after 24 hours"
+        case .week: "after 7 days"
+        case .off, .afterViewing: ""
+        }
+    }
+
+    /// The short form shown in the chat header and on messages.
+    public var short: String {
+        switch self {
+        case .off: "Off"
+        case .afterViewing: "Viewed"
+        case .hour: "1h"
+        case .day: "24h"
+        case .week: "7d"
         }
     }
 
     /// How long a message lasts, for the timed choices.
     public var lifetime: TimeInterval? {
         switch self {
+        case .hour: 3_600
         case .day: 86_400
         case .week: 7 * 86_400
         case .off, .afterViewing: nil
@@ -428,7 +481,7 @@ public enum Disappearing: String, Sendable, Equatable, CaseIterable, Identifiabl
         switch self {
         case .off: "{}"
         case .afterViewing: "{\"\(Self.afterViewingKey)\":true}"
-        case .day, .week: "{\"max_lifetime\":\(Int(lifetime! * 1000))}"
+        case .hour, .day, .week: "{\"max_lifetime\":\(Int(lifetime! * 1000))}"
         }
     }
 
@@ -440,7 +493,7 @@ public enum Disappearing: String, Sendable, Equatable, CaseIterable, Identifiabl
         if object[Self.afterViewingKey] as? Bool == true {
             self = .afterViewing
         } else if let ms = (object["max_lifetime"] as? NSNumber)?.doubleValue, ms > 0 {
-            self = ms <= 86_400_000 ? .day : .week
+            self = ms <= 3_600_000 ? .hour : ms <= 86_400_000 ? .day : .week
         } else {
             self = .off
         }
@@ -486,10 +539,37 @@ public enum DisappearingRule {
         }
     }
 
+    /// The words under a message that will disappear, or nil when it won't. Only what's true: a timed
+    /// message says how long is left here; "after viewing" says what it waits for.
+    public static func marker(for message: ChatMessage, state: DisappearingState, now: Date) -> String? {
+        guard message.kind != .deleted, !message.viewOnce, state.covers(message) else { return nil }
+        if let lifetime = state.setting.lifetime {
+            let left = message.time.addingTimeInterval(lifetime).timeIntervalSince(now)
+            guard left > 0 else { return "Disappearing now" }
+            return "Disappears in \(duration(left))"
+        }
+        if state.setting == .afterViewing {
+            return message.isOwn && message.seen ? "Read. Disappearing now" : "Disappears once read"
+        }
+        return nil
+    }
+
+    static func duration(_ seconds: TimeInterval) -> String {
+        let minutes = Int((seconds / 60).rounded(.up))
+        if minutes < 1 { return "under a minute" }
+        if minutes < 60 { return "\(minutes) min" }
+        let hours = minutes / 60
+        if hours < 24 { return minutes % 60 == 0 ? "\(hours) h" : "\(hours) h \(minutes % 60) min" }
+        let days = hours / 24
+        return days == 1 ? "1 day" : "\(days) days"
+    }
+
     /// Your own messages that are due to go: past their time, or seen by someone when it's after viewing.
     public static func due(_ messages: [ChatMessage], state: DisappearingState, now: Date) -> [ChatMessage] {
         let setting = state.setting
         return messages.filter { message in
+            // A view-once photo goes as soon as someone opens it, whatever the chat's own setting.
+            if message.isOwn, message.state == .sent, message.kind != .deleted, message.viewOnce, message.opened { return true }
             guard message.isOwn, message.state == .sent, message.kind != .deleted, state.covers(message) else { return false }
             if let lifetime = setting.lifetime { return message.time.addingTimeInterval(lifetime) <= now }
             return setting == .afterViewing && message.seen
