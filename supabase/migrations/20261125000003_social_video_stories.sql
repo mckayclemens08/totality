@@ -278,6 +278,7 @@ language sql stable security invoker set search_path = '' as $$
     'social_settings', (select to_jsonb(x) from public.social_settings x where x.owner_id = auth.uid()),
     'social_mutes',    (select coalesce(jsonb_agg(x), '[]') from public.social_mutes x where x.owner_id = auth.uid()),
     'social_saves',    (select coalesce(jsonb_agg(x), '[]') from public.social_saves x where x.owner_id = auth.uid()),
+    'message_requests_received', (select coalesce(jsonb_agg(x), '[]') from public.message_requests x where x.recipient_id = auth.uid()),
     'social_stories',  (select coalesce(jsonb_agg(x), '[]') from public.social_stories x where x.owner_id = auth.uid()),
     'social_story_views', (select coalesce(jsonb_agg(x), '[]') from public.social_story_views x where x.owner_id = auth.uid())
   );
