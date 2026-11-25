@@ -1,5 +1,6 @@
 import CoreLocation
 import Foundation
+import TotalityCore
 import UserNotifications
 
 /// Tasks' reminders on this iPhone: local notifications and Core Location region monitoring. There's no
@@ -44,8 +45,10 @@ public final class SystemTaskReminders: NSObject, TaskReminderScheduling, @unche
         let pending = await center.pendingNotificationRequests()
         let ours = pending.map(\.identifier).filter { $0.hasPrefix(TaskReminderPlanner.prefix) }
         center.removePendingNotificationRequests(withIdentifiers: ours)
-        // Calendar's reminders share iOS's 64; Tasks takes what they leave.
-        let room = max(0, Self.systemLimit - (pending.count - ours.count))
+        // Calendar's reminders share iOS's 64; Tasks takes what they leave. None at all while the
+        // Notifications page has Tasks' reminders switched off (issue 232).
+        let allowed = await MainActor.run { NotificationHub.shared.allows(NotificationHub.reminderKinds[0]) }
+        let room = allowed ? max(0, Self.systemLimit - (pending.count - ours.count)) : 0
         for planned in notifications.prefix(room) {
             try? await center.add(Self.request(id: planned.id, taskID: planned.taskID, title: planned.title, body: planned.body, at: planned.fireDate))
         }
@@ -158,7 +161,10 @@ public final class SystemTaskReminders: NSObject, TaskReminderScheduling, @unche
             id: TaskReminderPlanner.notificationID(words.taskID, Date()), taskID: words.taskID,
             title: words.title, body: words.body, at: nil
         )
-        UNUserNotificationCenter.current().add(request)
+        Task { @MainActor in
+            guard NotificationHub.shared.allows(NotificationHub.reminderKinds[0]) else { return }
+            try? await UNUserNotificationCenter.current().add(request)
+        }
     }
 
     // MARK: - Notifications

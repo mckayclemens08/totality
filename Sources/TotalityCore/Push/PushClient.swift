@@ -38,6 +38,18 @@ public struct PushClient: Sendable {
         try await post("push/device/remove", ["token": Self.hex(device)])
     }
 
+    /// Asks the server to wake these people's phones, after a like, comment or follow (issue 232). It says
+    /// nothing about what happened: their phones ask Social themselves.
+    public func poke(_ usernames: [String]) async throws {
+        let names = Array(Set(usernames)).sorted()
+        for start in stride(from: 0, to: names.count, by: Self.pokeNames) {
+            try await post("push/poke", ["to": Array(names[start..<min(start + Self.pokeNames, names.count)])])
+        }
+    }
+
+    /// Names one poke may carry, as `server/push` allows.
+    public static let pokeNames = 20
+
     /// Links the Gmail address Google's ID token names to this account's phones.
     public func linkGmail(idToken: String) async throws {
         try await post("push/gmail/link", ["idToken": idToken])

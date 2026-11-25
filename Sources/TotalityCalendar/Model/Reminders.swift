@@ -1,4 +1,5 @@
 import Foundation
+import TotalityCore
 import UserNotifications
 
 /// A reminder the device will show. It holds the title and time and nothing else, because the
@@ -69,6 +70,9 @@ public struct SystemReminders: ReminderScheduler {
         center.removePendingNotificationRequests(
             withIdentifiers: pending.map(\.identifier).filter { $0.hasPrefix(Self.prefix) }
         )
+        // The Notifications page's switch for event reminders (issue 232).
+        let allowed = await MainActor.run { NotificationHub.shared.allows(NotificationHub.reminderKinds[1]) }
+        guard allowed else { return }
         for reminder in reminders {
             let content = UNMutableNotificationContent()
             content.title = reminder.title
