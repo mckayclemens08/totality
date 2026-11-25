@@ -440,6 +440,7 @@ struct RootView: View {
             web = content.web
             tasks = content.tasks
             sharedLists = makeSharedLists(directory: content.registry.profiles)
+            content.reader.shared = makeSharedDocs(directory: content.registry.profiles)
             refreshers[.reader] = content.reader.refresher
             refreshers[.tasks] = content.tasks.refresher
             refreshers[.calendar] = content.calendar.refresher
@@ -631,6 +632,7 @@ struct RootView: View {
         account?.onAccountLeft = { _ in
             social = nil
             if sharedLists != nil, let registry { sharedLists = makeSharedLists(directory: registry.profiles) }
+            if reader?.shared != nil, let registry { reader?.shared = makeSharedDocs(directory: registry.profiles) }
             if open == .social { open = nil }
             Task {
                 await messages.checkAccount()
@@ -653,6 +655,17 @@ struct RootView: View {
     private func makeSharedLists(directory: (any ProfileDirectory)?) -> SharedListsModel? {
         #if canImport(MatrixRustSDK)
         let model = SharedListsModel(rooms: MatrixTaskRooms(messages: messages))
+        model.directory = directory
+        return model
+        #else
+        return nil
+        #endif
+    }
+
+    /// The Reader's shared docs (issue 228), in their own encrypted rooms over Messages' connection.
+    private func makeSharedDocs(directory: (any ProfileDirectory)?) -> SharedDocsModel? {
+        #if canImport(MatrixRustSDK)
+        let model = SharedDocsModel(rooms: MatrixTaskRooms(messages: messages, marker: SharedRoomMarker.reader))
         model.directory = directory
         return model
         #else

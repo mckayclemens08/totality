@@ -176,8 +176,10 @@ public enum SharedRoomMarker {
     public static let tasks = RoomMarker(name: "Totality shared list", topic: "app.totality.tasks.v1", messageType: "app.totality.tasks")
     /// Social's Friends and Close-friends posts (issue 149). Which audience a room is for travels inside it.
     public static let social = RoomMarker(name: "Totality posts", topic: "app.totality.social.v1", messageType: "app.totality.social")
+    /// The Reader's shared docs (issue 228). The doc's title and text travel inside the encrypted room.
+    public static let reader = RoomMarker(name: "Totality shared doc", topic: "app.totality.reader.v1", messageType: "app.totality.reader")
     /// Every module's marker, so Messages can leave all of them out of its chats.
-    public static let all = [tasks, social]
+    public static let all = [tasks, social, reader]
 
     public static var name: String { tasks.name }
     public static var topic: String { tasks.topic }

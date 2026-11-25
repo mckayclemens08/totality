@@ -18,6 +18,8 @@ struct ReaderFolderView: View {
     @State private var renaming: ReaderItem?
     @State private var name = ""
     @State private var moving: ReaderItem?
+    /// A doc being shared (issue 228).
+    @State private var sharing: ReaderItem?
     @State private var deleting: ReaderItem?
     @State private var linkingDrive = false
     @State private var adding = false
@@ -91,6 +93,14 @@ struct ReaderFolderView: View {
                 }
             } message: { _ in
                 Text("Everything inside stays in Recently Deleted for 30 days.")
+            }
+            .sheet(item: $sharing) { entry in
+                if let shared = model.shared {
+                    ShareDocSheet(model: model, shared: shared, target: .item(entry)) { room in
+                        sharing = nil
+                        if let room { path.append(.sharedDoc(room)) }
+                    }
+                }
             }
             .sheet(isPresented: $linkingDrive) {
                 if let drive = model.drive { DriveLinkSheet(model: drive) }
@@ -210,11 +220,16 @@ struct ReaderFolderView: View {
                 detail: "It was deleted or moved. Anything that was inside is at the top of your Reader, or in Recently Deleted."
             )
         case .ready where isEmptyLibrary:
-            VStack(spacing: 0) {
+            VStack(spacing: Space.s3) {
                 journalLink
                     .itemCard()
                     .padding(.horizontal, Space.s4)
                     .padding(.top, Space.s3)
+                if let shared = model.shared {
+                    sharedLink(shared)
+                        .itemCard()
+                        .padding(.horizontal, Space.s4)
+                }
                 emptyLibrary
             }
         case .ready where isTop && filter != .all:
@@ -231,6 +246,14 @@ struct ReaderFolderView: View {
     private var journalLink: some View {
         NavigationLink(value: ReaderRoute.journal(nil)) {
             JournalRow(model: model)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Shared docs (issue 228), under the journal.
+    private func sharedLink(_ shared: SharedDocsModel) -> some View {
+        NavigationLink(value: ReaderRoute.shared) {
+            SharedDocsRow(shared: shared)
         }
         .buttonStyle(.plain)
     }
@@ -326,6 +349,7 @@ struct ReaderFolderView: View {
             if folder == nil {
                 journalLink
                     .modifier(CardRow())
+                if let shared = model.shared { sharedLink(shared).modifier(CardRow()) }
                 status
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -421,6 +445,7 @@ struct ReaderFolderView: View {
             VStack(alignment: .leading, spacing: Space.s3) {
                 if folder == nil {
                     journalLink.itemCard()
+                    if let shared = model.shared { sharedLink(shared).itemCard() }
                     status
                 }
                 if folder == nil, let drive = model.drive {
@@ -465,6 +490,9 @@ struct ReaderFolderView: View {
             renaming = entry
         }
         Button("Move", systemImage: "folder") { moving = entry }
+        if entry.kind == .note, model.shared?.isAvailable == true {
+            Button("Share…", systemImage: "person.badge.plus") { sharing = entry }
+        }
         Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(entry) }
     }
 

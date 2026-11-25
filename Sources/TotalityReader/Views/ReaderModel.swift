@@ -54,6 +54,8 @@ public final class ReaderModel {
     public var drive: DriveModel?
     /// Where the person stopped in each file, synced as one sealed record (issue 117).
     public var places: ReadingPlaceBook?
+    /// Docs shared with other Totality users (issue 228), or nil where Messages' rooms aren't linked.
+    public var shared: SharedDocsModel?
     /// Where the person is in the front item, for the home square, such as "Page 112".
     public internal(set) var homePlace: String?
     /// The journal's code, in its own file, reaches the vault too.

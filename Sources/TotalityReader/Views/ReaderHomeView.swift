@@ -11,12 +11,15 @@ enum ReaderRoute: Hashable {
     case driveFile(DriveFileRoute)
     /// The journal (issue 128), opened at today, or at a day a search found.
     case journal(String?)
+    /// Docs shared with other Totality users (issue 228), and one of them by its room.
+    case shared
+    case sharedDoc(String)
 
     var opens: UUID? {
         switch self {
         case .folder(let id): id
         case .item(let item): item.id
-        case .trash, .drive, .driveFile, .journal: nil
+        case .trash, .drive, .driveFile, .journal, .shared, .sharedDoc: nil
         }
     }
 }
@@ -59,6 +62,10 @@ public struct ReaderHomeView: View {
                             }
                         case .driveFile(let file):
                             DriveFileView(route: file, model: model)
+                        case .shared:
+                            if let shared = model.shared { SharedDocsView(shared: shared) }
+                        case .sharedDoc(let room):
+                            if let shared = model.shared { SharedDocScreen(room: room, model: model, shared: shared) }
                         }
                     }
             }
