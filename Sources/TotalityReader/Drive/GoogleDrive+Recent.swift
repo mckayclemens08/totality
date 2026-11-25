@@ -54,7 +54,7 @@ extension GoogleDrive {
     public func recent() throws -> [DriveRecent] {
         guard !isClosed else { throw ReaderError.closed }
         let state = try loadState()
-        let connected = Set(connections().map(\.address))
+        let connected = Set(try connections().map(\.address))
         let opened = Dictionary(state.recent.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         // Folders of accounts not connected here still show, as "Connect to see".
         let folders = state.links.map { link in

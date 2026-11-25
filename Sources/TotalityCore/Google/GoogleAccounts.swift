@@ -46,9 +46,11 @@ public struct GoogleAccounts: Sendable {
 
     // MARK: What's connected
 
-    /// Every connected account, in the order they were connected. One that won't read is left out.
+    /// Every connected account, in the order they were connected. A read that fails throws rather than
+    /// leaving the account out: a Keychain that can't be read just after launch is not "no accounts", and
+    /// a screen must say "try again", never offer Connect or forget what it can't see.
     public func connections() throws -> [GoogleConnection] {
-        try addresses().compactMap { try? connection($0) }
+        try addresses().compactMap { try connection($0) }
     }
 
     public func connection(_ address: String) throws -> GoogleConnection? {
@@ -96,11 +98,10 @@ public struct GoogleAccounts: Sendable {
         }
         let connection = GoogleConnection(address: address, refreshToken: refreshToken, granted: granted)
         try keychain.save(try JSONEncoder().encode(connection), as: Self.name(address))
+        // Written every time, so an index that was missing or behind is repaired from what was read.
         var known = try addresses()
-        if !known.contains(address) {
-            known.append(address)
-            try saveAddresses(known)
-        }
+        if !known.contains(address) { known.append(address) }
+        try saveAddresses(known)
         return connection
     }
 
@@ -144,9 +145,25 @@ public struct GoogleAccounts: Sendable {
 
     private static func name(_ address: String) -> String { "account." + address.lowercased() }
 
+    /// The index, in the order accounts were connected, plus any `account.*` item it's missing, so a
+    /// lost or half-written index never hides a connection. A read that fails throws, and nothing is
+    /// ever written from it.
     private func addresses() throws -> [String] {
-        guard let data = try keychain.load(Self.indexName) else { return [] }
-        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+        var known: [String] = []
+        if let data = try keychain.load(Self.indexName) {
+            do {
+                known = try JSONDecoder().decode([String].self, from: data)
+            } catch {
+                // An unreadable index: only the items themselves can say what's connected.
+                guard keychain is any ListableKeyStore else { throw error }
+            }
+        }
+        if let listable = keychain as? any ListableKeyStore {
+            let prefix = Self.name("")
+            let found = try listable.names().filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+            known += found.filter { !known.contains($0) && Self.isAddress($0) }.sorted()
+        }
+        return known
     }
 
     private func saveAddresses(_ addresses: [String]) throws {

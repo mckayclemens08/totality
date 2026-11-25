@@ -20,6 +20,10 @@ public final class DriveModel {
         + "syncs to your other devices end-to-end encrypted, so the server can't read their names."
 
     public private(set) var accounts: [DriveAccount] = []
+    /// The Google sign-ins on this device couldn't be read just now, which is not the same as none. The
+    /// screens say so and offer to try again, never Connect.
+    public private(set) var signInUnreadable = false
+    public nonisolated static let signInUnreadableMessage = "Couldn't read your Google sign-in, try again."
     public private(set) var links: [DriveLink] = []
     /// Folders linked on another device, for a Google account not connected on this one.
     public private(set) var elsewhere: [DriveLink] = []
@@ -106,11 +110,23 @@ public final class DriveModel {
             // Once per run: anything another key left in the cache folder goes.
             swept = (try? await drive.sweepCache()) != nil
         }
-        accounts = await drive.connections()
         do {
-            links = try await drive.links()
-            let here = Set(links.map(\.id))
-            elsewhere = try await drive.allLinks().filter { !here.contains($0.id) }
+            accounts = try await drive.connections()
+            signInUnreadable = false
+        } catch {
+            // What was shown stays. Nothing here offers Connect for an account that may well be connected.
+            signInUnreadable = true
+        }
+        do {
+            if signInUnreadable {
+                // Which accounts are here isn't known, so every folder shows, each saying "try again".
+                links = try await drive.allLinks()
+                elsewhere = []
+            } else {
+                links = try await drive.links()
+                let here = Set(links.map(\.id))
+                elsewhere = try await drive.allLinks().filter { !here.contains($0.id) }
+            }
         } catch {
             problem = "Your linked Drive folders couldn't be read on this device."
         }
@@ -124,7 +140,7 @@ public final class DriveModel {
 
     /// True for a Google account that isn't connected on this device. Its folders show "Connect to see".
     public func needsConnecting(_ account: String) -> Bool {
-        !accounts.contains { $0.address == account }
+        !signInUnreadable && !accounts.contains { $0.address == account }
     }
 
     /// Reads what the home tile shows. A problem reads as nothing, so the tile never shows stale entries.
@@ -273,6 +289,7 @@ public final class DriveModel {
         for key in updated { fileUpdates[key, default: 0] += 1 }
         if !updated.isEmpty { await readCacheSize() }
         await load()
+        if result.signInUnreadable { return .failed(Self.signInUnreadableMessage) }
         folderProblems = result.problems
         needsAllowing = result.needsAllowing
         var fresh: [String: DriveListing] = [:]

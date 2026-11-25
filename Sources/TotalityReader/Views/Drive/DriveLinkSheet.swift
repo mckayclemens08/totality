@@ -84,6 +84,10 @@ private struct DriveAccountsPage: View {
             Section {
                 if model.isConnecting {
                     ProgressView("Connecting to Google…")
+                } else if model.signInUnreadable {
+                    Label(DriveModel.signInUnreadableMessage, systemImage: "exclamationmark.lock")
+                        .foregroundStyle(theme.danger.color)
+                    Button("Try Again") { Task { await model.load() } }
                 } else {
                     ForEach(model.accounts) { account in
                         Button {

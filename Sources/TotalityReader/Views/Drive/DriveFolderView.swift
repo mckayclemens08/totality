@@ -67,14 +67,23 @@ struct DriveFolderView: View {
             .background(theme.bg.color)
             .navigationTitle(location.name)
             .refreshable { await drive.refresh(location.folderID, account: location.account) }
-            .task(id: needsConnecting) {
-                guard !needsConnecting else { return }
+            .task(id: needsConnecting || drive.signInUnreadable) {
+                guard !needsConnecting, !drive.signInUnreadable else { return }
                 await drive.open(location.folderID, account: location.account)
             }
     }
 
     @ViewBuilder private var content: some View {
-        if needsConnecting {
+        if drive.signInUnreadable {
+            VStack(spacing: Space.s4) {
+                ReaderMessage(
+                    systemImage: "exclamationmark.lock", title: "Couldn't read your Google sign-in",
+                    detail: "This device couldn't read your Google sign-in just now. It's still here, so try again."
+                )
+                DriveRetryButton(drive: drive)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if needsConnecting {
             VStack(spacing: Space.s4) {
                 ReaderMessage(
                     systemImage: "person.crop.circle.badge.questionmark", title: "Connect to see",
@@ -205,6 +214,19 @@ struct DriveLinksSection: View {
 }
 
 /// Starts the usual Google sign-in for one account, for folders linked on another device.
+/// Reads the Google sign-ins again, for when the Keychain couldn't be read. Never offers to connect.
+struct DriveRetryButton: View {
+    let drive: DriveModel
+
+    var body: some View {
+        Button("Try Again") {
+            Task { await drive.load() }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.current.accent.color)
+    }
+}
+
 struct DriveConnectButton: View {
     let account: String
     let drive: DriveModel
