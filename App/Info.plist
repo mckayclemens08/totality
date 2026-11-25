@@ -20,7 +20,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Takes a photo or short video to send in Messages, and lets a site you're on use your camera when you agree. Totality keeps nothing you don't send.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Lets a site you're on see your location when you agree, and lets this iPhone watch for the places in your task reminders. Totality never uploads where you are.</string>
+	<string>Shows the weather where you are, lets a site you&apos;re on see your location when you agree, and lets this iPhone watch for the places in your task reminders. Totality&apos;s server never learns where you are. For the weather, a location rounded to about 1 km goes to the weather service.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Place reminders in Tasks: this iPhone watches for the places you pick, even while Totality is closed, and rings the reminder when you arrive or leave. Where you are never leaves the iPhone.</string>
 	<key>NSMicrophoneUsageDescription</key>

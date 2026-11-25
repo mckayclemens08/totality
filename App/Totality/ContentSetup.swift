@@ -7,6 +7,7 @@ import TotalityMessages
 import TotalityPhotos
 import TotalityReader
 import TotalityTasks
+import TotalityWeather
 import TotalityWeb
 
 /// Connects the modules that seal content to this device's key and storage. They share one key, so
@@ -88,7 +89,8 @@ enum ContentSetup {
 
     private static func stores() throws -> (
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
-        googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore, home: FileBlobStore
+        googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore, home: FileBlobStore,
+        weather: FileBlobStore, weatherCache: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -103,7 +105,11 @@ enum ContentSetup {
             try FileBlobStore(directory: base.appendingPathComponent("GoogleDrive", isDirectory: true)),
             try FileBlobStore(directory: base.appendingPathComponent("Tasks", isDirectory: true)),
             // Which modules are off Home, as one sealed record that syncs.
-            try FileBlobStore(directory: base.appendingPathComponent("Home", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Home", isDirectory: true)),
+            // Weather's saved places, as one sealed record that syncs.
+            try FileBlobStore(directory: base.appendingPathComponent("Weather", isDirectory: true)),
+            // The last forecast for each place. Apart from the places, because this never syncs.
+            try FileBlobStore(directory: base.appendingPathComponent("WeatherCache", isDirectory: true))
         )
     }
 
@@ -134,6 +140,8 @@ enum ContentSetup {
             SealedArea(store: stores.googleDrive, purposes: GoogleDrive.sealedPurposes),
             SealedArea(store: stores.tasks, purposes: TaskVault.sealedPurposes),
             SealedArea(store: stores.home, purposes: HomeChoicesBook.sealedPurposes),
+            SealedArea(store: stores.weather, purposes: WeatherPlaceBook.sealedPurposes),
+            SealedArea(store: stores.weatherCache, purposes: ForecastCache.sealedPurposes),
         ])
     }
 
@@ -150,7 +158,7 @@ enum ContentSetup {
         mailRefresh: @escaping @Sendable () async -> Void, refresh: @escaping @Sendable (ModuleID) async -> Void
     ) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, tasks: TasksModel, areas: [any SyncArea],
-        registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook
+        registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook, weather: WeatherModel
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -181,6 +189,9 @@ enum ContentSetup {
             reader.drive = model
         }
         let tasks = TasksModel(vault: taskVault)
+        let weatherBook = WeatherPlaceBook(store: stores.weather, rootKey: rootKey)
+        let weatherCache = ForecastCache(store: stores.weatherCache, rootKey: rootKey)
+        let weather = makeWeather(book: weatherBook, cache: weatherCache)
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
@@ -193,6 +204,11 @@ enum ContentSetup {
             MessagesRefresher(refresh: { await refresh(.messages) }),
             // A task made or planned from another module is read in at once (step 4).
             TasksModule(vault: taskVault, refresh: { await refresh(.tasks) }, changed: { @MainActor [weak tasks] in await tasks?.load() }),
+            WeatherModule(
+                book: weatherBook, cache: weatherCache,
+                units: { [suite = defaultsName()] in WeatherUnits.stored(in: UserDefaults(suiteName: suite) ?? .standard) },
+                refresh: { await refresh(.weather) }
+            ),
         ], profiles: AccountSetup.profiles)
         // Reminders ring from this iPhone alone: local notifications and places iOS watches.
         tasks.reminderCenter = HomeGatedTaskReminders(SystemTaskReminders.shared)
@@ -216,11 +232,39 @@ enum ContentSetup {
             tasks,
             // The Drive record syncs whether or not this build can sign in to Google, so links made on
             // another device aren't lost here.
-            [readerVault, calendarVault, webVault, drive, places, taskVault, home],
+            [readerVault, calendarVault, webVault, drive, places, taskVault, home, weatherBook],
             registry,
             MailContent(rootKey: rootKey, store: stores.mail),
             PhotosContent(rootKey: rootKey, store: stores.photos),
-            home
+            home,
+            weather
+        )
+    }
+
+    /// Weather, with Apple Weather as its source when this build has the WeatherKit entitlement
+    /// (`TotalityWeatherKit` in Info.plist), and Open-Meteo otherwise. Both are free (issue 203).
+    private static func makeWeather(book: WeatherPlaceBook, cache: ForecastCache) -> WeatherModel {
+        let source: any ForecastSource
+        #if canImport(WeatherKit)
+        if (Bundle.main.object(forInfoDictionaryKey: "TotalityWeatherKit") as? Bool) == true {
+            source = WeatherKitSource()
+        } else {
+            source = OpenMeteoSource()
+        }
+        #else
+        source = OpenMeteoSource()
+        #endif
+        #if os(iOS)
+        let location: (any WeatherLocating)? = SystemWeatherLocation()
+        let notices: (any WeatherAlertNotifying)? = SystemWeatherAlertNotices()
+        #else
+        let location: (any WeatherLocating)? = nil
+        let notices: (any WeatherAlertNotifying)? = nil
+        #endif
+        return WeatherModel(
+            book: book, cache: cache,
+            service: WeatherService(source: source, air: AirQualitySource(), alerts: NWSAlerts()),
+            searcher: OpenMeteoPlaces(), location: location, notices: notices, defaults: defaults()
         )
     }
 }

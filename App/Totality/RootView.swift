@@ -9,6 +9,7 @@ import TotalityReader
 import TotalitySocial
 import TotalityTasks
 import TotalityUI
+import TotalityWeather
 import TotalityWeb
 
 /// Home and whichever module is open. The Reader's model stays alive here, so Listen keeps playing
@@ -24,6 +25,7 @@ struct RootView: View {
     @State private var calendar: CalendarModel?
     @State private var web: WebModel?
     @State private var tasks: TasksModel?
+    @State private var weather: WeatherModel?
     /// Shared task lists, over Messages' Matrix connection (step 6).
     @State private var sharedLists: SharedListsModel?
     /// Social, made the first time it's opened (issue 149). It needs the sign-in, not the content key.
@@ -202,7 +204,7 @@ struct RootView: View {
             onRemove: { module in Task { await homeChoices.remove(module) } },
             onRestore: { module in Task { await homeChoices.restore(module) } }
         ) { module in
-            if [.reader, .calendar, .web, .mail, .photos, .tasks].contains(module) { prepareContent() }
+            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather].contains(module) { prepareContent() }
             bringUp(module)
         } onSearch: {
             prepareContent()
@@ -239,6 +241,12 @@ struct RootView: View {
         case .tasks:
             if let tasks {
                 TasksHomeView(model: tasks, shared: sharedLists) { open = nil }
+            } else {
+                contentMessage { open = nil }
+            }
+        case .weather:
+            if let weather {
+                WeatherHomeView(model: weather) { open = nil }
             } else {
                 contentMessage { open = nil }
             }
@@ -336,6 +344,7 @@ struct RootView: View {
         glances[.calendar] = calendar?.glance
         glances[.web] = web?.glance
         glances[.tasks] = tasks?.glance
+        glances[.weather] = weather?.glance
         glances[.social] = social?.glance
         glances[.mail] = mail.current.glance
         glances[.messages] = messages.glance
@@ -358,6 +367,9 @@ struct RootView: View {
         case .tasks:
             guard let tasks, tasks.phase == .ready else { return nil }
             return AnyView(TasksHomeTile(model: tasks, size: size, onOpen: { bringUp(.tasks) }, onQuickAdd: { quickAddingTask = true }))
+        case .weather:
+            guard let weather, weather.phase == .ready else { return nil }
+            return AnyView(WeatherHomeTile(model: weather, size: size) { bringUp(.weather) })
         case .mail:
             guard mail.current.phase == .ready else { return nil }
             return AnyView(MailHomeTile(model: mail.current, size: size) { bringUp(.mail) })
@@ -450,6 +462,8 @@ struct RootView: View {
             calendar = content.calendar
             web = content.web
             tasks = content.tasks
+            weather = content.weather
+            refreshers[.weather] = content.weather.refresher
             sharedLists = makeSharedLists(directory: content.registry.profiles)
             refreshers[.reader] = content.reader.refresher
             refreshers[.tasks] = content.tasks.refresher
@@ -514,7 +528,8 @@ struct RootView: View {
         async let reader: Void = self.reader?.load() ?? ()
         async let calendar: Void = self.calendar?.load() ?? ()
         async let tasks: Void = self.tasks?.load() ?? ()
-        _ = await (reader, calendar, tasks)
+        async let weather: Void = self.weather?.load() ?? ()
+        _ = await (reader, calendar, tasks, weather)
     }
 
     /// Each module that keeps itself up to date fetches what's new, quietly.
@@ -597,6 +612,8 @@ struct RootView: View {
         await calendar?.stopForKeyChange()
         await web?.stopForKeyChange()
         await tasks?.stopForKeyChange()
+        await weather?.stopForKeyChange()
+        weather = nil
         reader = nil
         calendar = nil
         web = nil
@@ -723,6 +740,7 @@ struct RootView: View {
             await calendar?.load()
             await web?.load()
             await tasks?.load()
+            await weather?.reload()
             // Marks from another device, so Mail is already up to date when it's opened.
             if mail.current.phase == .ready { await mail.current.refresh() }
         }
@@ -804,6 +822,7 @@ struct RootView: View {
             mail.current.requestFromSearch(id)
         case .photos: photos.requestedItem = UUID(uuidString: hit.itemID)
         case .tasks: tasks?.requestedTask = UUID(uuidString: hit.itemID)
+        case .weather: weather?.requestedPlace = UUID(uuidString: hit.itemID)
         case .social:
             if social == nil { social = makeSocial() }
             social?.requestedPost = UUID(uuidString: hit.itemID)
