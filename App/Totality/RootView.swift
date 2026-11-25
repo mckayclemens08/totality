@@ -59,6 +59,10 @@ struct RootView: View {
     @State private var linkedProfile: LinkedProfile?
     // What the home page's button chose, until the app restarts or the default changes.
     @Environment(\.scenePhase) private var scenePhase
+    /// The branded screen while the session is restored and each module opens what it has saved.
+    @State private var launching = true
+    /// Counts each launch screen, so a time limit left from an earlier one can't end a later one.
+    @State private var launchTurn = 0
 
     init() {
         let keys = DeviceContentKeys()
@@ -84,21 +88,49 @@ struct RootView: View {
     }
 
     var body: some View {
-        screens
+        ZStack {
+            if account?.showsSignInPage == true {
+                if let account { SignInPage(model: account).transition(.opacity) }
+            } else {
+                screens
+            }
+            if launching {
+                LaunchView()
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
+        }
+        .motion(Motion.smooth, value: account?.showsSignInPage)
         .task {
             contentKeys.willMove = { await closeContent() }
             contentKeys.didMove = { account?.sync?.resume() }
             watchAccountChanges()
-            // Before anything opens, so it opens in the signed-in account's own space.
-            await followAccount()
-            await account?.backup?.settleDevice()
-            connectSync()
-            // So the Messages tile shows who's written without opening Messages first. Not while it's off Home.
-            if !homeChoices.removed.contains(.messages) { Task { await messages.connect() } }
-            await openContentForHome()
+            // Reads the saved session only, so Home or the sign-in page can be chosen at once.
+            await account?.restore()
+            await launch()
             await refreshAhead()
-            await openSocialForHome()
             await account?.sync?.syncNow()
+        }
+        // However slow a module is, the launch screen goes after `LaunchView.limit`.
+        .task(id: launchTurn) {
+            try? await Task.sleep(for: LaunchView.limit)
+            guard !Task.isCancelled else { return }
+            endLaunch()
+        }
+        // Signing in on the sign-in page opens Home already filled in, as launching does. Signing in from
+        // the Account sheet is followed when the sheet closes.
+        .onChange(of: isSignedIn) { wasSignedIn, signedIn in
+            guard signedIn, !wasSignedIn, !showingAccount, !launching else { return }
+            Task { await openAfterSignIn() }
+        }
+        // Signing out brings the sign-in page back, with nothing of the account left open over it.
+        .onChange(of: account?.showsSignInPage) {
+            guard account?.showsSignInPage == true else { return }
+            showingAccount = false
+            showingSearch = false
+            quickAddingTask = false
+            linkedProfile = nil
+            open = nil
         }
         // Every minute while Totality is in front, the modules fetch what's new, so opening one never waits.
         .task(id: scenePhase) {
@@ -165,6 +197,61 @@ struct RootView: View {
         .onOpenURL { url in
             if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
         }
+    }
+
+    private var isSignedIn: Bool {
+        if case .signedIn = account?.phase { true } else { false }
+    }
+
+    /// Shows the launch screen while the signed-in account's space opens and each module reads what it
+    /// has saved on this device, so Home's tiles are filled in when it appears (owner, 2026-11-25). What's
+    /// new from the network follows in the background. Nobody waits longer than `LaunchView.limit`.
+    private func launch(after first: () async -> Void = {}) async {
+        launchTurn += 1
+        let turn = launchTurn
+        launching = true
+        await first()
+        // Signed out this is quick: each module finds no account and opens nothing.
+        await warmUp()
+        if turn == launchTurn { endLaunch() }
+    }
+
+    /// After signing in on the sign-in page: the launch screen while the account's space opens, then
+    /// Home. A new account, or a device whose key isn't this account's yet, still needs the recovery key
+    /// step, which lives on the Account page, so that opens over Home, as it did when signing in there.
+    private func openAfterSignIn() async {
+        // The device is claimed for the account before it's settled, never the other way round.
+        await launch(after: { await account?.waitForSignIn() })
+        await messages.checkAccount()
+        await messages.settleKeys()
+        if let backup = account?.backup {
+            await backup.load()
+            switch backup.phase {
+            case .notSetUp, .needsKey, .confirmingOwnership, .otherAccount:
+                if isSignedIn { showingAccount = true }
+            default:
+                break
+            }
+        }
+        await refreshAhead()
+    }
+
+    private func endLaunch() {
+        guard launching else { return }
+        withMotion(Motion.smooth) { launching = false }
+    }
+
+    /// Opens each module from its cache. Network fetches start here but aren't waited for.
+    private func warmUp() async {
+        // Before anything opens, so it opens in the signed-in account's own space.
+        await followAccount()
+        await account?.backup?.settleDevice()
+        connectSync()
+        // So the Messages tile shows who's written without opening Messages first. Not while it's off Home.
+        if !homeChoices.removed.contains(.messages) { Task { await messages.connect() } }
+        await openContentForHome()
+        // So the Social tile shows the newest posts. It reads the network, so launch doesn't wait for it.
+        Task { await openSocialForHome() }
     }
 
     /// Home, with the open module over it. On iPhone the module slides up as a cover and Home stays

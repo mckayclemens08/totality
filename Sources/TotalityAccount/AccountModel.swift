@@ -19,10 +19,16 @@ public final class AccountModel {
 
     public private(set) var phase = Phase.loading {
         didSet {
+            if case .signedIn = phase, !hasSignedInHere { rememberSignedInHere(true) }
             guard case .signedIn(let old) = oldValue, phase != oldValue else { return }
             onAccountLeft?(old)
         }
     }
+    /// Whether someone has signed in on this device and not signed out since. The sign-in page shows
+    /// only when this is false (owner, 2026-11-25), so a session that lapses or a Keychain read that fails
+    /// just after launch opens Home, where Account still offers to sign in, rather than the sign-in page.
+    /// It's a flag on this device and holds no username, token or password.
+    public private(set) var hasSignedInHere: Bool
     /// Called once the signed-in account signs out or is replaced, with the username that left. Anything
     /// the app keeps per account (Social, shared lists, Messages' connection) must drop it here, so the
     /// next account never sees or acts as this one.
@@ -57,7 +63,9 @@ public final class AccountModel {
     /// Usernames whose Matrix address is known to exist, so it's set up once and not on every launch.
     private let marks: UserDefaults
     private static let messagesReadyKey = "account.messagesAccountReady"
+    static let signedInHereKey = "account.signedInHere"
     private var settingUpMessages = false
+    private var finishing: Task<Void, Never>?
 
     public init(
         service: any AccountService, backup: BackupModel? = nil, sync: SyncModel? = nil, syncRemote: (any SyncRemote)? = nil,
@@ -68,6 +76,23 @@ public final class AccountModel {
         self.backup = backup
         self.sync = sync
         self.syncRemote = syncRemote
+        hasSignedInHere = marks.bool(forKey: Self.signedInHereKey)
+    }
+
+    /// The full-screen sign-in page, rather than Home: only on a device that has never signed in, or
+    /// since someone signed out here. Nothing is decided while the session is still being read.
+    public var showsSignInPage: Bool {
+        phase == .signedOut && !hasSignedInHere
+    }
+
+    /// Reads who is signed in from this device's saved session, and nothing else, so launch can decide
+    /// between Home and the sign-in page at once. It makes no network call: the Account page's `load()`
+    /// still registers the device and reads the profile when it opens.
+    public func restore() async {
+        guard phase == .loading else { return }
+        let username = await service.currentUsername()
+        guard phase == .loading else { return }
+        phase = username.map { .signedIn(username: $0) } ?? .signedOut
     }
 
     public func load() async {
@@ -87,10 +112,9 @@ public final class AccountModel {
         }
         await run {
             try await service.signIn(username: name, password: password)
-            forgetProfile()
-            phase = .signedIn(username: name.value)
+            signedIn(as: name.value)
         }
-        if case .signedIn = phase { await finishSigningIn() }
+        await waitForSignIn()
     }
 
     /// Passwords stay out of the model. A typo here can't be fixed later, so it's typed twice.
@@ -117,16 +141,16 @@ public final class AccountModel {
         }
         await run {
             try await service.signUp(username: name, password: password)
-            forgetProfile()
-            phase = .signedIn(username: name.value)
+            signedIn(as: name.value)
         }
-        if case .signedIn = phase { await finishSigningIn() }
+        await waitForSignIn()
     }
 
     public func signOut() async {
         await sync?.stopForSignOut()
         await run {
             let result = try await service.signOut()
+            rememberSignedInHere(false)
             phase = .signedOut
             deviceRegistered = false
             forgetProfile()
@@ -240,6 +264,21 @@ public final class AccountModel {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Waits for the steps after a sign-in or sign-up (claiming an empty device, adding it to the account,
+    /// reading the profile) to finish. The app waits on this before opening the account's space, so the
+    /// device is claimed before it's settled, as when signing in from the Account page.
+    public func waitForSignIn() async {
+        await finishing?.value
+    }
+
+    /// The account is in from this moment. What follows starts at once, in the same step, so anyone
+    /// watching the phase change can wait for it with `waitForSignIn`.
+    private func signedIn(as username: String) {
+        forgetProfile()
+        phase = .signedIn(username: username)
+        finishing = Task { await finishSigningIn() }
+    }
+
     private func finishSigningIn() async {
         await backup?.accountSignedIn()
         await registerDevice()
@@ -268,6 +307,11 @@ public final class AccountModel {
 
     private var messagesReady: Set<String> {
         Set(marks.stringArray(forKey: Self.messagesReadyKey) ?? [])
+    }
+
+    private func rememberSignedInHere(_ value: Bool) {
+        hasSignedInHere = value
+        marks.set(value, forKey: Self.signedInHereKey)
     }
 
     private func registerDevice() async {

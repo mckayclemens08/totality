@@ -6,12 +6,7 @@ import TotalityUI
 public struct AccountView: View {
     private let model: AccountModel
     private let onClose: () -> Void
-    @State private var username = ""
-    @State private var password = ""
-    @State private var confirmation = ""
     @State private var creating = false
-
-    private static let noticeID = "notice"
 
     public init(model: AccountModel, onClose: @escaping () -> Void) {
         self.model = model
@@ -30,7 +25,7 @@ public struct AccountView: View {
                         .scrollDismissesKeyboard(.interactively)
                         .onChange(of: model.notice) {
                             guard model.notice != nil else { return }
-                            withMotion(Motion.snappy) { proxy.scrollTo(Self.noticeID, anchor: .bottom) }
+                            withMotion(Motion.snappy) { proxy.scrollTo(SignInForm.noticeID, anchor: .bottom) }
                         }
                 }
                 #else
@@ -49,10 +44,6 @@ public struct AccountView: View {
         .id(isSignedIn)
         .tint(theme.accent.color)
         .task { await model.load() }
-        .onChange(of: model.phase) {
-            password = ""
-            confirmation = ""
-        }
     }
 
     private var isSignedIn: Bool {
@@ -62,14 +53,14 @@ public struct AccountView: View {
     private var form: some View {
         VStack(alignment: .leading, spacing: Space.s4) {
             content
-            if let notice = model.notice {
+            // The sign-in form shows its own notice. Signed in, the Account page's land here.
+            if isSignedIn, let notice = model.notice {
                 Text(notice)
                     .font(Typeface.caption)
                     .foregroundStyle(Theme.current.danger.color)
-                    .id(Self.noticeID)
+                    .id(SignInForm.noticeID)
             }
         }
-        .onSubmit(submit)
         .padding(Space.s4)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -80,69 +71,12 @@ public struct AccountView: View {
             ProgressView()
                 .frame(maxWidth: .infinity)
         case .signedOut:
-            detail(creating ? "Choose a username and a password of at least \(AccountModel.minimumPasswordLength) characters." : "Sign in with your username and password.")
-            usernameField
-            passwordField("Password", text: $password)
             if creating {
-                passwordField("Confirm password", text: $confirmation)
-                detail("Totality has no email for you, so a forgotten password can't be reset here. Keep it somewhere safe. Your username can't be changed later.")
+                AccountDetail(text: "Choose a username and a password of at least \(AccountModel.minimumPasswordLength) characters.")
             }
-            primary(creating ? "Create account" : "Sign in", action: submit)
-            Button(creating ? "I already have an account" : "Create an account") {
-                creating.toggle()
-                confirmation = ""
-                model.notice = nil
-            }
-            .font(Typeface.callout)
+            SignInForm(model: model, creating: $creating)
         case .signedIn:
             AccountPage(model: model)
         }
-    }
-
-    private func detail(_ text: String) -> some View {
-        AccountDetail(text: text)
-    }
-
-    private var usernameField: some View {
-        TextField("Username", text: $username)
-            .font(Typeface.body)
-            .textFieldStyle(.plain)
-            .autocorrectionDisabled()
-            // At sign-up iOS would offer an email address or Hide My Email, and neither is a username.
-            .textContentType(creating ? nil : .username)
-            #if os(iOS)
-            .textInputAutocapitalization(.never)
-            #endif
-            .raisedField()
-    }
-
-    private func passwordField(_ prompt: String, text: Binding<String>) -> some View {
-        SecureField(prompt, text: text)
-            .font(Typeface.body)
-            .textFieldStyle(.plain)
-            #if os(iOS)
-            // iOS's strong-password fill needs Associated Domains, which the free Apple plan can't
-            // have. On a sign-up form it would cover these fields and drop what's typed, even with
-            // .password set, and .oneTimeCode is what keeps it away.
-            .textContentType(creating ? .oneTimeCode : .password)
-            #else
-            .textContentType(.password)
-            #endif
-            .raisedField()
-    }
-
-    private func submit() {
-        guard !model.isWorking else { return }
-        Task {
-            if creating {
-                await model.signUp(username: username, password: password, confirmation: confirmation)
-            } else {
-                await model.signIn(username: username, password: password)
-            }
-        }
-    }
-
-    private func primary(_ title: String, action: @escaping () -> Void) -> some View {
-        AccountButton(title: title, isWorking: model.isWorking, action: action)
     }
 }
