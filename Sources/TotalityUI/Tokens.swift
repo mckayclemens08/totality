@@ -263,6 +263,12 @@ public enum Metric {
     public static let swatchDot: CGFloat = 14
     /// The round check, or empty ring, that marks the chosen one of a list.
     public static let choiceMark: CGFloat = 22
+    /// The widest a sign-in form grows, so it stays a column on a Mac window or an iPad.
+    public static let formWidth: CGFloat = 440
+    /// Totality's mark on the launch screen.
+    public static let launchMark: CGFloat = 84
+    /// One of the launch screen's three loading dots.
+    public static let launchDot: CGFloat = 6
 }
 
 /// Every animation in the app is one of these springs, so things move alike everywhere. Springs carry a
