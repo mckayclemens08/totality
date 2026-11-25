@@ -51,6 +51,14 @@ public struct AccountKeyStore: KeyStore {
     public func delete(_ name: String) throws { try base.delete(prefix + name) }
 }
 
+extension AccountKeyStore: ListableKeyStore {
+    /// This account's own names, without the prefix. Only a store over one that can list can say.
+    public func names() throws -> [String] {
+        guard let listable = base as? any ListableKeyStore else { throw KeyStoreError.unexpectedStatus(errSecUnimplemented) }
+        return try listable.names().filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+    }
+}
+
 extension ContentRootKey {
     static let keyStoreName = "content-root-key"
 
@@ -102,12 +110,33 @@ public struct KeychainKeyStore: KeyStore {
         return item as? Data
     }
 
+    /// Replaces the item in place, or adds it when there's none. Never deletes first: a crash or a lock
+    /// between a delete and an add would lose the only copy of a key or a sign-in.
     public func save(_ data: Data, as name: String) throws {
-        try delete(name)
-        var request = query(name)
-        request[kSecValueData as String] = data
-        request[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        let status = SecItemAdd(request as CFDictionary, nil)
+        let accessible = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        try Self.upsert(
+            update: {
+                let changes: [String: Any] = [kSecValueData as String: data, kSecAttrAccessible as String: accessible]
+                return SecItemUpdate(query(name) as CFDictionary, changes as CFDictionary)
+            },
+            add: {
+                var request = query(name)
+                request[kSecValueData as String] = data
+                request[kSecAttrAccessible as String] = accessible
+                return SecItemAdd(request as CFDictionary, nil)
+            }
+        )
+    }
+
+    /// Update first; add only when there's nothing to update. If another save added the item in between,
+    /// the add finds a duplicate and the update runs once more. Nothing here ever deletes, so a failure at
+    /// any step leaves the item that was there.
+    static func upsert(update: () -> OSStatus, add: () -> OSStatus) throws {
+        var status = update()
+        if status == errSecItemNotFound {
+            status = add()
+            if status == errSecDuplicateItem { status = update() }
+        }
         guard status == errSecSuccess else { throw KeyStoreError.unexpectedStatus(status) }
     }
 
