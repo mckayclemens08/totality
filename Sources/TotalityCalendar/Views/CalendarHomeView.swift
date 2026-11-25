@@ -136,6 +136,9 @@ public struct CalendarHomeView: View {
             VStack(spacing: Space.s3) {
                 header
                 if model.mode == .day { WeekStrip(model: model) }
+                if model.mode == .day || model.mode == .week, let forecast = model.dayForecast {
+                    DayForecastChip(forecast: forecast)
+                }
                 UnreadableNote(model: model)
                 RefreshStatusLine(model.refresher)
                 GoogleSyncNote(model: model)
