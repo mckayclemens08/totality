@@ -37,7 +37,7 @@ struct TrailDetailView: View {
             ScreenTitle(trail.name, subtitle: [trail.kind, trail.surface?.replacingOccurrences(of: "_", with: " ")].compactMap { $0 }.joined(separator: " · "))
             RouteMap(lines: trail.lines, here: model.here)
                 .frame(height: Space.s8 * 4)
-            Text("Map: Apple Maps · \(OverpassTrails.credit)")
+            Text(trail.isImported ? "Map: Apple Maps · Route from a GPX file" : "Map: Apple Maps · \(OverpassTrails.credit)")
                 .font(Typeface.micro)
                 .foregroundStyle(theme.textSecondary.color)
             HStack(spacing: Space.s3) {
@@ -56,7 +56,7 @@ struct TrailDetailView: View {
                         .font(Typeface.micro)
                         .foregroundStyle(theme.textSecondary.color)
                 } else {
-                    Text(model.isSaved(trail) || model.nearbyState == .offline ? "No elevation yet. It's looked up when you're online." : "Looking up the elevation")
+                    Text(trail.isImported ? "No elevation in this file" : model.isSaved(trail) || model.nearbyState == .offline ? "No elevation yet. It's looked up when you're online." : "Looking up the elevation")
                         .font(Typeface.caption)
                         .foregroundStyle(theme.textSecondary.color)
                 }
@@ -204,6 +204,7 @@ struct HikeDetailView: View {
     let onClose: () -> Void
     @State private var renaming = false
     @State private var newTitle = ""
+    @State private var exporting = false
 
     var body: some View {
         let theme = Theme.current
@@ -260,6 +261,7 @@ struct HikeDetailView: View {
                             newTitle = current.title
                             renaming = true
                         }
+                        Button("Export GPX", systemImage: "square.and.arrow.up") { exporting = true }
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             model.delete(current)
                             onClose()
@@ -269,6 +271,9 @@ struct HikeDetailView: View {
                     }
                     .accessibilityLabel("More")
                 }
+            }
+            .sheet(isPresented: $exporting) {
+                GPXExportView(model: model, hike: current) { exporting = false }
             }
             .alert("Rename hike", isPresented: $renaming) {
                 TextField("Name", text: $newTitle)

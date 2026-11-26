@@ -14,7 +14,10 @@ public actor HikeLog {
     public static let trailSuffix = ".hiketrail"
     public static let cacheSuffix = ".hikecache"
     /// How a key move finds each blob to seal again.
-    public static let sealedPurposes: [String: KeyPurpose] = [hikeSuffix: .hike, trailSuffix: .hikeTrail, cacheSuffix: .hikeCache]
+    public static let groupsSuffix = ".hikegroups"
+    public static let sealedPurposes: [String: KeyPurpose] = [
+        hikeSuffix: .hike, trailSuffix: .hikeTrail, cacheSuffix: .hikeCache, groupsSuffix: .hikeGroups,
+    ]
 
     private let store: any BlobStore
     private let rootKey: ContentRootKey
@@ -65,6 +68,25 @@ public actor HikeLog {
         try store.delete(name(trailID(id), Self.trailSuffix))
     }
 
+    /// How many hike blobs are there but won't open, for "Couldn't open 2 hikes".
+    public func unreadableHikeCount() -> Int {
+        let names = (try? store.names()) ?? []
+        let all = names.filter { $0.hasSuffix(Self.hikeSuffix) }.count
+        return max(0, all - hikes().count)
+    }
+
+    // MARK: Groups
+
+    /// The groups, in the order the person made them. One sealed blob, named by an ID derived from the key.
+    public func groups() -> [HikeGroup] {
+        let id = groupsID
+        return open(name(id, Self.groupsSuffix), id: id, purpose: .hikeGroups) ?? []
+    }
+
+    public func saveGroups(_ groups: [HikeGroup]) throws {
+        try write(groups, id: groupsID, purpose: .hikeGroups, suffix: Self.groupsSuffix)
+    }
+
     // MARK: Nearby
 
     public func nearby() -> NearbyTrails? {
@@ -83,6 +105,7 @@ public actor HikeLog {
 
     // MARK: Sealing
 
+    private var groupsID: UUID { rootKey.derivedID(from: "hike-groups:all") }
     private var cacheID: UUID { rootKey.derivedID(from: "hike-cache:nearby") }
     private func trailID(_ osmID: String) -> UUID { rootKey.derivedID(from: "hike-trail:\(osmID)") }
     private func name(_ id: UUID, _ suffix: String) -> String { id.uuidString.lowercased() + suffix }

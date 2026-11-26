@@ -51,11 +51,14 @@ public struct Trail: Codable, Hashable, Sendable, Identifiable {
     public var profile: [Double]?
     /// When it was saved for offline use, or nil if it isn't saved.
     public var savedAt: Date?
+    /// The group it is saved in, or nil for none. A trail is in one group at most.
+    public var groupID: UUID?
 
     public init(
         id: String, name: String, lines: [[GeoPoint]], sacScale: String? = nil, surface: String? = nil,
-        kind: String = "Path", profile: [Double]? = nil, savedAt: Date? = nil
+        kind: String = "Path", profile: [Double]? = nil, savedAt: Date? = nil, groupID: UUID? = nil
     ) {
+        self.groupID = groupID
         self.id = id
         self.name = name
         self.lines = lines
@@ -81,7 +84,31 @@ public struct Trail: Codable, Hashable, Sendable, Identifiable {
     }
 
     /// A link to the trail on openstreetmap.org, for its credit line.
-    public var sourceURL: URL? { URL(string: "https://www.openstreetmap.org/\(id)") }
+    public var sourceURL: URL? { isImported ? nil : URL(string: "https://www.openstreetmap.org/\(id)") }
+
+    /// The ID prefix of a trail brought in from a GPX file, which has no OpenStreetMap page.
+    public static let importedPrefix = "gpx/"
+    public var isImported: Bool { id.hasPrefix(Self.importedPrefix) }
+}
+
+/// A named group of saved trails (owner, 2026-11-26). A trail is in one group or none, and "All saved" shows
+/// every trail regardless.
+public struct HikeGroup: Codable, Hashable, Sendable, Identifiable {
+    public static let maxNameLength = 40
+    public var id: UUID
+    public var name: String
+
+    public init(id: UUID = UUID(), name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    /// A name trimmed and cut to 40 characters, or nil if nothing is left.
+    public static func clean(_ name: String) -> String? {
+        let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxNameLength))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }
 
 /// The trails found near a rough location, as kept sealed on the iPhone so Hiking opens at once.

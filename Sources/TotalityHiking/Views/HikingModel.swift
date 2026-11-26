@@ -27,7 +27,12 @@ public final class HikingModel {
     public private(set) var phase = Phase.loading
     public private(set) var nearby: [Trail] = []
     public private(set) var nearbyState = NearbyState.idle
-    public private(set) var saved: [Trail] = []
+    public internal(set) var saved: [Trail] = []
+    public internal(set) var groups: [HikeGroup] = []
+    /// Hikes on disk that wouldn't open, which Statistics says are left out of its totals.
+    public internal(set) var unreadableHikes = 0
+    /// A GPX file handed to Totality from Files or a share sheet, waiting for the import screen.
+    public var pendingImport: URL?
     public private(set) var hikes: [Hike] = []
     public private(set) var here: GeoPoint?
     public private(set) var recording: Recording?
@@ -40,18 +45,18 @@ public final class HikingModel {
     /// Starts a Social post through the app, which hands it to Social's composer. Nothing posts from here.
     public var onShare: (@MainActor (PostDraft) -> Void)?
 
-    @ObservationIgnored private var log: HikeLog?
+    @ObservationIgnored var log: HikeLog?
     @ObservationIgnored private let trails: OverpassTrails
     @ObservationIgnored private let elevation: OpenMeteoElevation
     @ObservationIgnored private let location: (any HikeLocating)?
-    @ObservationIgnored private let now: @Sendable () -> Date
+    @ObservationIgnored let now: @Sendable () -> Date
     @ObservationIgnored private var deleting: Task<Void, Never>?
     @ObservationIgnored private var lookingUp: Set<String> = []
 
     /// How long Undo stays after a delete.
     public static let undoSeconds: Double = 5
     /// How much of each end of a route is left off a shared picture.
-    public static let privacyTrim = 200.0
+    public static let privacyTrim = GPXExport.endTrim
 
     public init(
         log: HikeLog?, trails: OverpassTrails = OverpassTrails(), elevation: OpenMeteoElevation = OpenMeteoElevation(),
@@ -75,6 +80,8 @@ public final class HikingModel {
         }
         hikes = await log.hikes()
         saved = await log.savedTrails()
+        groups = await log.groups()
+        unreadableHikes = await log.unreadableHikeCount()
         if let cached = await log.nearby() {
             nearby = cached.trails
             here = cached.around
@@ -129,7 +136,7 @@ public final class HikingModel {
 
     /// Looks up a trail's elevation profile once, and keeps it with the trail.
     public func lookUpProfile(_ trail: Trail) async {
-        guard self.trail(trail.id)?.profile == nil, !lookingUp.contains(trail.id) else { return }
+        guard !trail.isImported, self.trail(trail.id)?.profile == nil, !lookingUp.contains(trail.id) else { return }
         lookingUp.insert(trail.id)
         defer { lookingUp.remove(trail.id) }
         guard let profile = try? await elevation.profile(of: trail) else { return }
@@ -308,6 +315,7 @@ public final class HikingModel {
         log = nil
         hikes = []
         saved = []
+        groups = []
         nearby = []
         phase = .failed
     }

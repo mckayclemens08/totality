@@ -21,6 +21,30 @@ import TotalityCore
         #expect(await b.nearby() == nil)
     }
 
+    /// Groups and a trail imported from GPX are sealed with the first account's key. Another account on the
+    /// same iPhone sees neither, and can't read the group names or the imported route.
+    @Test func anotherAccountSeesNoGroupsOrImportedTrails() async throws {
+        let store = MemoryBlobStore()
+        let a = HikeLog(store: store, rootKey: try ContentRootKey.generate())
+        let group = HikeGroup(name: "Wasatch")
+        try await a.saveGroups([group])
+        let imported = try GPXImport.trail(from: Data(garminGPX.utf8), fallbackName: "x", now: Date(), groupID: group.id)
+        try await a.save(imported.trail)
+        #expect(await a.groups() == [group])
+        #expect(await a.savedTrails().first?.groupID == group.id)
+
+        let b = HikeLog(store: store, rootKey: try ContentRootKey.generate())
+        #expect(await b.groups().isEmpty)
+        #expect(await b.savedTrails().isEmpty)
+        // Its own groups don't touch the first account's.
+        try await b.saveGroups([HikeGroup(name: "Mine")])
+        #expect(await a.groups() == [group])
+        for blob in store.all.values {
+            let text = String(decoding: blob, as: UTF8.self)
+            #expect(!text.contains("Wasatch") && !text.contains("Mount Olympus"))
+        }
+    }
+
     @Test func aBlobSealedForOneHikeWontOpenAsAnother() async throws {
         let store = MemoryBlobStore()
         let key = try ContentRootKey.generate()
