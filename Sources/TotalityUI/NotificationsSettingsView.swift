@@ -37,6 +37,7 @@ public struct NotificationsSettingsView: View {
 
                 ForEach(modules, id: \.self) { module in
                     moduleCard(module)
+                    if module == .calendar, hub.preferences.isOn(module) { calendarDefaults }
                 }
 
                 group("Quiet hours") {
@@ -48,7 +49,7 @@ public struct NotificationsSettingsView: View {
                         }
                         .padding(.horizontal, Space.s4)
                         .padding(.bottom, Space.s2)
-                        note("Alerts still arrive, quietly in Notification Centre, with no sound or banner. Reminders you set ring as usual.")
+                        note("Alerts still arrive, quietly in Notification Centre, with no sound or banner. Task reminders ring as usual. Calendar alerts arrive quietly.")
                         toggle("Close friends break through", detail: "Their messages and posts ring even in quiet hours",
                                isOn: $hub.preferences.closeFriendsBreakThrough)
                     }
@@ -116,6 +117,103 @@ public struct NotificationsSettingsView: View {
         }
         .padding(.vertical, Space.s1)
         .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+    }
+
+    // MARK: Calendar defaults
+
+    private var eventAlertsOn: Bool { hub.preferences.isOn(NotificationHub.reminderKinds[1]) }
+
+    /// What new events start with, and the hour all-day alerts ring. Existing events keep their own.
+    @ViewBuilder private var calendarDefaults: some View {
+        let theme = Theme.current
+        defaultAlerts("Default alerts \u{B7} timed events", list: $hub.preferences.calendarAlerts.timed, allDay: false)
+        defaultAlerts("Default alerts \u{B7} all-day events", list: $hub.preferences.calendarAlerts.allDay, allDay: true)
+        group("All-day alerts") {
+            DatePicker("All-day alerts ring at", selection: allDayTime, displayedComponents: .hourAndMinute)
+                .font(Typeface.body)
+                .foregroundStyle(theme.textPrimary.color)
+                .padding(.horizontal, Space.s4)
+                .padding(.vertical, Space.s2)
+                .frame(minHeight: Metric.headerButton)
+            note("Applies to events you create from now on. Events you already have keep their alerts. Quiet hours still apply.")
+        }
+        if !eventAlertsOn {
+            note("Event alerts are off. Turn them on above so new events ring.")
+        }
+    }
+
+    private var allDayTime: Binding<Date> {
+        Binding(
+            get: {
+                let minute = hub.preferences.calendarAlerts.allDayMinute
+                return Calendar.current.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: Date()) ?? Date()
+            },
+            set: {
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: $0)
+                hub.preferences.calendarAlerts.allDayMinute = (parts.hour ?? 9) * 60 + (parts.minute ?? 0)
+            }
+        )
+    }
+
+    private func defaultAlerts(_ title: String, list: Binding<[Int]>, allDay: Bool) -> some View {
+        let theme = Theme.current
+        let hour = AlertOffset.clock(hub.preferences.calendarAlerts.allDayMinute)
+        return group(title) {
+            if list.wrappedValue.isEmpty {
+                VStack(alignment: .leading, spacing: Space.hairline * 2) {
+                    Text("None")
+                        .font(Typeface.body)
+                        .foregroundStyle(theme.textSecondary.color)
+                    Text("New events won't ring")
+                        .font(Typeface.caption)
+                        .foregroundStyle(theme.textSecondary.color)
+                }
+                .padding(.horizontal, Space.s4)
+                .padding(.vertical, Space.s2)
+                .frame(minHeight: Metric.headerButton, alignment: .leading)
+            }
+            ForEach(AlertOffset.sorted(list.wrappedValue), id: \.self) { minutes in
+                HStack {
+                    VStack(alignment: .leading, spacing: Space.hairline * 2) {
+                        Text(AlertOffset.name(minutes, allDay: allDay))
+                            .font(Typeface.body)
+                            .foregroundStyle(theme.textPrimary.color)
+                        if allDay {
+                            Text("at \(hour)")
+                                .font(Typeface.caption)
+                                .foregroundStyle(theme.textSecondary.color)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        list.wrappedValue.removeAll { $0 == minutes }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(Typeface.caption)
+                            .foregroundStyle(theme.textSecondary.color)
+                            .frame(minWidth: Metric.headerButton, minHeight: Metric.headerButton)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove \(AlertOffset.name(minutes, allDay: allDay))")
+                }
+                .padding(.horizontal, Space.s4)
+            }
+            if list.wrappedValue.count < AlertOffset.maxPerEvent {
+                Menu {
+                    ForEach(AlertOffset.presets(allDay: allDay).filter { !list.wrappedValue.contains($0) }, id: \.self) { minutes in
+                        Button(AlertOffset.name(minutes, allDay: allDay)) {
+                            list.wrappedValue = AlertOffset.adding(minutes, to: list.wrappedValue)
+                        }
+                    }
+                } label: {
+                    Label("Add default alert", systemImage: "plus")
+                        .font(Typeface.callout)
+                        .foregroundStyle(theme.accent.color)
+                        .frame(minHeight: Metric.headerButton)
+                }
+                .padding(.horizontal, Space.s4)
+            }
+        }
     }
 
     private var permissionCard: some View {

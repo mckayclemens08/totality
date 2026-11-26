@@ -35,6 +35,15 @@ struct EventDetailView: View {
         if case .own(let occurrence) = entry.source { occurrence } else { nil }
     }
 
+    /// Every alert, as the editor names them. Google's are the ones kept on this iPhone.
+    private var alertNames: [String] {
+        if let occurrence {
+            return occurrence.event.alerts.map { AlertOffset.name($0, allDay: occurrence.event.isAllDay) }
+        }
+        if let google { return model.deviceAlerts(for: google).map { AlertOffset.name($0, allDay: entry.isAllDay) } }
+        return []
+    }
+
     private var when: String {
         let timing = Date.FormatStyle(date: .complete, time: .omitted)
         if let occurrence, occurrence.event.isAllDay {
@@ -69,8 +78,8 @@ struct EventDetailView: View {
                 if let rule = occurrence?.event.repeatRule {
                     Label(rule.description(in: model.display), systemImage: "repeat")
                 }
-                if let minutes = occurrence?.event.reminderMinutes {
-                    Label(ReminderText.name(minutes), systemImage: "bell")
+                if !alertNames.isEmpty {
+                    Label(alertNames.joined(separator: "\n"), systemImage: "bell")
                 }
                 if let offer = alarmOffer {
                     Button { alarmDraft = offer } label: {
@@ -269,18 +278,6 @@ extension RepeatRule {
     }
 }
 
-enum ReminderText {
-    static func name(_ minutes: Int?) -> String {
-        switch minutes {
-        case nil: "None"
-        case 0: "At the start"
-        case 60: "1 hour before"
-        case 1_440: "1 day before"
-        case let minutes?: "\(minutes) minutes before"
-        }
-    }
-}
-
 /// Creating an event and editing one are the same form. Saving a repeating event asks how far it goes.
 /// A Google event, or a new one on a Google calendar, goes through a confirm sheet first, and only its
 /// press sends anything (issue 88).
@@ -372,16 +369,16 @@ struct EventEditorView: View {
                         DatePicker("Last day", selection: Binding(get: { until }, set: { draft.until = $0 }), displayedComponents: [.date])
                     }
                 }
-                if !isGoogle {
-                    Picker("Reminder", selection: $draft.reminderMinutes) {
-                        ForEach(CalendarModel.reminderChoices, id: \.self) { Text(ReminderText.name($0)).tag($0) }
-                    }
-                }
-            } footer: {
-                if draft.reminderMinutes != nil, !isGoogle {
-                    Text("Reminders show the event's title and time, including on your lock screen. Your device keeps those outside Totality's encryption until the reminder fires.")
-                }
             }
+            }
+            if target == nil {
+                AlertsSection(
+                    alerts: $draft.alerts, isAllDay: draft.isAllDay, start: draft.start, display: model.display,
+                    allDayMinute: model.alertDefaults().allDayMinute,
+                    footer: google != nil
+                        ? "Google keeps its own alerts. Ones you set here ring on this iPhone and aren't sent to Google."
+                        : "Alerts show the event's title and time, including on your lock screen. Your device keeps those outside Totality's encryption until the alert rings."
+                )
             }
             Section {
                 if showingNotes || !draft.notes.isEmpty {
@@ -410,6 +407,10 @@ struct EventEditorView: View {
         .background(theme.bg.color)
         .navigationTitle(occurrence == nil && google == nil ? "New event" : "Edit event")
         .task { typingTitle = occurrence == nil }
+        .onChange(of: draft.isAllDay) { _, allDay in
+            // A new event's alerts follow the kind of event, as long as they're still the starting ones.
+            if occurrence == nil, google == nil { draft.alerts = model.alertsAfterSwitching(draft.alerts, toAllDay: allDay) }
+        }
         .onChange(of: draft.start) { old, new in
             draft.end = draft.end.addingTimeInterval(new.timeIntervalSince(old))
         }
@@ -444,6 +445,7 @@ struct EventEditorView: View {
             NavigationStack {
                 GoogleConfirmSheet(model: model, change: change) {
                     pending = nil
+                    if let google { Task { await model.setDeviceAlerts(draft.alerts, for: google) } }
                     onDone()
                 } onCancel: {
                     pending = nil

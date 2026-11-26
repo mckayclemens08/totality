@@ -182,6 +182,7 @@ extension CalendarVault: SyncArea {
                 title: "\(older.displayTitle) (conflict copy)", location: older.location, notes: older.notes,
                 start: older.start, end: older.end, isAllDay: older.isAllDay, timeZoneID: older.timeZoneID,
                 repeatRule: older.repeatRule, skipped: older.skipped, reminderMinutes: older.reminderMinutes,
+                alertMinutes: older.alertMinutes,
                 attachments: older.attachments
             )
             if try store.read(name(copy.id)) == nil { try save(copy) }

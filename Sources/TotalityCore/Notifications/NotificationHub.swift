@@ -25,7 +25,7 @@ public final class NotificationHub: NSObject {
     /// Tasks' and Calendar's reminders. They still get a switch.
     public static let reminderKinds = [
         NotificationKind(module: .tasks, key: "reminder", name: "Reminders", detail: "Done or snooze from the lock screen"),
-        NotificationKind(module: .calendar, key: "reminder", name: "Event reminders", detail: "Before each event, as you set it"),
+        NotificationKind(module: .calendar, key: "reminder", name: "Event alerts", detail: "Before each event, as you set it"),
     ]
 
     public private(set) var sources: [ModuleID: any NotificationSource] = [:]
@@ -156,7 +156,8 @@ public final class NotificationHub: NSObject {
 
     nonisolated static func category(_ actions: [NotificationAction]) -> UNNotificationCategory {
         let buttons: [UNNotificationAction] = actions.map { action in
-            let options: UNNotificationActionOptions = action.needsUnlock ? [.authenticationRequired] : []
+            var options: UNNotificationActionOptions = action.needsUnlock ? [.authenticationRequired] : []
+            if action == .open { options.insert(.foreground) }
             if action == .reply {
                 return UNTextInputNotificationAction(
                     identifier: action.identifier, title: action.title, options: options,
@@ -184,7 +185,16 @@ extension NotificationHub: UNUserNotificationCenterDelegate {
             return
         }
         let identifier = response.notification.request.identifier
-        let action = NotificationAction(identifier: response.actionIdentifier)
+        var action = NotificationAction(identifier: response.actionIdentifier)
+        if action == .snoozeTen {
+            // Done right here: the words are already in the alert, so it works with Calendar still sealed.
+            let again = Self.snoozed(response.notification.request, minutes: AlertOffset.snoozeMinutes)
+            try? await center.add(again)
+            center.removeDeliveredNotifications(withIdentifiers: [identifier])
+            return
+        }
+        // The Open button is a tap that was asked for by name.
+        if action == .open { action = nil }
         let text = (response as? UNTextInputNotificationResponse)?.userText
         await respond(to: target, action: action, text: text)
         // A button finished the job, so the alert leaves the lock screen.
@@ -193,6 +203,16 @@ extension NotificationHub: UNUserNotificationCenterDelegate {
 }
 
 extension NotificationHub {
+    /// The same alert again after `minutes`. Its identifier is its own, so a Calendar refresh that replaces
+    /// the planned alerts can't remove it.
+    nonisolated static func snoozed(_ request: UNNotificationRequest, minutes: Int) -> UNNotificationRequest {
+        let content = (request.content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
+        return UNNotificationRequest(
+            identifier: "totality.snooze." + UUID().uuidString.lowercased(), content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: Double(max(1, minutes)) * 60, repeats: false)
+        )
+    }
+
     /// Hands an alert that isn't the hub's to the delegate that was there before, through the call iOS
     /// itself would have made.
     nonisolated func forward(_ center: UNUserNotificationCenter, _ response: UNNotificationResponse) {
