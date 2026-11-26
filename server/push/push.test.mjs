@@ -5,7 +5,7 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
-import { APNs, DEVICE_DAYS, MAX_DEVICES, PushGate, PushStore, QUIET_SECONDS, WAKE, accountFrom, addressHash, apnsToken, googleKeys } from './push.mjs'
+import { APNs, DEVICE_DAYS, MATRIX_NOTIFY, MAX_DEVICES, POKES_PER_MINUTE, PushGate, PushStore, QUIET_SECONDS, WAKE, accountFrom, addressHash, apnsToken, googleKeys } from './push.mjs'
 
 const MCKAY = { name: 'mckayclemens', id: randomUUID() }
 const DANA = { name: 'dana_whitfield', id: randomUUID() }
@@ -27,7 +27,7 @@ async function newGate({ answers, clock } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'totality-push-'))
   const store = new PushStore(root, { clock })
   const apple = fakeApple(answers)
-  const gate = new PushGate({ checkSignIn: async (token) => signIns.get(token) ?? null, store, apns: apple.apns })
+  const gate = new PushGate({ checkSignIn: async (token) => signIns.get(token) ?? null, store, apns: apple.apns, ...(clock ? { clock } : {}) })
   return { root, store, gate, sent: apple.sent }
 }
 
@@ -296,6 +296,109 @@ describe("Google's Pub/Sub note", () => {
     timers[0].fn()
     await gate.waking
     assert.equal(sent.length, 2)
+  })
+})
+
+describe('pokes', () => {
+  async function pokeGate() {
+    let now = Date.now()
+    const made = await newGate({ clock: () => now })
+    const timers = []
+    made.gate.later = (fn, ms) => timers.push({ fn, ms })
+    await call(made.gate, '/push/device', { body: { token: phone(1), sandbox: false } })
+    await call(made.gate, '/push/device', { token: 'token-dana', body: { token: phone(2), sandbox: false } })
+    return { ...made, timers, tick: (ms) => { now += ms } }
+  }
+  const poke = (gate, to, token = 'token-mckay') => call(gate, '/push/poke', { token, body: { to } })
+
+  test('wakes the named account with an empty push, and never the one poking', async () => {
+    const { gate, sent } = await pokeGate()
+    assert.equal((await poke(gate, ['dana_whitfield', 'mckayclemens'])).status, 204)
+    await gate.waking
+    assert.deepEqual(sent.map((s) => s.token), [phone(2)])
+    assert.deepEqual(JSON.parse(sent[0].body), JSON.parse(WAKE))
+  })
+
+  test('needs a sign-in and well-formed names', async () => {
+    const { gate, sent } = await pokeGate()
+    assert.equal((await poke(gate, ['dana_whitfield'], null)).status, 401)
+    for (const to of [[], ['Dana Whitfield'], 'dana_whitfield', Array(21).fill('dana_whitfield'), [5]]) {
+      assert.equal((await poke(gate, to)).status, 400)
+    }
+    assert.equal(sent.length, 0)
+  })
+
+  test('answers the same for a name with no phone', async () => {
+    const { gate, sent } = await pokeGate()
+    assert.equal((await poke(gate, ['nobody_here'])).status, 204)
+    await gate.waking
+    assert.equal(sent.length, 0)
+  })
+
+  test('a burst wakes once now and once after the quiet gap', async () => {
+    const { gate, sent, timers, tick } = await pokeGate()
+    for (let i = 0; i < 4; i++) { await poke(gate, ['dana_whitfield']); await gate.waking; tick(1000) }
+    assert.equal(sent.length, 1)
+    assert.equal(timers.length, 1)
+    tick(QUIET_SECONDS * 1000)
+    timers[0].fn()
+    await gate.waking
+    assert.equal(sent.length, 2)
+  })
+
+  test('is limited per account per minute', async () => {
+    const { gate, tick } = await pokeGate()
+    for (let i = 0; i < POKES_PER_MINUTE / 20; i++) assert.equal((await poke(gate, Array(20).fill('dana_whitfield'))).status, 204)
+    assert.equal((await poke(gate, ['dana_whitfield'])).status, 429)
+    tick(60_000)
+    assert.equal((await poke(gate, ['dana_whitfield'])).status, 204)
+  })
+
+  test('keeps no username on disk, and forgets names after a restart without a key', async () => {
+    const { root, gate } = await pokeGate()
+    assert.ok(!(await readFile(join(root, 'push.json'), 'utf8')).includes('dana_whitfield'))
+    assert.equal(await new PushStore(root).accountNamed('dana_whitfield'), null)
+    const key = Buffer.alloc(32, 7)
+    const keyed = new PushStore(root, { nameKey: key })
+    await keyed.addDevice(DANA.id, phone(2), false, 'dana_whitfield')
+    assert.equal(await new PushStore(root, { nameKey: key }).accountNamed('dana_whitfield'), DANA.id)
+  })
+})
+
+describe('the Matrix push gateway', () => {
+  const note = (devices) => ({ notification: { event_id: '$e', room_id: '!r:usetotality.com', counts: { unread: 1 }, devices } })
+  const matrix = (gate, body) => call(gate, MATRIX_NOTIFY, { token: null, body })
+
+  test('wakes a registered phone and rejects any other pushkey', async () => {
+    const { gate, sent } = await newGate()
+    await call(gate, '/push/device', { body: { token: phone(1), sandbox: true } })
+    const answer = await matrix(gate, note([
+      { app_id: 'app.totality.ios', pushkey: phone(1) },
+      { app_id: 'app.totality.ios', pushkey: phone(9) },
+      { app_id: 'someone.else', pushkey: phone(1) },
+    ]))
+    await gate.waking
+    assert.equal(answer.status, 200)
+    assert.deepEqual(JSON.parse(answer.body).rejected, [phone(9), phone(1)])
+    assert.deepEqual(sent.map((s) => [s.token, s.host]), [[phone(1), 'api.sandbox.push.apple.com']])
+    assert.deepEqual(JSON.parse(sent[0].body), JSON.parse(WAKE))
+  })
+
+  test('keeps nothing from the note', async () => {
+    const { root, gate } = await newGate()
+    await call(gate, '/push/device', { body: { token: phone(1), sandbox: true } })
+    await matrix(gate, note([{ app_id: 'app.totality.ios', pushkey: phone(1) }]))
+    await gate.waking
+    const text = await readFile(join(root, 'push.json'), 'utf8')
+    assert.ok(!text.includes('!r:') && !text.includes('$e'))
+  })
+
+  test('turns away a malformed or oversized note', async () => {
+    const { gate, sent } = await newGate()
+    assert.equal((await matrix(gate, 'nope')).status, 400)
+    assert.equal((await matrix(gate, note(Array(21).fill({ app_id: 'app.totality.ios', pushkey: phone(1) })))).status, 400)
+    assert.equal((await call(gate, MATRIX_NOTIFY, { token: null, method: 'GET' })).status, 405)
+    assert.equal(sent.length, 0)
   })
 })
 

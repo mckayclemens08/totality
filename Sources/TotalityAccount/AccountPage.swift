@@ -25,6 +25,9 @@ struct AccountPage: View {
                 NavigationLink { ThemePickerView() } label: {
                     SettingsRow("Theme", value: ThemeStore.shared.choice.name)
                 }
+                NavigationLink { NotificationsSettingsView() } label: {
+                    SettingsRow("Notifications", value: NotificationHub.shared.preferences.quietHoursOn ? "Quiet hours on" : nil)
+                }
             }
 
             SettingsGroup("Keys and devices") {

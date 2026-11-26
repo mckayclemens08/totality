@@ -5,9 +5,10 @@ import TotalityMail
 import UIKit
 import UserNotifications
 
-/// Instant Gmail sync on the app's side (issue 164). It registers this phone's Apple push token with
-/// Totality's push service, keeps each Gmail watch going, and when an empty push says an inbox changed,
-/// fetches from Gmail and posts the notification itself. The server never sees what it says.
+/// Push on the app's side (issues 164 and 232). It registers this phone's Apple push token with Totality's
+/// push service and as the Matrix homeserver's pusher, and keeps each Gmail watch going. When an empty push
+/// wakes the phone, `NotificationHub` asks every module what's new and posts the alerts itself. The server
+/// never sees what they say.
 @MainActor
 final class PushSetup {
     static let shared = PushSetup()
@@ -26,16 +27,27 @@ final class PushSetup {
         return GmailPushPlan(topic: topic, push: PushClient(token: token))
     }
 
-    /// Asks Apple for this phone's push token. iOS answers through the app delegate.
+    /// This phone's Apple push token, once iOS has given it. The Matrix pusher is set from it.
+    static var device: Data? {
+        get { UserDefaults.standard.data(forKey: "push.device") }
+        set { UserDefaults.standard.set(newValue, forKey: "push.device") }
+    }
+
+    /// Asks Apple for this phone's push token. iOS answers through the app delegate. Every signed-in phone
+    /// registers, for Messages and Social as well as Gmail.
     func start() {
-        guard Self.plan() != nil else { return }
+        guard AccountSetup.searchToken != nil else { return }
         UIApplication.shared.registerForRemoteNotifications()
     }
 
     func registered(_ device: Data) {
         guard let signIn = AccountSetup.searchToken else { return }
+        Self.device = device
         let push = PushClient(token: signIn)
         Task { try? await push.register(device: device, sandbox: PushClient.isSandbox) }
+        #if canImport(MatrixRustSDK)
+        Task { await MatrixMessagesService.latest?.setPusher(device: device) }
+        #endif
     }
 
     /// The watches renew, and notifications are asked for the first time there's something to show.
@@ -48,23 +60,12 @@ final class PushSetup {
         await keepWatching?()
     }
 
-    /// One push. iOS gives about 30 seconds, so this fetches, notifies, and says whether anything came.
+    /// One push. iOS gives about 30 seconds, so every module fetches what's new and the hub posts it.
+    /// Mail's part fetches from Gmail through `onWake`.
     func woke() async -> UIBackgroundFetchResult {
-        guard GmailPushSettings.shared.isOn, let onWake else { return .noData }
-        let notes = await onWake()
-        await keepWatching?()
-        // In front, Mail is already showing it.
-        guard UIApplication.shared.applicationState != .active else { return notes.isEmpty ? .noData : .newData }
-        for note in notes {
-            let content = UNMutableNotificationContent()
-            content.title = note.title
-            content.body = note.body
-            content.sound = .default
-            content.threadIdentifier = "mail." + note.conversationID.uuidString
-            let request = UNNotificationRequest(identifier: "mail." + note.id.uuidString, content: content, trigger: nil)
-            try? await UNUserNotificationCenter.current().add(request)
-        }
-        return notes.isEmpty ? .noData : .newData
+        let posted = await NotificationHub.shared.collect()
+        if GmailPushSettings.shared.isOn { await keepWatching?() }
+        return posted > 0 ? .newData : .noData
     }
 }
 

@@ -2,6 +2,15 @@
 // push token here, and the server later sends it a silent push that says only "look again". Every push
 // is empty apart from that, so Apple, Cloudflare and this server carry nothing about what changed.
 //
+// Three things wake a phone, and none of them carries what happened (issue 232):
+// - Gmail, below.
+// - The Matrix homeserver, as a Matrix push gateway (`/_matrix/push/v1/notify`). Its pushers use the
+//   `event_id_only` format, so a note holds a room ID and an event ID and never message or post text. Push
+//   reads only the device token from it and keeps nothing.
+// - A poke: a signed-in phone asking to wake other accounts by username after a like, comment or follow.
+//   It names no kind and no content; the woken phone asks Supabase what's new itself, so a poke with
+//   nothing behind it shows nothing. Pokes are limited and held only in memory.
+//
 // Instant Gmail sync is the first user (non-negotiable 8). A phone links a Gmail address by showing a
 // Google ID token for it, which proves the address is that person's and opens nothing in Gmail. Only a
 // keyed hash of the address is kept. When the inbox changes, Google posts to `/push/gmail/notify` through
@@ -12,7 +21,7 @@
 // The Apple key is on the server only. Its file is mounted from `~/totality/secrets/push/`, which git ignores,
 // and its ID and team come from `.env`. Without them registration still works and nothing is sent.
 // Nothing here logs a request, a token or an account.
-import { createHash, createHmac, createPrivateKey, createPublicKey, sign, timingSafeEqual, verify } from 'node:crypto'
+import { createHash, createHmac, createPrivateKey, createPublicKey, randomBytes, sign, timingSafeEqual, verify } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
@@ -33,12 +42,20 @@ export const MAX_LINKS = 3
 export const QUIET_SECONDS = 10
 // How far a Google token's times may be off from this server's clock.
 export const SKEW_SECONDS = 300
+// Usernames one poke may name, and names one account may poke a minute.
+export const POKE_NAMES = 20
+export const POKES_PER_MINUTE = 60
+// The app ID the iPhone app's Matrix pushers use. Anything else is turned away.
+export const MATRIX_APP_IDS = ['app.totality.ios', 'app.totality.ios.dev']
+// Device tokens one Matrix note may name.
+export const MATRIX_DEVICES = 20
 
 const DAY = 24 * 60 * 60 * 1000
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Apple's device tokens are 32 bytes today; the length may grow, so this allows up to 100.
 const DEVICE = /^[0-9a-f]{64,200}$/
 const TOKEN = /^Bearer ([A-Za-z0-9._-]{1,4096})$/
+const NAME = /^[a-z0-9_]{3,24}$/
 
 /** The account behind a sign-in, or null if it doesn't look like a Totality account. */
 export function accountFrom(user) {
@@ -67,10 +84,16 @@ export function rememberingSignIns(checkSignIn, { clock = Date.now, seconds = 60
 /** What push keeps, in one small file: each account's phones (`{ token, sandbox, seen }`). It's written
  *  whole to a new file and renamed into place, so a crash never leaves half of it. */
 export class PushStore {
-  constructor(root, { clock = Date.now } = {}) {
+  /** `nameKey` keys the hashes kept in place of usernames. Without one, a key is made for this run and
+   *  the hashes are dropped on the next start, so pokes reach only phones registered since. */
+  constructor(root, { clock = Date.now, nameKey = null } = {}) {
     this.file = root ? join(root, 'push.json') : null
     this.clock = clock
-    this.state = { devices: {}, gmail: {} }
+    this.lastingNames = Boolean(nameKey)
+    this.nameKey = nameKey ?? randomBytes(32)
+    // `names` maps a keyed hash of a username to its account ID, for pokes. It holds only accounts that
+    // registered a phone, and never a username itself.
+    this.state = { devices: {}, gmail: {}, names: {} }
     this.loaded = false
     this.writing = Promise.resolve()
   }
@@ -82,6 +105,7 @@ export class PushStore {
     try {
       const saved = JSON.parse(await readFile(this.file, 'utf8'))
       this.state = { ...this.state, ...saved }
+      if (!this.lastingNames) this.state.names = {}
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
     }
@@ -106,8 +130,13 @@ export class PushStore {
 
   /** Adds or refreshes a phone. A token belongs to one account at a time, so a phone that signs in to
    *  another account moves with it. */
-  async addDevice(account, token, sandbox) {
+  async addDevice(account, token, sandbox, name = null) {
     await this.load()
+    if (name && NAME.test(name)) {
+      const hash = this.nameHash(name)
+      for (const [other, id] of Object.entries(this.state.names)) if (id === account && other !== hash) delete this.state.names[other]
+      this.state.names[hash] = account
+    }
     for (const [other, list] of Object.entries(this.state.devices)) {
       if (other === account) continue
       const kept = list.filter((device) => device.token !== token)
@@ -144,6 +173,28 @@ export class PushStore {
     if (changed) await this.save()
   }
 
+  /** The account a username belongs to, if it registered a phone here. */
+  nameHash(name) {
+    return createHmac('sha256', this.nameKey).update(`name:${name}`).digest('base64url')
+  }
+
+  async accountNamed(name) {
+    await this.load()
+    const id = this.state.names[this.nameHash(name)]
+    return id && (this.state.devices[id] ?? []).length ? id : null
+  }
+
+  /** The registered phone with this token, whichever account it belongs to. */
+  async device(token) {
+    await this.load()
+    const cutoff = this.clock() - DEVICE_DAYS * DAY
+    for (const list of Object.values(this.state.devices)) {
+      const found = list.find((device) => device.token === token && device.seen >= cutoff)
+      if (found) return found
+    }
+    return null
+  }
+
   /** The accounts a hashed Gmail address wakes. */
   async linked(hash) {
     await this.load()
@@ -169,8 +220,12 @@ export class PushStore {
   }
 
   setDevices(account, list) {
-    if (list.length) this.state.devices[account] = list
-    else delete this.state.devices[account]
+    if (list.length) {
+      this.state.devices[account] = list
+      return
+    }
+    delete this.state.devices[account]
+    for (const [name, id] of Object.entries(this.state.names)) if (id === account) delete this.state.names[name]
   }
 }
 
@@ -345,7 +400,8 @@ async function jsonBody(body, limit) {
 
 /** No sockets in here, so every rule can be tested. `checkSignIn(token)` returns an account or null and
  *  throws if it can't tell. `apns` is null while the Apple key isn't on the server. */
-const ROUTES = ['/push/device', '/push/device/remove', '/push/gmail/link', '/push/gmail/unlink', '/push/gmail/notify']
+const ROUTES = ['/push/device', '/push/device/remove', '/push/poke', '/push/gmail/link', '/push/gmail/unlink', '/push/gmail/notify']
+export const MATRIX_NOTIFY = '/_matrix/push/v1/notify'
 
 /** `gmail` is null until the server has its address key and knows Google's Pub/Sub sender:
  *  `{ addressKey, keys, clientIDs, pubsubAudience, pubsubSender }`. */
@@ -353,10 +409,13 @@ export class PushGate {
   constructor({ checkSignIn, store, apns = null, gmail = null, clock = Date.now, later = (fn, ms) => setTimeout(fn, ms).unref?.() }) {
     Object.assign(this, { checkSignIn, store, apns, gmail, clock, later })
     this.quiet = new Map()
+    // Names each account poked in the last minute: `{ at, count }`. Memory only.
+    this.pokes = new Map()
   }
 
   async respond({ method, path, headers = {}, body }) {
     if (path === '/push/health') return method === 'GET' ? json(200, { ok: true, sending: Boolean(this.apns), gmail: Boolean(this.gmail) }) : empty(405)
+    if (path === MATRIX_NOTIFY) return method === 'POST' ? this.matrix(body) : empty(405)
     if (!ROUTES.includes(path)) return empty(404)
     if (method !== 'POST') return empty(405)
     const token = TOKEN.exec(headers.authorization ?? '')?.[1]
@@ -365,12 +424,13 @@ export class PushGate {
     const account = await this.checkSignIn(token)
     if (!account) return empty(401)
     if (path.startsWith('/push/gmail/')) return this.linking(path, account, body)
+    if (path === '/push/poke') return this.poke(account, body)
     const request = await jsonBody(body, 1_024)
     const device = request?.token
     if (typeof device !== 'string' || !DEVICE.test(device)) return empty(400)
     if (path === '/push/device') {
       if (typeof request.sandbox !== 'boolean') return empty(400)
-      await this.store.addDevice(account.id, device, request.sandbox)
+      await this.store.addDevice(account.id, device, request.sandbox, account.name)
       return empty(204)
     }
     await this.store.removeDevice(account.id, device)
@@ -416,25 +476,77 @@ export class PushGate {
     return empty(204)
   }
 
-  /** Wakes an address's phones now, or once at the end of the quiet gap if it woke them just before. */
-  soon(hash) {
+  /** A phone asking to wake other people's phones. It's answered the same whether or not a name is known,
+   *  so a poke can't be used to find out who has Totality on a phone. */
+  async poke(account, body) {
+    const request = await jsonBody(body, 2_048)
+    const names = request?.to
+    if (!Array.isArray(names) || !names.length || names.length > POKE_NAMES || !names.every((name) => typeof name === 'string' && NAME.test(name))) return empty(400)
     const now = this.clock()
-    const held = this.quiet.get(hash)
+    const used = this.pokes.get(account.id)
+    const window = used && now - used.at < 60_000 ? used : { at: now, count: 0 }
+    if (window.count + names.length > POKES_PER_MINUTE) return empty(429)
+    window.count += names.length
+    this.pokes.set(account.id, window)
+    if (this.pokes.size > 10_000) {
+      for (const [key, value] of this.pokes) if (now - value.at >= 60_000) this.pokes.delete(key)
+    }
+    const ids = []
+    for (const name of new Set(names)) {
+      const id = await this.store.accountNamed(name)
+      if (id && id !== account.id) ids.push(id)
+    }
+    this.waking = Promise.all(ids.map((id) => this.coalesce(`a:${id}`, () => this.wake([id])))).catch(() => 0)
+    return empty(204)
+  }
+
+  /** The Matrix homeserver's note that a room has something new for these pushers. Only the device tokens
+   *  are read. A token that isn't a registered phone is given back as rejected, as the Matrix spec asks,
+   *  so the homeserver drops that pusher. */
+  async matrix(body) {
+    const request = await jsonBody(body, 16_384)
+    const devices = request?.notification?.devices
+    if (!Array.isArray(devices) || devices.length > MATRIX_DEVICES) return empty(400)
+    const rejected = []
+    const waking = []
+    for (const entry of devices) {
+      const token = entry?.pushkey
+      if (typeof token !== 'string') continue
+      const device = MATRIX_APP_IDS.includes(entry?.app_id) && DEVICE.test(token) ? await this.store.device(token) : null
+      if (!device) {
+        rejected.push(token)
+        continue
+      }
+      waking.push(this.coalesce(`d:${token}`, () => this.wakeDevices([device])))
+    }
+    this.waking = Promise.all(waking).catch(() => 0)
+    return json(200, { rejected })
+  }
+
+  /** Runs `run` now, or once at the end of the quiet gap if it ran for `key` just before. */
+  coalesce(key, run) {
+    const now = this.clock()
+    const held = this.quiet.get(key)
     if (held && now - held.at < QUIET_SECONDS * 1000) {
       if (!held.waiting) {
         held.waiting = true
         this.later(() => {
-          this.quiet.set(hash, { at: this.clock(), waiting: false })
-          this.wakeAddress(hash)
+          this.quiet.set(key, { at: this.clock(), waiting: false })
+          this.waking = Promise.resolve(run()).catch(() => 0)
         }, held.at + QUIET_SECONDS * 1000 - now)
       }
-      return
+      return Promise.resolve(0)
     }
-    this.quiet.set(hash, { at: now, waiting: false })
+    this.quiet.set(key, { at: now, waiting: false })
     if (this.quiet.size > 10_000) {
-      for (const [key, value] of this.quiet) if (now - value.at > QUIET_SECONDS * 1000 && !value.waiting) this.quiet.delete(key)
+      for (const [other, value] of this.quiet) if (now - value.at > QUIET_SECONDS * 1000 && !value.waiting) this.quiet.delete(other)
     }
-    this.wakeAddress(hash)
+    return Promise.resolve(run()).catch(() => 0)
+  }
+
+  /** Wakes an address's phones now, or once at the end of the quiet gap if it woke them just before. */
+  soon(hash) {
+    this.coalesce(`g:${hash}`, () => this.wakeAddress(hash))
   }
 
   wakeAddress(hash) {
@@ -445,13 +557,18 @@ export class PushGate {
   /** Wakes every phone of these accounts, and forgets any token Apple says is gone. */
   async wake(accounts) {
     if (!this.apns) return 0
+    const devices = []
+    for (const account of new Set(accounts)) devices.push(...await this.store.devices(account))
+    return this.wakeDevices(devices)
+  }
+
+  async wakeDevices(devices) {
+    if (!this.apns) return 0
     let sent = 0
-    for (const account of new Set(accounts)) {
-      for (const device of await this.store.devices(account)) {
-        const result = await this.apns.wake(device)
-        if (result === 'sent') sent += 1
-        if (result === 'gone') await this.store.forget(device.token)
-      }
+    for (const device of devices) {
+      const result = await this.apns.wake(device)
+      if (result === 'sent') sent += 1
+      if (result === 'gone') await this.store.forget(device.token)
     }
     return sent
   }
@@ -497,7 +614,9 @@ function liveGate() {
     gmail = { addressKey, keys: googleKeys(), clientIDs, pubsubAudience, pubsubSender }
   }
 
-  return new PushGate({ checkSignIn: rememberingSignIns(checkSignIn), store: new PushStore(root), apns, gmail })
+  // Usernames are hashed with a key made from the address key, when there is one, so they last restarts.
+  const nameKey = addressKey && addressKey.length >= 32 ? createHmac('sha256', addressKey).update('push names').digest() : null
+  return new PushGate({ checkSignIn: rememberingSignIns(checkSignIn), store: new PushStore(root, { nameKey }), apns, gmail })
 }
 
 export function serve(gate, port, host = '0.0.0.0') {

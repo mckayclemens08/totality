@@ -68,6 +68,9 @@ public final class SocialModel {
     public var onMessage: (@MainActor (String) -> Void)?
     /// Keeps a private card for someone in Contacts. Only their handle and shown name go over.
     public var contactMaker: (any ContactMaker)?
+    /// Wakes these people's phones after a public like, comment or follow, so their notifications come
+    /// soon (issue 232). Usernames only; their phones ask Social what happened.
+    public var onActivity: (@MainActor ([String]) -> Void)?
     /// Your own Social settings, once loaded.
     public private(set) var settings = SocialSettings()
     /// People waiting for you to approve their follow, while your account is private.
@@ -338,6 +341,7 @@ public final class SocialModel {
         update(post.id) { $0.liked = liked; $0.likes += liked ? 1 : -1 }
         do {
             if post.audience == .everyone { try await server.setLiked(liked, post: post.id) } else { try await privatePosts?.setLiked(liked, post) }
+            if liked && post.audience == .everyone { nudge(post.author) }
         } catch {
             update(post.id) { $0.liked = !liked; $0.likes += liked ? -1 : 1 }
             notice = Self.message(error)
@@ -359,6 +363,7 @@ public final class SocialModel {
         update(post.id) { $0.reposted = on; $0.reposts = max(0, $0.reposts + (on ? 1 : -1)) }
         do {
             try await server.setReposted(on, post: post.id)
+            if on { nudge(post.author) }
             guard let me else { return }
             if on {
                 if !following.contains(where: { $0.id == post.id }) {
@@ -391,6 +396,7 @@ public final class SocialModel {
         do {
             if post.audience == .everyone {
                 try await server.comment(body, on: post.id, replyingTo: parent)
+                nudge(post.author)
             } else {
                 try await privatePosts?.comment(body, on: post, replyingTo: parent)
                 try? await loadFollowing()
@@ -477,10 +483,16 @@ public final class SocialModel {
 
     private static func same(_ a: String, _ b: String) -> Bool { a.lowercased() == b.lowercased() }
 
+    private func nudge(_ username: String) {
+        guard let me, !Self.same(username, me) else { return }
+        onActivity?([username.lowercased()])
+    }
+
     public func setFollowing(_ follow: Bool, _ username: String) async -> Bool {
         do {
             try await server.setFollowing(follow, username)
             if follow { followingSet.insert(username) } else { followingSet.remove(username) }
+            if follow { nudge(username) }
             friends = Set((try? await server.friends()) ?? Array(friends))
             return true
         } catch {

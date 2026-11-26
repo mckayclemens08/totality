@@ -40,10 +40,15 @@ ingress:
   - hostname: usetotality.com
     path: ^/social/(media|stories)/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
     service: http://social-media:8080
-  # Push: a signed-in phone registering or removing its push token or linking a Gmail address, and
-  # Google's Pub/Sub note that a Gmail inbox changed, which has to carry Google's signature. Health stays
-  # private.
+  # Push: a signed-in phone registering or removing its push token, linking a Gmail address, or poking
+  # other accounts awake after a like, comment or follow; and Google's Pub/Sub note that a Gmail inbox
+  # changed, which has to carry Google's signature. Health stays private.
   - hostname: usetotality.com
-    path: ^/push/(device|device/remove|gmail/link|gmail/unlink|gmail/notify)$
+    path: ^/push/(device|device/remove|poke|gmail/link|gmail/unlink|gmail/notify)$
+    service: http://push:8080
+  # The Matrix push gateway: the homeserver's note that a pusher has something new, in the event_id_only
+  # format, so it never carries message text. Only registered phone tokens are woken.
+  - hostname: usetotality.com
+    path: ^/_matrix/push/v1/notify$
     service: http://push:8080
   - service: http_status:404
