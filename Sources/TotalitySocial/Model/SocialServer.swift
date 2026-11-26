@@ -182,6 +182,7 @@ public struct RestSocialServer: SocialServer {
         let muted: Bool?
         let can_comment: Bool?
         let can_message: Bool?
+        let links: [String]?
     }
 
     struct SettingsRow: Decodable {
@@ -447,6 +448,7 @@ public struct RestSocialServer: SocialServer {
             p.requested = $0.requested ?? false
             p.privateAccount = $0.private_account ?? false
             p.muted = $0.muted ?? false
+            p.links = $0.links ?? []
             p.canComment = $0.can_comment ?? true
             p.canMessage = $0.can_message ?? true
             return p

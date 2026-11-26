@@ -152,6 +152,8 @@ public struct SocialProfile: Hashable, Sendable {
     /// Whether their settings let you comment on their posts, or message them.
     public var canComment = true
     public var canMessage = true
+    /// Their https links, as the server stored them. Checked again by `ProfileLinks.safe` before showing.
+    public var links: [String] = []
 
     public init(
         username: String, displayName: String?, bio: String?, photoKey: String? = nil, posts: Int = 0,

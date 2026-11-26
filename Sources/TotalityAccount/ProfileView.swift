@@ -53,6 +53,8 @@ struct ProfileHeader: View {
                     .foregroundStyle(theme.textPrimary.color)
                     .padding(.top, Space.s2)
             }
+            ProfileLinkChips(stored: profile.links)
+                .padding(.top, Space.s2)
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
@@ -99,6 +101,7 @@ struct EditProfileView: View {
     let onDone: () -> Void
     @State private var displayName: String
     @State private var bio: String
+    @State private var links: [String]
     @State private var picked: PhotosPickerItem?
 
     init(model: AccountModel, onDone: @escaping () -> Void) {
@@ -106,6 +109,37 @@ struct EditProfileView: View {
         self.onDone = onDone
         _displayName = State(initialValue: model.profile?.displayName ?? "")
         _bio = State(initialValue: model.profile?.bio ?? "")
+        _links = State(initialValue: model.profile?.links ?? [])
+    }
+
+    /// One box per link, with a way to remove it, and an add button until there are five.
+    @ViewBuilder
+    private func linkFields(_ theme: Theme) -> some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
+            Text("Links").font(Typeface.callout).foregroundStyle(theme.textSecondary.color)
+            ForEach(links.indices, id: \.self) { index in
+                HStack(spacing: Space.s2) {
+                    TextField("example.com", text: $links[index])
+                        .modifier(LinkEntry())
+                        .modifier(ProfileField())
+                    Button { links.remove(at: index) } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(theme.textSecondary.color)
+                            .frame(minWidth: Space.s7, minHeight: Space.s7)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove link")
+                }
+            }
+            if links.count < ProfileLinks.maximumCount {
+                Button { links.append("") } label: {
+                    Label("Add a link", systemImage: "plus").font(Typeface.callout)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.accent.color)
+                .frame(minHeight: Space.s7, alignment: .leading)
+            }
+        }
     }
 
     var body: some View {
@@ -136,10 +170,11 @@ struct EditProfileView: View {
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                AccountDetail(text: "Your name, photo, and bio are public and aren't encrypted.")
+                linkFields(theme)
+                AccountDetail(text: "Your name, photo, bio, and links are public and aren't encrypted.")
                 AccountButton(title: "Save", isWorking: model.isWorking) {
                     Task {
-                        if await model.saveProfile(displayName: displayName, bio: bio) { onDone() }
+                        if await model.saveProfile(displayName: displayName, bio: bio, links: links) { onDone() }
                     }
                 }
                 if let notice = model.notice {
@@ -165,6 +200,17 @@ struct EditProfileView: View {
                 self.picked = nil
             }
         }
+    }
+}
+
+/// Web-address keyboard, no capital letters, no autocorrect.
+private struct LinkEntry: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.keyboardType(.URL).textContentType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+        #else
+        content.autocorrectionDisabled()
+        #endif
     }
 }
 

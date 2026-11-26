@@ -178,7 +178,7 @@ public final class AccountModel {
     }
 
     /// Returns whether it saved, so the edit screen knows to close. Blank fields clear what was there.
-    public func saveProfile(displayName: String, bio: String) async -> Bool {
+    public func saveProfile(displayName: String, bio: String, links typed: [String] = []) async -> Bool {
         let name = Self.cleaned(displayName)
         let about = Self.cleaned(bio)
         guard (name?.unicodeScalars.count ?? 0) <= Profile.maximumNameLength else {
@@ -189,11 +189,22 @@ public final class AccountModel {
             notice = "Use \(Profile.maximumBioLength) characters or fewer for your bio."
             return false
         }
+        let links: [String]
+        do {
+            links = try ProfileLinks.normalize(all: typed)
+        } catch let problem as ProfileLinks.Problem {
+            notice = ProfileLinks.message(for: problem)
+            return false
+        } catch {
+            notice = ProfileLinks.message(for: .malformed)
+            return false
+        }
         var saved = false
         await run {
-            try await service.saveProfile(displayName: name, bio: about)
+            try await service.saveProfile(displayName: name, bio: about, links: links)
             profile?.displayName = name
             profile?.bio = about
+            profile?.links = links
             saved = true
         }
         if saved { await refreshWebPage() }
