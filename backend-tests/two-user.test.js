@@ -206,7 +206,8 @@ describe('contact requests', () => {
                              'social_comments_of', 'social_follow', 'social_follow_requests', 'social_following_feed',
                              'social_for_you', 'social_friends', 'social_mark_seen', 'social_my_settings',
                              'social_people', 'social_post', 'social_posts_by', 'social_profile',
-                             'social_remove_follower', 'social_report', 'social_saved', 'social_search_people',
+                             'social_remove_follower', 'social_report', 'social_repost_stats',
+                             'social_reposts_by', 'social_reposts_feed', 'social_saved', 'social_search_people',
                              'social_set_settings', 'social_stories', 'social_story_viewers', 'social_top_tags',
                              'social_unfollow', 'social_view_story'])
   })

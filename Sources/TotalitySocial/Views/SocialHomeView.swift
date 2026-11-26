@@ -260,6 +260,7 @@ struct GridCard: View {
         let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s2) {
                 if !post.media.isEmpty { GridCover(model: model, post: post) }
+                if let by = post.repostedBy { RepostedLine(by: by, me: model.me) }
                 if post.audience != .everyone { AudienceTag(audience: post.audience) }
                 if let title = post.title, !title.isEmpty {
                     Text(title).font(Typeface.headline).foregroundStyle(theme.textPrimary.color).lineLimit(3)
@@ -305,6 +306,7 @@ struct FollowingCard: View {
     var body: some View {
         let theme = Theme.current
         VStack(alignment: .leading, spacing: Space.s3) {
+            if let by = post.repostedBy { RepostedLine(by: by, me: model.me) }
             HStack(spacing: Space.s3) {
                 Button(action: onAuthor) {
                     HStack(spacing: Space.s3) {
@@ -336,6 +338,7 @@ struct FollowingCard: View {
                         .foregroundStyle(post.liked ? theme.accent.color : theme.textSecondary.color)
                 }
                 .accessibilityLabel(post.liked ? "Unlike" : "Like")
+                RepostControl(model: model, post: post)
                 Button(action: onOpen) {
                     Text(post.comments == 1 ? "1 comment" : "\(post.comments) comments").foregroundStyle(theme.textSecondary.color)
                 }
@@ -344,6 +347,41 @@ struct FollowingCard: View {
             .buttonStyle(SoftPress())
         }
         .itemCard()
+    }
+}
+
+/// "Maya Chen reposted" above a post that's in a feed or profile because someone reposted it.
+struct RepostedLine: View {
+    let by: Reposter
+    let me: String?
+
+    var body: some View {
+        Label(by.line(me: me), systemImage: "arrow.2.squarepath")
+            .font(Typeface.caption)
+            .foregroundStyle(Theme.current.textSecondary.color)
+    }
+}
+
+/// The repost button with its count, which undoes a repost when pressed again. On your own post, and on
+/// anything that isn't public, there's nothing to press: it only shows how many reposted yours.
+struct RepostControl: View {
+    let model: SocialModel
+    let post: SocialPost
+
+    var body: some View {
+        let theme = Theme.current
+        if post.canRepost(by: model.me) {
+            Button { Task { await model.toggleRepost(post) } } label: {
+                Label(post.reposts == 0 ? "Repost" : "\(post.reposts)", systemImage: "arrow.2.squarepath")
+                    .foregroundStyle(post.reposted ? theme.accent.color : theme.textSecondary.color)
+            }
+            .accessibilityLabel(post.reposted ? "Undo repost" : "Repost")
+            .accessibilityValue(post.reposts == 1 ? "1 repost" : "\(post.reposts) reposts")
+        } else if post.reposts > 0 {
+            Label("\(post.reposts)", systemImage: "arrow.2.squarepath")
+                .foregroundStyle(theme.textSecondary.color)
+                .accessibilityLabel(post.reposts == 1 ? "1 repost" : "\(post.reposts) reposts")
+        }
     }
 }
 

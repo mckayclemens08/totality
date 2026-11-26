@@ -147,6 +147,12 @@ struct PostDetailView: View {
                             .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                     }
                 }
+                if post.canRepost(by: model.me) || post.reposts > 0 {
+                    RepostControl(model: model, post: post)
+                        .font(Typeface.callout)
+                        .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
+                        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                }
                 Text(post.comments == 1 ? "1 comment" : "\(post.comments) comments")
                     .font(Typeface.callout)
                     .foregroundStyle(theme.textSecondary.color)

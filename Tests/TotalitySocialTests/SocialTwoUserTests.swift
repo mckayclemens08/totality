@@ -114,6 +114,76 @@ import TotalityCore
         #expect(world.posts.isEmpty)
     }
 
+    // MARK: Reposts
+
+    @Test("A repost reaches the reposter's followers as 'reposted by', counts, and goes when undone")
+    func repostsReachFollowersAndUndo() async throws {
+        let maya = device("maya"), jonah = device("jonah"), priya = device("priya")
+        // Priya follows Jonah only. Maya posts publicly; Jonah follows Maya.
+        await jonah.load(); #expect(await jonah.setFollowing(true, "maya"))
+        await priya.load(); #expect(await priya.setFollowing(true, "jonah"))
+        await maya.load()
+        #expect(await maya.publish(.everyone, title: "Trailhead at dawn", body: "Frost on the boardwalk."))
+        await jonah.load()
+        let original = try #require(jonah.following.first)
+        await jonah.toggleRepost(original)
+        #expect(jonah.post(original.id)?.reposted == true)
+
+        await priya.load()
+        let seen = try #require(priya.following.first { $0.id == original.id })
+        #expect(seen.repostedBy?.handle == "jonah")
+        #expect(seen.repostedBy?.line(me: priya.me) == "jonah reposted")
+        #expect(seen.reposts == 1 && !seen.reposted)
+        // Priya reposts it too, which Maya sees as a count of two, and an own post has no repost button.
+        await priya.toggleRepost(seen)
+        await maya.load()
+        let mine = try #require(maya.following.first)
+        #expect(mine.reposts == 2 && mine.repostedBy == nil && !mine.canRepost(by: maya.me))
+
+        // It shows on Jonah's profile, marked, and undo takes it back out of both.
+        let profile = try await priya.posts(by: "jonah")
+        #expect(profile.first?.repostedBy?.handle == "jonah")
+        await jonah.toggleRepost(original)
+        await priya.load()
+        #expect(priya.following.first { $0.id == original.id }?.repostedBy?.handle == "priya")
+        #expect(try await priya.posts(by: "jonah").isEmpty)
+    }
+
+    @Test("You can't repost your own post, a private account's post, or the same post twice")
+    func repostsAreLimited() async throws {
+        let maya = device("maya"), jonah = device("jonah")
+        await maya.load()
+        #expect(await maya.publish(.everyone, title: "Sourdough", body: "Open crumb at last."))
+        let own = try #require(maya.following.first)
+        await maya.toggleRepost(own)
+        #expect(world.reposts["maya"] == nil)
+        await jonah.load()
+        let theirs = try #require(jonah.forYou.first)
+        await jonah.toggleRepost(theirs)
+        await jonah.toggleRepost(theirs) // pressed again: that's the undo
+        #expect(world.reposts["jonah"]?[theirs.id] == nil)
+        await jonah.toggleRepost(theirs)
+        #expect(world.reposts["jonah"]?.count == 1)
+        await jonah.toggleRepost(theirs) // undo
+        world.settings["maya"] = SocialSettings(privateAccount: true)
+        await jonah.toggleRepost(theirs)
+        #expect(world.reposts["jonah"]?[theirs.id] == nil, "a private account's post can't be reposted")
+        #expect(jonah.post(theirs.id)?.reposted == false)
+    }
+
+    @Test("A Friends post can't be reposted")
+    func friendsPostsCannotBeReposted() async throws {
+        let maya = device("maya"), jonah = device("jonah")
+        for (a, b) in [(jonah, "maya"), (maya, "jonah")] { await a.load(); #expect(await a.setFollowing(true, b)) }
+        await maya.load()
+        #expect(await maya.publish(.friends, title: "Spare key", body: "Under the fern."))
+        await jonah.load()
+        let private1 = try #require(jonah.following.first { $0.audience == .friends })
+        #expect(!private1.canRepost(by: jonah.me))
+        await jonah.toggleRepost(private1)
+        #expect(world.reposts["jonah"] == nil)
+    }
+
     // MARK: Profiles
 
     /// The two servers keep separate clocks; this keeps their posts in the order they were made.

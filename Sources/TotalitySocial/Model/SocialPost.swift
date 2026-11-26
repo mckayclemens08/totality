@@ -65,6 +65,12 @@ public struct SocialPost: Identifiable, Hashable, Sendable {
     /// The author hides like counts from everyone else (their setting), so `likes` is meaningless here.
     public var likesHidden = false
     public var saved = false
+    /// How many people reposted it, and whether you did. Only a public post can be reposted.
+    public var reposts = 0
+    public var reposted = false
+    /// Set when this entry is in a feed or profile because someone reposted the post, not because its author
+    /// posted it.
+    public var repostedBy: Reposter?
     /// For You's "Why am I seeing this?" line.
     public var reason: String?
     /// The encrypted room it lives in, for one that isn't public.
@@ -94,6 +100,12 @@ public struct SocialPost: Identifiable, Hashable, Sendable {
         self.media = media
     }
 
+    /// Where the entry sits in a feed: when it was reposted, or else when it was posted.
+    public var feedDate: Date { repostedBy?.date ?? date }
+
+    /// Whether this person may repost it: a public post that isn't theirs.
+    public func canRepost(by me: String?) -> Bool { audience == .everyone && me != nil && author != me }
+
     /// A post's photos. For a video post, that's its one cover photo.
     public var photos: [PostMedia] { media.filter { $0.kind == .photo } }
     public var audio: PostMedia? { media.first { $0.kind == .audio } }
@@ -111,6 +123,26 @@ public struct SocialPost: Identifiable, Hashable, Sendable {
         if body.isEmpty, video != nil { return "Video" }
         if body.isEmpty, !photos.isEmpty { return photos.count == 1 ? "Photo" : "\(photos.count) photos" }
         return body
+    }
+}
+
+/// Who reposted a post, and when. A repost adds no text of its own, so there's nothing to moderate or encrypt.
+public struct Reposter: Hashable, Sendable {
+    public let handle: String
+    public let name: String?
+    public let date: Date
+
+    public init(handle: String, name: String? = nil, date: Date) {
+        self.handle = handle
+        self.name = name
+        self.date = date
+    }
+
+    /// "You reposted" or "Maya Chen reposted".
+    public func line(me: String?) -> String {
+        if handle == me { return "You reposted" }
+        let shown = (name?.trimmingCharacters(in: .whitespaces)).flatMap { $0.isEmpty ? nil : $0 } ?? handle
+        return "\(shown) reposted"
     }
 }
 
