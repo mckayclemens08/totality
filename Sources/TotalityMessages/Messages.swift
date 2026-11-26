@@ -407,7 +407,7 @@ public enum ViewOnce {
     public static func isViewOnce(filename: String) -> Bool { filename == Self.filename }
 
     /// The words under the choice to send one, and in its viewer. Literally what happens.
-    public static let explanation = "Opens once on their phone, then it's deleted for everyone. In a group, the first person to open it removes it for the others. It is removed from the server the next time your app opens this chat. Nothing stops a screenshot or another camera."
+    public static let explanation = "Opens once on their phone, then the sender's app deletes it for everyone. A copy may stay in the phone's media cache until the system clears it. In a group, the first person to open it removes it for the others. It is removed from the server the next time your app opens this chat. Nothing stops a screenshot or another camera."
 }
 
 /// Disappearing messages, per chat and off by default (owner, 2026-11-05).

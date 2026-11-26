@@ -123,7 +123,7 @@ struct OnceTile: View {
 
     private var detail: String? {
         if message.isOwn { return message.opened ? "It's being deleted for everyone." : "Not opened yet" }
-        return message.opened ? "It's gone from this chat." : nil
+        return message.opened ? "It can't be opened again." : nil
     }
 
     private var canOpen: Bool { !message.isOwn && !message.opened && message.decrypted && message.state == .sent }
@@ -184,7 +184,7 @@ struct OnceViewer: View {
                         ProgressView()
                     }
                 }
-                Text(data == nil ? "Opens once, then it's deleted." : "This is the only time you can see it. When you close it, it's gone. Nothing stops a screenshot or another camera.")
+                Text(data == nil ? "Opens once, then it can't be opened again." : "This is the only time you can see it. When you close it, you can't open it again. Nothing stops a screenshot or another camera.")
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
                     .multilineTextAlignment(.center)

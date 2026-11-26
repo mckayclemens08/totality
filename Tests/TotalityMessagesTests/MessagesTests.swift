@@ -1485,6 +1485,8 @@ private func privacyModel(_ privacy: FakePrivacy, chats: [ChatSummary] = []) asy
     #expect(RestMessagePrivacy.error(status: 401, data: Data()) == .notSignedIn)
     #expect(RestMessagePrivacy.error(status: 500, data: body("secret detail")).message == "That didn't go through. Try again.")
     #expect(MessageReach.allCases.map(\.title) == ["Anyone", "Followers", "Friends"])
+}
+
 // MARK: Disappearing up front: markers, view-once photos, new-chat default
 
 @Test func everyMessageThatWillDisappearSaysSo() {
