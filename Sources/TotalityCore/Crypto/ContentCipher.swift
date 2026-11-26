@@ -73,6 +73,13 @@ public enum KeyPurpose: String, Sendable, Hashable {
     case clockDevice = "clock-device"
     /// One card in Contacts (issue 205). Its own purpose, so a card can't pass for anything else.
     case contact
+    /// One hike recorded in Hiking, sealed on the iPhone (issue 240). Its own purpose, so it can't pass for
+    /// anything else.
+    case hike
+    /// A trail saved for offline use: its route, profile and details, sealed on the iPhone.
+    case hikeTrail = "hike-trail"
+    /// The last list of trails nearby, sealed on the iPhone so Hiking opens at once. Never synced.
+    case hikeCache = "hike-cache"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.
