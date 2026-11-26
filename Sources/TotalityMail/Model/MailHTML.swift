@@ -25,14 +25,19 @@ enum MailHTML {
 
     /// The message goes last, so the policy is in force before a byte of it is read.
     static func document(_ html: String, allowingImages: Bool) -> String {
-        let theme = Theme.current
+        // Mail brings its own colours (Gmail writes black text into plain messages), and they can't be
+        // trusted on a dark page. In a dark theme the message sits on a light card with dark text, which
+        // stays readable whatever the sender set; otherwise it follows the theme.
+        let dark = ThemeStore.shared.choice.isDark
+        let theme = dark ? Theme.light : Theme.current
+        let card = dark ? "html{border-radius:12px}body{padding:12px}" : ""
         return """
         <!doctype html><meta http-equiv="Content-Security-Policy" content="\(policy(allowingImages: allowingImages))">\
         <meta http-equiv="x-dns-prefetch-control" content="off">\
         <meta name="viewport" content="width=device-width, initial-scale=1">\
         <meta name="color-scheme" content="light">\
         <style>html{background:\(css(theme.surface));color:\(css(theme.textPrimary));font:-apple-system-body;-webkit-text-size-adjust:100%}\
-        body{margin:0;overflow-wrap:anywhere}img{max-width:100%;height:auto}</style>
+        body{margin:0;overflow-wrap:anywhere}img{max-width:100%;height:auto}\(card)</style>
         """ + withoutLinks(html)
     }
 

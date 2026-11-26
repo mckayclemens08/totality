@@ -103,17 +103,36 @@ public struct WeatherHomeView: View {
                 ScrollView {
                     page(shown)
                         .padding(.horizontal, Space.s4)
-                        // Room for the page dots, which float over the bottom of each page.
-                        .padding(.bottom, model.shown.count > 1 ? Space.s8 : Space.s6)
+                        .padding(.bottom, Space.s6)
                 }
                 .refreshable { await model.pull() }
                 .tag(shown.key)
             }
         }
         #if os(iOS)
-        .tabViewStyle(.page(indexDisplayMode: model.shown.count > 1 ? .always : .never))
-        .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+        // The system's dots sit in their own tinted strip and nearly vanish on the page, so they're drawn
+        // here: the page background runs to the bottom edge, and the dots reserve their own row, so the
+        // last row never sits under them.
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if model.shown.count > 1 { pageDots }
+        }
         #endif
+    }
+
+    private var pageDots: some View {
+        let theme = Theme.current
+        let current = model.current?.key
+        return HStack(spacing: Space.s2) {
+            ForEach(model.shown) { shown in
+                Circle()
+                    .fill(shown.key == current ? theme.accent.color : theme.textTertiary.color)
+                    .frame(width: 8, height: 8)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: Space.s5 + Space.s2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Place \((model.shown.firstIndex { $0.key == current } ?? 0) + 1) of \(model.shown.count)")
     }
 
     @ViewBuilder
