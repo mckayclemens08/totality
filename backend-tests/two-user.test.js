@@ -270,6 +270,8 @@ describe('contact requests', () => {
     await as(db, u2, (q) => q('delete from public.content_objects where id = $1', [places.id]))
     const [kept] = await as(db, u1, (q) => q('select meta_cipher from public.content_objects where id = $1', [places.id]))
     assert.equal(Buffer.from(kept.meta_cipher).toString(), 'sealed places')
+  })
+
   // Issue 204: the Clock's cities, presets and stopwatch are one sealed record of theirs.
   test('one user\'s clock record never reaches another', async () => {
     const [u1, u2] = await trio()
