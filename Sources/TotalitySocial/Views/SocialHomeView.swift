@@ -379,6 +379,8 @@ struct RepostControl: View {
         if post.canRepost(by: model.me) {
             Button { Task { await model.toggleRepost(post) } } label: {
                 Label(post.reposts == 0 ? "Repost" : "\(post.reposts)", systemImage: "arrow.2.squarepath")
+                    .labelStyle(RepostLabelStyle(iconOnly: post.reposts == 0))
+                    .lineLimit(1)
                     .foregroundStyle(post.reposted ? theme.accent.color : theme.textSecondary.color)
             }
             .accessibilityLabel(post.reposted ? "Undo repost" : "Repost")
@@ -387,6 +389,18 @@ struct RepostControl: View {
             Label("\(post.reposts)", systemImage: "arrow.2.squarepath")
                 .foregroundStyle(theme.textSecondary.color)
                 .accessibilityLabel(post.reposts == 1 ? "1 repost" : "\(post.reposts) reposts")
+        }
+    }
+}
+
+/// "Repost" is the icon alone when there's no count yet; the accessibility label still says it.
+private struct RepostLabelStyle: LabelStyle {
+    let iconOnly: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if iconOnly {
+            configuration.icon
+        } else {
+            HStack(spacing: Space.s1) { configuration.icon; configuration.title }
         }
     }
 }

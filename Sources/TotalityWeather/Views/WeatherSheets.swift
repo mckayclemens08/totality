@@ -75,10 +75,12 @@ struct PlacesSheet: View {
                             let ids = offsets.map { model.places[$0].id }
                             Task { for id in ids { await model.remove(id) } }
                         }
-                    } footer: {
+                        // A plain last row, not a Section footer: a footer gets the system's own band.
                         Text("Your places are end-to-end encrypted and follow you to your other devices.")
                             .font(Typeface.caption)
                             .foregroundStyle(theme.textSecondary.color)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
                 }
             }

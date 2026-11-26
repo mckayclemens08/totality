@@ -89,7 +89,9 @@ struct MailConversationView: View {
     private func answer(_ label: String, systemImage: String, action: @escaping () -> Void) -> some View {
         let theme = Theme.current
         return Button(action: action) {
+            // Icon only: three words won't fit across a phone, and never wrap or truncate.
             Label(label, systemImage: systemImage)
+                .labelStyle(.iconOnly)
                 .font(Typeface.callout)
                 .foregroundStyle(theme.textPrimary.color)
                 .lineLimit(1)
@@ -100,6 +102,7 @@ struct MailConversationView: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     private func toggle(_ message: MailMessage) {
