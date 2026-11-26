@@ -82,7 +82,7 @@ public struct AlarmKitAlarms: AlarmScheduling {
     public func start(_ timer: RunningTimer, sound: String?, at now: Date) async throws {
         let left = timer.remaining(at: now)
         // A paused AlarmKit timer resumes where it was; anything else is set afresh for what's left.
-        if AlarmManager.shared.alarms.contains(where: { $0.id == timer.id && $0.state == .paused }) {
+        if ((try? AlarmManager.shared.alarms) ?? []).contains(where: { $0.id == timer.id && $0.state == .paused }) {
             do { try AlarmManager.shared.resume(id: timer.id); return } catch {}
         }
         await cancelTimer(timer.id)
