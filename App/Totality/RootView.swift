@@ -11,6 +11,7 @@ import TotalityReader
 import TotalitySocial
 import TotalityTasks
 import TotalityUI
+import TotalityHiking
 import TotalityWeather
 import TotalityWeb
 
@@ -30,6 +31,7 @@ struct RootView: View {
     @State private var weather: WeatherModel?
     @State private var clock: ClockModel?
     @State private var contacts: ContactsModel?
+    @State private var hiking: HikingModel?
     /// Shared task lists, over Messages' Matrix connection (step 6).
     @State private var sharedLists: SharedListsModel?
     /// Social, made the first time it's opened (issue 149). It needs the sign-in, not the content key.
@@ -292,7 +294,7 @@ struct RootView: View {
             onRemove: { module in Task { await homeChoices.remove(module) } },
             onRestore: { module in Task { await homeChoices.restore(module) } }
         ) { module in
-            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock, .contacts].contains(module) { prepareContent() }
+            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock, .contacts, .hiking].contains(module) { prepareContent() }
             bringUp(module)
         } onSearch: {
             prepareContent()
@@ -347,6 +349,12 @@ struct RootView: View {
         case .contacts:
             if let contacts {
                 ContactsHomeView(model: contacts) { open = nil }
+            } else {
+                contentMessage { open = nil }
+            }
+        case .hiking:
+            if let hiking {
+                HikingHomeView(model: hiking) { open = nil }
             } else {
                 contentMessage { open = nil }
             }
@@ -440,6 +448,7 @@ struct RootView: View {
         glances[.weather] = weather?.glance
         glances[.clock] = clock?.glance
         glances[.contacts] = contacts?.glance
+        glances[.hiking] = hiking?.glance
         glances[.social] = social?.glance
         glances[.mail] = mail.current.glance
         glances[.messages] = messages.glance
@@ -471,6 +480,9 @@ struct RootView: View {
         case .contacts:
             guard let contacts, contacts.phase == .ready else { return nil }
             return AnyView(ContactsHomeTile(model: contacts, size: size) { bringUp(.contacts) })
+        case .hiking:
+            guard let hiking, hiking.phase == .ready else { return nil }
+            return AnyView(HikingHomeTile(model: hiking, size: size) { bringUp(.hiking) })
         case .mail:
             guard mail.current.phase == .ready else { return nil }
             return AnyView(MailHomeTile(model: mail.current, size: size) { bringUp(.mail) })
@@ -569,6 +581,9 @@ struct RootView: View {
             contacts = content.contacts
             refreshers[.contacts] = content.contacts.refresher
             connectContacts(content.contacts, registry: content.registry)
+            hiking = content.hiking
+            // A hike shared from Hiking opens Social's composer with it. Nothing posts until Post is pressed.
+            content.hiking.onShare = { draft in shareToSocial(draft) }
             sharedLists = makeSharedLists(directory: content.registry.profiles)
             content.reader.shared = makeSharedDocs(directory: content.registry.profiles)
             refreshers[.reader] = content.reader.refresher
@@ -637,7 +652,8 @@ struct RootView: View {
         async let weather: Void = self.weather?.load() ?? ()
         async let clock: Void = self.clock?.load() ?? ()
         async let contacts: Void = self.contacts?.load() ?? ()
-        _ = await (reader, calendar, tasks, weather, clock, contacts)
+        async let hiking: Void = self.hiking?.load() ?? ()
+        _ = await (reader, calendar, tasks, weather, clock, contacts, hiking)
     }
 
     /// Each module that keeps itself up to date fetches what's new, quietly.
@@ -681,6 +697,19 @@ struct RootView: View {
 
     /// Shared lists travel in Matrix rooms, which run only where the Matrix SDK is linked.
     /// So the Social tile shows the newest posts without opening Social first. Not while it's off Home.
+    /// Opens Social's composer with a post another module started (issue 240). The person checks it, picks
+    /// who sees it and presses Post; nothing is sent before that.
+    private func shareToSocial(_ draft: PostDraft) {
+        if social == nil { social = makeSocial() }
+        guard let social else {
+            hiking?.notice = "Sign in to share to Social"
+            return
+        }
+        social.draft = draft
+        social.homeRequest = .compose
+        bringUp(.social)
+    }
+
     private func openSocialForHome() async {
         guard !homeChoices.removed.contains(.social), case .signedIn = account?.phase else { return }
         if social == nil { social = makeSocial() }
@@ -727,6 +756,8 @@ struct RootView: View {
         await contacts?.stopForKeyChange()
         contacts = nil
         messages.people.lookup = nil
+        await hiking?.stopForKeyChange()
+        hiking = nil
         reader = nil
         calendar = nil
         web = nil
@@ -985,6 +1016,7 @@ struct RootView: View {
         case .clock: clock?.requestedTab = hit.itemID.hasPrefix("city:") ? .world : .alarms
         case .weather: weather?.requestedPlace = UUID(uuidString: hit.itemID)
         case .contacts: contacts?.requestedCard = UUID(uuidString: hit.itemID)
+        case .hiking: hiking?.requestedItem = hit.itemID
         case .social:
             if social == nil { social = makeSocial() }
             social?.requestedPost = UUID(uuidString: hit.itemID)

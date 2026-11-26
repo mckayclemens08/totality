@@ -879,3 +879,12 @@ Spec: issue 205. Mockup: https://claude.ai/artifact/47x26DUHY5GkZ65DRrgtKv (artb
 - **Birthdays** reach the Calendar as all-day `AgendaItem`s (`AgendaProvider`): the title and the age only.
 - `ContactsModule` is also a `ContentProvider` (a card can be attached through `ContentRef`), a `ModuleSearcher` and a `ModuleRefresher`. Message, Mail and Profile on a card hand over to those modules through the app; Call and Text open the iPhone's own apps.
 - **Private contact discovery** is not built. Hashed lookups leak, so it waits for its own design and security review (PR for issue 205).
+
+## Hiking
+
+Spec: issue 240.
+
+- **Data:** `HikeLog` seals each hike (purpose `hike`), each trail saved for offline use (`hike-trail`) and the last nearby list (`hike-cache`) with the content key, in the `Hiking` folder. Nothing in it syncs in v1, so there's no server row and no migration. `ContentKind.hike` exists so a hike can be named in a `ContentRef`.
+- **Sources:** trails from OpenStreetMap through the public Overpass API, sent a location rounded to 2 decimals, and only when Nearby opens or is pulled. Heights come from Open-Meteo's elevation API, sent only the trail's own points. Recorded heights come from the iPhone's GPS. The map is Apple MapKit. No map tiles are prefetched.
+- **Contract `PostDraft`** (in `TotalityCore`): a title, body, optional JPEG and the source `ContentRef`. Hiking hands one to the app through `HikingModel.onShare`. The app sets `SocialModel.draft` and `homeRequest = .compose`, and Social's composer opens filled in. Nothing posts until the person presses Post.
+- `HikingModule` is a `ModuleSearcher` over saved hikes and trails, on the device.

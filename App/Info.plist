@@ -24,7 +24,7 @@
 	<key>NSContactsUsageDescription</key>
 	<string>Totality copies the contacts you choose and encrypts them on this iPhone.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Shows the weather where you are, lets a site you&apos;re on see your location when you agree, and lets this iPhone watch for the places in your task reminders. Totality&apos;s server never learns where you are. For the weather, a location rounded to about 1 km goes to the weather service.</string>
+	<string>Shows the weather and trails where you are, records your hikes, lets a site you&apos;re on see your location when you agree, and lets this iPhone watch for the places in your task reminders. Totality&apos;s server never learns where you are, and recorded hikes stay on this iPhone. A location rounded to about 1 km goes to the weather service, and to OpenStreetMap to find trails.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Place reminders in Tasks: this iPhone watches for the places you pick, even while Totality is closed, and rings the reminder when you arrive or leave. Where you are never leaves the iPhone.</string>
 	<key>NSMicrophoneUsageDescription</key>
@@ -53,6 +53,7 @@
 	<array>
 		<string>audio</string>
 		<string>fetch</string>
+		<string>location</string>
 		<string>processing</string>
 		<string>remote-notification</string>
 	</array>

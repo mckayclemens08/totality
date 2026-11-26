@@ -9,6 +9,7 @@ import TotalityMessages
 import TotalityPhotos
 import TotalityReader
 import TotalityTasks
+import TotalityHiking
 import TotalityWeather
 import TotalityWeb
 
@@ -92,7 +93,8 @@ enum ContentSetup {
     private static func stores() throws -> (
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
         googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore, home: FileBlobStore,
-        weather: FileBlobStore, weatherCache: FileBlobStore, clock: FileBlobStore, contacts: FileBlobStore
+        weather: FileBlobStore, weatherCache: FileBlobStore, clock: FileBlobStore, contacts: FileBlobStore,
+        hiking: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -115,7 +117,9 @@ enum ContentSetup {
             // The Clock's synced record and its device-only one (issue 204).
             try FileBlobStore(directory: base.appendingPathComponent("Clock", isDirectory: true)),
             // Contacts' cards, one sealed blob each, which sync.
-            try FileBlobStore(directory: base.appendingPathComponent("Contacts", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Contacts", isDirectory: true)),
+            // Hikes, saved trails and the nearby list, sealed. Never synced in v1 (issue 240).
+            try FileBlobStore(directory: base.appendingPathComponent("Hiking", isDirectory: true))
         )
     }
 
@@ -150,6 +154,7 @@ enum ContentSetup {
             SealedArea(store: stores.weatherCache, purposes: ForecastCache.sealedPurposes),
             SealedArea(store: stores.clock, purposes: ClockBook.sealedPurposes),
             SealedArea(store: stores.contacts, purposes: ContactVault.sealedPurposes),
+            SealedArea(store: stores.hiking, purposes: HikeLog.sealedPurposes),
         ])
     }
 
@@ -167,7 +172,7 @@ enum ContentSetup {
     ) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, tasks: TasksModel, areas: [any SyncArea],
         registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook, weather: WeatherModel, clock: ClockModel,
-        contacts: ContactsModel
+        contacts: ContactsModel, hiking: HikingModel
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -210,6 +215,12 @@ enum ContentSetup {
         let deviceContacts: (any DeviceContacts)? = nil
         #endif
         let contacts = ContactsModel(vault: contactVault, device: deviceContacts, defaults: defaults())
+        let hikeLog = HikeLog(store: stores.hiking, rootKey: rootKey)
+        #if os(iOS)
+        let hiking = HikingModel(log: hikeLog, location: SystemHikeLocation())
+        #else
+        let hiking = HikingModel(log: hikeLog, location: nil)
+        #endif
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
@@ -237,6 +248,7 @@ enum ContentSetup {
                 vault: contactVault, directory: contacts.directory, refresh: { await refresh(.contacts) },
                 changed: { @MainActor [weak contacts] in await contacts?.load() }
             ),
+            HikingModule(log: hikeLog),
         ], profiles: AccountSetup.profiles)
         contacts.profiles = AccountSetup.profiles
         contacts.taskMaker = registry.taskMaker
@@ -269,7 +281,8 @@ enum ContentSetup {
             home,
             weather,
             clock,
-            contacts
+            contacts,
+            hiking
         )
     }
 

@@ -23,6 +23,7 @@
 		A1B2C3D400000000000000D0 /* TotalityWeather in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000D1 /* TotalityWeather */; };
 		A1B2C3D400000000000000E0 /* TotalityClock in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000E1 /* TotalityClock */; };
 		A1B2C3D400000000000000E2 /* TotalityContacts in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000E3 /* TotalityContacts */; };
+		A1B2C3D400000000000000F0 /* TotalityHiking in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000F1 /* TotalityHiking */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -69,6 +70,7 @@
 				A1B2C3D400000000000000D0 /* TotalityWeather in Frameworks */,
 				A1B2C3D400000000000000E0 /* TotalityClock in Frameworks */,
 				A1B2C3D400000000000000E2 /* TotalityContacts in Frameworks */,
+				A1B2C3D400000000000000F0 /* TotalityHiking in Frameworks */,
 				A1B2C3D4000000000000001A /* TotalityAccount in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -131,6 +133,7 @@
 				A1B2C3D400000000000000D1 /* TotalityWeather */,
 				A1B2C3D400000000000000E1 /* TotalityClock */,
 				A1B2C3D400000000000000E3 /* TotalityContacts */,
+				A1B2C3D400000000000000F1 /* TotalityHiking */,
 				A1B2C3D40000000000000019 /* TotalityAccount */,
 			);
 			productName = Totality;
@@ -416,6 +419,10 @@
 		A1B2C3D400000000000000E3 /* TotalityContacts */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TotalityContacts;
+		};
+		A1B2C3D400000000000000F1 /* TotalityHiking */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TotalityHiking;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
