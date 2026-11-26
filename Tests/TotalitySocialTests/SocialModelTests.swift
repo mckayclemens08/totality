@@ -18,6 +18,17 @@ import TotalityCore
         #expect(PostTags.find(in: (1...12).map { "#t\($0)" }.joined(separator: " ")).count == 10)
     }
 
+    @Test func tagLinksAndTagLineSkipWhatTheTextHas() {
+        let text = "Rye loaf #Baking today, mail a#b"
+        let linked = PostTags.linked(text)
+        let links = linked.runs.compactMap { $0.link }
+        #expect(links.count == 1)
+        #expect(links.first.flatMap(PostTags.tag(from:)) == "baking")
+        #expect(String(linked.characters) == text)
+        #expect(PostTags.tag(from: URL(string: "https://example.com")!) == nil)
+        #expect(PostTags.notInText(["baking", "bread"], text: text) == ["bread"])
+    }
+
     @Test func handlesParse() {
         #expect(Handle.parse("@Maya_Cooks ") == "maya_cooks")
         #expect(Handle.parse("ab") == nil)
