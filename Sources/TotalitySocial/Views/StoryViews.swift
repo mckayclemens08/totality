@@ -1,6 +1,5 @@
 import AVFoundation
 import CoreTransferable
-import PhotosUI
 import SwiftUI
 import TotalityCore
 import TotalityUI
@@ -393,21 +392,6 @@ struct StoryViewersSheet: View {
 
 // MARK: Picking a video
 
-/// A video from the photo library, as a file this app can read.
-struct PickedMovie: Transferable {
-    let url: URL
-
-    static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(contentType: .movie) { movie in
-            SentTransferredFile(movie.url)
-        } importing: { received in
-            let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + received.file.pathExtension)
-            try FileManager.default.copyItem(at: received.file, to: copy)
-            return PickedMovie(url: copy)
-        }
-    }
-}
-
 /// Picking, trimming and making small one video, for a post or a story. The original stays where it was;
 /// only the made-small copy of the kept part is ever sent.
 @MainActor
@@ -423,14 +407,15 @@ final class VideoPick {
 
     var attachments: [Attachment] { prepared.map { [$0.video, $0.cover] } ?? [] }
 
-    func pick(_ item: PhotosPickerItem) async {
+    /// Takes a video the shared chooser opened as a file. Nil means it couldn't be opened.
+    func pick(_ file: URL?) async {
         discard()
         state = .preparing
         do {
-            guard let movie = try await item.loadTransferable(type: PickedMovie.self) else { throw SocialError.failed("That video couldn't be opened.") }
-            source = movie.url
-            originalBytes = ((try? FileManager.default.attributesOfItem(atPath: movie.url.path)[.size]) as? Int) ?? 0
-            length = try await VideoPrep.length(of: movie.url)
+            guard let file else { throw SocialError.failed("That video couldn't be opened.") }
+            source = file
+            originalBytes = ((try? FileManager.default.attributesOfItem(atPath: file.path)[.size]) as? Int) ?? 0
+            length = try await VideoPrep.length(of: file)
             range = TrimRange.clamped(start: 0, end: length, length: length)
             await prepare()
         } catch {
@@ -468,7 +453,7 @@ final class VideoPick {
 /// go up at.
 struct VideoPickSection: View {
     let pick: VideoPick
-    @State private var chosen: PhotosPickerItem?
+    @State private var choosing = false
     @State private var start: Double = 0
     @State private var end: Double = 0
 
@@ -495,7 +480,7 @@ struct VideoPickSection: View {
                 }
             }
             HStack(spacing: Space.s2) {
-                PhotosPicker(selection: $chosen, matching: .videos) {
+                Button { choosing = true } label: {
                     PickLabel(text: pick.source == nil ? "Choose a video" : "Choose another")
                 }
                 .buttonStyle(SoftPress())
@@ -522,14 +507,10 @@ struct VideoPickSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.highlight.color, in: shape)
         .neumorphic(.raised, in: shape)
-        .onChange(of: chosen) { _, item in
-            guard let item else { return }
-            Task {
-                await pick.pick(item)
-                start = pick.range.start
-                end = pick.range.end
-                chosen = nil
-            }
+        .photoChooser(isPresented: $choosing, kinds: .videos) { media in
+            if case .video(let url)? = media.first { await pick.pick(url) } else { await pick.pick(nil) }
+            start = pick.range.start
+            end = pick.range.end
         }
         .onAppear { start = pick.range.start; end = pick.range.end }
     }
@@ -597,7 +578,7 @@ struct StoryComposer: View {
     @State private var background: StoryBackground = .accent
     @State private var audience: Audience = .everyone
     @State private var photo: Attachment?
-    @State private var pickedPhoto: PhotosPickerItem?
+    @State private var choosingPhoto = false
     @State private var photoProblem: String?
     @State private var video = VideoPick()
     @State private var sharing = false
@@ -678,17 +659,13 @@ struct StoryComposer: View {
         }
         .background(theme.bg.color.ignoresSafeArea())
         .sheet(isPresented: $editingCloseFriends) { CloseFriendsView(model: model) { editingCloseFriends = false } }
-        .onChange(of: pickedPhoto) { _, item in
-            guard let item else { return }
-            Task {
-                photoProblem = nil
-                do {
-                    guard let data = try await item.loadTransferable(type: Data.self) else { throw SocialError.failed("That photo couldn't be opened.") }
-                    photo = try await Task.detached(priority: .userInitiated) { try Attachment.photo(data) }.value
-                } catch {
-                    photoProblem = (error as? SocialError)?.message ?? "That photo couldn't be opened."
-                }
-                pickedPhoto = nil
+        .photoChooser(isPresented: $choosingPhoto) { media in
+            photoProblem = nil
+            do {
+                guard case .photo(let data, _)? = media.first else { throw SocialError.failed("That photo couldn't be opened.") }
+                photo = try await Task.detached(priority: .userInitiated) { try Attachment.photo(data) }.value
+            } catch {
+                photoProblem = (error as? SocialError)?.message ?? "That photo couldn't be opened."
             }
         }
         .interactiveDismissDisabled(!text.isEmpty || photo != nil || video.source != nil)
@@ -731,7 +708,7 @@ struct StoryComposer: View {
     private var photoSection: some View {
         let theme = Theme.current
         return VStack(alignment: .leading, spacing: Space.s2) {
-            PhotosPicker(selection: $pickedPhoto, matching: .images) {
+            Button { choosingPhoto = true } label: {
                 StoryPhotoTile(photo: photo)
             }
             .buttonStyle(SoftPress())

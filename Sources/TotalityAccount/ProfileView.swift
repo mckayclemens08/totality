@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 import TotalityCore
 import TotalityUI
@@ -102,7 +101,7 @@ struct EditProfileView: View {
     @State private var displayName: String
     @State private var bio: String
     @State private var links: [String]
-    @State private var picked: PhotosPickerItem?
+    @State private var choosingPhoto = false
 
     init(model: AccountModel, onDone: @escaping () -> Void) {
         self.model = model
@@ -148,7 +147,7 @@ struct EditProfileView: View {
             VStack(alignment: .leading, spacing: Space.s4) {
                 VStack(spacing: Space.s3) {
                     ProfilePicture(url: model.profile?.avatarURL)
-                    PhotosPicker(model.profile?.avatarURL == nil ? "Add photo" : "Change photo", selection: $picked, matching: .images)
+                    Button(model.profile?.avatarURL == nil ? "Add photo" : "Change photo") { choosingPhoto = true }
                         .font(Typeface.callout)
                     if model.profile?.avatarURL != nil {
                         Button("Remove photo") { Task { await model.removePhoto() } }
@@ -189,15 +188,11 @@ struct EditProfileView: View {
         .background(theme.bg.color)
         .navigationTitle("Edit profile")
         .onAppear { model.notice = nil }
-        .onChange(of: picked) {
-            guard let picked else { return }
-            Task {
-                if let picture = try? await picked.loadTransferable(type: Data.self) {
-                    await model.setPhoto(picture)
-                } else {
-                    model.notice = "That picture can't be used. Try another."
-                }
-                self.picked = nil
+        .photoChooser(isPresented: $choosingPhoto) { media in
+            if case .photo(let picture, _)? = media.first {
+                await model.setPhoto(picture)
+            } else {
+                model.notice = "That picture can't be used. Try another."
             }
         }
     }

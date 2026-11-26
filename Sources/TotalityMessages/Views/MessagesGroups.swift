@@ -1,5 +1,5 @@
-import PhotosUI
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// A group's name and photo fields, with the plain note that neither is end-to-end encrypted.
@@ -10,14 +10,14 @@ struct GroupFields: View {
     /// The photo the group already has, already opened.
     var current: Data?
     var onRemovePhoto: (() -> Void)?
-    @State private var picked: PhotosPickerItem?
+    @State private var choosing = false
 
     var body: some View {
         let theme = Theme.current
         let shown = photo ?? current
         VStack(alignment: .leading, spacing: Space.s3) {
             HStack(spacing: Space.s3) {
-                PhotosPicker(selection: $picked, matching: .images) {
+                Button { choosing = true } label: {
                     PhotoChoice(shown: shown)
                 }
                 .buttonStyle(.plain)
@@ -40,12 +40,8 @@ struct GroupFields: View {
             .font(Typeface.caption)
             .foregroundStyle(theme.textSecondary.color)
         }
-        .onChange(of: picked) {
-            guard let item = picked else { return }
-            Task {
-                photo = try? await item.loadTransferable(type: Data.self)
-                picked = nil
-            }
+        .photoChooser(isPresented: $choosing) { media in
+            if case .photo(let data, _)? = media.first { photo = data }
         }
     }
 }

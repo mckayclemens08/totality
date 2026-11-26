@@ -1,7 +1,5 @@
-#if os(iOS)
-import PhotosUI
-#endif
 import SwiftUI
+import TotalityCore
 import TotalityUI
 import UniformTypeIdentifiers
 
@@ -17,9 +15,7 @@ struct MailComposeView: View {
     @State private var importing = false
     @State private var confirmingDiscard = false
     @FocusState private var focus: Focus?
-    #if os(iOS)
-    @State private var photos: [PhotosPickerItem] = []
-    #endif
+    @State private var choosingPhotos = false
 
     enum Focus: Hashable {
         case field(MailField), subject, body
@@ -58,6 +54,7 @@ struct MailComposeView: View {
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { attach(urls) }
         }
+        .photoChooser(isPresented: $choosingPhotos, kinds: .photosAndVideos, limit: 10) { attach($0) }
         .confirmationDialog("Discard this draft?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
             Button("Discard Draft", role: .destructive) {
                 Task {
@@ -316,16 +313,7 @@ struct MailComposeView: View {
         let theme = Theme.current
         return HStack(spacing: Space.s4) {
             Button("Attach a File", systemImage: "paperclip") { importing = true }
-            #if os(iOS)
-            PhotosPicker(selection: $photos, matching: .any(of: [.images, .videos])) {
-                Label("Photos", systemImage: "photo.on.rectangle")
-            }
-            .onChange(of: photos) { _, picked in
-                guard !picked.isEmpty else { return }
-                photos = []
-                Task { await attach(picked) }
-            }
-            #endif
+            Button("Photos", systemImage: "photo.on.rectangle") { choosingPhotos = true }
         }
         .font(Typeface.callout)
         .foregroundStyle(theme.accent.color)
@@ -346,19 +334,26 @@ struct MailComposeView: View {
         }
     }
 
-    #if os(iOS)
-    private func attach(_ items: [PhotosPickerItem]) async {
-        for item in items {
-            let kind = item.supportedContentTypes.first ?? .jpeg
-            guard let data = try? await item.loadTransferable(type: Data.self) else {
-                composer.problem = "A photo couldn't be read, so it wasn't attached."
-                continue
+    /// Attaches what the shared chooser handed back. Mail only ever sees the bytes.
+    private func attach(_ media: [ChosenMedia]) {
+        for one in media {
+            switch one {
+            case .photo(let data, let type):
+                let kind = type.flatMap { UTType($0) } ?? .jpeg
+                let name = "Photo \(composer.draft.attachments.count + 1).\(kind.preferredFilenameExtension ?? "jpg")"
+                composer.attach(name: name, mimeType: kind.preferredMIMEType ?? "application/octet-stream", data: data)
+            case .video(let url):
+                defer { try? FileManager.default.removeItem(at: url) }
+                guard let data = try? Data(contentsOf: url) else {
+                    composer.problem = "A video couldn't be read, so it wasn't attached."
+                    continue
+                }
+                let kind = UTType(filenameExtension: url.pathExtension) ?? .movie
+                let name = "Video \(composer.draft.attachments.count + 1).\(kind.preferredFilenameExtension ?? "mov")"
+                composer.attach(name: name, mimeType: kind.preferredMIMEType ?? "video/quicktime", data: data)
             }
-            let name = "Photo \(composer.draft.attachments.count + 1).\(kind.preferredFilenameExtension ?? "jpg")"
-            composer.attach(name: name, mimeType: kind.preferredMIMEType ?? "application/octet-stream", data: data)
         }
     }
-    #endif
 
     // MARK: Sending
 

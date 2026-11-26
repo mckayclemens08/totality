@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 import TotalityCore
 import TotalityUI
@@ -52,13 +51,11 @@ struct ChatView: View {
     @State private var confirmingLeave = false
     @State private var editingGroup = false
     @State private var invitingToChannel = false
-    @State private var pickedPhoto: PhotosPickerItem?
     @State private var viewing: ChatMessage?
     @State private var viewingOnce: ChatMessage?
     /// Choosing how to send a photo that opens once.
     @State private var choosingOnce = false
     @State private var cameraOnce = false
-    @State private var pickedOnce: PhotosPickerItem?
     @State private var showingOncePhotos = false
     @State private var deleting: ChatMessage?
     @State private var showingCamera = false
@@ -166,22 +163,11 @@ struct ChatView: View {
             await messages.people.want(matrixIDs: Array(otherSenders))
         }
         .sheet(item: $showingPerson) { personSheet($0) }
-        .photosPicker(isPresented: $showingPhotos, selection: $pickedPhoto, matching: .any(of: [.images, .videos]), preferredItemEncoding: .compatible)
-        .onChange(of: pickedPhoto) {
-            guard let item = pickedPhoto else { return }
-            pickedPhoto = nil
-            Task {
-                if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
-                    if let movie = try? await item.loadTransferable(type: PickedMovie.self) {
-                        await model.sendVideo(movie.url)
-                    } else {
-                        model.notice = "That video couldn't be opened."
-                    }
-                } else if let data = try? await item.loadTransferable(type: Data.self) {
-                    await model.sendPhoto(data)
-                } else {
-                    model.notice = "That photo couldn't be opened."
-                }
+        .photoChooser(isPresented: $showingPhotos, kinds: .photosAndVideos) { media in
+            switch media.first {
+            case .video(let url)?: await model.sendVideo(url)
+            case .photo(let data, _)?: await model.sendPhoto(data)
+            case nil: model.notice = "That photo couldn't be opened."
             }
         }
         .sheet(item: $viewing) { message in
@@ -190,16 +176,11 @@ struct ChatView: View {
         .sheet(item: $viewingOnce) { message in
             OnceViewer(message: message, model: model) { viewingOnce = nil }
         }
-        .photosPicker(isPresented: $showingOncePhotos, selection: $pickedOnce, matching: .images, preferredItemEncoding: .compatible)
-        .onChange(of: pickedOnce) {
-            guard let item = pickedOnce else { return }
-            pickedOnce = nil
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self) {
-                    await model.sendPhoto(data, viewOnce: true)
-                } else {
-                    model.notice = "That photo couldn't be opened."
-                }
+        .photoChooser(isPresented: $showingOncePhotos) { media in
+            if case .photo(let data, _)? = media.first {
+                await model.sendPhoto(data, viewOnce: true)
+            } else {
+                model.notice = "That photo couldn't be opened."
             }
         }
         .confirmationDialog("Send a photo that opens once?", isPresented: $choosingOnce, titleVisibility: .visible) {
