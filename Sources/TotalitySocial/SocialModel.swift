@@ -192,6 +192,9 @@ public final class SocialModel {
     private func loadPrivate() async throws {
         guard let privatePosts, privatePosts.unavailableReason == nil, let me else { return }
         let timelines = try await privatePosts.refresh(following: followingSet)
+        // Matrix may not have synced its rooms yet, so none come back. That isn't "no posts": the last good
+        // Friends posts stay until rooms say otherwise, or Home's tile would empty a minute after it filled.
+        if timelines.isEmpty, !privateFeed.isEmpty { return }
         privateFeed = timelines.flatMap(\.posts)
         privateStories = timelines.flatMap(\.stories)
         friends = Set(try await server.friends())

@@ -213,6 +213,15 @@ struct RootView: View {
             bringUp(module)
         }
         #endif
+        #if os(iOS)
+        // Mail seen, going in or out, is what the icon's badge counts from.
+        .onChange(of: open) { old, new in
+            guard old == .mail || new == .mail else { return }
+            MailBadge.shared.markSeen()
+            Task { await NotificationHub.shared.updateBadge() }
+        }
+        #endif
+        .onChange(of: ObjectIdentifier(mail.current)) { Task { await warmMailForHome() } }
         .onOpenURL { url in
             if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
         }
@@ -267,10 +276,15 @@ struct RootView: View {
         await account?.backup?.settleDevice()
         connectSync()
         // So the Messages tile shows who's written without opening Messages first. Not while it's off Home.
-        if !homeChoices.removed.contains(.messages) { Task { await messages.connect() } }
-        await openContentForHome()
-        // So the Social tile shows the newest posts. It reads the network, so launch doesn't wait for it.
-        Task { await openSocialForHome() }
+        // Each tile's first content is waited for, up to the launch cap, so Home opens filled in (owner,
+        // 2026-11-26). Mail shows what's saved at once and checks behind it; Messages and Social read the network.
+        var jobs: [@MainActor () async -> Void] = []
+        if !homeChoices.removed.contains(.messages) { jobs.append { await messages.connect() } }
+        jobs.append { await openContentForHome() }
+        // Content may have opened already, so openContentForHome stopped early; Mail's tile still needs its check.
+        jobs.append { await warmMailForHome() }
+        jobs.append { await openSocialForHome() }
+        await FirstContent.wait(for: jobs, cap: LaunchView.limit)
     }
 
     /// Home, with the open module over it. On iPhone the module slides up as a cover and Home stays
@@ -653,11 +667,7 @@ struct RootView: View {
         prepareContent()
         // Who's here first, so Mail opens its own mailbox straight away, without waiting on the others.
         await tellWhoIsHere()
-        // So the Mail tile has something to show before Mail is opened.
-        if mail.current.phase != .ready, !homeChoices.removed.contains(.mail) {
-            let mail = mail.current
-            Task { await mail.refresh() }
-        }
+        await warmMailForHome(waitForCheck: false)
         async let reader: Void = self.reader?.load() ?? ()
         async let calendar: Void = self.calendar?.load() ?? ()
         async let tasks: Void = self.tasks?.load() ?? ()
@@ -666,6 +676,16 @@ struct RootView: View {
         async let contacts: Void = self.contacts?.load() ?? ()
         async let hiking: Void = self.hiking?.load() ?? ()
         _ = await (reader, calendar, tasks, weather, clock, contacts, hiking)
+    }
+
+    /// So the Mail tile has something to show before Mail is opened. A new mailbox model (another account,
+    /// a new key) needs this too, so it isn't only done when content first opens.
+    private func warmMailForHome(waitForCheck: Bool = true) async {
+        guard reader != nil, !homeChoices.removed.contains(.mail) else { return }
+        let mail = mail.current
+        await mail.showStored()
+        // The check behind it isn't waited for past what's saved, unless nothing is.
+        if mail.phase == .ready || !waitForCheck { Task { await mail.warmForHome() } } else { await mail.warmForHome() }
     }
 
     /// Each module that keeps itself up to date fetches what's new, quietly.

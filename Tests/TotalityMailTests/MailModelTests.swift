@@ -40,6 +40,7 @@ private actor FakeStore: MailStore {
         erased.append(messages)
     }
 
+    func cached() async -> Mailbox? { failure == nil ? mailbox : nil }
     func data(of attachment: UUID) async throws -> Data { Data() }
     func save(_ draft: MailDraft) async throws {}
     func discard(draft: UUID) async throws {}
@@ -183,10 +184,52 @@ private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
 
     @Test func beforeMailOpensTheTileOnlyInvitesYouIn() async {
         let model = MailModel(store: FakeStore(Mailbox(), failure: .noKey))
-        #expect(model.glance == ModuleGlance(lines: ["Checking your mail"], isQuiet: true))
+        #expect(model.glance == ModuleGlance(lines: ["Open to check your mail"], isQuiet: true), "Never claims a check that isn't running")
         await model.load()
         #expect(model.glance == ModuleGlance(lines: ["Open to check your mail"], isQuiet: true), "A key problem is shown in Mail, not on the home page")
         #expect(model.glanceConversation(at: 1) == nil)
+    }
+
+    @Test func theTileSettlesWhenNothingStartedTheCheck() async {
+        let store = FakeStore(Mailbox(address: "mckay@usetotality.com", messages: [message(MailMarks(isUnread: true))]))
+        let model = MailModel(store: store, now: { now })
+        #expect(model.glance.lines != ["Checking your mail"], "Not loading, so it doesn't say so")
+        await model.warmForHome()
+        #expect(model.phase == .ready)
+        #expect(model.glance.lines.first == "1 unread")
+        await model.warmForHome()
+        #expect(model.phase == .ready, "Calling it again is harmless")
+    }
+
+    @Test func aFailedCheckEndsInAnErrorStateNotASpinner() async {
+        let model = MailModel(store: FakeStore(Mailbox(), failure: .unavailable))
+        await model.warmForHome()
+        #expect(model.phase == .failed)
+        #expect(model.glance == ModuleGlance(lines: ["Open to check your mail"], isQuiet: true))
+    }
+
+    @Test func theBadgeCountsOnlyUnreadMailNewSinceMailWasSeen() {
+        let defaults = UserDefaults(suiteName: "MailBadgeTests-\(UUID().uuidString)")!
+        let badge = MailBadge(defaults: defaults)
+        let old = message(MailMarks(isUnread: true))
+        func later(_ marks: MailMarks) -> MailMessage {
+            MailMessage(
+                conversationID: UUID(), from: dana, to: [MailAddress(address: "mckay@usetotality.com")], subject: "Later",
+                date: now.addingTimeInterval(120), body: .plain("Hi"), route: .betweenAccounts, marks: marks
+            )
+        }
+        let fresh = later(MailMarks(isUnread: true))
+        let mailbox = Mailbox(address: "mckay@usetotality.com", messages: [old, fresh])
+        // First run: nothing before now counts, so a 27-message backlog never sits on the icon.
+        #expect(badge.count(in: mailbox, now: now.addingTimeInterval(300)) == 0)
+        badge.markSeen(now: now.addingTimeInterval(-60))
+        #expect(badge.count(in: mailbox, now: now) == 2)
+        badge.markSeen(now: now.addingTimeInterval(60))
+        #expect(badge.count(in: mailbox, now: now) == 1, "Only what arrived after Mail was last seen")
+        let read = later(MailMarks(isUnread: false))
+        #expect(badge.count(in: Mailbox(address: "mckay@usetotality.com", messages: [old, read]), now: now) == 0, "Reading clears it")
+        badge.markSeen(now: now.addingTimeInterval(300))
+        #expect(badge.count(in: mailbox, now: now) == 0, "Opening Mail clears it")
     }
 
     @Test func onlyTheInboxReachesTheHomePage() async {
@@ -551,5 +594,16 @@ private func message(_ marks: MailMarks = MailMarks()) -> MailMessage {
         #expect(model.requestedConversation == id)
         #expect(model.query.isEmpty)
         #expect(model.mailbox.conversation(id, in: model.place) != nil)
+    }
+}
+
+@MainActor
+@Suite struct MailLaunchTests {
+    @Test func savedMailShowsWithoutTheNetwork() async {
+        let store = FakeStore(Mailbox(address: "mckay@usetotality.com", messages: [message(MailMarks(isUnread: true))]))
+        let model = MailModel(store: store, now: { now })
+        await model.showStored()
+        #expect(model.phase == .ready)
+        #expect(model.glance.lines.first == "1 unread", "The tile has mail the moment launch ends")
     }
 }

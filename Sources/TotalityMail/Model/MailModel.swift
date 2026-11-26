@@ -126,6 +126,20 @@ public final class MailModel {
         Array(mailbox.conversations(in: .inbox).prefix(limit))
     }
 
+    /// What's saved on the device, shown without touching the network, so the tile has mail the moment
+    /// the launch screen goes. Does nothing once Mail has something to show.
+    public func showStored() async {
+        guard phase != .ready, let cached = await store.cached(), phase != .ready else { return }
+        mailbox = merged(cached, here: Since())
+        phase = .ready
+    }
+
+    /// Starts the check the Mail tile waits on, if nothing has and Mail isn't loaded. Safe to call again.
+    public func warmForHome() async {
+        guard phase != .ready, !isChecking else { return }
+        await refresh()
+    }
+
     public var homeUnread: Int { mailbox.unreadCount(in: .inbox) }
 
     /// How many senders the small tile lists under the count.
@@ -136,7 +150,8 @@ public final class MailModel {
     /// or the account is shown in Mail itself, never on the home page.
     public var glance: ModuleGlance {
         guard phase == .ready else {
-            if case .loading = phase { return ModuleGlance(lines: ["Checking your mail"], isQuiet: true) }
+            // Only while a check is really out. A mailbox that isn't loading never claims it is.
+            if case .loading = phase, isChecking { return ModuleGlance(lines: ["Checking your mail"], isQuiet: true) }
             return ModuleGlance(lines: ["Open to check your mail"], isQuiet: true)
         }
         let unread = homeUnread
