@@ -51,6 +51,7 @@ struct ChatView: View {
     @State private var pendingSetting: Disappearing?
     @State private var confirmingLeave = false
     @State private var editingGroup = false
+    @State private var invitingToChannel = false
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var viewing: ChatMessage?
     @State private var viewingOnce: ChatMessage?
@@ -75,7 +76,11 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: Space.s2) {
-                        EncryptionNote(isGroup: model.isGroup)
+                        if let access = model.channelAccess {
+                            ChannelNote(access: access, followers: max(0, model.channelMembers - 1))
+                        } else {
+                            EncryptionNote(isGroup: model.isGroup)
+                        }
                         if !model.extraPeople.isEmpty {
                             ExtraPeopleNote(people: model.extraPeople, with: model.otherPerson)
                         }
@@ -83,7 +88,7 @@ struct ChatView: View {
                             DisappearingNote(setting: model.disappearing, changedBy: model.disappearingChangedBy)
                         }
                         if model.loaded && model.messages.isEmpty {
-                            Text("No messages yet. Say hello.")
+                            Text(model.channelAccess == nil ? "No messages yet. Say hello." : "No posts yet.")
                                 .font(Typeface.body)
                                 .foregroundStyle(theme.textSecondary.color)
                                 .padding(.top, Space.s5)
@@ -136,7 +141,11 @@ struct ChatView: View {
             if let reply = model.replyingTo {
                 ReplyBar(message: reply) { model.replyingTo = nil }
             }
-            composer
+            if let access = model.channelAccess, !access.canPost {
+                ChannelFollowerBar(owner: model.channelOwner) { messageOwner() }
+            } else {
+                composer
+            }
         }
         .background(theme.bg.color)
         .navigationTitle(chatTitle)
@@ -210,6 +219,9 @@ struct ChatView: View {
         }
         .addToTasksSheet($taskDraft, maker: messages.taskMaker) { made in model.notice = made.line }
         .toolbar { chatMenu }
+        .sheet(isPresented: $invitingToChannel) {
+            InviteToChannelView(model: messages, chat: model.chatID, members: model.channelMembers) { invitingToChannel = false }
+        }
         .sheet(isPresented: $editingGroup) {
             GroupDetailsView(chat: model, messages: messages) { editingGroup = false }
         }
@@ -345,7 +357,22 @@ struct ChatView: View {
         return messages.people.profile(ofMatrixID: person)?.name ?? model.title
     }
 
+    /// A follower's way to the owner: their private chat, which then shows in the list.
+    private func messageOwner() {
+        guard let owner = model.channelOwner else { return }
+        Task {
+            if await messages.startChat(with: MessagesUsername.display(owner)) != nil { onGone() }
+            else { model.notice = messages.notice; messages.notice = nil }
+        }
+    }
+
     @ToolbarContentBuilder private var chatMenu: some ToolbarContent {
+        if let access = model.channelAccess, access.canInvite {
+            ToolbarItem(placement: .primaryAction) {
+                Button { invitingToChannel = true } label: { Image(systemName: "person.badge.plus") }
+                    .accessibilityLabel("Invite followers")
+            }
+        }
         if !model.isGroup, let person = model.otherPerson, MessagesPeople.handle(of: person) != nil {
             ToolbarItem(placement: .principal) {
                 Button { showingPerson = ShownPerson(id: person) } label: {

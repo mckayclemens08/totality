@@ -15,6 +15,7 @@ public struct MessagesHomeView: View {
     /// What the camera took, waiting for its chat to be chosen.
     @State private var taken: TakenMedia?
     @State private var makingGroup = false
+    @State private var makingChannel = false
     @State private var showingBlocked = false
     @State private var showingPrivacy = false
     @AppStorage(MessagesPreferences.shareReadAndTypingKey) private var shareReadAndTyping = true
@@ -96,6 +97,12 @@ public struct MessagesHomeView: View {
         .sheet(isPresented: $makingGroup) {
             NewGroupView(model: model) { chat in
                 makingGroup = false
+                if let chat { opened = chat }
+            }
+        }
+        .sheet(isPresented: $makingChannel) {
+            NewChannelView(model: model) { chat in
+                makingChannel = false
                 if let chat { opened = chat }
             }
         }
@@ -241,6 +248,7 @@ public struct MessagesHomeView: View {
     private var settingsMenu: some View {
         HeaderMenu("Messages settings", systemImage: "gearshape.fill") {
             Button("New group", systemImage: "person.3") { makingGroup = true }
+            Button("New broadcast channel", systemImage: "megaphone") { makingChannel = true }
             Button("Who can message me", systemImage: "person.crop.circle.badge.checkmark") { showingPrivacy = true }
             Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
             Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
@@ -270,6 +278,11 @@ private struct ChatRow: View {
         HStack(spacing: Space.s3) {
             if let person = chat.otherPerson {
                 PersonFace(photo: messages.people.profile(ofMatrixID: person)?.photo, name: title)
+            } else if chat.isChannel {
+                Image(systemName: "megaphone.fill")
+                    .foregroundStyle(theme.accent.color)
+                    .frame(width: Space.s7, height: Space.s7)
+                    .accessibilityLabel("Broadcast channel")
             } else {
                 GroupAvatar(title: chat.title, location: chat.photo, messages: messages)
             }

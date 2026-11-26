@@ -60,6 +60,18 @@ private final class FakeService: MessagesService, @unchecked Sendable {
         return "!dm-\(username)"
     }
 
+    func startChannel(name: String, admins: [String]) async throws -> String {
+        record("channel \(name) \(admins.joined(separator: ","))")
+        guard admins.allSatisfy(known.contains) else { throw MessagesError.noSuchPerson }
+        return "!channel"
+    }
+
+    var channelMembers = 1
+    func invite(_ usernames: [String], toChannel chat: String) async throws {
+        try ChannelLimits.check(members: channelMembers, adding: usernames.count)
+        record("invite \(usernames.joined(separator: ",")) \(chat)")
+    }
+
     private(set) var openedChannels: [FakeChannel] = []
     func openChat(_ chat: String) async throws -> any ChatChannel {
         let channel = FakeChannel()
@@ -143,6 +155,9 @@ final class FakeChannel: ChatChannel, @unchecked Sendable {
     func rename(_ name: String?) async throws { lock.withLock { names.append(name) } }
     func setPhoto(_ photo: GroupPhoto?) async throws { lock.withLock { groupPhotos.append(photo) } }
     var extraPeople: [String] = []
+    var channelAccess: ChannelAccess?
+    var channelOwner: String?
+    var channelMembers = 0
 
     func observe(messages: @escaping @Sendable ([ChatMessage]) -> Void, typing: @escaping @Sendable ([String]) -> Void) async {
         messages(startingMessages)
