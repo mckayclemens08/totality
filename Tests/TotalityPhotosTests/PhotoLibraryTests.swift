@@ -621,6 +621,46 @@ final class Clock: @unchecked Sendable {
         #expect(model.requestedItem == nil)
     }
 
+    /// The shared chooser lists the library, opens a photo on the device, and leaves Recently Deleted out.
+    @Test @MainActor func theSharedChooserListsAndOpensLibraryPhotos() async throws {
+        let key = try ContentRootKey.generate()
+        let mckay = UUID().uuidString.lowercased()
+        let (library, _) = try newLibrary(account: mckay, key: key, store: FakeStore(), rows: FakeRows())
+        let model = PhotosModel(library: library)
+        let original = samplePhoto(width: 320, height: 200)
+        let added = try await library.add(original)
+        _ = try await library.add(samplePhoto(width: 330, height: 200))
+        let chooser: any PhotoChoosing = model
+        await chooser.refreshChoices()
+        #expect(chooser.unavailableReason == nil)
+        #expect(chooser.choices.count == 2)
+        #expect(chooser.choices.allSatisfy { !$0.isVideo })
+        #expect(try await chooser.photo(added.id) == original)
+        #expect(await chooser.thumbnail(of: added.id) != nil)
+
+        await model.moveToRecentlyDeleted(added)
+        #expect(!chooser.choices.contains { $0.id == added.id })
+    }
+
+    /// Two-user case for the chooser: Dana's chooser on the same device shows none of McKay's photos and
+    /// can't open one, and a closed library says why instead of listing anything.
+    @Test @MainActor func user2sChooserShowsNothingOfUser1s() async throws {
+        let key = try ContentRootKey.generate()
+        let store = FakeStore()
+        let rows = FakeRows()
+        let (hers, _) = try newLibrary(account: UUID().uuidString.lowercased(), key: key, store: store, rows: rows)
+        let herPhoto = try await hers.add(samplePhoto(width: 340, height: 200))
+        let (his, _) = try newLibrary(account: UUID().uuidString.lowercased(), key: key, store: store, rows: rows)
+        let danas = PhotosModel(library: his)
+        await danas.load()
+        #expect(danas.choices.isEmpty)
+        await #expect(throws: (any Error).self) { try await danas.photo(herPhoto.id) }
+
+        let closed = PhotosModel(library: nil, unavailable: PhotosModel.signedOut)
+        #expect(closed.unavailableReason != nil)
+        #expect(closed.choices.isEmpty)
+    }
+
     /// Photos' home tile case for the brief §6 two-user test: Dana's tile on the same device never
     /// shows McKay's photos, and asking it for one of them opens nothing.
     @Test @MainActor func user2sHomeTileShowsNothingOfUser1s() async throws {

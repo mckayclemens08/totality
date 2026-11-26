@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 import TotalityCore
 import TotalityUI
@@ -21,7 +20,7 @@ struct ComposeView: View {
     @State private var posting = false
     @State private var editingCloseFriends = false
     @State private var photos: [Attachment] = []
-    @State private var picked: [PhotosPickerItem] = []
+    @State private var choosingPhotos = false
     @State private var preparing = false
     @State private var photoProblem: String?
     @State private var capture = AudioCapture()
@@ -117,7 +116,7 @@ struct ComposeView: View {
             .fileImporter(isPresented: $importingAudio, allowedContentTypes: [.audio]) { result in
                 if case .success(let url) = result { Task { await capture.pick(url) } }
             }
-            .onChange(of: picked) { _, items in Task { await addPhotos(items) } }
+            .photoChooser(isPresented: $choosingPhotos, limit: MediaLimits.photos - photos.count) { await addPhotos($0) }
             .task { await takeDraft() }
         }
         .interactiveDismissDisabled(!text.isEmpty || !title.isEmpty || !photos.isEmpty || capture.clip != nil || video.source != nil)
@@ -150,7 +149,7 @@ struct ComposeView: View {
                         }
                     }
                     if photos.count < MediaLimits.photos {
-                        PhotosPicker(selection: $picked, maxSelectionCount: MediaLimits.photos - photos.count, matching: .images) {
+                        Button { choosingPhotos = true } label: {
                             AddPhotosLabel(count: photos.count, preparing: preparing)
                         }
                         .buttonStyle(SoftPress())
@@ -188,20 +187,18 @@ struct ComposeView: View {
         preparing = false
     }
 
-    private func addPhotos(_ items: [PhotosPickerItem]) async {
-        guard !items.isEmpty else { return }
+    private func addPhotos(_ media: [ChosenMedia]) async {
+        guard !media.isEmpty else { return }
         preparing = true
         photoProblem = nil
-        for item in items where photos.count < MediaLimits.photos {
+        for case .photo(let data, _) in media where photos.count < MediaLimits.photos {
             do {
-                guard let data = try await item.loadTransferable(type: Data.self) else { throw SocialError.failed("That photo couldn't be opened.") }
                 let prepared = try await Task.detached(priority: .userInitiated) { try Attachment.photo(data) }.value
                 photos.append(prepared)
             } catch {
                 photoProblem = (error as? SocialError)?.message ?? "That photo couldn't be opened."
             }
         }
-        picked = []
         preparing = false
     }
 

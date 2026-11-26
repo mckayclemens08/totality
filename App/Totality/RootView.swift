@@ -149,6 +149,8 @@ struct RootView: View {
                 await refreshAhead()
             }
         }
+        // Every module's photo chooser shows the Photos library first. Modules only see `PhotoChoosing`.
+        .environment(\.photoChooser, photos)
         .onChange(of: ObjectIdentifier(photos), initial: true) {
             refreshers[.photos] = photos.refresher
             currentPhotos.model = photos

@@ -128,17 +128,3 @@ public enum VideoFiles {
         }
     }
 }
-
-/// A video chosen in the photo picker, copied into the temporary folder.
-struct PickedMovie: Transferable {
-    let url: URL
-
-    static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(importedContentType: .movie) { received in
-            let copy = VideoFiles.folder.appendingPathComponent(UUID().uuidString).appendingPathExtension(received.file.pathExtension)
-            try FileManager.default.copyItem(at: received.file, to: copy)
-            VideoFiles.protect(copy)
-            return PickedMovie(url: copy)
-        }
-    }
-}
