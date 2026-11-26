@@ -23,12 +23,15 @@ public struct ChatSummary: Identifiable, Sendable, Equatable {
     public let otherPerson: String?
     /// The Matrix ID of whoever sent the last message, when it wasn't you. A group's row names them.
     public let lastSender: String?
+    /// A broadcast channel: only its owner and admins post.
+    public let isChannel: Bool
 
     public init(
         id: String, title: String, isRequest: Bool = false, from: String? = nil,
         lastMessage: String? = nil, lastActivity: Date? = nil, unread: Int = 0, isGroup: Bool = false,
-        photo: String? = nil, otherPerson: String? = nil, lastSender: String? = nil
+        photo: String? = nil, otherPerson: String? = nil, lastSender: String? = nil, isChannel: Bool = false
     ) {
+        self.isChannel = isChannel
         self.id = id
         self.lastSender = lastSender
         self.otherPerson = otherPerson
@@ -266,6 +269,10 @@ public protocol MessagesService: AnyObject, Sendable {
     func blocked() async throws -> [String]
     func unblock(_ person: String) async throws
     func leave(_ chat: String) async throws
+    /// Starts a broadcast channel: an encrypted room where only you and `admins` can post. Its ID.
+    func startChannel(name: String, admins: [String]) async throws -> String
+    /// Invites people to a channel you own or help run. Refuses past `ChannelLimits.maxMembers`.
+    func invite(_ usernames: [String], toChannel chat: String) async throws
     /// Backs up message keys under the secret from the recovery key, or opens the backup with it, which
     /// also verifies this device. Nil when this device doesn't have the recovery key. Never resets.
     func settleKeys(recoverySecret: String?) async -> MessageKeys
@@ -315,6 +322,27 @@ public protocol ChatChannel: AnyObject, Sendable {
     func markRead(share: Bool) async
     func setTyping(_ typing: Bool) async
     func close()
+    /// Nil in a chat or group. In a broadcast channel, what you can do there.
+    var channelAccess: ChannelAccess? { get }
+    /// The Matrix ID of a channel's owner, so a follower can message them privately.
+    var channelOwner: String? { get }
+    /// People in a channel, followers and admins together, invited ones included.
+    var channelMembers: Int { get }
+}
+
+public extension ChatChannel {
+    var channelAccess: ChannelAccess? { nil }
+    var channelOwner: String? { nil }
+    var channelMembers: Int { 0 }
+}
+
+public extension MessagesService {
+    func startChannel(name: String, admins: [String]) async throws -> String {
+        throw MessagesError.failed("Channels aren't available here.")
+    }
+    func invite(_ usernames: [String], toChannel chat: String) async throws {
+        throw MessagesError.failed("Channels aren't available here.")
+    }
 }
 
 /// Whether this account's message history is backed up under the recovery key, and this device verified.

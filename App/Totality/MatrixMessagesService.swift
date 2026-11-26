@@ -151,7 +151,8 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             return ChatSummary(
                 id: info.id, title: title, lastMessage: text, lastActivity: time, unread: unread,
                 isGroup: !info.isDirect, photo: info.isDirect ? nil : info.avatarUrl,
-                otherPerson: info.isDirect ? info.heroes.first?.userId : nil, lastSender: sender
+                otherPerson: info.isDirect ? info.heroes.first?.userId : nil, lastSender: sender,
+                isChannel: channelAccess(of: room, info: info) != nil
             )
         default:
             return nil
@@ -380,7 +381,9 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             let extra = isGroup ? [] : DirectChatRule.extraPeople(members: await Self.activeMembers(of: room), own: userID, other: other)
             return MatrixChat(
                 client: client, room: room, timeline: try await room.timeline(), title: title, ownUserID: userID,
-                isGroup: isGroup, otherPerson: other, extraPeople: extra, photo: isGroup ? info?.avatarUrl : nil
+                isGroup: isGroup, otherPerson: other, extraPeople: extra, photo: isGroup ? info?.avatarUrl : nil,
+                channelAccess: Self.channelAccess(of: room, info: info), channelOwner: info?.creators?.first,
+                channelMembers: info.map { Int($0.joinedMembersCount + $0.invitedMembersCount) } ?? 0
             )
         } catch {
             throw Self.translate(error)
@@ -470,8 +473,17 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
 
     let photo: String?
     let extraPeople: [String]
+    let channelAccess: ChannelAccess?
+    let channelOwner: String?
+    let channelMembers: Int
 
-    init(client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String, isGroup: Bool, otherPerson: String?, extraPeople: [String], photo: String?) {
+    init(
+        client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String, isGroup: Bool, otherPerson: String?,
+        extraPeople: [String], photo: String?, channelAccess: ChannelAccess? = nil, channelOwner: String? = nil, channelMembers: Int = 0
+    ) {
+        self.channelAccess = channelAccess
+        self.channelOwner = channelOwner
+        self.channelMembers = channelMembers
         self.photo = photo
         self.extraPeople = extraPeople
         self.client = client

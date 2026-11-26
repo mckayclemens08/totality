@@ -228,7 +228,7 @@ public final class MessagesModel {
     }
 
     /// Gives a chat you just made your "new chats" timer, if you picked one.
-    private func applyNewChatDefault(to chat: String) async {
+    func applyNewChatDefault(to chat: String) async {
         let setting = MessagesPreferences.newChatsDisappear(defaults)
         guard setting != .off, let service, let channel = try? await service.openChat(chat) else { return }
         defer { channel.close() }
@@ -472,6 +472,10 @@ public final class ChatModel {
     public var chatID: String { channel.id }
     public var otherPerson: String? { channel.otherPerson }
     public var extraPeople: [String] { channel.extraPeople }
+    /// Nil in a chat or group. In a broadcast channel, what you can do there.
+    public var channelAccess: ChannelAccess? { channel.channelAccess }
+    public var channelOwner: String? { channel.channelOwner }
+    public var channelMembers: Int { channel.channelMembers }
     public private(set) var sendingVideo = false
     private let channel: any ChatChannel
     private var typingSent = false
@@ -612,6 +616,11 @@ public final class ChatModel {
     public func send() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        // The server refuses it too. This just says so before the message is queued.
+        if let access = channel.channelAccess, !access.canPost {
+            notice = ChannelLabels.followerNote
+            return
+        }
         let reply = replyingTo
         draft = ""
         replyingTo = nil
