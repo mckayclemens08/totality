@@ -38,6 +38,25 @@ import TotalityCore
         #expect(phone.friends.isEmpty && phone.followingSet.isEmpty)
     }
 
+    @Test("The Home tile keeps the last good posts when Matrix hasn't synced its rooms yet")
+    func friendsPostsStayWhenARefreshFindsNoRoomsYet() async throws {
+        let maya = device("maya"), jonah = device("jonah")
+        for (a, b) in [(jonah, "maya"), (maya, "jonah")] { await a.load(); #expect(await a.setFollowing(true, b)) }
+        await maya.load()
+        #expect(await maya.publish(.friends, title: "", body: "Sunrise from the ridge."))
+        await jonah.load()
+        #expect(jonah.following.count == 1)
+        // The phone's Matrix connection restarts: it has no rooms for a moment.
+        let saved = matrix.rooms
+        matrix.rooms = [:]
+        await jonah.load()
+        #expect(jonah.following.count == 1, "an empty room list is not an empty feed")
+        #expect(jonah.phase == .ready)
+        matrix.rooms = saved
+        await jonah.load()
+        #expect(jonah.following.count == 1)
+    }
+
     @Test func friendsPostsReachOnlyFriends() async throws {
         let maya = device("maya"), jonah = device("jonah"), priya = device("priya")
         // Jonah and Maya follow each other; Priya follows Maya but Maya doesn't follow back.

@@ -50,7 +50,7 @@ struct BrandGlyph: Shape {
 /// so Home is filled in when it appears (owner, 2026-11-25). It never holds anyone longer than `limit`.
 public struct LaunchView: View {
     /// The longest the launch screen stays up, even when a module is slow to open.
-    public static let limit = Duration.milliseconds(1500)
+    public static let limit = Duration.milliseconds(3500)
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var lit = false

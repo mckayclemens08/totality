@@ -68,7 +68,7 @@ final class MailNotifications: NotificationSource {
     }
 
     func badgeCount() -> Int {
-        mail.current.mailbox.conversations(in: .inbox).filter(\.isUnread).count
+        MailBadge.shared.count(in: mail.current.mailbox)
     }
 
     func prepareToOpen(_ target: NotificationTarget) {

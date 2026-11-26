@@ -164,6 +164,11 @@ public struct Mailbox: Sendable, Equatable {
         conversations(in: place).filter { $0.messages.contains { place.lists($0) && $0.marks.isUnread } }.count
     }
 
+    /// Conversations in a place with unread mail that arrived after `since`: what's new, not the backlog.
+    public func newUnreadCount(in place: MailPlace, since: Date) -> Int {
+        conversations(in: place).filter { $0.messages.contains { place.lists($0) && $0.marks.isUnread && $0.date > since } }.count
+    }
+
     /// What an action changes, keyed by message. Sent mail and drafts stay put unless they're trashed,
     /// so archiving a conversation doesn't empty Sent.
     public func marks(after action: MailAction, on conversations: [MailConversation], now: Date) -> [UUID: MailMarks] {

@@ -124,10 +124,13 @@ public struct SocialHomeTile: View {
     private var content: some View {
         let theme = Theme.current
         if isLoading {
-            VStack(alignment: .leading, spacing: Metric.tileRowGap) {
-                ForEach(0..<(size == .large ? 3 : 1), id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: Radius.sm).fill(theme.textSecondary.color.opacity(0.12)).frame(height: 36)
-                }
+            // Plain words, not a grey bar: a bar reads as an empty field.
+            HStack(spacing: Space.s2) {
+                ProgressView()
+                Text("Loading posts")
+                    .font(Typeface.body)
+                    .foregroundStyle(theme.textSecondary.color)
+                Spacer(minLength: 0)
             }
             .accessibilityLabel("Loading Social")
         } else if posts.isEmpty {
