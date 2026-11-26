@@ -5,7 +5,7 @@ import { mkdtemp, readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
-import { ACCOUNT_CAP, DISK_FLOOR, MAX_FILE, MediaGate, MediaStore, accountFrom, corsHeaders, rememberingSignIns, serve } from './media.mjs'
+import { ACCOUNT_CAP, DISK_FLOOR, MAX_FILE, MAX_VIDEO, STORY_LIFETIME, MediaGate, MediaStore, accountFrom, corsHeaders, rememberingSignIns, serve } from './media.mjs'
 
 const GiB = 1024 ** 3
 const MCKAY = { name: 'mckayclemens', id: randomUUID() }
@@ -14,6 +14,7 @@ const tokens = new Map([['token-mckay', MCKAY], ['token-dana', DANA]])
 
 const jpeg = (size = 2_000) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), randomBytes(size - 4)])
 const m4a = (size = 2_000) => Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from('ftypM4A '), randomBytes(size - 12)])
+const mp4 = (size = 2_000) => Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from('ftypisom'), randomBytes(size - 12)])
 const sealed = (size = 2_000) => randomBytes(size)
 
 async function newGate({ free = 40 * GiB, checkSignIn, cap, daily, clock } = {}) {
@@ -238,12 +239,98 @@ describe('over HTTP', () => {
 
 test('the tunnel carries file paths only, never health', async () => {
   const tunnel = (await readFile(new URL('../cloudflared.yml', import.meta.url))).toString()
-  const rules = [...tunnel.matchAll(/^ +path: (\^\/social\/media\/.*)$/gm)].map((match) => new RegExp(match[1]))
+  const rules = [...tunnel.matchAll(/^ +path: (\^\/social\/.*)$/gm)].map((match) => new RegExp(match[1]))
   assert.equal(rules.length, 1)
   const [rule] = rules
   assert.match(`/social/media/${randomUUID()}/${randomUUID()}`, rule)
+  assert.match(`/social/stories/${randomUUID()}/${randomUUID()}`, rule)
   for (const bad of ['/social/media/health', `/social/media/${randomUUID()}`, `/social/media/${randomUUID()}/${randomUUID()}/x`,
-    `/social/media/${randomUUID()}/../${randomUUID()}`, `/social/media/${randomUUID().toUpperCase()}/${randomUUID()}`]) {
+    `/social/media/${randomUUID()}/../${randomUUID()}`, `/social/media/${randomUUID().toUpperCase()}/${randomUUID()}`,
+    `/social/other/${randomUUID()}/${randomUUID()}`, '/social/stories/health']) {
     assert.doesNotMatch(bad, rule)
   }
+})
+
+describe('video', () => {
+  test('a short video can be much bigger than a photo, and is still checked by its first bytes', async () => {
+    const { gate } = await newGate()
+    const id = randomUUID()
+    assert.equal((await put(gate, MCKAY, id, mp4(MAX_FILE + 1_000), 'video/mp4')).status, 201)
+    const got = await call(gate, 'GET', path(MCKAY, id))
+    assert.equal(got.headers['Content-Type'], 'video/mp4')
+    got.body.destroy?.()
+    assert.equal((await put(gate, MCKAY, randomUUID(), jpeg(), 'video/mp4')).status, 415)
+  })
+
+  test('a photo still stops at its own limit, and a video at its', async () => {
+    const { gate } = await newGate()
+    assert.equal((await put(gate, MCKAY, randomUUID(), jpeg(MAX_FILE + 1), 'image/jpeg')).status, 413)
+    assert.equal((await call(gate, 'PUT', path(MCKAY, randomUUID()), { type: 'video/mp4', body: mp4(20), length: MAX_VIDEO + 1 })).status, 413)
+  })
+
+  test('a sealed file can be as big as a video', async () => {
+    const { gate } = await newGate()
+    assert.equal((await put(gate, MCKAY, randomUUID(), sealed(MAX_FILE + 1_000), 'application/octet-stream')).status, 201)
+  })
+})
+
+describe('stories', () => {
+  async function storyGate(limits = {}) {
+    const root = await mkdtemp(join(tmpdir(), 'totality-stories-'))
+    const store = new MediaStore(join(root, 'posts'))
+    const stories = new MediaStore(join(root, 'stories'), { lifetime: STORY_LIFETIME })
+    const gate = new MediaGate({ checkSignIn: async (token) => tokens.get(token) ?? null, store, stories, diskFree: async () => 40 * GiB, ...limits })
+    return { gate, store, stories }
+  }
+  const storyPath = (owner, id) => `/social/stories/${owner.id}/${id}`
+  const putStory = (gate, owner, id, body, token = 'token-mckay') => call(gate, 'PUT', storyPath(owner, id), { token, type: 'image/jpeg', body })
+
+  test('a story file is read and written like a post file, on its own shelf', async () => {
+    const { gate } = await storyGate()
+    const id = randomUUID()
+    assert.equal((await putStory(gate, MCKAY, id, jpeg())).status, 201)
+    const got = await call(gate, 'GET', storyPath(MCKAY, id), { token: 'token-dana' })
+    assert.equal(got.status, 200)
+    assert.equal(got.headers['Cache-Control'], 'private, max-age=86400')
+    got.body.destroy?.()
+    assert.equal((await call(gate, 'GET', path(MCKAY, id))).status, 404)
+    assert.equal((await putStory(gate, MCKAY, randomUUID(), jpeg(), 'token-dana')).status, 403)
+    assert.equal((await call(gate, 'GET', storyPath(MCKAY, id), { token: null })).status, 401)
+  })
+
+  test('a story file reads as gone once its day is up, and the sweep deletes it', async () => {
+    const { gate, stories } = await storyGate()
+    const id = randomUUID()
+    assert.equal((await putStory(gate, MCKAY, id, jpeg())).status, 201)
+    const later = Date.now() + STORY_LIFETIME + 1_000
+    stories.clock = () => later
+    assert.equal((await call(gate, 'GET', storyPath(MCKAY, id))).status, 404)
+    assert.equal(await stories.expire(), 1)
+    assert.equal(await stories.find(MCKAY.id, id), null)
+    assert.equal(await stories.used(MCKAY.id), 0)
+  })
+
+  test('a fresh story file is kept by the sweep, and post files never expire', async () => {
+    const { gate, store, stories } = await storyGate()
+    const post = randomUUID()
+    await putStory(gate, MCKAY, randomUUID(), jpeg())
+    await put(gate, MCKAY, post, jpeg(), 'image/jpeg')
+    assert.equal(await stories.expire(), 0)
+    store.clock = () => Date.now() + 365 * 24 * 60 * 60 * 1000
+    assert.equal(await store.expire(), 0)
+    assert.notEqual(await store.find(MCKAY.id, post), null)
+  })
+
+  test('stories have their own cap and daily count, apart from posts', async () => {
+    const { gate } = await storyGate({ storyDaily: 1, storyCap: 3_000 })
+    assert.equal((await putStory(gate, MCKAY, randomUUID(), jpeg())).status, 201)
+    assert.equal((await putStory(gate, MCKAY, randomUUID(), jpeg())).status, 429)
+    assert.equal((await putStory(gate, DANA, randomUUID(), jpeg(4_000), 'token-dana')).status, 507)
+    assert.equal((await put(gate, MCKAY, randomUUID(), jpeg(), 'image/jpeg')).status, 201)
+  })
+
+  test('without a story shelf, story paths are not found', async () => {
+    const { gate } = await newGate()
+    assert.equal((await call(gate, 'GET', storyPath(MCKAY, randomUUID()))).status, 404)
+  })
 })

@@ -4,11 +4,11 @@ import TotalityCore
 import TotalityUI
 import UniformTypeIdentifiers
 
-/// A new post: text, up to four photos, or one audio clip. You pick who sees it, each choice with its agreed
-/// label, and nothing is sent until you press Post (non-negotiable 6). Video comes in a later step.
+/// A new post: text, up to four photos, one video, or one audio clip. You pick who sees it, each choice with its agreed
+/// label, and nothing is sent until you press Post (non-negotiable 6).
 struct ComposeView: View {
     enum Kind: String, CaseIterable, Identifiable {
-        case text = "Text", photo = "Photo", audio = "Audio"
+        case text = "Text", photo = "Photo", video = "Video", audio = "Audio"
         var id: String { rawValue }
     }
 
@@ -26,11 +26,13 @@ struct ComposeView: View {
     @State private var photoProblem: String?
     @State private var capture = AudioCapture()
     @State private var importingAudio = false
+    @State private var video = VideoPick()
 
     private var attachments: [Attachment] {
         switch kind {
         case .text: []
         case .photo: photos
+        case .video: video.attachments
         case .audio: capture.clip.map { [$0] } ?? []
         }
     }
@@ -52,12 +54,13 @@ struct ComposeView: View {
                                 posting = true
                                 if await model.publish(audience, title: title, body: text, attachments: attachments) {
                                     capture.discard()
+                                    video.discard()
                                     onClose()
                                 }
                                 posting = false
                             }
                         }
-                        .disabled(posting || preparing || capture.state == .recording
+                        .disabled(posting || preparing || capture.state == .recording || (kind == .video && video.state != .ready)
                                   || PostLimits.problem(title: title, body: text, hasMedia: !attachments.isEmpty) != nil)
                     }
                     HStack(spacing: Space.s2) {
@@ -69,6 +72,7 @@ struct ComposeView: View {
                     switch kind {
                     case .text: EmptyView()
                     case .photo: photoSection
+                    case .video: VideoPickSection(pick: video)
                     case .audio: audioSection
                     }
                     VStack(alignment: .leading, spacing: Space.s2) {
@@ -115,8 +119,8 @@ struct ComposeView: View {
             }
             .onChange(of: picked) { _, items in Task { await addPhotos(items) } }
         }
-        .interactiveDismissDisabled(!text.isEmpty || !title.isEmpty || !photos.isEmpty || capture.clip != nil)
-        .onDisappear { capture.discard() }
+        .interactiveDismissDisabled(!text.isEmpty || !title.isEmpty || !photos.isEmpty || capture.clip != nil || video.source != nil)
+        .onDisappear { capture.discard(); video.discard() }
     }
 
     // MARK: Photos

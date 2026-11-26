@@ -94,8 +94,10 @@ public struct SocialPost: Identifiable, Hashable, Sendable {
         self.media = media
     }
 
+    /// A post's photos. For a video post, that's its one cover photo.
     public var photos: [PostMedia] { media.filter { $0.kind == .photo } }
     public var audio: PostMedia? { media.first { $0.kind == .audio } }
+    public var video: PostMedia? { media.first { $0.kind == .video } }
 
     public var displayName: String {
         guard let authorName, !authorName.trimmingCharacters(in: .whitespaces).isEmpty else { return author }
@@ -106,6 +108,7 @@ public struct SocialPost: Identifiable, Hashable, Sendable {
     public var headline: String {
         if let title, !title.isEmpty { return title }
         if body.isEmpty, audio != nil { return "Audio" }
+        if body.isEmpty, video != nil { return "Video" }
         if body.isEmpty, !photos.isEmpty { return photos.count == 1 ? "Photo" : "\(photos.count) photos" }
         return body
     }

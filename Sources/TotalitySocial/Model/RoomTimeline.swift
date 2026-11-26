@@ -8,6 +8,10 @@ public enum RoomMessage: Equatable, Sendable {
     /// server can't tell a Friends room from a Close-friends one.
     case timeline(Audience)
     case post(id: UUID, title: String?, body: String, tags: [String], date: Date, media: [PostMedia] = [])
+    /// A Friends or Close-friends story. Its file, if any, is sealed and on the story shelf, which deletes it
+    /// after a day; every device stops showing the story after 24 hours. `.delete` takes one down early.
+    case story(id: UUID, kind: SocialStory.Kind, text: String, background: StoryBackground?, media: [PostMedia])
+    /// Removes a post or a story.
     case delete(post: UUID)
     case like(post: UUID, on: Bool)
     case comment(id: UUID, post: UUID, parent: UUID?, body: String)
@@ -25,6 +29,8 @@ public enum RoomMessage: Equatable, Sendable {
         var tags: [String]?
         var date: Double?
         var on: Bool?
+        var kind: String?
+        var background: String?
         /// Each item's key rides here, inside the encryption.
         var media: [PostMedia]?
     }
@@ -35,6 +41,8 @@ public enum RoomMessage: Equatable, Sendable {
         case .timeline(let audience): w = Wire(type: "timeline", audience: audience.rawValue)
         case .post(let id, let title, let body, let tags, let date, let media):
             w = Wire(type: "post", id: id, title: title, body: body, tags: tags, date: date.timeIntervalSince1970, media: media.isEmpty ? nil : media)
+        case .story(let id, let kind, let text, let background, let media):
+            w = Wire(type: "story", id: id, body: text, kind: kind.rawValue, background: background?.rawValue, media: media.isEmpty ? nil : media)
         case .delete(let post): w = Wire(type: "delete", post: post)
         case .like(let post, let on): w = Wire(type: "like", post: post, on: on)
         case .comment(let id, let post, let parent, let body): w = Wire(type: "comment", id: id, post: post, parent: parent, body: body)
@@ -61,6 +69,14 @@ public enum RoomMessage: Equatable, Sendable {
             let tags = (w.tags ?? []).filter { $0.range(of: "^[a-z0-9_]{1,30}$", options: .regularExpression) != nil }
             self = .post(id: id, title: (w.title?.isEmpty ?? true) ? nil : w.title, body: body, tags: Array(tags.prefix(PostTags.limit)),
                          date: Date(timeIntervalSince1970: date), media: media)
+        case "story":
+            let media = w.media ?? []
+            guard let id = w.id, let kind = w.kind.flatMap(SocialStory.Kind.init(rawValue:)) else { return nil }
+            let text = w.body ?? ""
+            let background = w.background.flatMap(StoryBackground.init(rawValue:))
+            if w.background != nil, background == nil { return nil }
+            guard StoryLimits.problem(kind: kind, text: text, media: media, encrypted: true) == nil else { return nil }
+            self = .story(id: id, kind: kind, text: text, background: background, media: media)
         case "delete":
             guard let post = w.post else { return nil }
             self = .delete(post: post)
@@ -90,11 +106,15 @@ public struct RoomTimeline: Equatable, Sendable {
     public let comments: [UUID: [SocialComment]]
     /// Posts this device couldn't open, such as ones sent before it joined.
     public let unreadable: Int
+    /// The owner's stories still inside their 24 hours, oldest first.
+    public var stories: [SocialStory] = []
 
     /// Replays the room's history. Only the owner (power 100 at that point in the history) can set the
     /// audience, post or delete a post; anyone in the room can like and comment. A comment can be removed by
     /// whoever wrote it or by the owner. Each person's last like counts. Posts come back newest first.
-    public static func build(room: String, history: SharedRoomHistory, me: String) -> RoomTimeline {
+    public static func build(room: String, history: SharedRoomHistory, me: String, now: Date = Date()) -> RoomTimeline {
+        var stories: [UUID: SocialStory] = [:]
+        var storyOrder: [UUID] = []
         var levels: [String: Int] = [:]
         var owner: String?
         var audience: Audience?
@@ -127,10 +147,17 @@ public struct RoomTimeline: Equatable, Sendable {
                     // The server's time, not the one written in the post, so an author can't backdate.
                     posts[id] = SocialPost(id: id, author: sender, audience: audience, title: title, body: body, tags: tags, date: date, room: room, media: media)
                     order.append(id)
+                case .story(let id, let kind, let text, let background, let media):
+                    guard isOwner, let audience, stories[id] == nil, posts[id] == nil, !deleted.contains(id) else { continue }
+                    // The server's time, so a story can't be made to last longer than its day.
+                    stories[id] = SocialStory(id: id, author: sender, audience: audience, kind: kind, text: text, background: background,
+                                              media: media, date: date, room: room)
+                    storyOrder.append(id)
                 case .delete(let id):
                     guard isOwner else { continue }
                     deleted.insert(id)
                     posts[id] = nil
+                    stories[id] = nil
                 case .like(let post, let on):
                     guard posts[post] != nil else { continue }
                     likes[post, default: [:]][sender] = on
@@ -162,7 +189,9 @@ public struct RoomTimeline: Equatable, Sendable {
             post.comments = byPost[id]?.count ?? 0
             return post
         }.sorted { $0.date > $1.date }
-        return RoomTimeline(room: room, owner: owner, audience: audience, posts: built, comments: byPost, unreadable: unreadable)
+        var timeline = RoomTimeline(room: room, owner: owner, audience: audience, posts: built, comments: byPost, unreadable: unreadable)
+        timeline.stories = storyOrder.compactMap { stories[$0] }.filter { $0.isLive(at: now) }.sorted { $0.date < $1.date }
+        return timeline
     }
 
     /// Comments oldest first, each reply straight after the comment it answers.
@@ -265,6 +294,20 @@ public final class PrivatePosts {
         let id = UUID()
         try await rooms.post(RoomMessage.post(id: id, title: title, body: body, tags: tags, date: date, media: media).encoded, to: room)
         return id
+    }
+
+    /// A story into your room for the audience. Its file is already sealed, with its key in `media`.
+    public func publishStory(_ audience: Audience, kind: SocialStory.Kind, text: String, background: StoryBackground?,
+                             media: [PostMedia]) async throws -> UUID {
+        let room = try await ownRoom(audience)
+        let id = UUID()
+        try await rooms.post(RoomMessage.story(id: id, kind: kind, text: text, background: background, media: media).encoded, to: room)
+        return id
+    }
+
+    public func deleteStory(_ story: SocialStory) async throws {
+        guard let room = story.room else { return }
+        try await rooms.post(RoomMessage.delete(post: story.id).encoded, to: room)
     }
 
     public func delete(_ post: SocialPost) async throws {
