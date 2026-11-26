@@ -173,16 +173,14 @@ extension NotificationHub: UNUserNotificationCenterDelegate {
     nonisolated public func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        if !notification.request.content.categoryIdentifier.hasPrefix("totality."), let fallback {
-            return await fallback.userNotificationCenter?(center, willPresent: notification) ?? [.banner, .list, .sound]
-        }
-        return [.banner, .list, .sound]
+        // Tasks' reminders, the only others, show the same way.
+        [.banner, .list, .sound]
     }
 
     nonisolated public func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let content = response.notification.request.content
         guard content.categoryIdentifier.hasPrefix("totality."), let target = NotificationTarget(userInfo: content.userInfo) else {
-            await fallback?.userNotificationCenter?(center, didReceive: response)
+            forward(center, response)
             return
         }
         let identifier = response.notification.request.identifier
@@ -191,6 +189,14 @@ extension NotificationHub: UNUserNotificationCenterDelegate {
         await respond(to: target, action: action, text: text)
         // A button finished the job, so the alert leaves the lock screen.
         if action != nil { center.removeDeliveredNotifications(withIdentifiers: [identifier]) }
+    }
+}
+
+extension NotificationHub {
+    /// Hands an alert that isn't the hub's to the delegate that was there before, through the call iOS
+    /// itself would have made.
+    nonisolated func forward(_ center: UNUserNotificationCenter, _ response: UNNotificationResponse) {
+        fallback?.userNotificationCenter?(center, didReceive: response, withCompletionHandler: {})
     }
 }
 
