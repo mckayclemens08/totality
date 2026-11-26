@@ -132,7 +132,7 @@ actor FakeAccountService: AccountService {
         stored = made
         return made
     }
-    func saveProfile(displayName: String?, bio: String?) async throws {
+    func saveProfile(displayName: String?, bio: String?, links: [String]) async throws {
         if let saveError { throw saveError }
         stored?.displayName = displayName
         stored?.bio = bio
@@ -549,7 +549,21 @@ actor FakeAccountService: AccountService {
         #expect(await service.stored?.bio == nil)
     }
 
-    @Test(arguments: [(String(repeating: "n", count: 51), ""), ("", String(repeating: "b", count: 161))])
+    @Test func linksAreNormalisedOnSaveAndUnsafeOnesRefused() async {
+        let service = FakeAccountService(username: "owner")
+        let model = AccountModel(service: service)
+        await model.load()
+        #expect(await model.saveProfile(displayName: "", bio: "", links: ["Example.com/me", "", "https://example.com/me"]))
+        #expect(model.profile?.links == ["https://example.com/me"])
+        for bad in ["javascript:alert(1)", "http://example.com", "https://a.com@b.com"] {
+            #expect(await model.saveProfile(displayName: "", bio: "", links: [bad]) == false)
+            #expect(model.notice != nil)
+        }
+        #expect(await model.saveProfile(displayName: "", bio: "", links: (1...6).map { "s\($0).com" }) == false)
+        #expect(model.profile?.links == ["https://example.com/me"])
+    }
+
+    @Test(arguments: [(String(repeating: "n", count: 51), ""),("", String(repeating: "b", count: 161))])
     func overlongProfilesAreCaughtBeforeSending(name: String, bio: String) async {
         let service = FakeAccountService(username: "owner")
         let model = AccountModel(service: service)

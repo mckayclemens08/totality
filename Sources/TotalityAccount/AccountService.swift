@@ -38,7 +38,7 @@ public protocol AccountService: Sendable {
     func registerDevice() async throws
     func signOut() async throws -> SignOutResult
     func loadProfile() async throws -> Profile
-    func saveProfile(displayName: String?, bio: String?) async throws
+    func saveProfile(displayName: String?, bio: String?, links: [String]) async throws
     /// Replaces the public photo, or removes it when given nil. Returns where the new one is.
     func updatePhoto(_ jpeg: Data?) async throws -> URL?
     /// Whether this account's public web page is up.
@@ -153,12 +153,13 @@ public struct SupabaseAccountService: AccountService {
         }
     }
 
-    public func saveProfile(displayName: String?, bio: String?) async throws {
+    public func saveProfile(displayName: String?, bio: String?, links: [String]) async throws {
         try await mapErrors {
             let owner = try await client.auth.session.user.id
             let edit: [String: AnyJSON] = [
                 "display_name": displayName.map(AnyJSON.string) ?? .null,
                 "bio": bio.map(AnyJSON.string) ?? .null,
+                "links": .array(links.map(AnyJSON.string)),
             ]
             try await client.from("profiles").update(edit).eq("id", value: owner.uuidString).execute()
         }
@@ -274,7 +275,7 @@ public struct SupabaseAccountService: AccountService {
 
     private func profileRow(of owner: UUID) async throws -> ProfileRow? {
         let rows: [ProfileRow] = try await client.from("profiles")
-            .select("handle, display_name, bio, avatar_key")
+            .select("handle, display_name, bio, avatar_key, links")
             .eq("id", value: owner.uuidString)
             .execute()
             .value
@@ -282,7 +283,7 @@ public struct SupabaseAccountService: AccountService {
     }
 
     private func profile(from row: ProfileRow) throws -> Profile {
-        Profile(username: row.handle, displayName: row.display_name, bio: row.bio, avatarURL: try row.avatar_key.map(photoURL))
+        Profile(username: row.handle, displayName: row.display_name, bio: row.bio, avatarURL: try row.avatar_key.map(photoURL), links: ProfileLinks.safe(row.links).map(\.absoluteString))
     }
 
     private struct ProfileRow: Decodable {
@@ -290,6 +291,7 @@ public struct SupabaseAccountService: AccountService {
         let display_name: String?
         let bio: String?
         let avatar_key: String?
+        let links: [String]?
     }
 
     private struct Registered: Decodable {

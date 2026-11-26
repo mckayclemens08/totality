@@ -146,6 +146,7 @@ struct SocialProfileView: View {
             if let bio = profile.bio, !bio.isEmpty {
                 Text(bio).font(Typeface.body).foregroundStyle(theme.textPrimary.color)
             }
+            ProfileLinkChips(stored: profile.links)
             // Three even columns, number above label. A private account's lists are only for it and its
             // approved followers; others see the same numbers without the tap.
             let canOpen = isMe || !profile.isClosed
