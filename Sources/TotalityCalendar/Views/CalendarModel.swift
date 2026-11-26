@@ -1036,7 +1036,8 @@ extension CalendarModel {
         let end = last.adding(days: 1, in: display).start(in: display)
         let items = await registry.agenda(from: start, to: end, except: .calendar)
         var byDay: [CalendarDay: [CalendarEntry]] = [:]
-        for item in items where !item.isAllDay {
+        // All-day items, like a birthday from Contacts, go in the all-day row; the timeline draws only timed ones.
+        for item in items {
             let entry = CalendarEntry(source: .linked(item))
             for day in entry.days(in: display) { byDay[day, default: []].append(entry) }
         }
