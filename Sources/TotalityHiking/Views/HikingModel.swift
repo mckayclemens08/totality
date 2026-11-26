@@ -224,7 +224,11 @@ public final class HikingModel {
 
     /// Takes the hike off the list at once and deletes it for good after five seconds, unless Undo is pressed.
     public func delete(_ hike: Hike) {
-        finishPendingDelete()
+        // A delete already waiting goes through now, so only the newest can be undone.
+        deleting?.cancel()
+        if let earlier = recentlyDeleted, let log {
+            Task { try? await log.delete(hike: earlier.id) }
+        }
         hikes.removeAll { $0.id == hike.id }
         recentlyDeleted = hike
         deleting = Task { [weak self] in
