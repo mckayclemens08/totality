@@ -21,6 +21,8 @@
 	<string>Rings the alarms and timers you set in the Clock, through silent mode and Focus, on your Lock Screen.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Takes a photo or short video to send in Messages, and lets a site you're on use your camera when you agree. Totality keeps nothing you don't send.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Totality copies the contacts you choose and encrypts them on this iPhone.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Shows the weather where you are, lets a site you&apos;re on see your location when you agree, and lets this iPhone watch for the places in your task reminders. Totality&apos;s server never learns where you are. For the weather, a location rounded to about 1 km goes to the weather service.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
