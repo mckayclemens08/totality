@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import TotalityCalendar
 import TotalityCore
 import TotalityMail
 import TotalityMessages
@@ -21,6 +22,12 @@ enum NotificationsSetup {
         Task { await hub.askPermission() }
     }
 
+    /// Calendar joins so a tap on one of its alerts opens that event. Its alerts are planned on the phone
+    /// by the Calendar itself, so it has nothing to fetch.
+    static func connect(calendar: CalendarModel) {
+        NotificationHub.shared.register(CalendarNotifications(model: calendar))
+    }
+
     /// Social joins once its model is made. Its likes, comments and follows poke the other person's phones.
     static func connect(social: SocialModel) {
         NotificationHub.shared.register(SocialNotifications(model: social))
@@ -36,6 +43,24 @@ enum NotificationsSetup {
         for module in Array(hub.sources.keys) { hub.unregister(module) }
         AppRefresh.shared.extras["notifications"] = nil
         Task { await hub.updateBadge() }
+    }
+}
+
+/// Calendar's part: taps. Alerts are set by `SystemReminders` and Snooze is done by the hub.
+@MainActor
+final class CalendarNotifications: NotificationSource {
+    let module = ModuleID.calendar
+    let kinds: [NotificationKind] = []
+    private let model: CalendarModel
+
+    init(model: CalendarModel) {
+        self.model = model
+    }
+
+    func newNotifications() async -> [AppNotification] { [] }
+
+    func prepareToOpen(_ target: NotificationTarget) {
+        if target.kind == "event" { model.requestAlertTarget(target.item) }
     }
 }
 

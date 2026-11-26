@@ -94,8 +94,16 @@ public struct EventDraft: Equatable, Sendable {
     public var isAllDay = false
     public var frequency: RepeatRule.Frequency?
     public var until: Date?
-    public var reminderMinutes: Int?
+    /// Minutes before the start for each alert, earliest ring first. All-day ones count back from the
+    /// all-day hour on the Notifications page.
+    public var alerts: [Int] = []
     public var attachments: [ContentRef] = []
+
+    /// The first alert alone, for callers that only know one.
+    public var reminderMinutes: Int? {
+        get { alerts.first }
+        set { alerts = newValue.map { [$0] } ?? [] }
+    }
 
     public init(start: Date, end: Date) {
         self.start = start
@@ -117,7 +125,7 @@ public struct EventDraft: Equatable, Sendable {
         }
         frequency = event.repeatRule?.frequency
         until = event.repeatRule?.until?.start(in: display)
-        reminderMinutes = event.reminderMinutes
+        alerts = event.alerts
         attachments = event.attachments
     }
 }
@@ -200,6 +208,12 @@ public final class CalendarModel {
     public var isSynced = false
     /// A search result to open. The home screen takes it from here.
     public var requestedHit: SearchHit?
+    /// Alerts the last sync left out because iOS holds only so many at once (the Calendar says so).
+    public private(set) var skippedAlerts = 0
+    /// What new events start with and when all-day alerts ring, read from the Notifications page. A test
+    /// can replace it.
+    @ObservationIgnored public var alertDefaults: () -> CalendarAlertDefaults = { NotificationHub.shared.preferences.calendarAlerts }
+    private nonisolated static let deviceAlertsKey = "calendar.deviceAlerts"
     private var requestedDay: CalendarDay?
 
     public let display: Calendar
@@ -570,7 +584,7 @@ public final class CalendarModel {
         let day = mode == .schedule ? today : selectedDay
         if day == today {
             let base = display.nextDate(after: now(), matching: DateComponents(minute: 0), matchingPolicy: .nextTime) ?? now()
-            return EventDraft(start: base, end: base.addingTimeInterval(3_600))
+            return withDefaultAlerts(EventDraft(start: base, end: base.addingTimeInterval(3_600)))
         }
         return newDraft(on: day, hour: 9)
     }
@@ -578,7 +592,52 @@ public final class CalendarModel {
     /// For an hour tapped on the timeline.
     public func newDraft(on day: CalendarDay, hour: Int) -> EventDraft {
         let base = display.date(bySettingHour: hour, minute: 0, second: 0, of: day.start(in: display)) ?? now()
-        return EventDraft(start: base, end: base.addingTimeInterval(3_600))
+        return withDefaultAlerts(EventDraft(start: base, end: base.addingTimeInterval(3_600)))
+    }
+
+    /// New events start with the alerts chosen on the Notifications page. Events that already exist keep
+    /// their own.
+    private func withDefaultAlerts(_ draft: EventDraft) -> EventDraft {
+        var draft = draft
+        draft.alerts = alertDefaults().defaults(allDay: draft.isAllDay)
+        return draft
+    }
+
+    /// What a new event starts with when it's switched between timed and all-day, if the alerts are still the
+    /// ones the old kind started with.
+    public func alertsAfterSwitching(_ alerts: [Int], toAllDay: Bool) -> [Int] {
+        let settings = alertDefaults()
+        return alerts == settings.defaults(allDay: !toAllDay) ? settings.defaults(allDay: toAllDay) : alerts
+    }
+
+    // MARK: Alerts on Google events
+
+    /// Google's events can't hold Totality's alerts and Totality never writes them back, so they're kept on
+    /// this iPhone only, by the event's ID. Only offsets are stored, never words.
+    private var deviceAlerts: [String: [Int]] {
+        (defaults.dictionary(forKey: Self.deviceAlertsKey) as? [String: [Int]]) ?? [:]
+    }
+
+    public func deviceAlerts(for key: GoogleEventKey) -> [Int] {
+        deviceAlerts[GoogleCalendars.deviceID(account: key.account, calendar: key.calendar, event: key.event.id)] ?? []
+    }
+
+    public func setDeviceAlerts(_ alerts: [Int], for key: GoogleEventKey) async {
+        var all = deviceAlerts
+        let id = GoogleCalendars.deviceID(account: key.account, calendar: key.calendar, event: key.event.id)
+        let list = Array(AlertOffset.sorted(alerts).prefix(AlertOffset.maxPerEvent))
+        all[id] = list.isEmpty ? nil : list
+        defaults.set(all, forKey: Self.deviceAlertsKey)
+        if !list.isEmpty, await !reminders.requestPermission() {
+            notice = "Notifications are off for Totality, so this event's alerts won't show."
+        }
+        await syncReminders()
+    }
+
+    /// A tap on an alert: opens the event it was for, through the same check a search result gets.
+    public func requestAlertTarget(_ item: String) {
+        guard let cut = item.lastIndex(of: "-"), let seconds = Double(item[item.index(after: cut)...]) else { return }
+        requestedHit = SearchHit(module: .calendar, itemID: item, title: "", date: Date(timeIntervalSince1970: seconds))
     }
 
     public func draft(for occurrence: EventOccurrence) -> EventDraft {
@@ -593,10 +652,10 @@ public final class CalendarModel {
         let event = CalendarEvent(
             title: Self.cleaned(draft.title), location: Self.cleaned(draft.location), notes: draft.notes,
             start: times.start, end: times.end, isAllDay: draft.isAllDay, timeZoneID: times.zone,
-            repeatRule: rule(from: draft), reminderMinutes: draft.reminderMinutes, attachments: draft.attachments,
+            repeatRule: rule(from: draft), alertMinutes: draft.alerts, attachments: draft.attachments,
             createdAt: now(), updatedAt: now()
         )
-        return await commit(saving: [event], needsReminders: draft.reminderMinutes != nil)
+        return await commit(saving: [event], needsReminders: !draft.alerts.isEmpty)
     }
 
     /// What's on screen was older than what a sync brought in, so the latest shows first.
@@ -614,12 +673,12 @@ public final class CalendarModel {
             let single = CalendarEvent(
                 title: Self.cleaned(draft.title), location: Self.cleaned(draft.location), notes: draft.notes,
                 start: times.start, end: times.end, isAllDay: draft.isAllDay, timeZoneID: times.zone,
-                reminderMinutes: draft.reminderMinutes, attachments: draft.attachments,
+                alertMinutes: draft.alerts, attachments: draft.attachments,
                 createdAt: now(), updatedAt: now()
             )
             series.skipped.insert(occurrence.start)
             series.updatedAt = now()
-            return await commit(saving: [single, series], basedOn: occurrence.event, needsReminders: draft.reminderMinutes != nil)
+            return await commit(saving: [single, series], basedOn: occurrence.event, needsReminders: !draft.alerts.isEmpty)
         }
 
         if series.repeatRule != nil, series.isAllDay == draft.isAllDay {
@@ -640,10 +699,10 @@ public final class CalendarModel {
         series.isAllDay = draft.isAllDay
         series.timeZoneID = times.zone
         series.repeatRule = rule(from: draft)
-        series.reminderMinutes = draft.reminderMinutes
+        series.alerts = draft.alerts
         series.attachments = draft.attachments
         series.updatedAt = now()
-        return await commit(saving: [series], basedOn: occurrence.event, needsReminders: draft.reminderMinutes != nil)
+        return await commit(saving: [series], basedOn: occurrence.event, needsReminders: !draft.alerts.isEmpty)
     }
 
     public func delete(_ occurrence: EventOccurrence, scope: EditScope) async {
@@ -680,7 +739,7 @@ public final class CalendarModel {
             return false
         }
         if needsReminders, await !reminders.requestPermission() {
-            notice = "The event is saved, but notifications are off for Totality, so its reminder won't show."
+            notice = "The event is saved, but notifications are off for Totality, so its alerts won't show."
         }
         await load()
         return true
@@ -859,6 +918,7 @@ public final class CalendarModel {
         draft.location = event.location
         draft.notes = event.notes
         draft.isAllDay = event.isAllDay
+        draft.alerts = deviceAlerts(for: key)
         return draft
     }
 
@@ -1015,7 +1075,18 @@ public final class CalendarModel {
     }
 
     private func syncReminders() async {
-        await reminders.replace(with: ReminderPlanner.plan(for: events, now: now(), display: display))
+        let from = now()
+        // Google's events for the same stretch, read from what's kept on this device.
+        let google = GoogleCalendars.events(
+            in: googleAccounts, from: from, to: from.addingTimeInterval(Double(ReminderPlanner.horizonDays + 1) * 86_400),
+            editable: googleEditable
+        )
+        let plan = ReminderPlanner.planning(
+            for: events, now: from, display: display, allDayMinute: alertDefaults().allDayMinute,
+            device: google, deviceAlerts: deviceAlerts
+        )
+        skippedAlerts = plan.skipped
+        await reminders.replace(with: plan.planned)
     }
 }
 

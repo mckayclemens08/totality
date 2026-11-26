@@ -94,6 +94,10 @@ public struct CalendarEvent: Identifiable, Codable, Sendable, Hashable {
     public var skipped: Set<Date>
     /// Minutes before the start. Nil means no reminder.
     public var reminderMinutes: Int?
+    /// All the alerts when there are several, earliest ring first. Events saved with one reminder, or none,
+    /// don't have it. The first is always kept in `reminderMinutes` too, so the website and older copies of
+    /// the app still show a sensible alert. Read and write through `alerts`.
+    public var alertMinutes: [Int]?
     public var attachments: [ContentRef]
     public let createdAt: Date
     public var updatedAt: Date
@@ -101,7 +105,8 @@ public struct CalendarEvent: Identifiable, Codable, Sendable, Hashable {
     public init(
         id: UUID = UUID(), title: String, location: String = "", notes: String = "", start: Date, end: Date,
         isAllDay: Bool = false, timeZoneID: String, repeatRule: RepeatRule? = nil, skipped: Set<Date> = [],
-        reminderMinutes: Int? = nil, attachments: [ContentRef] = [], createdAt: Date = Date(), updatedAt: Date = Date()
+        reminderMinutes: Int? = nil, alertMinutes: [Int]? = nil, attachments: [ContentRef] = [],
+        createdAt: Date = Date(), updatedAt: Date = Date()
     ) {
         self.id = id
         self.title = title
@@ -117,6 +122,21 @@ public struct CalendarEvent: Identifiable, Codable, Sendable, Hashable {
         self.attachments = attachments
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        if let alertMinutes { alerts = alertMinutes }
+    }
+
+    /// Minutes before the start for each alert, earliest ring first. For all-day events they count back from
+    /// the all-day hour. If the website changed the single reminder, that wins over the longer list.
+    public var alerts: [Int] {
+        get {
+            if let list = alertMinutes, list.first == reminderMinutes { return list }
+            return reminderMinutes.map { [$0] } ?? []
+        }
+        set {
+            let list = Array(AlertOffset.sorted(newValue).prefix(AlertOffset.maxPerEvent))
+            reminderMinutes = list.first
+            alertMinutes = list.count > 1 ? list : nil
+        }
     }
 
     public var displayTitle: String {

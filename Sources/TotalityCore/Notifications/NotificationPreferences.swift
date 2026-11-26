@@ -34,8 +34,25 @@ public struct NotificationPreferences: Codable, Equatable, Sendable {
     /// Show text from encrypted content in alerts. Off, they say only who it's from.
     public var showsPrivateText = true
     public var badgesOff: Set<ModuleID> = []
+    /// What new calendar events start with, and when all-day alerts ring.
+    public var calendarAlerts = CalendarAlertDefaults()
 
     public init() {}
+
+    /// Choices saved before a field existed keep working: each is read only when it's there.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        modulesOff = try c.decodeIfPresent(Set<ModuleID>.self, forKey: .modulesOff) ?? []
+        flipped = try c.decodeIfPresent(Set<String>.self, forKey: .flipped) ?? []
+        quietHoursOn = try c.decodeIfPresent(Bool.self, forKey: .quietHoursOn) ?? false
+        quietStart = try c.decodeIfPresent(Int.self, forKey: .quietStart) ?? 22 * 60
+        quietEnd = try c.decodeIfPresent(Int.self, forKey: .quietEnd) ?? 7 * 60
+        closeFriendsBreakThrough = try c.decodeIfPresent(Bool.self, forKey: .closeFriendsBreakThrough) ?? false
+        grouping = try c.decodeIfPresent(Grouping.self, forKey: .grouping) ?? .module
+        showsPrivateText = try c.decodeIfPresent(Bool.self, forKey: .showsPrivateText) ?? true
+        badgesOff = try c.decodeIfPresent(Set<ModuleID>.self, forKey: .badgesOff) ?? []
+        calendarAlerts = try c.decodeIfPresent(CalendarAlertDefaults.self, forKey: .calendarAlerts) ?? CalendarAlertDefaults()
+    }
 
     public func isOn(_ kind: NotificationKind) -> Bool {
         guard !modulesOff.contains(kind.module) else { return false }
@@ -125,7 +142,7 @@ public struct PlannedAlert: Equatable, Sendable {
 
     /// iOS knows each set of buttons by a category. These are all the sets any module uses.
     public static let categories: [[NotificationAction]] = [
-        [], [.reply, .markRead], [.markRead], [.approve], [.done, .snoozeShort, .snoozeMorning],
+        [], [.reply, .markRead], [.markRead], [.approve], [.done, .snoozeShort, .snoozeMorning], [.snoozeTen, .open],
     ]
 
     public static func category(for actions: [NotificationAction]) -> String {

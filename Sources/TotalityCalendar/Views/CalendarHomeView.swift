@@ -40,6 +40,18 @@ public struct CalendarHomeView: View {
                 #endif
         }
         .tint(theme.accent.color)
+        .safeAreaInset(edge: .bottom) {
+            if model.skippedAlerts > 0, path.isEmpty {
+                Text("\(model.skippedAlerts) \(model.skippedAlerts == 1 ? "alert is" : "alerts are") waiting. Totality keeps \(ReminderPlanner.limit) calendar alerts set at once. The rest are set up as these ring and when you open Calendar.")
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .padding(Space.s3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
+                    .padding(.horizontal, Space.s4)
+                    .padding(.trailing, Metric.headerButton + Space.s4)
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             if model.phase == .ready, path.isEmpty {
                 AddButton("New event") { creating = model.newDraft() }

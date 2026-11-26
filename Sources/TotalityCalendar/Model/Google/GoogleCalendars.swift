@@ -118,6 +118,11 @@ public actor GoogleCalendars {
         Self.events(in: kept(), from: start, to: end, editable: editableAccounts())
     }
 
+    /// How an event is known in the schedule, and to this device's own alerts for it.
+    static func deviceID(account: String, calendar: String, event: String) -> String {
+        "google-\(UUID(derivedFrom: "\(account)\n\(calendar)\n\(event)").uuidString.lowercased())"
+    }
+
     static func events(in accounts: [GoogleCalendarAccount], from start: Date, to end: Date, editable: Set<String> = []) -> [DeviceEvent] {
         var found: [DeviceEvent] = []
         for account in accounts {
@@ -125,7 +130,7 @@ public actor GoogleCalendars {
                 for event in calendar.events.values where event.start < end && (event.isAllDay ? event.end.addingTimeInterval(86_400) : event.end) > start {
                     let canEdit = calendar.info.isOwned && editable.contains(account.address)
                     found.append(DeviceEvent(
-                        id: "google-\(UUID(derivedFrom: "\(account.address)\n\(calendar.id)\n\(event.id)").uuidString.lowercased())",
+                        id: deviceID(account: account.address, calendar: calendar.id, event: event.id),
                         title: event.title, location: event.location, notes: event.notes,
                         start: event.start, end: event.end, isAllDay: event.isAllDay,
                         calendarTitle: calendar.info.title, origin: .google(account: account.address, link: event.link),

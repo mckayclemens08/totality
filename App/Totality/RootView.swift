@@ -627,6 +627,7 @@ struct RootView: View {
             AppRefresh.shared.extras["gmailPush"] = { await PushSetup.shared.renew() }
             PushSetup.shared.start()
             NotificationsSetup.connect(messages: messages, mail: mail)
+            NotificationsSetup.connect(calendar: content.calendar)
             #endif
             // A pull also brings in the person's other devices. The app already syncs with them on
             // opening and on coming back, so the minute-by-minute refresh leaves it out.

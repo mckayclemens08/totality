@@ -24,7 +24,7 @@ public struct NotificationKind: Hashable, Codable, Sendable, Identifiable {
 /// What a lock-screen button does. A module offers only the ones that make sense for it, and handles
 /// them itself.
 public enum NotificationAction: String, Codable, Sendable, CaseIterable {
-    case reply, markRead, done, snoozeShort, snoozeMorning, approve
+    case reply, markRead, done, snoozeShort, snoozeMorning, approve, snoozeTen, open
 
     /// The identifier iOS knows the button by.
     public var identifier: String { "totality.action." + rawValue }
@@ -42,6 +42,8 @@ public enum NotificationAction: String, Codable, Sendable, CaseIterable {
         case .snoozeShort: "Snooze 15 minutes"
         case .snoozeMorning: "Snooze until 9 AM"
         case .approve: "Approve"
+        case .snoozeTen: "Snooze 10 min"
+        case .open: "Open"
         }
     }
 
