@@ -21,6 +21,8 @@ public final class MessagesPeople {
 
     /// Set by the app from the `ModuleRegistry`. Without it, everyone shows as their handle.
     public var directory: (any ProfileDirectory)?
+    /// The person's own Contacts, through the registry. In memory only; nothing is fetched for it.
+    @ObservationIgnored public var lookup: (any PeopleLookup)?
     private(set) var entries: [String: Entry] = [:]
     /// Handles whose last fetch failed with nothing saved from before.
     private(set) var failed: Set<String> = []
@@ -45,9 +47,11 @@ public final class MessagesPeople {
         Self.handle(of: matrixID).flatMap { entries[$0]?.profile }
     }
 
-    /// What to call someone: their profile's name once it's known, else their handle.
+    /// What to call someone: the name on your own card for them in Contacts (its nickname first), else their
+    /// profile's name once it's known, else their handle.
     public func name(ofMatrixID matrixID: String) -> String {
-        profile(ofMatrixID: matrixID)?.name ?? MessagesUsername.display(matrixID)
+        if let handle = Self.handle(of: matrixID), let card = lookup?.person(username: handle) { return card.shownName }
+        return profile(ofMatrixID: matrixID)?.name ?? MessagesUsername.display(matrixID)
     }
 
     public func phase(of username: String) -> PersonProfileView.Phase {

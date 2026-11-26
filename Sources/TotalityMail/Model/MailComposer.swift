@@ -190,7 +190,31 @@ public final class MailComposer: Identifiable {
 
     /// People from this device's own mail who match what's typed. Nothing typed leaves the device.
     public func suggestions(for field: MailField) -> [MailAddress] {
-        Self.suggestions(typed[field] ?? "", in: model.mailbox, excluding: draft.recipients)
+        let typed = typed[field] ?? ""
+        return Self.merged(
+            contacts: Self.suggestions(typed, from: model.people, excluding: draft.recipients),
+            mail: Self.suggestions(typed, in: model.mailbox, excluding: draft.recipients)
+        )
+    }
+
+    /// People from the person's own Contacts who match what's typed, on the device (issue 205, question 4).
+    static func suggestions(_ typed: String, from people: (any PeopleLookup)?, excluding: [MailAddress], limit: Int = 5) -> [MailAddress] {
+        guard let people else { return [] }
+        let taken = Set(excluding.map(\.key))
+        let query = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var found: [MailAddress] = []
+        for person in people.people(matching: typed, limit: limit) {
+            // The address that matched, or else the card's first.
+            let address = person.emails.first { $0.hasPrefix(query) } ?? person.emails.first
+            if let address, !taken.contains(address) { found.append(MailAddress(name: person.name, address: address)) }
+        }
+        return found
+    }
+
+    /// Contacts first, then people from mail, each address once.
+    static func merged(contacts: [MailAddress], mail: [MailAddress], limit: Int = 5) -> [MailAddress] {
+        var seen = Set<String>()
+        return Array((contacts + mail).filter { seen.insert($0.key).inserted }.prefix(limit))
     }
 
     /// Everyone on the mail here, outside Spam and apart from the person themselves, who matches the

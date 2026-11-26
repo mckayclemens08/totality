@@ -39,10 +39,14 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     /// The Clock's world cities, timer presets and stopwatch laps, as one sealed record per person (issue
     /// 204). Alarms aren't in it: an alarm rings on the device that set it.
     case clockItems = "clock_items"
+    /// One card in Contacts: names, numbers, addresses, birthday, notes, labels, photo and any @username
+    /// link, all sealed in the metadata (issue 205). Not the server's `contacts` table, which is the
+    /// account graph and is left alone.
+    case contact
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {
-    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks, weather, clock
+    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks, weather, clock, contacts
 }
 
 /// Where an object's key lives, matching `content_objects.key_ref`.

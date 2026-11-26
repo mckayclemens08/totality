@@ -62,6 +62,11 @@ public final class MailModel {
     /// A reply the home page asked for. Mail opens compose with it started and clears this; it still
     /// sends only on the person's press.
     public var requestedReply: UUID?
+    /// Addresses another module asked to write to, such as Mail on a contact card or a label's Mail all.
+    /// Mail opens a new message to them and clears this; nothing is sent without the person's press.
+    public var requestedRecipients: [String]?
+    /// The person's own Contacts, through the registry, for names and address suggestions. In memory only.
+    @ObservationIgnored public var people: (any PeopleLookup)?
     /// Which unread conversation the big square shows, once Next has been pressed. Nil is the newest.
     public var homeShown: UUID?
     public var isSelecting = false

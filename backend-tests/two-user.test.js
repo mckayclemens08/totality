@@ -285,6 +285,20 @@ describe('contact requests', () => {
     assert.equal(Buffer.from(kept.meta_cipher).toString(), 'sealed clock')
   })
 
+  // Issue 205: each card in Contacts is a sealed object of its owner's.
+  test('one user\'s contact cards never reach another', async () => {
+    const [u1, u2] = await trio()
+    const card = await addObject(db, u1, { kind: 'contact', storage_key: null })
+    await as(db, u1, (q) => q('update public.content_objects set meta_cipher = $1 where id = $2', [Buffer.from('sealed card'), card.id]))
+    assert.equal(await canSee(u1, card.id), true)
+    assert.equal(await canSee(u2, card.id), false)
+    // User 2 can't replace it or delete it.
+    await as(db, u2, (q) => q('update public.content_objects set meta_cipher = $1 where id = $2', [Buffer.from('forged'), card.id]))
+    await as(db, u2, (q) => q('delete from public.content_objects where id = $1', [card.id]))
+    const [kept] = await as(db, u1, (q) => q('select meta_cipher from public.content_objects where id = $1', [card.id]))
+    assert.equal(Buffer.from(kept.meta_cipher).toString(), 'sealed card')
+  })
+
   test('a blocked user cannot see public content or the profile', async () => {
     const [u1, u2, u3] = await trio()
     const o = await addObject(db, u1, { visibility: 'public', key_ref: 'plain:' })

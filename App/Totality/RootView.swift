@@ -2,6 +2,7 @@ import SwiftUI
 import TotalityAccount
 import TotalityCalendar
 import TotalityClock
+import TotalityContacts
 import TotalityCore
 import TotalityMail
 import TotalityMessages
@@ -28,6 +29,7 @@ struct RootView: View {
     @State private var tasks: TasksModel?
     @State private var weather: WeatherModel?
     @State private var clock: ClockModel?
+    @State private var contacts: ContactsModel?
     /// Shared task lists, over Messages' Matrix connection (step 6).
     @State private var sharedLists: SharedListsModel?
     /// Social, made the first time it's opened (issue 149). It needs the sign-in, not the content key.
@@ -290,7 +292,7 @@ struct RootView: View {
             onRemove: { module in Task { await homeChoices.remove(module) } },
             onRestore: { module in Task { await homeChoices.restore(module) } }
         ) { module in
-            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock].contains(module) { prepareContent() }
+            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock, .contacts].contains(module) { prepareContent() }
             bringUp(module)
         } onSearch: {
             prepareContent()
@@ -342,9 +344,16 @@ struct RootView: View {
             } else {
                 contentMessage { open = nil }
             }
+        case .contacts:
+            if let contacts {
+                ContactsHomeView(model: contacts) { open = nil }
+            } else {
+                contentMessage { open = nil }
+            }
         case .mail:
             MailHomeView(model: mail.current, onClose: { open = nil }, onOpenLink: openInWeb)
                 .id(ObjectIdentifier(mail.current))
+                .task(id: ObjectIdentifier(mail.current)) { mail.current.people = registry?.people }
         case .messages:
             MessagesHomeView(model: messages, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
         case .photos:
@@ -430,6 +439,7 @@ struct RootView: View {
         glances[.tasks] = tasks?.glance
         glances[.weather] = weather?.glance
         glances[.clock] = clock?.glance
+        glances[.contacts] = contacts?.glance
         glances[.social] = social?.glance
         glances[.mail] = mail.current.glance
         glances[.messages] = messages.glance
@@ -458,6 +468,9 @@ struct RootView: View {
         case .weather:
             guard let weather, weather.phase == .ready else { return nil }
             return AnyView(WeatherHomeTile(model: weather, size: size) { bringUp(.weather) })
+        case .contacts:
+            guard let contacts, contacts.phase == .ready else { return nil }
+            return AnyView(ContactsHomeTile(model: contacts, size: size) { bringUp(.contacts) })
         case .mail:
             guard mail.current.phase == .ready else { return nil }
             return AnyView(MailHomeTile(model: mail.current, size: size) { bringUp(.mail) })
@@ -553,6 +566,9 @@ struct RootView: View {
             weather = content.weather
             clock = content.clock
             refreshers[.weather] = content.weather.refresher
+            contacts = content.contacts
+            refreshers[.contacts] = content.contacts.refresher
+            connectContacts(content.contacts, registry: content.registry)
             sharedLists = makeSharedLists(directory: content.registry.profiles)
             content.reader.shared = makeSharedDocs(directory: content.registry.profiles)
             refreshers[.reader] = content.reader.refresher
@@ -620,7 +636,8 @@ struct RootView: View {
         async let tasks: Void = self.tasks?.load() ?? ()
         async let weather: Void = self.weather?.load() ?? ()
         async let clock: Void = self.clock?.load() ?? ()
-        _ = await (reader, calendar, tasks, weather, clock)
+        async let contacts: Void = self.contacts?.load() ?? ()
+        _ = await (reader, calendar, tasks, weather, clock, contacts)
     }
 
     /// Each module that keeps itself up to date fetches what's new, quietly.
@@ -683,6 +700,7 @@ struct RootView: View {
         let model = SocialModel(server: server, privateRooms: rooms, profiles: AccountSetup.profiles, remembered: .standard)
         model.taskMaker = registry?.taskMaker
         model.receiver = registry?.receiver(for: .social)
+        model.contactMaker = registry?.contactMaker
         model.onMessage = { name in
             Task {
                 guard let chat = await messages.startChat(with: name) else { return }
@@ -706,6 +724,9 @@ struct RootView: View {
         await weather?.stopForKeyChange()
         weather = nil
         clock = nil
+        await contacts?.stopForKeyChange()
+        contacts = nil
+        messages.people.lookup = nil
         reader = nil
         calendar = nil
         web = nil
@@ -846,6 +867,7 @@ struct RootView: View {
             await tasks?.load()
             await weather?.reload()
             await clock?.reload()
+            await contacts?.load()
             // Marks from another device, so Mail is already up to date when it's opened.
             if mail.current.phase == .ready { await mail.current.refresh() }
         }
@@ -890,16 +912,47 @@ struct RootView: View {
             }
         }
         calendar?.onOpenLinked = { item in
-            guard item.module == .tasks else { return }
-            show(SearchHit(module: .tasks, itemID: item.id, title: item.title))
+            guard item.module == .tasks || item.module == .contacts, let module = item.module else { return }
+            show(SearchHit(module: module, itemID: item.id, title: item.title))
         }
     }
 
-    /// Only the Reader's content can be attached so far, so that's where a ref opens.
+    /// A ref opens in its own module: the Reader's items, and Contacts' cards.
     private func show(_ ref: ContentRef) {
-        guard ref.module == .reader else { return }
-        reader?.requestedItem = ref.id
-        bringUp(.reader)
+        switch ref.module {
+        case .reader:
+            reader?.requestedItem = ref.id
+            bringUp(.reader)
+        case .contacts:
+            contacts?.requestedCard = ref.id
+            bringUp(.contacts)
+        default:
+            return
+        }
+    }
+
+    /// Contacts hands people over to Messages, Mail and Social, and lends Mail and Messages its names, all
+    /// through the registry or the app. Nothing is sent without the person's press in that module.
+    private func connectContacts(_ model: ContactsModel, registry: ModuleRegistry) {
+        messages.people.lookup = registry.people
+        mail.current.people = registry.people
+        model.onMessage = { name in
+            Task {
+                guard let chat = await messages.startChat(with: name) else { return }
+                messages.requestedChat = chat
+                bringUp(.messages)
+            }
+        }
+        model.onMail = { addresses in
+            mail.current.people = registry.people
+            mail.current.requestedRecipients = addresses
+            bringUp(.mail)
+        }
+        model.onProfile = { name in
+            if social == nil { social = makeSocial() }
+            social?.requestedProfile = name
+            bringUp(.social)
+        }
     }
 
     /// Every module the home search looks in. Each reads only what's already open on this device.
@@ -931,6 +984,7 @@ struct RootView: View {
         case .tasks: tasks?.requestedTask = UUID(uuidString: hit.itemID)
         case .clock: clock?.requestedTab = hit.itemID.hasPrefix("city:") ? .world : .alarms
         case .weather: weather?.requestedPlace = UUID(uuidString: hit.itemID)
+        case .contacts: contacts?.requestedCard = UUID(uuidString: hit.itemID)
         case .social:
             if social == nil { social = makeSocial() }
             social?.requestedPost = UUID(uuidString: hit.itemID)

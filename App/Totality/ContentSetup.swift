@@ -2,6 +2,7 @@ import Foundation
 import TotalityAccount
 import TotalityCalendar
 import TotalityClock
+import TotalityContacts
 import TotalityCore
 import TotalityMail
 import TotalityMessages
@@ -91,7 +92,7 @@ enum ContentSetup {
     private static func stores() throws -> (
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
         googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore, home: FileBlobStore,
-        weather: FileBlobStore, weatherCache: FileBlobStore, clock: FileBlobStore
+        weather: FileBlobStore, weatherCache: FileBlobStore, clock: FileBlobStore, contacts: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -112,7 +113,9 @@ enum ContentSetup {
             // The last forecast for each place. Apart from the places, because this never syncs.
             try FileBlobStore(directory: base.appendingPathComponent("WeatherCache", isDirectory: true)),
             // The Clock's synced record and its device-only one (issue 204).
-            try FileBlobStore(directory: base.appendingPathComponent("Clock", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Clock", isDirectory: true)),
+            // Contacts' cards, one sealed blob each, which sync.
+            try FileBlobStore(directory: base.appendingPathComponent("Contacts", isDirectory: true))
         )
     }
 
@@ -146,6 +149,7 @@ enum ContentSetup {
             SealedArea(store: stores.weather, purposes: WeatherPlaceBook.sealedPurposes),
             SealedArea(store: stores.weatherCache, purposes: ForecastCache.sealedPurposes),
             SealedArea(store: stores.clock, purposes: ClockBook.sealedPurposes),
+            SealedArea(store: stores.contacts, purposes: ContactVault.sealedPurposes),
         ])
     }
 
@@ -162,7 +166,8 @@ enum ContentSetup {
         mailRefresh: @escaping @Sendable () async -> Void, refresh: @escaping @Sendable (ModuleID) async -> Void
     ) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, tasks: TasksModel, areas: [any SyncArea],
-        registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook, weather: WeatherModel, clock: ClockModel
+        registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook, weather: WeatherModel, clock: ClockModel,
+        contacts: ContactsModel
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -198,6 +203,13 @@ enum ContentSetup {
         let weather = makeWeather(book: weatherBook, cache: weatherCache)
         let clockBook = ClockBook(store: stores.clock, rootKey: rootKey)
         let clock = ClockModel(book: clockBook)
+        let contactVault = ContactVault(store: stores.contacts, rootKey: rootKey)
+        #if canImport(Contacts)
+        let deviceContacts: (any DeviceContacts)? = SystemDeviceContacts()
+        #else
+        let deviceContacts: (any DeviceContacts)? = nil
+        #endif
+        let contacts = ContactsModel(vault: contactVault, device: deviceContacts, defaults: defaults())
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
@@ -220,7 +232,14 @@ enum ContentSetup {
                 guard let clock else { throw AlarmSchedulingError.failed }
                 return try await clock.make(draft)
             },
+            // A card added from another module, such as Social's Add to Contacts, is read in at once.
+            ContactsModule(
+                vault: contactVault, directory: contacts.directory, refresh: { await refresh(.contacts) },
+                changed: { @MainActor [weak contacts] in await contacts?.load() }
+            ),
         ], profiles: AccountSetup.profiles)
+        contacts.profiles = AccountSetup.profiles
+        contacts.taskMaker = registry.taskMaker
         // Reminders ring from this iPhone alone: local notifications and places iOS watches.
         tasks.reminderCenter = HomeGatedTaskReminders(SystemTaskReminders.shared)
         tasks.actionQueue = .shared
@@ -243,13 +262,14 @@ enum ContentSetup {
             tasks,
             // The Drive record syncs whether or not this build can sign in to Google, so links made on
             // another device aren't lost here.
-            [readerVault, calendarVault, webVault, drive, places, taskVault, home, weatherBook, clockBook],
+            [readerVault, calendarVault, webVault, drive, places, taskVault, home, weatherBook, clockBook, contactVault],
             registry,
             MailContent(rootKey: rootKey, store: stores.mail),
             PhotosContent(rootKey: rootKey, store: stores.photos),
             home,
             weather,
-            clock
+            clock,
+            contacts
         )
     }
 

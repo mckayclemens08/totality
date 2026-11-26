@@ -2,6 +2,32 @@ import SwiftUI
 import TotalityCore
 import TotalityUI
 
+/// "Add to Contacts" on someone's profile (issue 205, section 5): keeps a private, sealed card linked to their
+/// handle in Contacts, through the registry. It never changes their profile.
+struct AddToContactsButton: View {
+    let maker: any ContactMaker
+    let username: String
+    let displayName: String?
+    @State private var isIn = false
+    @State private var failed = false
+
+    var body: some View {
+        HeaderPill(isIn ? "In Contacts" : (failed ? "Try again" : "Add to Contacts"), systemImage: isIn ? "checkmark" : "person.crop.circle.badge.plus") {
+            Task {
+                do {
+                    _ = try await maker.addContact(username: username, displayName: displayName)
+                    isIn = true
+                    failed = false
+                } catch {
+                    failed = true
+                }
+            }
+        }
+        .disabled(isIn)
+        .task(id: username) { isIn = await maker.hasContact(username: username) }
+    }
+}
+
 /// Someone's profile: the one public profile (owner, 2026-11-17). Photo, name, @handle, bio, counts,
 /// Follow, and their posts. On your own, Close friends is here too.
 struct SocialProfileView: View {
@@ -192,6 +218,9 @@ struct SocialProfileView: View {
     private func messageButton(_ profile: SocialProfile) -> some View {
         if let onMessage = model.onMessage, profile.canMessage {
             HeaderPill("Message", systemImage: "bubble.left") { onMessage(profile.username) }
+        }
+        if let maker = model.contactMaker {
+            AddToContactsButton(maker: maker, username: profile.username, displayName: profile.displayName)
         }
     }
 

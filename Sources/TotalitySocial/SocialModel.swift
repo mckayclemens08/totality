@@ -63,6 +63,8 @@ public final class SocialModel {
     public var receiver: (any ContentReceiver)?
     /// Opens your chat with someone in Messages.
     public var onMessage: (@MainActor (String) -> Void)?
+    /// Keeps a private card for someone in Contacts. Only their handle and shown name go over.
+    public var contactMaker: (any ContactMaker)?
     /// Your own Social settings, once loaded.
     public private(set) var settings = SocialSettings()
     /// People waiting for you to approve their follow, while your account is private.

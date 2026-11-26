@@ -77,14 +77,16 @@ struct DayTimelineView: View {
     }
 
     @ViewBuilder private var allDayRow: some View {
-        let columns = days.map { day in model.entries(on: day).filter(\.isAllDay) }
+        let columns = days.map { day in model.timeline(on: day).filter(\.isAllDay) }
         if columns.contains(where: { !$0.isEmpty }) {
             HStack(alignment: .top, spacing: 0) {
                 Color.clear.frame(width: Self.gutter, height: 0)
                 ForEach(Array(columns.enumerated()), id: \.offset) { _, entries in
                     VStack(spacing: Space.s1) {
                         ForEach(entries) { entry in
-                            AllDayChip(entry: entry).tappable { onOpen(entry) }
+                            AllDayChip(entry: entry).tappable {
+                                if case .linked(let item) = entry.source { model.onOpenLinked?(item) } else { onOpen(entry) }
+                            }
                         }
                     }
                     .padding(.horizontal, Space.s1)

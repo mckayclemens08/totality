@@ -94,7 +94,23 @@ public struct MailHomeView: View {
         }
         .onChange(of: model.place) { opened = nil }
         .onChange(of: model.requestedConversation, initial: true) { openRequested() }
-        .onChange(of: model.phase) { openRequested() }
+        .onChange(of: model.phase) {
+            openRequested()
+            writeRequested()
+        }
+        .onChange(of: model.requestedRecipients, initial: true) { writeRequested() }
+    }
+
+    /// A new message to people another module named, such as Mail on a contact card. It's only started:
+    /// it goes when the person presses Send.
+    private func writeRequested() {
+        guard let addresses = model.requestedRecipients, model.phase == .ready else { return }
+        model.requestedRecipients = nil
+        let composer = MailComposer.new(in: model)
+        composer.draft.to = addresses.prefix(MailDraft.maxRecipients).map { address in
+            MailAddress(name: model.people?.person(email: address)?.name ?? "", address: address)
+        }
+        composing = composer
     }
 
     /// A conversation tapped on the home page opens straight away, once it's in the mailbox, with a reply
