@@ -68,8 +68,12 @@ public enum Birthdays {
     /// "22 November".
     public static func dayMonth(_ date: Date, in calendar: Calendar) -> String {
         let parts = calendar.dateComponents([.day, .month], from: date)
-        guard let day = parts.day, let month = parts.month, calendar.monthSymbols.indices.contains(month - 1) else { return "" }
-        return "\(day) \(calendar.monthSymbols[month - 1])"
+        // A calendar made without a locale names months "M11", so it borrows the person's.
+        var named = calendar
+        if named.locale?.identifier.isEmpty ?? true { named.locale = .autoupdatingCurrent }
+        let symbols = named.monthSymbols
+        guard let day = parts.day, let month = parts.month, symbols.indices.contains(month - 1) else { return "" }
+        return "\(day) \(symbols[month - 1])"
     }
 
     /// "Priya Patel's birthday is Sunday".
