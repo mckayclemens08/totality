@@ -266,7 +266,7 @@ struct SocialProfileView: View {
 
     /// The next page, once the oldest post shown scrolls into view.
     private func loadMore() async {
-        guard hasMore, !loadingMore, let oldest = posts.last?.date else { return }
+        guard hasMore, !loadingMore, let oldest = posts.last?.feedDate else { return }
         loadingMore = true
         defer { loadingMore = false }
         guard let page = try? await model.posts(by: username, before: oldest) else { return }

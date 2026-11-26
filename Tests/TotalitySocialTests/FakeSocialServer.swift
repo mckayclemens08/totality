@@ -12,6 +12,8 @@ final class FakeSocialWorld: @unchecked Sendable {
     var seen: [String: Set<UUID>] = [:]
     var settings: [String: SocialSettings] = [:]
     var saves: [String: Set<UUID>] = [:]
+    /// Who reposted what, and when.
+    var reposts: [String: [UUID: Date]] = [:]
     var mutes: [String: Set<UUID>] = [:]
     var blocks: [String: Set<UUID>] = [:]
     var reports: [(from: String, about: String, post: UUID?, comment: UUID?, reason: String)] = []
@@ -67,7 +69,22 @@ struct FakeSocial: SocialServer {
         p.likes = row.likedBy.count
         p.liked = row.likedBy.contains(me)
         p.comments = row.comments.count
+        p.reposts = world.reposts.values.filter { $0[p.id] != nil }.count
+        p.reposted = world.reposts[me]?[p.id] != nil
         return p
+    }
+
+    /// Reposts by these people, as the server's `social_reposts_feed` and `social_reposts_by` return them.
+    private func repostEntries(by people: Set<String>) -> [SocialPost] {
+        world.reposts.filter { people.contains($0.key) }.flatMap { person, posts in
+            posts.compactMap { id, date in
+                world.posts[id].map { row in
+                    var entry = view(row)
+                    entry.repostedBy = Reposter(handle: person, name: world.names[person], date: date)
+                    return entry
+                }
+            }
+        }
     }
 
     func me() async throws -> String { me }
@@ -81,14 +98,18 @@ struct FakeSocial: SocialServer {
 
     func following(before: Date?) async throws -> [SocialPost] {
         world.lock.withLock {
-            world.posts.values.filter { $0.post.author == me || world.follows.contains([me, $0.post.author]) }.map(view).sorted { $0.date > $1.date }
+            let people = Set(world.people.filter { $0 == me || world.follows.contains([me, $0]) })
+            let posts = world.posts.values.filter { people.contains($0.post.author) }.map(view)
+            return RestSocialServer.merged(posts, repostEntries(by: people), pageSize: 30)
         }
     }
 
     func posts(by username: String, before: Date?) async throws -> [SocialPost] {
         world.lock.withLock {
-            Array(world.posts.values.filter { $0.post.author == username && (before == nil || $0.post.date < before!) }
+            let posts = Array(world.posts.values.filter { $0.post.author == username && (before == nil || $0.post.date < before!) }
                 .map(view).sorted { $0.date > $1.date }.prefix(SocialPage.size))
+            let reposts = repostEntries(by: [username]).filter { before == nil || $0.feedDate < before! }
+            return RestSocialServer.merged(posts, Array(reposts.sorted { $0.feedDate > $1.feedDate }.prefix(SocialPage.size)), pageSize: SocialPage.size)
         }
     }
 
@@ -258,6 +279,20 @@ struct FakeSocial: SocialServer {
     func setSaved(_ saved: Bool, post: UUID) async throws {
         world.lock.withLock { if saved { world.saves[me, default: []].insert(post) } else { world.saves[me]?.remove(post) } }
     }
+    /// As `social_reposts` does: someone else's public post, from an account that isn't private, once.
+    func setReposted(_ reposted: Bool, post: UUID) async throws {
+        try world.lock.withLock {
+            if reposted {
+                guard let row = world.posts[post], row.post.author != me, !(world.settings[row.post.author]?.privateAccount ?? false) else {
+                    throw SocialError.refused("That post isn't available any more.")
+                }
+                if world.reposts[me]?[post] == nil { world.reposts[me, default: [:]][post] = world.tick() }
+            } else {
+                world.reposts[me]?[post] = nil
+            }
+        }
+    }
+
     func saved() async throws -> [SocialPost] {
         world.lock.withLock { (world.saves[me] ?? []).compactMap { world.posts[$0].map(view) }.map { var p = $0; p.saved = true; return p } }
     }

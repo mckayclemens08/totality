@@ -177,7 +177,7 @@ public final class SocialModel {
         } catch {
             notice = "Friends posts didn't load: \((error as? SharedRoomError)?.message ?? "try again")."
         }
-        following = (publicPosts + privateFeed).sorted { $0.date > $1.date }
+        following = (publicPosts + privateFeed).sorted { $0.feedDate > $1.feedDate }
         await loadStories()
     }
 
@@ -341,6 +341,39 @@ public final class SocialModel {
         }
     }
 
+    // MARK: Reposts
+
+    /// Reposts a public post to your followers, or takes the repost back. It adds the post to your own
+    /// Following as "You reposted" at once. Friends and Close-friends posts never get here: they can't be
+    /// reposted, and neither can your own.
+    public func toggleRepost(_ post: SocialPost) async {
+        let post = self.post(post.id) ?? post
+        guard post.canRepost(by: me) else {
+            notice = post.audience == .everyone ? nil : "Only public posts can be reposted."
+            return
+        }
+        let on = !post.reposted
+        update(post.id) { $0.reposted = on; $0.reposts = max(0, $0.reposts + (on ? 1 : -1)) }
+        do {
+            try await server.setReposted(on, post: post.id)
+            guard let me else { return }
+            if on {
+                if !following.contains(where: { $0.id == post.id }) {
+                    var entry = post
+                    entry.reposted = true
+                    entry.reposts = post.reposts + 1
+                    entry.repostedBy = Reposter(handle: me, name: nil, date: Date())
+                    following.insert(entry, at: 0)
+                }
+            } else {
+                following.removeAll { $0.id == post.id && $0.repostedBy?.handle == me }
+            }
+        } catch {
+            update(post.id) { $0.reposted = !on; $0.reposts = max(0, $0.reposts + (on ? -1 : 1)) }
+            notice = Self.message(error)
+        }
+    }
+
     public func comments(on post: SocialPost) async throws -> [SocialComment] {
         if post.audience == .everyone { return try await server.comments(on: post.id) }
         return privatePosts?.comments(on: post) ?? []
@@ -413,13 +446,13 @@ public final class SocialModel {
             }
         }
         let publicPosts = try await server.posts(by: username, before: before)
-        var privateOnes = decrypted(by: username).filter { post in before.map { post.date < $0 } ?? true }
+        var privateOnes = decrypted(by: username).filter { post in before.map { post.feedDate < $0 } ?? true }
         // A full public page stops at its oldest post; private ones older than that wait for the next page,
         // so the two stay in date order across pages and none shows twice.
-        if publicPosts.count >= SocialPage.size, let oldest = publicPosts.map(\.date).min() {
-            privateOnes = privateOnes.filter { $0.date >= oldest }
+        if publicPosts.count >= SocialPage.size, let oldest = publicPosts.map(\.feedDate).min() {
+            privateOnes = privateOnes.filter { $0.feedDate >= oldest }
         }
-        return (publicPosts + privateOnes).sorted { $0.date > $1.date }
+        return (publicPosts + privateOnes).sorted { $0.feedDate > $1.feedDate }
     }
 
     /// Whether a page of a profile's posts could be followed by another.

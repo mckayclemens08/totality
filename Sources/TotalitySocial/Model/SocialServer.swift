@@ -71,6 +71,9 @@ public protocol SocialServer: Sendable {
     func setSaved(_ saved: Bool, post: UUID) async throws
     func saved() async throws -> [SocialPost]
 
+    // Reposts (public posts only). `following` and `posts(by:)` already include them, marked `repostedBy`.
+    func setReposted(_ reposted: Bool, post: UUID) async throws
+
     // Stories (issue 149, owner's answer 3). Only public ones; the others go through `PrivatePosts`.
     /// Your public stories and those of people you follow, still inside their day.
     func stories() async throws -> [SocialStory]
@@ -326,19 +329,26 @@ public struct RestSocialServer: SocialServer {
     }
 
     public func forYou(tag: String?) async throws -> [SocialPost] {
-        try await rpc("social_for_you", ["p_limit": 30, "p_tag": tag ?? NSNull()], as: PostRow.self).map(\.post)
+        await withRepostCounts(try await rpc("social_for_you", ["p_limit": 30, "p_tag": tag ?? NSNull()], as: PostRow.self).map(\.post))
     }
 
     public func following(before: Date?) async throws -> [SocialPost] {
-        try await rpc("social_following_feed", ["p_before": before.map(Self.text) ?? NSNull(), "p_limit": 30], as: PostRow.self).map(\.post)
+        let posts = try await rpc("social_following_feed", ["p_before": before.map(Self.text) ?? NSNull(), "p_limit": 30], as: PostRow.self).map(\.post)
+        // Reposts are an extra; if they don't load, Following still shows the posts.
+        let reposts = (try? await rpc("social_reposts_feed", ["p_before": before.map(Self.text) ?? NSNull(), "p_limit": 30], as: RepostRow.self))?.compactMap(\.entry) ?? []
+        return await withRepostCounts(Self.merged(posts, reposts, pageSize: 30))
     }
 
     public func posts(by username: String, before: Date?) async throws -> [SocialPost] {
-        try await rpc("social_posts_by", ["p_handle": username, "p_before": before.map(Self.text) ?? NSNull(), "p_limit": SocialPage.size], as: PostRow.self).map(\.post)
+        let args: [String: Any] = ["p_handle": username, "p_before": before.map(Self.text) ?? NSNull(), "p_limit": SocialPage.size]
+        let posts = try await rpc("social_posts_by", args, as: PostRow.self).map(\.post)
+        let reposts = (try? await rpc("social_reposts_by", args, as: RepostRow.self))?.compactMap(\.entry) ?? []
+        return await withRepostCounts(Self.merged(posts, reposts, pageSize: SocialPage.size))
     }
 
     public func post(_ id: UUID) async throws -> SocialPost? {
-        try await rpc("social_post", ["p_id": id.uuidString.lowercased()], as: PostRow.self).first?.post
+        guard let post = try await rpc("social_post", ["p_id": id.uuidString.lowercased()], as: PostRow.self).first?.post else { return nil }
+        return await withRepostCounts([post]).first
     }
 
     public func publish(title: String?, body: String, tags: [String], media: [PostMedia]) async throws -> UUID {
@@ -560,7 +570,68 @@ public struct RestSocialServer: SocialServer {
     }
 
     public func saved() async throws -> [SocialPost] {
-        try await rpc("social_saved", as: PostRow.self).map(\.post)
+        await withRepostCounts(try await rpc("social_saved", as: PostRow.self).map(\.post))
+    }
+
+    // MARK: Reposts
+
+    struct RepostRow: Decodable {
+        let reposter_handle: String
+        let reposter_name: String?
+        let reposted_at: String
+        let post: PostRow
+
+        var entry: SocialPost? {
+            guard let when = RestSocialServer.date(reposted_at) else { return nil }
+            var entry = post.post
+            entry.repostedBy = Reposter(handle: reposter_handle, name: reposter_name, date: when)
+            return entry
+        }
+    }
+
+    struct StatRow: Decodable {
+        let post_id: UUID
+        let reposts: Int
+        let reposted: Bool
+    }
+
+    public func setReposted(_ reposted: Bool, post: UUID) async throws {
+        let id = post.uuidString.lowercased()
+        if reposted {
+            do { _ = try await request("social_reposts", body: ["post_id": id]) } catch SocialError.refused("Already done.") {}
+        } else {
+            _ = try await request("social_reposts", method: "DELETE", query: [URLQueryItem(name: "post_id", value: "eq.\(id)")])
+        }
+    }
+
+    /// Fills in each post's repost count and whether you reposted it. A failure leaves the counts at zero
+    /// rather than losing the posts.
+    func withRepostCounts(_ posts: [SocialPost]) async -> [SocialPost] {
+        let ids = Set(posts.filter { $0.audience == .everyone }.map(\.id))
+        guard !ids.isEmpty,
+              let rows = try? await rpc("social_repost_stats", ["p_posts": ids.map { $0.uuidString.lowercased() }], as: StatRow.self)
+        else { return posts }
+        let stats = Dictionary(rows.map { ($0.post_id, $0) }, uniquingKeysWith: { a, _ in a })
+        return posts.map { post in
+            guard let row = stats[post.id] else { return post }
+            var post = post
+            post.reposts = row.reposts
+            post.reposted = row.reposted
+            return post
+        }
+    }
+
+    /// Posts and reposts as one list, newest first. Where a post is both posted and reposted in the list, or
+    /// reposted twice, it shows once: as posted, else by the latest repost. When either list came back full,
+    /// the merge stops where that list did, so a later page can pick up from the oldest entry without a gap.
+    static func merged(_ posts: [SocialPost], _ reposts: [SocialPost], pageSize: Int) -> [SocialPost] {
+        var cutoff = Date.distantPast
+        if posts.count >= pageSize, let oldest = posts.map(\.date).min() { cutoff = max(cutoff, oldest) }
+        if reposts.count >= pageSize, let oldest = reposts.map(\.feedDate).min() { cutoff = max(cutoff, oldest) }
+        var seen = Set(posts.map(\.id))
+        var result = posts
+        for entry in reposts.sorted(by: { $0.feedDate > $1.feedDate }) where seen.insert(entry.id).inserted { result.append(entry) }
+        return result.filter { $0.feedDate >= cutoff }.sorted { $0.feedDate > $1.feedDate }
     }
 
     // MARK: Stories
