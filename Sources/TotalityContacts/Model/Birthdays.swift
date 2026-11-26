@@ -67,9 +67,9 @@ public enum Birthdays {
 
     /// "22 November".
     public static func dayMonth(_ date: Date, in calendar: Calendar) -> String {
-        var style = Date.FormatStyle().day().month(.wide)
-        style.timeZone = calendar.timeZone
-        return date.formatted(style)
+        let parts = calendar.dateComponents([.day, .month], from: date)
+        guard let day = parts.day, let month = parts.month, calendar.monthSymbols.indices.contains(month - 1) else { return "" }
+        return "\(day) \(calendar.monthSymbols[month - 1])"
     }
 
     /// "Priya Patel's birthday is Sunday".
