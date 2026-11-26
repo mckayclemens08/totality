@@ -163,7 +163,7 @@ public struct HikingHomeView: View {
         case .offline where model.nearby.isEmpty:
             HikingMessage(systemImage: "wifi.slash", title: "You're offline", detail: "Trails nearby need a connection. Your saved trails and hikes still open, and recording works with no signal.")
         case .failed where model.nearby.isEmpty:
-            HikingMessage(systemImage: "exclamationmark.arrow.triangle.2.circlepath", title: "Trails couldn't load", detail: "OpenStreetMap didn't answer. Pull down to try again.")
+            HikingMessage(systemImage: "exclamationmark.arrow.triangle.2.circlepath", title: "Trails couldn't load", detail: "OpenStreetMap's free servers are busy or didn't answer. Pull down to try again.")
         default:
             if model.nearbyState == .offline || model.nearbyState == .failed {
                 Label(model.nearbyState == .offline ? "You're offline. This is the last list." : "Couldn't refresh. This is the last list.", systemImage: "wifi.slash")

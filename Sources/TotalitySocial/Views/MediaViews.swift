@@ -39,6 +39,8 @@ struct PostPhoto: View {
     let model: SocialModel
     let item: PostMedia
     var side = 1200
+    /// Show the whole picture, centred, instead of filling the frame and cropping its edges.
+    var fit = false
     @State private var load = MediaLoad()
 
     var body: some View {
@@ -51,7 +53,7 @@ struct PostPhoto: View {
                     .accessibilityLabel("Photo loading")
             case .ready(let data):
                 if let image = PhotoDecode.image(data, side: side) {
-                    Image(image, scale: 1, label: Text("Photo")).resizable().scaledToFill()
+                    Image(image, scale: 1, label: Text("Photo")).resizable().aspectRatio(contentMode: fit ? .fit : .fill)
                 } else {
                     failure("This photo couldn't be shown.")
                 }

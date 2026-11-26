@@ -3,6 +3,8 @@ import Foundation
 /// Fetches from the network, so tests can answer instead.
 public protocol HikingHTTP: Sendable {
     func get(_ url: URL, headers: [String: String]) async throws -> Data
+    /// A form POST (`application/x-www-form-urlencoded`), with its own time limit in seconds.
+    func post(_ url: URL, form: [String: String], headers: [String: String], timeout: TimeInterval) async throws -> Data
 }
 
 /// The real network, with nothing kept: no cookies, no cache and no stored credentials.
@@ -21,6 +23,19 @@ public struct URLSessionHikingHTTP: HikingHTTP {
     public func get(_ url: URL, headers: [String: String]) async throws -> Data {
         var request = URLRequest(url: url)
         for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
+        return try await send(request)
+    }
+
+    public func post(_ url: URL, form: [String: String], headers: [String: String], timeout: TimeInterval) async throws -> Data {
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
+        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(HikingForm.encode(form).utf8)
+        return try await send(request)
+    }
+
+    private func send(_ request: URLRequest) async throws -> Data {
         let data: Data, response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
@@ -29,6 +44,17 @@ public struct URLSessionHikingHTTP: HikingHTTP {
         }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw HikingError.failed }
         return data
+    }
+}
+
+/// Form encoding with every reserved character escaped, so a query's brackets, pipes, plus signs and ampersands survive.
+enum HikingForm {
+    private static let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+
+    static func encode(_ fields: [String: String]) -> String {
+        fields.sorted { $0.key < $1.key }.map { key, value in
+            "\(key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key)=\(value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value)"
+        }.joined(separator: "&")
     }
 }
 
@@ -61,23 +87,41 @@ public struct OverpassTrails: Sendable {
         """
     }
 
-    static func url(around point: GeoPoint) -> URL {
-        var parts = URLComponents(string: "https://overpass-api.de/api/interpreter")!
-        parts.queryItems = [URLQueryItem(name: "data", value: query(around: point))]
-        return parts.url!
-    }
+    /// The public servers, tried in order. The first often says "at capacity" at busy hours.
+    static let servers: [URL] = [
+        "https://overpass-api.de/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    ].map { URL(string: $0)! }
+
+    /// Seconds to wait on each server before trying the next.
+    static let wait: TimeInterval = 20
 
     public func trails(near here: GeoPoint) async throws -> [Trail] {
         let rough = here.rough
         guard rough.isValid else { throw HikingError.badAnswer }
-        let data = try await http.get(Self.url(around: rough), headers: ["User-Agent": userAgent])
-        return try Self.parse(data, near: rough)
+        let form = ["data": Self.query(around: rough)]
+        var last: Error = HikingError.failed
+        for server in Self.servers {
+            do {
+                let data = try await http.post(server, form: form, headers: ["User-Agent": userAgent, "Accept": "application/json"], timeout: Self.wait)
+                return try Self.parse(data, near: rough)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                last = error
+            }
+        }
+        throw last
     }
 
     // MARK: Reading the answer
 
     private struct Answer: Decodable {
         let elements: [Element]
+        /// Set when the server gave up part-way ("runtime error: ... timed out").
+        let remark: String?
     }
 
     private struct Element: Decodable {
@@ -106,6 +150,7 @@ public struct OverpassTrails: Sendable {
     /// name are joined by name, since a long path is often several ways. Short bits are left out.
     static func parse(_ data: Data, near here: GeoPoint) throws -> [Trail] {
         guard let answer = try? JSONDecoder().decode(Answer.self, from: data) else { throw HikingError.badAnswer }
+        if answer.elements.isEmpty, answer.remark != nil { throw HikingError.badAnswer }
         var trails: [Trail] = []
         var routeNames = Set<String>()
         for element in answer.elements where element.type == "relation" {

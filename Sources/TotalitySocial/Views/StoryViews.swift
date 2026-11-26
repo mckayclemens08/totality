@@ -265,7 +265,7 @@ struct StoryViewer: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .photo:
                 Rectangle().fill(theme.surface.color)
-                if let photo = story.photo { PostPhoto(model: model, item: photo, side: 1600) }
+                if let photo = story.photo { PostPhoto(model: model, item: photo, side: 1600, fit: true) }
             case .video:
                 Rectangle().fill(theme.surface.color)
                 if let video = story.video {
@@ -462,7 +462,7 @@ struct VideoPickSection: View {
         let shape = RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
         VStack(alignment: .leading, spacing: Space.s3) {
             if let cover = pick.prepared?.cover, let image = PhotoDecode.image(cover.data, side: 800) {
-                Image(image, scale: 1, label: Text("Video cover")).resizable().scaledToFill()
+                Image(image, scale: 1, label: Text("Video cover")).resizable().scaledToFit()
                     .frame(maxWidth: .infinity).frame(height: 180).clipShape(RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                     .overlay(alignment: .topLeading) { VideoChip(text: ClipTime.text(pick.range.length), systemImage: "video").padding(Space.s2) }
             }
@@ -552,7 +552,7 @@ private struct StoryPhotoTile: View {
         let shape = RoundedRectangle(cornerRadius: Radius.lg, style: .continuous)
         ZStack {
             if let photo, let image = PhotoDecode.image(photo.data, side: 800) {
-                Image(image, scale: 1, label: Text("Photo for the story")).resizable().scaledToFill()
+                Image(image, scale: 1, label: Text("Photo for the story")).resizable().scaledToFit()
             } else {
                 VStack(spacing: Space.s2) {
                     Image(systemName: "photo.badge.plus").font(Typeface.title).foregroundStyle(theme.accent.color)
