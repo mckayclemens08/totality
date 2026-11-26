@@ -19,6 +19,7 @@ let package = Package(
         .library(name: "TotalityWeather", targets: ["TotalityWeather"]),
         .library(name: "TotalityClock", targets: ["TotalityClock"]),
         .library(name: "TotalityContacts", targets: ["TotalityContacts"]),
+        .library(name: "TotalityHiking", targets: ["TotalityHiking"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.9.1"),
@@ -51,6 +52,7 @@ let package = Package(
         // AlarmKit is iPhone only, so the one file that uses it is behind `canImport(AlarmKit)`.
         .target(name: "TotalityClock", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityContacts", dependencies: ["TotalityCore", "TotalityUI"]),
+        .target(name: "TotalityHiking", dependencies: ["TotalityCore", "TotalityUI"]),
         .testTarget(name: "TotalityCoreTests", dependencies: ["TotalityCore"]),
         .testTarget(name: "TotalityUITests", dependencies: ["TotalityUI"]),
         .testTarget(name: "TotalityReaderTests", dependencies: ["TotalityReader"]),
@@ -65,5 +67,6 @@ let package = Package(
         .testTarget(name: "TotalityWeatherTests", dependencies: ["TotalityWeather"]),
         .testTarget(name: "TotalityClockTests", dependencies: ["TotalityClock"]),
         .testTarget(name: "TotalityContactsTests", dependencies: ["TotalityContacts"]),
+        .testTarget(name: "TotalityHikingTests", dependencies: ["TotalityHiking"]),
     ]
 )

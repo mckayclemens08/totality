@@ -51,5 +51,7 @@ public struct ModuleEntry: Identifiable, Sendable, Equatable {
               summary: "World clock, alarms, timers and a stopwatch.", keeps: "Your cities, presets and alarms"),
         .init(id: .contacts, name: "Contacts", systemImage: "person.crop.circle",
               summary: "Your own address book, end-to-end encrypted.", keeps: "Your contacts"),
+        .init(id: .hiking, name: "Hiking", systemImage: "figure.hiking",
+              summary: "Trails nearby, and hikes recorded on this iPhone.", keeps: "Your hikes"),
     ]
 }
