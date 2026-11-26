@@ -865,3 +865,17 @@ Spec: issue 204. iPhone only, everything on the device.
 - `ClockModule` is a `ModuleSearcher` (cities and alarm labels), a `PlacesProvider` and an `AlarmMaker`.
 - `PlacesProvider` (`TotalityCore/Modules/Places.swift`): `places() -> [NamedPlace]`, a name, an IANA time zone and an optional spot. Reached through `ModuleRegistry.placesProviders` and `places(except:)`. Weather reads Clock's cities here.
 - `AlarmMaker` (`TotalityCore/Modules/AlarmLinks.swift`): `makeAlarm(AlarmDraft) -> AlarmMade`, a one-time alarm with a label, a time and a `TaskSource`. Reached through `ModuleRegistry.alarmMaker`. The Calendar offers it on a timed event ahead, an hour before; Tasks on a task with a day and time ahead. Both use `SetAlarmSheet` in `TotalityUI`, and nothing is set until Set.
+
+## Contacts
+
+Spec: issue 205. Mockup: https://claude.ai/artifact/47x26DUHY5GkZ65DRrgtKv (artboards Contacts, ContactCard, ContactsEmpty, ContactsTiles), plus https://claude.ai/artifact/FZB5dTbXTEmWnsMzcgmxg8 for the items moved up from Later.
+
+- `TotalityContacts` imports only `TotalityCore` and `TotalityUI`. `ModuleID.contacts` and `ContentKind.contact` (`contact`) are added. The server's older `contacts` table (the account graph) is a different thing and is untouched; no table is added.
+- **Cards** are one sealed object each (kind `contact`, purpose `contact`) in `ContactVault`, meta only, no body. The photo is a `SafeAvatar` rebuild inside the seal. The server sees how many cards, their sizes and when they change. A conflict keeps the newer card whole.
+- **Recently Deleted** is `deletedAt` inside the seal, so it syncs; after 30 days the card is deleted for good with a deletion record.
+- **iPhone Contacts** are read only after the person taps Choose from iPhone Contacts, with limited access and the iOS 18 access picker supported. Notes are never read or written. Import is a copy; Update from iPhone shows the changes first. Two-way sync (off by default) writes a copied card's fields back and pulls changes in, and never writes Totality's notes, labels or links.
+- **Contract `PeopleLookup`** (in `TotalityCore`): `person(email:)`, `person(username:)`, `people(matching:limit:)` returning `KnownPerson` (card ID, name, nickname, emails, handle, photo). In memory only, filled from the open cards and emptied on a key change; Recently Deleted cards aren't known. `ModuleRegistry.people` finds it. Mail uses it for address suggestions; Messages for the name it shows for someone.
+- **Contract `ContactMaker`** (in `TotalityCore`): `addContact(username:displayName:) -> ContentRef` and `hasContact(username:)`. Social's "Add to Contacts" uses it. It's its own protocol rather than `ContentReceiver`, so Contacts can never become the module that takes Save to Reader.
+- **Birthdays** reach the Calendar as all-day `AgendaItem`s (`AgendaProvider`): the title and the age only.
+- `ContactsModule` is also a `ContentProvider` (a card can be attached through `ContentRef`), a `ModuleSearcher` and a `ModuleRefresher`. Message, Mail and Profile on a card hand over to those modules through the app; Call and Text open the iPhone's own apps.
+- **Private contact discovery** is not built. Hashed lookups leak, so it waits for its own design and security review (PR for issue 205).
