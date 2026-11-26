@@ -18,6 +18,7 @@ public struct MessagesHomeView: View {
     @State private var showingBlocked = false
     @State private var showingPrivacy = false
     @AppStorage(MessagesPreferences.shareReadAndTypingKey) private var shareReadAndTyping = true
+    @AppStorage(MessagesPreferences.newChatsDisappearKey) private var newChatsDisappear = Disappearing.off.rawValue
 
     private let onOpenAccount: (() -> Void)?
 
@@ -243,6 +244,10 @@ public struct MessagesHomeView: View {
             Button("Who can message me", systemImage: "person.crop.circle.badge.checkmark") { showingPrivacy = true }
             Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
             Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
+            Picker("New chats disappear", selection: $newChatsDisappear) {
+                ForEach(Disappearing.allCases) { Text($0.label).tag($0.rawValue) }
+            }
+            .pickerStyle(.menu)
             if model.keys == .backedUp {
                 Section {
                     Label("History backed up, this device verified", systemImage: "checkmark.shield")

@@ -51,6 +51,7 @@ public final class MessagesModel {
     private let connector: MessagesConnector?
     private let unavailableReason: String?
     private(set) var service: (any MessagesService)?
+    private let defaults: UserDefaults
     /// Bumped on every connect, so a slow old connection can't write into a newer one's lists.
     private(set) var generation = 0
 
@@ -59,8 +60,10 @@ public final class MessagesModel {
         connector: MessagesConnector?,
         unavailableReason: String? = nil,
         recoverySecret: @escaping @Sendable (_ account: String) async -> String? = { _ in nil },
-        peopleFile: @escaping @Sendable (_ account: String) -> URL? = { _ in nil }
+        peopleFile: @escaping @Sendable (_ account: String) -> URL? = { _ in nil },
+        defaults: UserDefaults = .standard
     ) {
+        self.defaults = defaults
         self.recoverySecret = recoverySecret
         self.peopleFile = peopleFile
         self.account = account
@@ -214,10 +217,25 @@ public final class MessagesModel {
                     return nil
                 }
             }
-            return try await service.startChat(with: username)
+            let known = Set(chats.map(\.id))
+            let chat = try await service.startChat(with: username)
+            if !known.contains(chat) { await applyNewChatDefault(to: chat) }
+            return chat
         } catch {
             notice = Self.describe(error)
             return nil
+        }
+    }
+
+    /// Gives a chat you just made your "new chats" timer, if you picked one.
+    private func applyNewChatDefault(to chat: String) async {
+        let setting = MessagesPreferences.newChatsDisappear(defaults)
+        guard setting != .off, let service, let channel = try? await service.openChat(chat) else { return }
+        defer { channel.close() }
+        do {
+            try await channel.setDisappearing(setting)
+        } catch {
+            notice = "The chat started, but its disappearing timer didn't go on. Turn it on from the chat's timer button."
         }
     }
 
@@ -252,7 +270,9 @@ public final class MessagesModel {
             let prepared = try photo.map { original in
                 try GroupPhoto.prepare(original)
             }
-            return try await service.startGroup(with: names, name: GroupName.clean(name), photo: prepared)
+            let chat = try await service.startGroup(with: names, name: GroupName.clean(name), photo: prepared)
+            await applyNewChatDefault(to: chat)
+            return chat
         } catch {
             notice = Self.describe(error)
             return nil
@@ -415,9 +435,18 @@ public final class MessagesModel {
 public final class ChatModel {
     /// What the chat shows: everything, minus anything a disappearing setting has expired.
     public var messages: [ChatMessage] {
-        DisappearingRule.visible(all, state: disappearingState, now: now, viewedUpTo: viewedUpTo)
+        let shown = DisappearingRule.visible(all, state: disappearingState, now: now, viewedUpTo: viewedUpTo)
+        guard !openedHere.isEmpty else { return shown }
+        return shown.map { message in
+            guard openedHere.contains(message.id) else { return message }
+            var message = message
+            message.opened = true
+            return message
+        }
     }
     private var all: [ChatMessage] = []
+    /// View-once photos opened on this device, so they show as opened before the server echoes it.
+    private var openedHere: Set<String> = []
     public private(set) var disappearingState = DisappearingState.off
     public var disappearing: Disappearing { disappearingState.setting }
     /// Who turned the current setting on, when it wasn't you.
@@ -598,7 +627,7 @@ public final class ChatModel {
     }
 
     /// Prepares a photo off the main thread, then queues it. It's sealed by the SDK before upload.
-    public func sendPhoto(_ original: Data) async {
+    public func sendPhoto(_ original: Data, viewOnce: Bool = false) async {
         guard !sendingPhoto else { return }
         sendingPhoto = true
         defer { sendingPhoto = false }
@@ -606,7 +635,8 @@ public final class ChatModel {
         replyingTo = nil
         do {
             notice = nil
-            let photo = try await Task.detached(priority: .userInitiated) { try PhotoPrep.prepare(original) }.value
+            var photo = try await Task.detached(priority: .userInitiated) { try PhotoPrep.prepare(original) }.value
+            photo.viewOnce = viewOnce
             try await channel.sendPhoto(photo, replyingTo: reply?.id)
         } catch {
             replyingTo = reply
@@ -637,10 +667,40 @@ public final class ChatModel {
 
     /// A photo opened on this device, kept in memory while the chat is open.
     public func photo(_ message: ChatMessage, thumbnail: Bool) async -> Data? {
+        // A view-once photo is only ever handed over by `openOnce`.
+        guard !message.viewOnce else { return nil }
         let key = "\(message.id)|\(thumbnail)"
         if let cached = photos[key] { return cached }
         guard let data = try? await channel.photo(message.id, thumbnail: thumbnail) else { return nil }
         photos[key] = data
+        return data
+    }
+
+    /// What to say under a message about it disappearing, if it will.
+    public func marker(for message: ChatMessage) -> String? {
+        DisappearingRule.marker(for: message, state: disappearingState, now: now)
+    }
+
+    /// A view-once photo, for the one time it can be opened. It's fetched first, so a bad connection
+    /// doesn't use it up, then marked opened for the sender and everyone else before it's handed over.
+    /// The bytes are never kept: not in the photo memory, and the viewer lets go of them on closing.
+    public func openOnce(_ message: ChatMessage) async -> Data? {
+        guard message.viewOnce, !message.isOwn, message.decrypted, message.state == .sent,
+              !message.opened, !openedHere.contains(message.id), message.kind != .deleted
+        else { return nil }
+        guard let data = try? await channel.photo(message.id, thumbnail: false) else {
+            notice = "That photo didn't open, and it hasn't been used up. Check your connection and try again."
+            return nil
+        }
+        do {
+            notice = nil
+            try await channel.toggleReaction(ViewOnce.openedKey, on: message.id)
+        } catch {
+            notice = "It couldn't be marked opened, so it stays closed for now. \(MessagesModel.describe(error))"
+            return nil
+        }
+        openedHere.insert(message.id)
+        photos.removeAll()
         return data
     }
 

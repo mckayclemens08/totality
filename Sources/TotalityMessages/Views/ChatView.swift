@@ -53,6 +53,12 @@ struct ChatView: View {
     @State private var editingGroup = false
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var viewing: ChatMessage?
+    @State private var viewingOnce: ChatMessage?
+    /// Choosing how to send a photo that opens once.
+    @State private var choosingOnce = false
+    @State private var cameraOnce = false
+    @State private var pickedOnce: PhotosPickerItem?
+    @State private var showingOncePhotos = false
     @State private var deleting: ChatMessage?
     @State private var showingCamera = false
     @State private var showingPhotos = false
@@ -172,6 +178,33 @@ struct ChatView: View {
         .sheet(item: $viewing) { message in
             PhotoViewer(message: message, model: model) { viewing = nil }
         }
+        .sheet(item: $viewingOnce) { message in
+            OnceViewer(message: message, model: model) { viewingOnce = nil }
+        }
+        .photosPicker(isPresented: $showingOncePhotos, selection: $pickedOnce, matching: .images, preferredItemEncoding: .compatible)
+        .onChange(of: pickedOnce) {
+            guard let item = pickedOnce else { return }
+            pickedOnce = nil
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    await model.sendPhoto(data, viewOnce: true)
+                } else {
+                    model.notice = "That photo couldn't be opened."
+                }
+            }
+        }
+        .confirmationDialog("Send a photo that opens once?", isPresented: $choosingOnce, titleVisibility: .visible) {
+            Button("Choose from your library") { showingOncePhotos = true }
+            if camera {
+                Button("Take a photo") {
+                    cameraOnce = true
+                    showingCamera = true
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(ViewOnce.explanation)
+        }
         .sheet(item: $playing) { message in
             VideoViewer(message: message, model: model) { playing = nil }
         }
@@ -218,9 +251,17 @@ struct ChatView: View {
         .fullScreenCover(isPresented: $showingCamera) {
             CameraPicker { result in
                 showingCamera = false
+                let once = cameraOnce
+                cameraOnce = false
                 switch result {
-                case .photo(let data): Task { await model.sendPhoto(data) }
-                case .video(let url): Task { await model.sendVideo(url) }
+                case .photo(let data): Task { await model.sendPhoto(data, viewOnce: once) }
+                case .video(let url):
+                    if once {
+                        try? FileManager.default.removeItem(at: url)
+                        model.notice = "Only photos can open once. A video wasn't sent."
+                    } else {
+                        Task { await model.sendVideo(url) }
+                    }
                 case nil: break
                 }
             }
@@ -254,7 +295,9 @@ struct ChatView: View {
             onOpenSender: opensSender ? { showingPerson = ShownPerson(id: message.sender) } : nil,
             showsSeen: message.seen && model.messages[(index + 1)...].allSatisfy { !$0.isOwn || !$0.seen },
             onRetry: { Task { await model.retry(message) } },
-            onOpenPhoto: { if message.isVideo { playing = message } else { viewing = message } },
+            onOpenPhoto: {
+                if message.viewOnce { viewingOnce = message } else if message.isVideo { playing = message } else { viewing = message }
+            },
             onReply: {
                 model.replyingTo = message
                 writing = true
@@ -319,20 +362,19 @@ struct ChatView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Picker("Disappearing messages", selection: Binding(
-                    get: { model.disappearing },
-                    set: { setting in
-                        if setting == .off {
-                            Task { await model.setDisappearing(.off) }
-                        } else {
-                            pendingSetting = setting
-                        }
+            TimerChip(
+                setting: model.disappearing,
+                choose: { setting in
+                    if setting == .off {
+                        Task { await model.setDisappearing(.off) }
+                    } else if setting != model.disappearing {
+                        pendingSetting = setting
                     }
-                )) {
-                    ForEach(Disappearing.allCases) { Text($0.label).tag($0) }
                 }
-                .pickerStyle(.menu)
+            )
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
                 if model.otherPerson != nil {
                     Button("Block \(MessagesUsername.display(model.otherPerson ?? ""))", systemImage: "hand.raised", role: .destructive) {
                         confirmingBlock = true
@@ -345,22 +387,26 @@ struct ChatView: View {
                     confirmingLeave = true
                 }
             } label: {
-                ToolbarGlyph(systemImage: model.disappearing == .off ? "ellipsis" : "timer")
+                ToolbarGlyph(systemImage: "ellipsis")
             }
             .accessibilityLabel("Chat settings")
         }
     }
 
-    private var composer: some View {
+    private var camera: Bool {
         #if os(iOS)
-        let camera = CameraPicker.isAvailable
+        CameraPicker.isAvailable
         #else
-        let camera = false
+        false
         #endif
-        return ChatComposer(
+    }
+
+    private var composer: some View {
+        ChatComposer(
             draft: $model.draft, writing: $writing,
             busy: model.sendingPhoto || model.sendingVideo, canUseCamera: camera,
             onCamera: { showingCamera = true }, onPhotos: { showingPhotos = true },
+            onOnce: { choosingOnce = true },
             onSend: { Task { await model.send() } },
             onDraftChanged: { Task { await model.draftChanged() } }
         )
@@ -376,6 +422,7 @@ struct ChatComposer: View {
     let canUseCamera: Bool
     let onCamera: () -> Void
     let onPhotos: () -> Void
+    var onOnce: (() -> Void)? = nil
     let onSend: () -> Void
     let onDraftChanged: () -> Void
 
@@ -389,6 +436,9 @@ struct ChatComposer: View {
                     Button("Take a photo or video", systemImage: "camera", action: onCamera)
                 }
                 Button("Choose from your library", systemImage: "photo.on.rectangle", action: onPhotos)
+                if let onOnce {
+                    Button("Photo that opens once", systemImage: "1.circle", action: onOnce)
+                }
             } label: {
                 ComposerBar<EmptyView, EmptyView>.attachGlyph(busy: busy)
             }
@@ -451,6 +501,46 @@ struct ComposerBar<Attach: View, Field: View>: View {
             .frame(width: ToolbarGlyph.diameter, height: ToolbarGlyph.diameter)
             .background(Circle().fill(theme.surfaceSunken.color))
             .contentShape(Circle())
+    }
+}
+
+/// The chat's disappearing timer, always in the header: what it's set to, and one tap to change it.
+/// Changing it asks first (the sheet says what it does), except turning it off.
+struct TimerChip: View {
+    let setting: Disappearing
+    let choose: (Disappearing) -> Void
+
+    var body: some View {
+        let theme = Theme.current
+        let on = setting != .off
+        Menu {
+            Section("Disappearing messages") {
+                ForEach(Disappearing.allCases) { option in
+                    Button {
+                        choose(option)
+                    } label: {
+                        if option == setting {
+                            Label(option.label, systemImage: "checkmark")
+                        } else {
+                            Text(option.label)
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: Space.s1) {
+                Image(systemName: "timer")
+                Text(on ? setting.short : "Off")
+            }
+            .font(Typeface.caption.weight(.semibold))
+            .foregroundStyle(on ? theme.accentOn.color : theme.textSecondary.color)
+            .padding(.horizontal, Space.s3)
+            .frame(height: ToolbarGlyph.diameter)
+            .background(Capsule().fill(on ? theme.accent.color : theme.surface.color))
+            .neumorphic(.subtle, in: Capsule())
+        }
+        .accessibilityLabel(on ? "Disappearing messages: \(setting.label.lowercased())" : "Disappearing messages: off")
+        .accessibilityHint("Changes how long messages in this chat last")
     }
 }
 
@@ -597,6 +687,12 @@ struct Bubble: View {
                         .buttonStyle(.plain)
                 }
             }
+            if let marker = model.marker(for: message) {
+                Label(marker, systemImage: "timer")
+                    .font(Typeface.micro)
+                    .foregroundStyle(theme.accent.color)
+                    .accessibilityLabel(marker)
+            }
             if !message.reactions.isEmpty {
                 Reactions(reactions: message.reactions) { key in
                     Task { await model.toggleReaction(key, on: message) }
@@ -611,6 +707,8 @@ struct Bubble: View {
     @ViewBuilder private var content: some View {
         let theme = Theme.current
         switch message.kind {
+        case .photo where message.viewOnce:
+            OnceTile(message: message, onOpen: onOpenPhoto)
         case .photo:
             PhotoBubble(message: message, model: model, onOpen: onOpenPhoto, onDoubleTap: heart)
         case .video:

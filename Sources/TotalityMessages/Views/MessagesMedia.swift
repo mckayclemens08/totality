@@ -110,6 +110,106 @@ struct PhotoViewer: View {
     }
 }
 
+/// A photo sent to open once. It never shows a picture in the chat: only whether it's waiting, and
+/// what happened to it.
+struct OnceTile: View {
+    let message: ChatMessage
+    let onOpen: () -> Void
+
+    private var title: String {
+        if message.isOwn { return message.opened ? "Opened" : "Photo that opens once" }
+        return message.opened ? "Opened" : "Tap to open. You can only do it once"
+    }
+
+    private var detail: String? {
+        if message.isOwn { return message.opened ? "It's being deleted for everyone." : "Not opened yet" }
+        return message.opened ? "It can't be opened again." : nil
+    }
+
+    private var canOpen: Bool { !message.isOwn && !message.opened && message.decrypted && message.state == .sent }
+
+    var body: some View {
+        let theme = Theme.current
+        let tile = HStack(spacing: Space.s3) {
+            Image(systemName: message.opened ? "checkmark.circle" : "1.circle.fill")
+                .font(Typeface.title)
+                .foregroundStyle(message.opened ? theme.textSecondary.color : theme.accent.color)
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(title)
+                    .font(Typeface.callout.weight(.semibold))
+                    .foregroundStyle(theme.textPrimary.color)
+                if let detail {
+                    Text(detail)
+                        .font(Typeface.micro)
+                        .foregroundStyle(theme.textSecondary.color)
+                }
+            }
+        }
+        .padding(.horizontal, Space.s4)
+        .padding(.vertical, Space.s3)
+        .background(RoundedRectangle(cornerRadius: Radius.md).fill(message.isOwn ? theme.highlight.color : theme.surface.color))
+        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
+        if canOpen {
+            Button(action: onOpen) { tile }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Photo from \(MessagesUsername.display(message.sender)) that opens once. Open it")
+        } else {
+            tile.accessibilityElement(children: .combine)
+        }
+    }
+}
+
+/// Shows a view-once photo, if it can still be opened. The bytes live only in this view.
+struct OnceViewer: View {
+    let message: ChatMessage
+    let model: ChatModel
+    let onClose: () -> Void
+    @State private var data: Data?
+    @State private var tried = false
+
+    var body: some View {
+        let theme = Theme.current
+        NavigationStack {
+            VStack(spacing: Space.s3) {
+                ZStack {
+                    theme.bg.color
+                    if let data {
+                        OpenedImage(data: data).padding(Space.s3)
+                    } else if tried {
+                        MessagesStateView(
+                            systemImage: "1.circle", title: "This photo didn't open",
+                            detail: model.notice ?? "It can only be opened once, and that's already happened."
+                        )
+                    } else {
+                        ProgressView()
+                    }
+                }
+                Text(data == nil ? "Opens once, then it can't be opened again." : "This is the only time you can see it. When you close it, you can't open it again. Nothing stops a screenshot or another camera.")
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, Space.s4)
+                    .padding(.bottom, Space.s3)
+            }
+            .background(theme.bg.color)
+            .navigationTitle(MessagesUsername.display(message.sender))
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done", action: onClose) }
+            }
+        }
+        .tint(theme.accent.color)
+        .interactiveDismissDisabled(data == nil && !tried)
+        .task {
+            data = await model.openOnce(message)
+            tried = true
+        }
+        .onDisappear { data = nil }
+    }
+}
+
 enum Pasteboard {
     static func copy(_ text: String) {
         #if canImport(UIKit)

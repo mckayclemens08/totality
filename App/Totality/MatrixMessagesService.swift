@@ -569,6 +569,7 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
         let id = item.uniqueId().id
         var decrypted = true
         var kind = ChatMessage.Kind.text
+        var viewOnce = false
         let body: String
         switch like.kind {
         case .unableToDecrypt:
@@ -581,7 +582,8 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
             if case .image(let image) = content.msgType {
                 kind = .photo(width: image.info?.width.map { Int(clamping: $0) }, height: image.info?.height.map { Int(clamping: $0) })
                 body = "Photo"
-                photoSources[id] = (image.source, image.info?.thumbnailSource)
+                viewOnce = ViewOnce.isViewOnce(filename: image.filename)
+                photoSources[id] = (image.source, viewOnce ? nil : image.info?.thumbnailSource)
             } else if case .video(let video) = content.msgType {
                 kind = .video(seconds: video.info?.duration)
                 body = "Video"
@@ -600,13 +602,17 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
         case .notSentYet: .sending
         case .sendingFailed(_, let recoverable): .failed(canRetry: recoverable)
         }
-        let reactions = kind == .deleted ? [] : event.reactions.map {
+        // The "opened" mark on a view-once photo isn't shown as a reaction: it's what makes it open once.
+        let openers = event.reactions.first { $0.key == ViewOnce.openedKey }?.senders.map(\.senderId) ?? []
+        let opened = viewOnce && (event.isOwn ? openers.contains { $0 != ownUserID } : openers.contains(ownUserID))
+        let reactions = kind == .deleted ? [] : event.reactions.filter { $0.key != ViewOnce.openedKey }.map {
             ChatReaction(key: $0.key, count: $0.senders.count, mine: $0.senders.contains { $0.senderId == ownUserID })
         }
         return ChatMessage(
             id: id, sender: event.sender, body: body, isOwn: event.isOwn,
             time: MatrixMessagesService.date(event.timestamp), state: state, decrypted: decrypted,
-            kind: kind, reactions: reactions, replyTo: like.inReplyTo.flatMap(Self.reply), canReply: event.canBeRepliedTo
+            kind: kind, reactions: reactions, replyTo: like.inReplyTo.flatMap(Self.reply), canReply: event.canBeRepliedTo,
+            viewOnce: viewOnce, opened: opened
         )
     }
 
@@ -656,21 +662,25 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
         guard await room.isEncrypted() else { throw MessagesError.notEncrypted }
         do {
             if !room.isSendQueueEnabled() { room.enableSendQueue(enable: true) }
+            // A view-once photo goes without a small version, so there's no second copy to look at again.
             let info = ImageInfo(
                 height: UInt64(photo.height), width: UInt64(photo.width), mimetype: "image/jpeg",
                 size: UInt64(photo.data.count),
-                thumbnailInfo: ThumbnailInfo(
+                thumbnailInfo: photo.viewOnce ? nil : ThumbnailInfo(
                     height: UInt64(photo.thumbnailHeight), width: UInt64(photo.thumbnailWidth),
                     mimetype: "image/jpeg", size: UInt64(photo.thumbnail.count)
                 ),
                 thumbnailSource: nil, blurhash: nil, isAnimated: false
             )
             let params = UploadParameters(
-                source: .data(bytes: photo.data, filename: "photo.jpg"), caption: nil, formattedCaption: nil,
+                source: .data(bytes: photo.data, filename: photo.viewOnce ? ViewOnce.filename : "photo.jpg"),
+                caption: nil, formattedCaption: nil,
                 mentions: nil, inReplyTo: replyingTo.flatMap(eventID)
             )
             let handle = try timeline.sendImage(
-                params: params, thumbnailSource: .data(bytes: photo.thumbnail, filename: "thumbnail.jpg"), imageInfo: info
+                params: params,
+                thumbnailSource: photo.viewOnce ? nil : .data(bytes: photo.thumbnail, filename: "thumbnail.jpg"),
+                imageInfo: info
             )
             try await handle.join()
         } catch {

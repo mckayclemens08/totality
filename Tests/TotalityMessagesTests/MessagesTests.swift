@@ -60,7 +60,12 @@ private final class FakeService: MessagesService, @unchecked Sendable {
         return "!dm-\(username)"
     }
 
-    func openChat(_ chat: String) async throws -> any ChatChannel { FakeChannel() }
+    private(set) var openedChannels: [FakeChannel] = []
+    func openChat(_ chat: String) async throws -> any ChatChannel {
+        let channel = FakeChannel()
+        lock.withLock { openedChannels.append(channel) }
+        return channel
+    }
 
     private(set) var blockedList: [String] = []
 
@@ -126,6 +131,7 @@ final class FakeChannel: ChatChannel, @unchecked Sendable {
     private(set) var videos: [OutgoingVideo] = []
     private(set) var settings: [Disappearing] = []
     var failSending = false
+    var failReactions = false
     var startingSetting = DisappearingState.off
     var startingMessages: [ChatMessage] = []
     let id = "!chat"
@@ -166,7 +172,10 @@ final class FakeChannel: ChatChannel, @unchecked Sendable {
         }
     }
     func retry(_ message: String) async throws {}
-    func toggleReaction(_ key: String, on message: String) async throws { lock.withLock { reactions.append("\(key)@\(message)") } }
+    func toggleReaction(_ key: String, on message: String) async throws {
+        if failReactions { throw MessagesError.offline }
+        lock.withLock { reactions.append("\(key)@\(message)") }
+    }
     func delete(_ message: String) async throws { lock.withLock { deleted.append(message) } }
     func photo(_ message: String, thumbnail: Bool) async throws -> Data { Data("\(message)|\(thumbnail)".utf8) }
     func markRead(share: Bool) async { lock.withLock { receipts.append(share) } }
@@ -628,7 +637,8 @@ private func on(_ setting: Disappearing) -> DisappearingState {
         #expect(Disappearing(stateJSON: setting.stateJSON) == setting, "\(setting)")
     }
     #expect(Disappearing(stateJSON: "not json") == .off)
-    #expect(Disappearing(stateJSON: "{\"max_lifetime\":3600000}") == .day)
+    #expect(Disappearing(stateJSON: "{\"max_lifetime\":3600000}") == .hour)
+    #expect(Disappearing(stateJSON: "{\"max_lifetime\":86400000}") == .day)
     #expect(Disappearing(stateJSON: "{\"max_lifetime\":2592000000}") == .week)
     #expect(Disappearing(stateJSON: "{\"max_lifetime\":0}") == .off)
 }
@@ -1475,4 +1485,139 @@ private func privacyModel(_ privacy: FakePrivacy, chats: [ChatSummary] = []) asy
     #expect(RestMessagePrivacy.error(status: 401, data: Data()) == .notSignedIn)
     #expect(RestMessagePrivacy.error(status: 500, data: body("secret detail")).message == "That didn't go through. Try again.")
     #expect(MessageReach.allCases.map(\.title) == ["Anyone", "Followers", "Friends"])
+}
+
+// MARK: Disappearing up front: markers, view-once photos, new-chat default
+
+@Test func everyMessageThatWillDisappearSaysSo() {
+    let mine = ChatMessage(id: "a", sender: "@me:x", body: "Hi", isOwn: true, time: jan1)
+    let now = jan1.addingTimeInterval(20 * 60)
+    #expect(DisappearingRule.marker(for: mine, state: on(.hour), now: now) == "Disappears in 40 min")
+    #expect(DisappearingRule.marker(for: mine, state: on(.day), now: now) == "Disappears in 23 h 40 min")
+    #expect(DisappearingRule.marker(for: mine, state: on(.week), now: now) == "Disappears in 6 days")
+    #expect(DisappearingRule.marker(for: mine, state: on(.hour), now: jan1.addingTimeInterval(7_200)) == "Disappearing now")
+    #expect(DisappearingRule.marker(for: mine, state: on(.afterViewing), now: now) == "Disappears once read")
+    #expect(DisappearingRule.marker(for: mine, state: .off, now: now) == nil)
+    // Sent before the timer went on: it stays, so it says nothing.
+    let early = ChatMessage(id: "b", sender: "@me:x", body: "Old", isOwn: true, time: jan1.addingTimeInterval(-3 * 86_400))
+    #expect(DisappearingRule.marker(for: early, state: on(.day), now: now) == nil)
+}
+
+@Test func anHourIsATimerChoiceAndWritesTheRoomState() {
+    #expect(Disappearing.hour.lifetime == 3_600)
+    #expect(Disappearing.hour.stateJSON == "{\"max_lifetime\":3600000}")
+    #expect(Disappearing(stateJSON: Disappearing.hour.stateJSON) == .hour)
+    #expect(Disappearing.hour.explanation.contains("after 1 hour"))
+}
+
+@Test func anOpenedViewOncePhotoOfYoursIsDueEvenWithNoTimer() {
+    let photo = ChatMessage(id: "p", sender: "@me:x", body: "Photo", isOwn: true, time: jan1, kind: .photo(width: 4, height: 3), viewOnce: true)
+    var opened = photo
+    opened.opened = true
+    let theirs = ChatMessage(id: "t", sender: "@ana:x", body: "Photo", isOwn: false, time: jan1, kind: .photo(width: 4, height: 3), viewOnce: true, opened: true)
+    #expect(DisappearingRule.due([photo, opened, theirs], state: .off, now: jan1).map(\.id) == ["p"])
+    #expect(DisappearingRule.due([photo], state: .off, now: jan1).isEmpty)
+    #expect(DisappearingRule.marker(for: photo, state: on(.day), now: jan1) == nil)
+}
+
+@MainActor
+@Test func aViewOncePhotoOpensOnceAndIsMarkedOpenedFirst() async throws {
+    let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+    let channel = FakeChannel()
+    let photo = ChatMessage(id: "$p", sender: "@ana:x", body: "Photo", isOwn: false, time: jan1, kind: .photo(width: 4, height: 3), viewOnce: true)
+    channel.startingMessages = [photo]
+    let chat = ChatModel(channel: channel, defaults: defaults)
+    await chat.start()
+    await settle()
+    #expect(await chat.photo(photo, thumbnail: true) == nil)
+    let first = await chat.openOnce(photo)
+    #expect(first != nil)
+    #expect(channel.reactions == ["\(ViewOnce.openedKey)@$p"])
+    #expect(chat.messages.first?.opened == true)
+    let again = try #require(chat.messages.first)
+    #expect(await chat.openOnce(again) == nil)
+    #expect(await chat.openOnce(photo) == nil)
+    #expect(channel.reactions.count == 1)
+    chat.close()
+}
+
+@MainActor
+@Test func aViewOncePhotoStaysClosedWhenItCantBeMarkedOpened() async throws {
+    let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+    let channel = FakeChannel()
+    channel.failReactions = true
+    let photo = ChatMessage(id: "$p", sender: "@ana:x", body: "Photo", isOwn: false, time: jan1, kind: .photo(width: 4, height: 3), viewOnce: true)
+    channel.startingMessages = [photo]
+    let chat = ChatModel(channel: channel, defaults: defaults)
+    await chat.start()
+    await settle()
+    #expect(await chat.openOnce(photo) == nil)
+    #expect(chat.messages.first?.opened == false)
+    #expect(chat.notice != nil)
+    channel.failReactions = false
+    #expect(await chat.openOnce(photo) != nil)
+    chat.close()
+}
+
+@MainActor
+@Test func yourOpenedViewOncePhotoIsDeletedOnce() async throws {
+    let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+    let channel = FakeChannel()
+    channel.startingMessages = [
+        ChatMessage(id: "$p", sender: "@me:x", body: "Photo", isOwn: true, time: Date(), kind: .photo(width: 4, height: 3), viewOnce: true, opened: true),
+    ]
+    let chat = ChatModel(channel: channel, defaults: defaults)
+    await chat.start()
+    await settle()
+    await chat.removeDue()
+    #expect(channel.deleted == ["$p"])
+    chat.close()
+}
+
+@MainActor
+@Test func sendingAPhotoThatOpensOnceFlagsIt() async throws {
+    let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+    let channel = FakeChannel()
+    let chat = ChatModel(channel: channel, defaults: defaults)
+    await chat.start()
+    await chat.sendPhoto(try phonePhoto(), viewOnce: true)
+    await chat.sendPhoto(try phonePhoto())
+    #expect(channel.photos.map(\.viewOnce) == [true, false])
+    chat.close()
+}
+
+@Test func viewOnceIsMarkedInsideTheMessageAndNeverGuessedFromAnythingElse() {
+    #expect(ViewOnce.isViewOnce(filename: ViewOnce.filename))
+    #expect(!ViewOnce.isViewOnce(filename: "photo.jpg"))
+    #expect(ViewOnce.explanation.contains("screenshot"))
+}
+
+@MainActor
+@Test func aNewChatGetsYourDefaultTimerButAnExistingOneDoesnt() async throws {
+    let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+    defaults.set(Disappearing.day.rawValue, forKey: MessagesPreferences.newChatsDisappearKey)
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [
+        ChatSummary(id: "!dm-mckay_test", title: "mckay_test", lastMessage: "Hi", lastActivity: jan1),
+    ])
+    let model = MessagesModel(account: { mckay }, connector: { _ in service }, defaults: defaults)
+    await model.connect()
+    await settle()
+    #expect(await model.startChat(with: "mckay_test") == "!dm-mckay_test")
+    #expect(service.openedChannels.isEmpty)
+    #expect(await model.startChat(with: "ana_ruiz") == "!dm-ana_ruiz")
+    #expect(service.openedChannels.first?.settings == [.day])
+    #expect(await model.startGroup(with: "ana_ruiz, @mckay_test") == "!group")
+    #expect(service.openedChannels.last?.settings == [.day])
+}
+
+@MainActor
+@Test func withNoDefaultNewChatsAreLeftAlone() async throws {
+    let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+    #expect(MessagesPreferences.newChatsDisappear(defaults) == .off)
+    let service = FakeService(account: mckay, user: "mckay_clemens", chats: [])
+    let model = MessagesModel(account: { mckay }, connector: { _ in service }, defaults: defaults)
+    await model.connect()
+    await settle()
+    #expect(await model.startChat(with: "ana_ruiz") == "!dm-ana_ruiz")
+    #expect(service.openedChannels.isEmpty)
 }
