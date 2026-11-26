@@ -208,6 +208,8 @@ public final class CalendarModel {
     private let devices: any DeviceCalendarSource
     private let reminders: any ReminderScheduler
     private let registry: ModuleRegistry?
+    /// The Clock, reached only through the registry, for "Set an alarm" on an event (issue 204).
+    public var alarmMaker: (any AlarmMaker)? { registry?.alarmMaker }
     private let defaults: UserDefaults
     private let now: @Sendable () -> Date
     private var deviceEvents: [DeviceEvent] = []

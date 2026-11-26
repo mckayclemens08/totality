@@ -62,3 +62,16 @@ extension TasksModel {
         await change(id) { $0.source = nil }
     }
 }
+
+extension TasksModel {
+    /// A task with a day and a time still ahead can ring as an alarm, through the Clock (issue 204).
+    public func alarmOffer(for task: TaskItem) -> AlarmDraft? {
+        guard alarmMaker != nil, !task.isCompleted, let day = task.when, let time = task.time else { return nil }
+        let date = day.date(at: time, in: calendar)
+        guard date > now else { return nil }
+        return AlarmDraft(
+            label: task.displayTitle, fireDate: date,
+            source: TaskSource(module: .tasks, itemID: task.id.uuidString, title: task.displayTitle)
+        )
+    }
+}

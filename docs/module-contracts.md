@@ -855,3 +855,13 @@ Spec: issue 203. Mockup: https://claude.ai/artifact/47x26DUHY5GkZ65DRrgtKv (artb
 - **Alerts** show in the app. With the setting on, a new severe or extreme alert makes a local notification on the iPhone; announced alerts are remembered as short hashes. No push: that would need the server to know the person's places.
 - **Contract `ForecastProvider`** (in `TotalityCore`): `forecast(on:) -> DayForecast?`, from the cache only, for where the person is or else the first saved place. It never fetches, so asking sends nothing. `ModuleRegistry.forecast(on:)` asks each provider. The Calendar shows it as a chip beside the selected day in Day and Week.
 - `WeatherModule` is a `ModuleRefresher`, a `ModuleSearcher` (saved places by name) and a `ForecastProvider`.
+## Clock
+
+Spec: issue 204. iPhone only, everything on the device.
+
+- `ModuleID.clock`, `ContentKind.clockItems` (`clock_items`). `ClockBook` holds two sealed records through `SealedRecordStore`: `clock_items` (purpose `clock-items`: world cities, timer presets, the stopwatch and its laps), which syncs as one opaque row per person and merges by keeping the later of each item, removals included; and a device record (purpose `clock-device`: alarms, bedtime, running timers, added sounds) that never syncs, so an alarm rings on the device that set it.
+- Alarms and timers ring through AlarmKit on iOS 26 and later (`AlarmKitAlarms`, behind `#available` and `canImport(AlarmKit)`), and as local notifications on iOS 17 to 25 (`NotificationAlarms`, ids prefixed `clock.`). The screens say which, and never call a notification an alarm. iOS holds the schedule outside Totality's encryption, and shows an alarm's label on the Lock Screen.
+- Added sounds are copied to Library/Sounds as WAV of at most 30 seconds, unencrypted, because iOS plays them from there. Totality's own tones are drawn from sine waves on the device.
+- `ClockModule` is a `ModuleSearcher` (cities and alarm labels), a `PlacesProvider` and an `AlarmMaker`.
+- `PlacesProvider` (`TotalityCore/Modules/Places.swift`): `places() -> [NamedPlace]`, a name, an IANA time zone and an optional spot. Reached through `ModuleRegistry.placesProviders` and `places(except:)`. Weather reads Clock's cities here.
+- `AlarmMaker` (`TotalityCore/Modules/AlarmLinks.swift`): `makeAlarm(AlarmDraft) -> AlarmMade`, a one-time alarm with a label, a time and a `TaskSource`. Reached through `ModuleRegistry.alarmMaker`. The Calendar offers it on a timed event ahead, an hour before; Tasks on a task with a day and time ahead. Both use `SetAlarmSheet` in `TotalityUI`, and nothing is set until Set.

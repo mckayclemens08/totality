@@ -1,6 +1,7 @@
 import SwiftUI
 import TotalityAccount
 import TotalityCalendar
+import TotalityClock
 import TotalityCore
 import TotalityMail
 import TotalityMessages
@@ -26,6 +27,7 @@ struct RootView: View {
     @State private var web: WebModel?
     @State private var tasks: TasksModel?
     @State private var weather: WeatherModel?
+    @State private var clock: ClockModel?
     /// Shared task lists, over Messages' Matrix connection (step 6).
     @State private var sharedLists: SharedListsModel?
     /// Social, made the first time it's opened (issue 149). It needs the sign-in, not the content key.
@@ -288,7 +290,7 @@ struct RootView: View {
             onRemove: { module in Task { await homeChoices.remove(module) } },
             onRestore: { module in Task { await homeChoices.restore(module) } }
         ) { module in
-            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather].contains(module) { prepareContent() }
+            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock].contains(module) { prepareContent() }
             bringUp(module)
         } onSearch: {
             prepareContent()
@@ -325,6 +327,12 @@ struct RootView: View {
         case .tasks:
             if let tasks {
                 TasksHomeView(model: tasks, shared: sharedLists) { open = nil }
+            } else {
+                contentMessage { open = nil }
+            }
+        case .clock:
+            if let clock {
+                ClockHomeView(model: clock) { open = nil }
             } else {
                 contentMessage { open = nil }
             }
@@ -421,6 +429,7 @@ struct RootView: View {
         glances[.web] = web?.glance
         glances[.tasks] = tasks?.glance
         glances[.weather] = weather?.glance
+        glances[.clock] = clock?.glance
         glances[.social] = social?.glance
         glances[.mail] = mail.current.glance
         glances[.messages] = messages.glance
@@ -443,6 +452,9 @@ struct RootView: View {
         case .tasks:
             guard let tasks, tasks.phase == .ready else { return nil }
             return AnyView(TasksHomeTile(model: tasks, size: size, onOpen: { bringUp(.tasks) }, onQuickAdd: { quickAddingTask = true }))
+        case .clock:
+            guard let clock, clock.phase == .ready else { return nil }
+            return AnyView(ClockHomeTile(model: clock, size: size) { bringUp(.clock) })
         case .weather:
             guard let weather, weather.phase == .ready else { return nil }
             return AnyView(WeatherHomeTile(model: weather, size: size) { bringUp(.weather) })
@@ -539,6 +551,7 @@ struct RootView: View {
             web = content.web
             tasks = content.tasks
             weather = content.weather
+            clock = content.clock
             refreshers[.weather] = content.weather.refresher
             sharedLists = makeSharedLists(directory: content.registry.profiles)
             content.reader.shared = makeSharedDocs(directory: content.registry.profiles)
@@ -606,7 +619,8 @@ struct RootView: View {
         async let calendar: Void = self.calendar?.load() ?? ()
         async let tasks: Void = self.tasks?.load() ?? ()
         async let weather: Void = self.weather?.load() ?? ()
-        _ = await (reader, calendar, tasks, weather)
+        async let clock: Void = self.clock?.load() ?? ()
+        _ = await (reader, calendar, tasks, weather, clock)
     }
 
     /// Each module that keeps itself up to date fetches what's new, quietly.
@@ -691,6 +705,7 @@ struct RootView: View {
         await tasks?.stopForKeyChange()
         await weather?.stopForKeyChange()
         weather = nil
+        clock = nil
         reader = nil
         calendar = nil
         web = nil
@@ -830,6 +845,7 @@ struct RootView: View {
             await web?.load()
             await tasks?.load()
             await weather?.reload()
+            await clock?.reload()
             // Marks from another device, so Mail is already up to date when it's opened.
             if mail.current.phase == .ready { await mail.current.refresh() }
         }
@@ -861,6 +877,8 @@ struct RootView: View {
         social?.taskMaker = maker
         social?.receiver = registry.receiver(for: .social)
         tasks?.replyWatchers = [MailReplyWatcher(model: mail)]
+        // Tasks and the Calendar set alarms through the registry, never by importing the Clock (issue 204).
+        tasks?.alarmMaker = registry.alarmMaker
         tasks?.onOpenSource = { source in show(source.hit) }
         tasks?.sourceGone = { source in
             switch source.module {
@@ -911,6 +929,7 @@ struct RootView: View {
             mail.current.requestFromSearch(id)
         case .photos: photos.requestedItem = UUID(uuidString: hit.itemID)
         case .tasks: tasks?.requestedTask = UUID(uuidString: hit.itemID)
+        case .clock: clock?.requestedTab = hit.itemID.hasPrefix("city:") ? .world : .alarms
         case .weather: weather?.requestedPlace = UUID(uuidString: hit.itemID)
         case .social:
             if social == nil { social = makeSocial() }

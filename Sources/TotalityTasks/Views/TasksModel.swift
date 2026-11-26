@@ -46,6 +46,10 @@ public final class TasksModel {
     public var requestedTask: UUID?
     /// Quick add, asked for by the home tile's +.
     public var requestedQuickAdd = false
+    /// A task's time, offered to the Clock as an alarm (issue 204). Nothing is set until Set.
+    public var alarmDraft: AlarmDraft?
+    /// The Clock, through the registry. Nil hides "Set an alarm".
+    @ObservationIgnored public var alarmMaker: (any AlarmMaker)?
     public let calendar: Calendar
     public let refresher = Refresher()
 

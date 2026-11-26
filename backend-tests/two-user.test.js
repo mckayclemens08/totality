@@ -272,6 +272,19 @@ describe('contact requests', () => {
     assert.equal(Buffer.from(kept.meta_cipher).toString(), 'sealed places')
   })
 
+  // Issue 204: the Clock's cities, presets and stopwatch are one sealed record of theirs.
+  test('one user\'s clock record never reaches another', async () => {
+    const [u1, u2] = await trio()
+    const clock = await addObject(db, u1, { kind: 'clock_items', storage_key: null })
+    await as(db, u1, (q) => q('update public.content_objects set meta_cipher = $1 where id = $2', [Buffer.from('sealed clock'), clock.id]))
+    assert.equal(await canSee(u1, clock.id), true)
+    assert.equal(await canSee(u2, clock.id), false)
+    await as(db, u2, (q) => q('update public.content_objects set meta_cipher = $1 where id = $2', [Buffer.from('forged'), clock.id]))
+    await as(db, u2, (q) => q('delete from public.content_objects where id = $1', [clock.id]))
+    const [kept] = await as(db, u1, (q) => q('select meta_cipher from public.content_objects where id = $1', [clock.id]))
+    assert.equal(Buffer.from(kept.meta_cipher).toString(), 'sealed clock')
+  })
+
   test('a blocked user cannot see public content or the profile', async () => {
     const [u1, u2, u3] = await trio()
     const o = await addObject(db, u1, { visibility: 'public', key_ref: 'plain:' })

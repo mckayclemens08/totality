@@ -1,6 +1,7 @@
 import Foundation
 import TotalityAccount
 import TotalityCalendar
+import TotalityClock
 import TotalityCore
 import TotalityMail
 import TotalityMessages
@@ -90,7 +91,7 @@ enum ContentSetup {
     private static func stores() throws -> (
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
         googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore, home: FileBlobStore,
-        weather: FileBlobStore, weatherCache: FileBlobStore
+        weather: FileBlobStore, weatherCache: FileBlobStore, clock: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -109,7 +110,9 @@ enum ContentSetup {
             // Weather's saved places, as one sealed record that syncs.
             try FileBlobStore(directory: base.appendingPathComponent("Weather", isDirectory: true)),
             // The last forecast for each place. Apart from the places, because this never syncs.
-            try FileBlobStore(directory: base.appendingPathComponent("WeatherCache", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("WeatherCache", isDirectory: true)),
+            // The Clock's synced record and its device-only one (issue 204).
+            try FileBlobStore(directory: base.appendingPathComponent("Clock", isDirectory: true))
         )
     }
 
@@ -142,6 +145,7 @@ enum ContentSetup {
             SealedArea(store: stores.home, purposes: HomeChoicesBook.sealedPurposes),
             SealedArea(store: stores.weather, purposes: WeatherPlaceBook.sealedPurposes),
             SealedArea(store: stores.weatherCache, purposes: ForecastCache.sealedPurposes),
+            SealedArea(store: stores.clock, purposes: ClockBook.sealedPurposes),
         ])
     }
 
@@ -158,7 +162,7 @@ enum ContentSetup {
         mailRefresh: @escaping @Sendable () async -> Void, refresh: @escaping @Sendable (ModuleID) async -> Void
     ) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, tasks: TasksModel, areas: [any SyncArea],
-        registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook, weather: WeatherModel
+        registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook, weather: WeatherModel, clock: ClockModel
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -192,6 +196,8 @@ enum ContentSetup {
         let weatherBook = WeatherPlaceBook(store: stores.weather, rootKey: rootKey)
         let weatherCache = ForecastCache(store: stores.weatherCache, rootKey: rootKey)
         let weather = makeWeather(book: weatherBook, cache: weatherCache)
+        let clockBook = ClockBook(store: stores.clock, rootKey: rootKey)
+        let clock = ClockModel(book: clockBook)
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
@@ -209,6 +215,11 @@ enum ContentSetup {
                 units: { [suite = defaultsName()] in WeatherUnits.stored(in: UserDefaults(suiteName: suite) ?? .standard) },
                 refresh: { await refresh(.weather) }
             ),
+            // Alarms other modules ask for go through the Clock's model, so its screens show them at once.
+            ClockModule(book: clockBook) { @MainActor [weak clock] draft in
+                guard let clock else { throw AlarmSchedulingError.failed }
+                return try await clock.make(draft)
+            },
         ], profiles: AccountSetup.profiles)
         // Reminders ring from this iPhone alone: local notifications and places iOS watches.
         tasks.reminderCenter = HomeGatedTaskReminders(SystemTaskReminders.shared)
@@ -232,12 +243,13 @@ enum ContentSetup {
             tasks,
             // The Drive record syncs whether or not this build can sign in to Google, so links made on
             // another device aren't lost here.
-            [readerVault, calendarVault, webVault, drive, places, taskVault, home, weatherBook],
+            [readerVault, calendarVault, webVault, drive, places, taskVault, home, weatherBook, clockBook],
             registry,
             MailContent(rootKey: rootKey, store: stores.mail),
             PhotosContent(rootKey: rootKey, store: stores.photos),
             home,
-            weather
+            weather,
+            clock
         )
     }
 

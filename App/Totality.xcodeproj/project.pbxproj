@@ -21,6 +21,7 @@
 		A1B2C3D400000000000000B0 /* TotalityTasks in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000B1 /* TotalityTasks */; };
 		A1B2C3D400000000000000C0 /* TotalitySocial in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000C1 /* TotalitySocial */; };
 		A1B2C3D400000000000000D0 /* TotalityWeather in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000D1 /* TotalityWeather */; };
+		A1B2C3D400000000000000E0 /* TotalityClock in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000E1 /* TotalityClock */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -65,6 +66,7 @@
 				A1B2C3D400000000000000B0 /* TotalityTasks in Frameworks */,
 				A1B2C3D400000000000000C0 /* TotalitySocial in Frameworks */,
 				A1B2C3D400000000000000D0 /* TotalityWeather in Frameworks */,
+				A1B2C3D400000000000000E0 /* TotalityClock in Frameworks */,
 				A1B2C3D4000000000000001A /* TotalityAccount in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -125,6 +127,7 @@
 				A1B2C3D400000000000000B1 /* TotalityTasks */,
 				A1B2C3D400000000000000C1 /* TotalitySocial */,
 				A1B2C3D400000000000000D1 /* TotalityWeather */,
+				A1B2C3D400000000000000E1 /* TotalityClock */,
 				A1B2C3D40000000000000019 /* TotalityAccount */,
 			);
 			productName = Totality;
@@ -402,6 +405,10 @@
 		A1B2C3D400000000000000D1 /* TotalityWeather */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TotalityWeather;
+		};
+		A1B2C3D400000000000000E1 /* TotalityClock */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TotalityClock;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
