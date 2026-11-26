@@ -90,7 +90,6 @@ public struct OverpassTrails: Sendable {
     /// The public servers, tried in order. The first often says "at capacity" at busy hours.
     static let servers: [URL] = [
         "https://overpass-api.de/api/interpreter",
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
     ].map { URL(string: $0)! }

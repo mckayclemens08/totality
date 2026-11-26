@@ -177,18 +177,18 @@ let overpassAnswer = """
     @Test("A busy first server hands over to the next one")
     func overpassFallsBack() async throws {
         let http = FakeHTTP()
-        http.failingHosts = ["overpass-api.de", "maps.mail.ru"]
+        http.failingHosts = ["overpass-api.de"]
         http.answer("overpass.kumi.systems", with: overpassAnswer)
         let trails = try await OverpassTrails(http: http).trails(near: GeoPoint(latitude: 40.244, longitude: -111.637))
         #expect(!trails.isEmpty)
         #expect(http.requests.map { $0.host } == ["overpass.kumi.systems"])
-        #expect(http.posted.count == 3)
+        #expect(http.posted.count == 2)
     }
 
     @Test("When every server fails the error comes through")
     func overpassAllFail() async {
         let http = FakeHTTP()
-        http.failingHosts = ["overpass-api.de", "maps.mail.ru", "overpass.kumi.systems", "overpass.private.coffee"]
+        http.failingHosts = ["overpass-api.de", "overpass.kumi.systems", "overpass.private.coffee"]
         await #expect(throws: HikingError.failed) { try await OverpassTrails(http: http).trails(near: GeoPoint(latitude: 40.2, longitude: -111.6)) }
     }
 
