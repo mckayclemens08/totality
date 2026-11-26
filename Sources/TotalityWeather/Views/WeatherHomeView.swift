@@ -103,7 +103,8 @@ public struct WeatherHomeView: View {
                 ScrollView {
                     page(shown)
                         .padding(.horizontal, Space.s4)
-                        .padding(.bottom, Space.s6)
+                        // Room for the page dots, which float over the bottom of each page.
+                        .padding(.bottom, model.shown.count > 1 ? Space.s8 : Space.s6)
                 }
                 .refreshable { await model.pull() }
                 .tag(shown.key)

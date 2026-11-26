@@ -12,7 +12,7 @@ struct AddToContactsButton: View {
     @State private var failed = false
 
     var body: some View {
-        HeaderPill(isIn ? "In Contacts" : (failed ? "Try again" : "Add to Contacts"), systemImage: isIn ? "checkmark" : "person.crop.circle.badge.plus") {
+        HeaderPill(isIn ? "In Contacts" : (failed ? "Try again" : "Add to Contacts"), systemImage: isIn ? "checkmark" : "person.crop.circle.badge.plus", iconOnly: true) {
             Task {
                 do {
                     _ = try await maker.addContact(username: username, displayName: displayName)
@@ -183,7 +183,7 @@ struct SocialProfileView: View {
                 }
                 stat(profile.following, "following", canOpen: canOpen) { open(.people(username, followers: false)) }
             }
-            .padding(.vertical, Space.s1)
+            .padding(.vertical, Space.s2)
             HStack(spacing: Space.s3) {
                 if isMe {
                     HeaderPill("Close friends · \(model.closeFriends.count)", systemImage: "star.circle") { editingCloseFriends = true }
@@ -206,6 +206,7 @@ struct SocialProfileView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: isMe ? .leading : .center)
+            .padding(.top, Space.s1)
             if isMe {
                 Text("Your profile is public: anyone on Totality can see your photo, name, bio and public posts. Edit them from Account.")
                     .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
@@ -217,7 +218,7 @@ struct SocialProfileView: View {
     @ViewBuilder
     private func messageButton(_ profile: SocialProfile) -> some View {
         if let onMessage = model.onMessage, profile.canMessage {
-            HeaderPill("Message", systemImage: "bubble.left") { onMessage(profile.username) }
+            HeaderPill("Message", systemImage: "bubble.left", iconOnly: true) { onMessage(profile.username) }
         }
         if let maker = model.contactMaker {
             AddToContactsButton(maker: maker, username: profile.username, displayName: profile.displayName)

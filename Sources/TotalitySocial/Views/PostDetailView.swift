@@ -143,6 +143,8 @@ struct PostDetailView: View {
                 Button { Task { await model.toggleLike(post) } } label: {
                     Label(LikeText.count(post, hideEverywhere: hideEverywhere), systemImage: post.liked ? "heart.fill" : "heart")
                         .font(Typeface.callout)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .foregroundStyle(post.liked ? theme.accent.color : theme.textSecondary.color)
                         .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
                         .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
@@ -150,12 +152,13 @@ struct PostDetailView: View {
                 .accessibilityLabel(post.liked ? "Unlike" : "Like")
                 if post.audience == .everyone {
                     Button { Task { await model.toggleSaved(post) } } label: {
-                        Label(post.saved ? "Saved" : "Save", systemImage: post.saved ? "bookmark.fill" : "bookmark")
+                        Image(systemName: post.saved ? "bookmark.fill" : "bookmark")
                             .font(Typeface.callout)
                             .foregroundStyle(post.saved ? theme.accent.color : theme.textSecondary.color)
                             .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
                             .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                     }
+                    .accessibilityLabel(post.saved ? "Saved" : "Save")
                 }
                 if post.canRepost(by: model.me) || post.reposts > 0 {
                     RepostControl(model: model, post: post)
@@ -163,9 +166,12 @@ struct PostDetailView: View {
                         .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
                         .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
                 }
-                Text(post.comments == 1 ? "1 comment" : "\(post.comments) comments")
+                Label("\(post.comments)", systemImage: "bubble.right")
+                    .accessibilityLabel(post.comments == 1 ? "1 comment" : "\(post.comments) comments")
                     .font(Typeface.callout)
                     .foregroundStyle(theme.textSecondary.color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
                     .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
             }

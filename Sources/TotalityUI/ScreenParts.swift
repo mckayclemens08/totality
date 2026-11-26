@@ -62,12 +62,15 @@ public struct HeaderPill: View {
     let title: String
     let systemImage: String?
     let isProminent: Bool
+    let iconOnly: Bool
     let action: () -> Void
 
-    public init(_ title: String, systemImage: String? = nil, isProminent: Bool = false, action: @escaping () -> Void) {
+    /// `iconOnly` shows just the icon (the title stays as the accessibility label) for a row that is tight.
+    public init(_ title: String, systemImage: String? = nil, isProminent: Bool = false, iconOnly: Bool = false, action: @escaping () -> Void) {
         self.title = title
         self.systemImage = systemImage
         self.isProminent = isProminent
+        self.iconOnly = iconOnly && systemImage != nil
         self.action = action
     }
 
@@ -80,7 +83,7 @@ public struct HeaderPill: View {
                         .foregroundStyle(isProminent ? theme.accentOn.color : theme.accent.color)
                         .accessibilityHidden(true)
                 }
-                Text(title)
+                if !iconOnly { Text(title).lineLimit(1).fixedSize(horizontal: true, vertical: false) }
             }
             .font(Typeface.callout.weight(.semibold))
             .foregroundStyle(isProminent ? theme.accentOn.color : theme.textSecondary.color)
@@ -93,6 +96,7 @@ public struct HeaderPill: View {
             .contentShape(Capsule())
         }
         .buttonStyle(SoftPress())
+        .accessibilityLabel(title)
     }
 }
 
