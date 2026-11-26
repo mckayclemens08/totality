@@ -97,7 +97,7 @@ struct RootView: View {
         _mail = State(initialValue: MailAccountModel { wiring.makeStore(account: $0) })
     }
 
-    var body: some View {
+    private var launchAndSignIn: some View {
         ZStack {
             if account?.showsSignInPage == true {
                 if let account { SignInPage(model: account).transition(.opacity) }
@@ -142,6 +142,11 @@ struct RootView: View {
             linkedProfile = nil
             open = nil
         }
+    }
+
+    /// `body` is split in two so the compiler can type-check each half in reasonable time.
+    var body: some View {
+        launchAndSignIn
         // Every minute while Totality is in front, the modules fetch what's new, so opening one never waits.
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
@@ -226,14 +231,17 @@ struct RootView: View {
         .onChange(of: hiking != nil) { deliverGPX() }
         .onChange(of: isSignedIn) { deliverGPX() }
         .onChange(of: ObjectIdentifier(mail.current)) { Task { await warmMailForHome() } }
-        .onOpenURL { url in
-            if url.isFileURL, url.pathExtension.lowercased() == "gpx" {
-                pendingGPX = url
-                deliverGPX()
-                return
-            }
-            if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
+        .onOpenURL(perform: openURL)
+    }
+
+    /// A GPX file goes to Hiking; a profile link opens that profile.
+    private func openURL(_ url: URL) {
+        if url.isFileURL, url.pathExtension.lowercased() == "gpx" {
+            pendingGPX = url
+            deliverGPX()
+            return
         }
+        if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
     }
 
     private var isSignedIn: Bool {
