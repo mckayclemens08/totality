@@ -360,6 +360,7 @@ public final class SocialModel {
         update(post.id) { $0.reposted = on; $0.reposts = max(0, $0.reposts + (on ? 1 : -1)) }
         do {
             try await server.setReposted(on, post: post.id)
+            if on { nudge(post.author) }
             guard let me else { return }
             if on {
                 if !following.contains(where: { $0.id == post.id }) {

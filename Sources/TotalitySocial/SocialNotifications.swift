@@ -12,6 +12,7 @@ public final class SocialNotifications: NotificationSource {
     public static let follower = NotificationKind(module: .social, key: "follower", name: "New followers", detail: "When someone follows you")
     public static let request = NotificationKind(module: .social, key: "request", name: "Follow requests", detail: "While your account is private")
     public static let like = NotificationKind(module: .social, key: "like", name: "Likes", detail: "On your posts")
+    public static let repost = NotificationKind(module: .social, key: "repost", name: "Reposts", detail: "When someone reposts yours")
     public static let comment = NotificationKind(module: .social, key: "comment", name: "Comments and replies", detail: "On your posts and comments")
     public static let closeFriendsPost = NotificationKind(
         module: .social, key: "closeFriendsPost", name: "Close-friends posts", detail: "From people who added you"
@@ -25,7 +26,7 @@ public final class SocialNotifications: NotificationSource {
     static let overlap: TimeInterval = 10 * 60
 
     public let module = ModuleID.social
-    public let kinds = [follower, request, like, comment, closeFriendsPost, friendsPost]
+    public let kinds = [follower, request, like, repost, comment, closeFriendsPost, friendsPost]
 
     private let model: SocialModel
     private let activity: (any SocialActivityServer)?
@@ -49,7 +50,7 @@ public final class SocialNotifications: NotificationSource {
 
     public func newNotifications() async -> [AppNotification] {
         var notes: [AppNotification] = []
-        if [Self.follower, Self.request, Self.like, Self.comment].contains(where: wants) {
+        if [Self.follower, Self.request, Self.like, Self.repost, Self.comment].contains(where: wants) {
             notes += await publicNotes()
         }
         if wants(Self.closeFriendsPost) || wants(Self.friendsPost) {
@@ -98,6 +99,7 @@ public final class SocialNotifications: NotificationSource {
         case .follower: (follower, "\(who) followed you", "", profile, [])
         case .request: (request, "\(who) asked to follow you", "Approve here, or see them in Social.", profile, [.approve])
         case .like: (like, "\(who) liked your post", quoted, post ?? profile, [])
+        case .repost: (repost, "\(who) reposted your post", quoted, post ?? profile, [])
         case .comment: (comment, "\(who) commented on your post", item.snippet ?? quoted, post ?? profile, [])
         case .reply: (comment, "\(who) replied to your comment", item.snippet ?? quoted, post ?? profile, [])
         }

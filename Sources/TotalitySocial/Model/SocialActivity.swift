@@ -5,7 +5,7 @@ import Foundation
 /// the encrypted rooms.
 public struct SocialActivity: Equatable, Sendable, Identifiable {
     public enum Kind: String, Sendable, CaseIterable {
-        case follower, request, like, comment, reply
+        case follower, request, like, repost, comment, reply
     }
 
     public let kind: Kind

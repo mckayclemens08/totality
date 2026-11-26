@@ -27,6 +27,7 @@ describe('social_activity', () => {
     const p = await post(ana, 'First frost on the Wasatch this morning')
     await follow(eli, ana)
     await like(eli, p)
+    await rpc(eli, 'insert into public.social_reposts (post_id) values ($1)', [p.id])
     const top = await comment(kai, p, 'Gorgeous light.')
     await comment(ana, p, 'Thanks!', top.id)
     // Mia replies to Kai's comment on Ana's post: Ana hears of it as a comment, Kai as a reply.
@@ -35,7 +36,7 @@ describe('social_activity', () => {
     await follow(kai, mia)
 
     assert.deepEqual(kinds(await activity(ana)),
-      [`comment:${kai.handle}`, `comment:${mia.handle}`, `follower:${eli.handle}`, `like:${eli.handle}`])
+      [`comment:${kai.handle}`, `comment:${mia.handle}`, `follower:${eli.handle}`, `like:${eli.handle}`, `repost:${eli.handle}`])
     assert.deepEqual(kinds(await activity(kai)), [`reply:${ana.handle}`, `reply:${mia.handle}`])
     assert.deepEqual(kinds(await activity(mia)), [`request:${kai.handle}`])
     const [liked] = (await activity(ana)).filter((r) => r.kind === 'like')

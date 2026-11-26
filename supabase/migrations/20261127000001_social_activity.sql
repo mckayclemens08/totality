@@ -1,6 +1,6 @@
 -- Social activity for notifications (issue 232, issue 149 step 6). When an empty push wakes a phone, Social
 -- asks here what's new for the signed-in person: new followers, follow requests, likes and comments on
--- their posts, and replies to their comments. Everything it returns is already readable to them through
+-- their posts, reposts of their posts, and replies to their comments. Everything it returns is already readable to them through
 -- the tables' own policies; this only gathers it in one call. It adds no table and keeps nothing.
 -- People they blocked, who blocked them, or whom they muted are left out, and so is their own activity.
 create function public.social_activity(p_since timestamptz, p_limit int default 50)
@@ -27,6 +27,10 @@ language sql stable security invoker set search_path = '' as $$
     select 'like', l.id, l.owner_id, l.post_id, null, null, l.created_at
     from public.social_likes l join public.social_posts p on p.id = l.post_id
     where p.owner_id = (select id from me) and l.created_at > p_since
+    union all
+    select 'repost', r.id, r.owner_id, r.post_id, null, null, r.created_at
+    from public.social_reposts r join public.social_posts p on p.id = r.post_id
+    where p.owner_id = (select id from me) and r.created_at > p_since
     union all
     select case when p.owner_id = (select id from me) then 'comment' else 'reply' end, c.id, c.owner_id,
            c.post_id, c.id, left(c.body, 140), c.created_at

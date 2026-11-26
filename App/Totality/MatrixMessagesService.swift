@@ -77,7 +77,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         try? await client.setPusher(
             identifiers: PusherIdentifiers(pushkey: PushClient.hex(device), appId: "app.totality.ios"),
             kind: .http(data: HttpPusherData(url: Self.pushGateway, format: .eventIdOnly, defaultPayload: nil)),
-            appDisplayName: "Totality", deviceDisplayName: Self.deviceName, profileTag: nil, lang: "en"
+            appDisplayName: "Totality", deviceDisplayName: Self.deviceName, profileTag: nil, lang: "en", append: false
         )
     }
 
