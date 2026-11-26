@@ -215,6 +215,36 @@ public enum PostTags {
         }
         return tags
     }
+
+    /// The scheme of the links made for #tags in a post's text.
+    public static let linkScheme = "totality-tag"
+
+    /// The tags that aren't already written in the text, so a tag line never repeats what's above it.
+    public static func notInText(_ tags: [String], text: String) -> [String] {
+        let inText = Set(find(in: text))
+        return tags.filter { !inText.contains($0) }
+    }
+
+    /// The text with each #tag made a link the app handles itself (totality-tag://tag).
+    public static func linked(_ text: String) -> AttributedString {
+        var out = AttributedString(text)
+        let pattern = try! NSRegularExpression(pattern: "(?:^|[^\\w#])(#([A-Za-z0-9_]{1,30}))(?![\\w])")
+        let range = NSRange(text.startIndex..., in: text)
+        for match in pattern.matches(in: text, range: range) {
+            guard let whole = Range(match.range(at: 1), in: text), let name = Range(match.range(at: 2), in: text) else { continue }
+            let tag = text[name].lowercased()
+            if tag.allSatisfy(\.isNumber) { continue }
+            guard let a = AttributedString.Index(whole.lowerBound, within: out), let b = AttributedString.Index(whole.upperBound, within: out),
+                  let url = URL(string: "\(linkScheme)://\(tag)") else { continue }
+            out[a..<b].link = url
+        }
+        return out
+    }
+
+    /// The tag a tapped link stands for, or nil for any other link.
+    public static func tag(from url: URL) -> String? {
+        url.scheme == linkScheme ? url.host(percentEncoded: false)?.lowercased() : nil
+    }
 }
 
 /// What a post may hold, matching the server's checks so a refusal is caught before sending.

@@ -151,7 +151,7 @@ public struct SocialHomeView: View {
                 VStack(spacing: Space.s3) {
                     if model.phase == .offline { OfflineLine { Task { await model.refresh() } } }
                     if model.feed == .forYou {
-                        if !model.tags.isEmpty { tagChips }
+                        if !model.tags.isEmpty || model.tag != nil { tagChips }
                         if model.forYou.isEmpty {
                             EmptyFeed(
                                 systemImage: "sparkles", title: "Nothing new right now",
@@ -189,11 +189,17 @@ public struct SocialHomeView: View {
         }
     }
 
+    /// The top tags, plus the one being filtered when a tapped #tag isn't among them.
+    private var chipTags: [String] {
+        guard let tag = model.tag, !model.tags.contains(tag) else { return model.tags }
+        return [tag] + model.tags
+    }
+
     private var tagChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Space.s2) {
                 FilterPill("All", isSelected: model.tag == nil) { model.tag = nil }
-                ForEach(model.tags, id: \.self) { tag in
+                ForEach(chipTags, id: \.self) { tag in
                     FilterPill("#" + tag, isSelected: model.tag == tag) { model.tag = tag }
                 }
             }

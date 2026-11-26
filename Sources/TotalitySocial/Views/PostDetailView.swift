@@ -32,10 +32,13 @@ struct PostDetailView: View {
                         VStack(alignment: .leading, spacing: Space.s3) {
                             if let title = post.title { Text(title).font(Typeface.title).foregroundStyle(theme.textPrimary.color) }
                             if !post.body.isEmpty {
-                                Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).textSelection(.enabled)
+                                Text(PostTags.linked(post.body)).font(Typeface.body).foregroundStyle(theme.textPrimary.color)
+                                    .tint(theme.accent.color).textSelection(.enabled)
                             }
-                            if !post.tags.isEmpty {
-                                Text(post.tags.map { "#" + $0 }.joined(separator: " ")).font(Typeface.callout).foregroundStyle(theme.accent.color)
+                            let extra = PostTags.notInText(post.tags, text: (post.title ?? "") + " " + post.body)
+                            if !extra.isEmpty {
+                                Text(PostTags.linked(extra.map { "#" + $0 }.joined(separator: " "))).font(Typeface.callout)
+                                    .tint(theme.accent.color)
                             }
                             if post.edited { Text("Edited").font(Typeface.micro).foregroundStyle(theme.textSecondary.color) }
                             if let reason = post.reason {
@@ -58,6 +61,13 @@ struct PostDetailView: View {
                         commentBox(post)
                     }
                 }
+                .environment(\.openURL, OpenURLAction { url in
+                    guard let tag = PostTags.tag(from: url) else { return .systemAction }
+                    model.feed = .forYou
+                    model.tag = tag
+                    dismiss()
+                    return .handled
+                })
                 .task(id: post.comments) { await loadComments(post) }
                 .task { if post.audience == .everyone { authorProfile = try? await model.profile(post.author) } }
                 .sheet(isPresented: $reportingPost) {
