@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 import TotalityCore
 import TotalityUI
@@ -13,7 +12,7 @@ struct ContactEditor: View {
     @State private var birthdayDate: Date
     @State private var knowsYear: Bool
     @State private var newLabel = ""
-    @State private var photoItem: PhotosPickerItem?
+    @State private var choosingPhoto = false
     @State private var isSaving = false
 
     init(model: ContactsModel, original: ContactCard?, onDone: @escaping (ContactCard?) -> Void) {
@@ -137,14 +136,11 @@ struct ContactEditor: View {
                         .disabled(isSaving || isBlank)
                 }
             }
-            .onChange(of: photoItem) {
-                guard let photoItem else { return }
-                Task {
-                    if let data = try? await photoItem.loadTransferable(type: Data.self), let safe = SafeAvatar.prepare(data) {
-                        card.photo = safe
-                    } else {
-                        model.notice = "That photo couldn't be used. Try a JPEG or PNG."
-                    }
+            .photoChooser(isPresented: $choosingPhoto) { media in
+                if case .photo(let data, _)? = media.first, let safe = SafeAvatar.prepare(data) {
+                    card.photo = safe
+                } else {
+                    model.notice = "That photo couldn't be used. Try a JPEG or PNG."
                 }
             }
         }
@@ -161,7 +157,7 @@ struct ContactEditor: View {
         VStack(spacing: Space.s2) {
             PersonFace(photo: card.photo, name: card.name == "No name" ? "?" : card.name, diameter: Space.s8 + Space.s4)
             HStack(spacing: Space.s2) {
-                PhotosPicker(selection: $photoItem, matching: .images) {
+                Button { choosingPhoto = true } label: {
                     PhotoPickLabel(title: card.photo == nil ? "Add photo" : "Change photo")
                 }
                 .buttonStyle(SoftPress())
