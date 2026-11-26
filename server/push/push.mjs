@@ -256,8 +256,19 @@ export class APNs {
     return this.made.token
   }
 
-  /** `'sent'`, `'gone'` when Apple says the token no longer works, or `'failed'`. */
-  async wake({ token, sandbox }) {
+  /** `'sent'`, `'gone'` when Apple says the token no longer works, or `'failed'`. A token Apple calls bad
+   * on one service is tried once on the other before it counts as gone, because a phone can't always tell
+   * which service its build uses (a TestFlight build carries no profile to read). When the other service
+   * takes it, the device's `sandbox` flag is corrected in place. */
+  async wake(device) {
+    const first = await this.send(device.token, device.sandbox)
+    if (first !== 'bad') return first
+    const second = await this.send(device.token, !device.sandbox)
+    if (second === 'sent') { device.sandbox = !device.sandbox; return 'sent' }
+    return second === 'bad' ? 'gone' : second
+  }
+
+  async send(token, sandbox) {
     const host = sandbox ? 'api.sandbox.push.apple.com' : 'api.push.apple.com'
     try {
       const { status, reason } = await this.request(host, {
@@ -271,7 +282,8 @@ export class APNs {
         'content-type': 'application/json',
       }, WAKE)
       if (status === 200) return 'sent'
-      if (status === 410 || (status === 400 && (reason === 'BadDeviceToken' || reason === 'DeviceTokenNotForTopic'))) return 'gone'
+      if (status === 400 && reason === 'BadDeviceToken') return 'bad'
+      if (status === 410 || (status === 400 && reason === 'DeviceTokenNotForTopic')) return 'gone'
       return 'failed'
     } catch {
       return 'failed'

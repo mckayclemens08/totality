@@ -18,7 +18,7 @@ function fakeApple(answers = {}) {
   const request = async (host, headers, body) => {
     const token = headers[':path'].split('/').pop()
     sent.push({ host, headers, body, token })
-    return answers[token] ?? { status: 200 }
+    return answers[`${host} ${token}`] ?? answers[token] ?? { status: 200 }
   }
   return { sent, apns: new APNs({ key: privateKey, keyId: 'KEY1234567', teamId: 'TEAM123456', topic: 'app.totality.ios', request }) }
 }
@@ -136,6 +136,14 @@ describe('waking phones', () => {
     for (const n of [1, 2, 3]) await call(gate, '/push/device', { body: { token: phone(n), sandbox: false } })
     assert.equal(await gate.wake([MCKAY.id]), 0)
     assert.deepEqual((await store.devices(MCKAY.id)).map((d) => d.token), [phone(3)])
+  })
+
+  test('tries the other Apple service before forgetting a bad token', async () => {
+    const { gate, store, sent } = await newGate({ answers: { [`api.sandbox.push.apple.com ${phone(1)}`]: { status: 400, reason: 'BadDeviceToken' } } })
+    await call(gate, '/push/device', { body: { token: phone(1), sandbox: true } })
+    assert.equal(await gate.wake([MCKAY.id]), 1)
+    assert.deepEqual(sent.map((s) => s.host), ['api.sandbox.push.apple.com', 'api.push.apple.com'])
+    assert.deepEqual((await store.devices(MCKAY.id)).map((d) => d.token), [phone(1)])
   })
 
   test('sends nothing while the Apple key is missing', async () => {

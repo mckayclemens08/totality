@@ -86,10 +86,17 @@ public struct PushClient: Sendable {
 
     /// Whether this build gets its pushes from Apple's development service. It's whatever the build's
     /// provisioning profile says, so a TestFlight build and a build run from Xcode each ask the right one.
-    /// A build with no profile (the simulator) counts as development.
+    /// A build with no profile is a TestFlight or App Store build on a phone, which uses the production
+    /// service; only the simulator counts as development without one.
     public static var isSandbox: Bool {
         guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
-              let data = try? Data(contentsOf: url) else { return true }
+              let data = try? Data(contentsOf: url) else {
+            #if targetEnvironment(simulator)
+            return true
+            #else
+            return false
+            #endif
+        }
         return sandbox(inProfile: data)
     }
 
