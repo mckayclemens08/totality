@@ -49,5 +49,7 @@ public struct ModuleEntry: Identifiable, Sendable, Equatable {
               summary: "The forecast where you are and in places you save.", keeps: "Your places"),
         .init(id: .clock, name: "Clock", systemImage: "alarm",
               summary: "World clock, alarms, timers and a stopwatch.", keeps: "Your cities, presets and alarms"),
+        .init(id: .contacts, name: "Contacts", systemImage: "person.crop.circle",
+              summary: "Your own address book, end-to-end encrypted.", keeps: "Your contacts"),
     ]
 }

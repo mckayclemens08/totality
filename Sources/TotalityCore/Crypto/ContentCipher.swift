@@ -71,6 +71,8 @@ public enum KeyPurpose: String, Sendable, Hashable {
     /// The Clock's alarms, bedtime and running timers, kept on this device only and never synced. Its own
     /// purpose, so the device record can't pass for the synced one.
     case clockDevice = "clock-device"
+    /// One card in Contacts (issue 205). Its own purpose, so a card can't pass for anything else.
+    case contact
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.
