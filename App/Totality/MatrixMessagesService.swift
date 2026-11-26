@@ -58,10 +58,27 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             }
             let sync = try await client.syncService().withOfflineMode().finish()
             await sync.start()
-            return try MatrixMessagesService(account: account, client: client, sync: sync)
+            let service = try MatrixMessagesService(account: account, client: client, sync: sync)
+            latest = service
+            if let device = await MainActor.run(body: { PushSetup.device }) { await service.setPusher(device: device) }
+            return service
         } catch {
             throw Self.translate(error)
         }
+    }
+
+    /// The service signed in most recently, so a push token that arrives later can still set the pusher.
+    nonisolated(unsafe) static weak var latest: MatrixMessagesService?
+    static let pushGateway = "https://usetotality.com/_matrix/push/v1/notify"
+
+    /// Registers this phone with the homeserver as a pusher (issue 232), so a new message or Friends post
+    /// wakes it through `server/push`. `event_id_only` keeps message text out of the note.
+    func setPusher(device: Data) async {
+        try? await client.setPusher(
+            identifiers: PusherIdentifiers(pushkey: PushClient.hex(device), appId: "app.totality.ios"),
+            kind: .http(data: HttpPusherData(url: Self.pushGateway, format: .eventIdOnly, defaultPayload: nil)),
+            appDisplayName: "Totality", deviceDisplayName: Self.deviceName, profileTag: nil, lang: "en"
+        )
     }
 
     func stop() async {

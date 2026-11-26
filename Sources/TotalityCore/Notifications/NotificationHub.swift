@@ -18,7 +18,7 @@ public protocol AlertPoster: AnyObject {
 /// (Tasks' reminders, which came first) goes on to `fallback` unchanged.
 @MainActor
 @Observable
-public final class NotificationHub {
+public final class NotificationHub: NSObject {
     public static let shared = NotificationHub()
 
     /// Alerts for kinds no source registers, because their module schedules them itself on the device:
@@ -54,6 +54,7 @@ public final class NotificationHub {
         self.poster = poster
         self.clock = clock
         preferences = store.current
+        super.init()
     }
 
     /// Every kind with a switch, in the order the page lists modules.

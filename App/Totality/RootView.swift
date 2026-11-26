@@ -200,6 +200,15 @@ struct RootView: View {
                 await account?.sync?.syncNow()
             }
         }
+        #if os(iOS)
+        // A tap on an alert asks for its module; the module was already told which item (issue 232).
+        .onChange(of: NotificationHub.shared.requestedModule, initial: true) { _, module in
+            guard let module else { return }
+            NotificationHub.shared.requestedModule = nil
+            if module == .social, social == nil { social = makeSocial() }
+            bringUp(module)
+        }
+        #endif
         .onOpenURL { url in
             if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
         }
@@ -586,6 +595,7 @@ struct RootView: View {
             }
             AppRefresh.shared.extras["gmailPush"] = { await PushSetup.shared.renew() }
             PushSetup.shared.start()
+            NotificationsSetup.connect(messages: messages, mail: mail)
             #endif
             // A pull also brings in the person's other devices. The app already syncs with them on
             // opening and on coming back, so the minute-by-minute refresh leaves it out.
@@ -708,11 +718,17 @@ struct RootView: View {
                 bringUp(.messages)
             }
         }
+        #if os(iOS)
+        NotificationsSetup.connect(social: model)
+        #endif
         return model
     }
 
     /// Closes every module's content, for a key change or an account leaving. Nothing is deleted.
     private func closeContent() async {
+        #if os(iOS)
+        NotificationsSetup.disconnect()
+        #endif
         // Photos first, before any wait, so the home tile can't show the old key's photos meanwhile.
         photosTurn += 1
         photos = PhotosModel(library: nil)

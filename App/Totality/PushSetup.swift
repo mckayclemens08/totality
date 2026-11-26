@@ -45,6 +45,9 @@ final class PushSetup {
         Self.device = device
         let push = PushClient(token: signIn)
         Task { try? await push.register(device: device, sandbox: PushClient.isSandbox) }
+        #if canImport(MatrixRustSDK)
+        Task { await MatrixMessagesService.latest?.setPusher(device: device) }
+        #endif
     }
 
     /// The watches renew, and notifications are asked for the first time there's something to show.

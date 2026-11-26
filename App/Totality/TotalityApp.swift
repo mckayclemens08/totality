@@ -17,6 +17,11 @@ struct TotalityApp: App {
         // Before launch finishes too, so Complete or Snooze on a notification, or a place reminder, that
         // wakes the app is handled.
         SystemTaskReminders.shared.start()
+        #if os(iOS)
+        // After Tasks, so its reminder buttons keep working: the hub takes over as iOS's notification
+        // delegate and hands Tasks' own alerts back to it (issue 232).
+        NotificationHub.shared.start()
+        #endif
     }
 
     var body: some Scene {
