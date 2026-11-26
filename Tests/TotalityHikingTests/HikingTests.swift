@@ -20,6 +20,10 @@ final class FakeHTTP: HikingHTTP, @unchecked Sendable {
     private var answers: [String: Data] = [:]
     private var asked: [(URL, [String: String])] = []
     var failure: HikingError?
+    /// Hosts that answer with a failure (like a 502 or 429) instead of their stored answer.
+    var failingHosts: Set<String> = []
+    fileprivate var forms: [[String: String]] = []
+    var posted: [[String: String]] { lock.withLock { forms } }
 
     func answer(_ host: String, with json: String) { lock.withLock { answers[host] = Data(json.utf8) } }
     var requests: [URL] { lock.withLock { asked.map(\.0) } }
@@ -33,6 +37,14 @@ final class FakeHTTP: HikingHTTP, @unchecked Sendable {
         if let failure { throw failure }
         guard let data else { throw HikingError.failed }
         return data
+    }
+}
+
+extension FakeHTTP {
+    func post(_ url: URL, form: [String: String], headers: [String: String], timeout: TimeInterval) async throws -> Data {
+        lock.withLock { forms.append(form) }
+        if failingHosts.contains(url.host ?? "") { throw HikingError.failed }
+        return try await get(url, headers: headers)
     }
 }
 
@@ -156,11 +168,42 @@ let overpassAnswer = """
         let http = FakeHTTP()
         http.answer("overpass-api.de", with: overpassAnswer)
         _ = try await OverpassTrails(http: http).trails(near: GeoPoint(latitude: 40.24486, longitude: -111.63704))
-        let url = try #require(http.requests.first)
-        let query = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "data" }?.value)
+        let query = try #require(http.posted.first?["data"])
         #expect(query.contains("around:8000,40.24,-111.64"))
         #expect(!query.contains("40.2448"))
         #expect(http.headers.first?["User-Agent"]?.hasPrefix("Totality-Hiking/") == true)
+    }
+
+    @Test("A busy first server hands over to the next one")
+    func overpassFallsBack() async throws {
+        let http = FakeHTTP()
+        http.failingHosts = ["overpass-api.de"]
+        http.answer("overpass.kumi.systems", with: overpassAnswer)
+        let trails = try await OverpassTrails(http: http).trails(near: GeoPoint(latitude: 40.244, longitude: -111.637))
+        #expect(!trails.isEmpty)
+        #expect(http.requests.map { $0.host } == ["overpass.kumi.systems"])
+        #expect(http.posted.count == 2)
+    }
+
+    @Test("When every server fails the error comes through")
+    func overpassAllFail() async {
+        let http = FakeHTTP()
+        http.failingHosts = ["overpass-api.de", "overpass.kumi.systems", "overpass.private.coffee"]
+        await #expect(throws: HikingError.failed) { try await OverpassTrails(http: http).trails(near: GeoPoint(latitude: 40.2, longitude: -111.6)) }
+    }
+
+    @Test("The form body escapes the query's brackets, pipes, plus signs and ampersands")
+    func formEncoding() {
+        let body = HikingForm.encode(["data": "[out:json];a~\"^(x|y)$\"&b+c"])
+        #expect(body == "data=%5Bout%3Ajson%5D%3Ba~%22%5E%28x%7Cy%29%24%22%26b%2Bc")
+    }
+
+    @Test("A server that gave up part-way (a remark and no elements) counts as a failure")
+    func overpassRemark() throws {
+        let here = GeoPoint(latitude: 40.244, longitude: -111.637)
+        let partial = #"{"version":0.6,"elements":[],"remark":"runtime error: Query timed out in \"query\" at line 3 after 26 seconds."}"#
+        #expect(throws: HikingError.badAnswer) { try OverpassTrails.parse(Data(partial.utf8), near: here) }
+        _ = try OverpassTrails.parse(Data(#"{"elements":[]}"#.utf8), near: here)
     }
 
     @Test("Routes come first by name, ways with one name join, and short or nameless bits are dropped")
