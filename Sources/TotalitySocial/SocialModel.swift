@@ -54,6 +54,9 @@ public final class SocialModel {
     /// A screen the home tile asked for: the composer or Search.
     public var homeRequest: HomeRequest?
     public enum HomeRequest: Equatable { case compose, search }
+    /// A post another module started, such as a hike, which the composer opens with (issue 240). The app
+    /// sets it with `homeRequest = .compose`; the composer takes it and clears it.
+    public var draft: PostDraft?
 
     // Connections to the other modules (issue 149 §7), set by the app through the registry, so Social
     // imports none of them.

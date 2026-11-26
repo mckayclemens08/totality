@@ -118,6 +118,7 @@ struct ComposeView: View {
                 if case .success(let url) = result { Task { await capture.pick(url) } }
             }
             .onChange(of: picked) { _, items in Task { await addPhotos(items) } }
+            .task { await takeDraft() }
         }
         .interactiveDismissDisabled(!text.isEmpty || !title.isEmpty || !photos.isEmpty || capture.clip != nil || video.source != nil)
         .onDisappear { capture.discard(); video.discard() }
@@ -167,6 +168,24 @@ struct ComposeView: View {
                     .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
             }
         }
+    }
+
+    /// Fills the composer with a post another module started, like a hike (issue 240). The person still
+    /// picks who sees it and presses Post; nothing is posted from the draft alone.
+    private func takeDraft() async {
+        guard let draft = model.draft else { return }
+        model.draft = nil
+        title = draft.title
+        text = draft.body
+        guard let image = draft.image else { return }
+        kind = .photo
+        preparing = true
+        if let prepared = try? await Task.detached(priority: .userInitiated, operation: { try Attachment.photo(image) }).value {
+            photos = [prepared]
+        } else {
+            photoProblem = "The picture couldn't be added. You can post the words alone."
+        }
+        preparing = false
     }
 
     private func addPhotos(_ items: [PhotosPickerItem]) async {
