@@ -92,6 +92,32 @@ public enum GeoLine {
         return Array(dropStart(Array(dropStart(points).reversed())).reversed())
     }
 
+    /// The range of indexes left once `metres` is cut off each end, or nil when the line is too short to trim.
+    public static func trimmedRange(_ points: [GeoPoint], by metres: Double) -> Range<Int>? {
+        guard points.count > 1 else { return nil }
+        guard metres > 0 else { return 0..<points.count }
+        guard length(points) > metres * 2 + 1 else { return nil }
+        var walked = 0.0
+        var start = 0
+        for index in 1..<points.count {
+            walked += points[index - 1].distance(to: points[index])
+            if walked >= metres {
+                start = index
+                break
+            }
+        }
+        walked = 0
+        var end = points.count - 1
+        for index in stride(from: points.count - 2, through: 0, by: -1) {
+            walked += points[index + 1].distance(to: points[index])
+            if walked >= metres {
+                end = index
+                break
+            }
+        }
+        return start <= end ? start..<(end + 1) : nil
+    }
+
     /// The corners of the box around every point, or nil for no points.
     public static func bounds(_ points: [GeoPoint]) -> (south: Double, west: Double, north: Double, east: Double)? {
         guard let first = points.first else { return nil }

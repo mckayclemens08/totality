@@ -11,6 +11,26 @@ public struct HikingHomeView: View {
     @State private var openTrail: TrailChoice?
     @State private var openHike: Hike?
     @State private var showsRecording = false
+    @State private var showsStatistics = false
+    @State private var showsImporter = false
+    @State private var importing: ImportChoice?
+    @State private var moving: Trail?
+    @State private var groupChoice = GroupChoice.all
+    @State private var newGroupName = ""
+    @State private var makingGroup = false
+    @State private var managing: HikeGroup?
+    @State private var renamedGroup = ""
+    @State private var renamingGroup = false
+    @State private var confirmsDeleteGroup = false
+
+    struct ImportChoice: Identifiable {
+        let url: URL
+        var id: URL { url }
+    }
+
+    enum GroupChoice: Hashable {
+        case all, group(UUID)
+    }
 
     enum Section: String, CaseIterable, Hashable {
         case nearby = "Nearby", saved = "Saved", hikes = "Hikes"
@@ -37,9 +57,56 @@ public struct HikingHomeView: View {
         .task {
             if model.phase == .loading { await model.load() }
             openRequested()
+            takePendingImport()
             if model.nearbyState == .idle { await model.loadNearby() }
         }
         .onChange(of: model.requestedItem) { openRequested() }
+        .onChange(of: model.pendingImport) { takePendingImport() }
+        .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.gpx, .xml]) { result in
+            if case .success(let url) = result { importing = ImportChoice(url: url) }
+        }
+        .sheet(item: $importing) { choice in
+            GPXImportView(model: model, url: choice.url) { importing = nil }
+        }
+        .sheet(item: $moving) { trail in
+            MoveToGroupView(model: model, trail: trail) { moving = nil }
+        }
+        .sheet(isPresented: $showsStatistics) {
+            StatisticsView(model: model) { showsStatistics = false } onOpenHike: { hike in
+                showsStatistics = false
+                section = .hikes
+                openHike = hike
+            }
+        }
+        .alert("New group", isPresented: $makingGroup) {
+            TextField("Name", text: $newGroupName)
+            Button("Create") {
+                Task {
+                    if let group = await model.createGroup(named: newGroupName) { groupChoice = .group(group.id) }
+                    newGroupName = ""
+                }
+            }
+            Button("Cancel", role: .cancel) { newGroupName = "" }
+        } message: {
+            Text("Up to \(HikeGroup.maxNameLength) characters. Sealed with your key like the trails.")
+        }
+        .alert("Rename group", isPresented: $renamingGroup) {
+            TextField("Name", text: $renamedGroup)
+            Button("Rename") {
+                if let managing { Task { await model.renameGroup(managing, to: renamedGroup) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Delete this group?", isPresented: $confirmsDeleteGroup, titleVisibility: .visible) {
+            Button("Delete group", role: .destructive) {
+                if let managing {
+                    groupChoice = .all
+                    Task { await model.deleteGroup(managing) }
+                }
+            }
+        } message: {
+            Text("Its trails move to All saved. None are deleted.")
+        }
         .onChange(of: model.recording != nil) { _, isOn in if isOn { showsRecording = true } }
         .sheet(item: $openTrail) { choice in
             TrailDetailView(model: model, trailID: choice.id) { openTrail = nil } onStart: {
@@ -58,6 +125,14 @@ public struct HikingHomeView: View {
             RecordingView(model: model) { showsRecording = false }
         }
         #endif
+    }
+
+    /// A .gpx handed over from Files or a share sheet opens the import screen on Saved.
+    private func takePendingImport() {
+        guard model.phase == .ready, let url = model.pendingImport else { return }
+        model.pendingImport = nil
+        section = .saved
+        importing = ImportChoice(url: url)
     }
 
     private func openRequested() {
@@ -79,6 +154,7 @@ public struct HikingHomeView: View {
             }
             Spacer(minLength: 0)
             if model.phase == .ready {
+                HeaderButton("Statistics", systemImage: "chart.bar.fill") { showsStatistics = true }
                 if model.recording != nil {
                     HeaderPill("Recording", systemImage: "record.circle", isProminent: true) { showsRecording = true }
                 } else {
@@ -199,6 +275,7 @@ public struct HikingHomeView: View {
                     Text(units.distance(trail.metres)).foregroundStyle(theme.textPrimary.color)
                     if let climb = model.trail(trail.id)?.climb { Text(units.climb(climb)) }
                     if let here = model.here { Text("\(units.distance(trail.distance(from: here))) away") }
+                    if let group = model.group(named: model.trail(trail.id)?.groupID) { Text(group.name) }
                     if model.isSaved(trail) { Label("Saved", systemImage: "arrow.down.circle.fill").labelStyle(.titleAndIcon) }
                 }
                 .font(Typeface.caption)
@@ -221,11 +298,75 @@ public struct HikingHomeView: View {
 
     @ViewBuilder
     private var savedList: some View {
+        let theme = Theme.current
+        let selected: UUID? = { if case .group(let id) = groupChoice { id } else { nil } }()
+        // A group deleted elsewhere falls back to All saved.
+        let shown = model.savedTrails(in: selected.flatMap { model.group(named: $0) == nil ? nil : $0 })
+        if !model.groups.isEmpty || !model.saved.isEmpty {
+            groupChips
+        }
         if model.saved.isEmpty {
-            HikingMessage(systemImage: "arrow.down.circle", title: "No saved trails", detail: "Open a trail and tap Save for offline. Its route and details stay on this iPhone, so it opens with no signal.")
+            HikingMessage(systemImage: "arrow.down.circle", title: "No saved trails", detail: "Open a trail and tap Save for offline, or import a GPX file. Its route and details stay on this iPhone, so it opens with no signal.")
+        } else if shown.isEmpty, let group = model.group(named: selected) {
+            HikingMessage(systemImage: "folder", title: "Nothing in \(group.name) yet", detail: "Press and hold a saved trail and choose Move to group, or import a GPX file.")
         } else {
-            ForEach(model.saved) { trailRow($0) }
+            ForEach(shown) { trail in
+                trailRow(trail)
+                    .contextMenu {
+                        Button("Move to group", systemImage: "folder") { moving = trail }
+                        Button("Remove from saved", systemImage: "trash", role: .destructive) { Task { await model.forget(trail) } }
+                    }
+            }
             credit
+        }
+        Button {
+            showsImporter = true
+        } label: {
+            Label("Import a GPX file", systemImage: "square.and.arrow.down")
+                .font(Typeface.callout)
+                .foregroundStyle(theme.accent.color)
+                .frame(maxWidth: .infinity)
+                .padding(Space.s3)
+                .neumorphic(.raised, in: Capsule())
+        }
+        .buttonStyle(SoftPress())
+    }
+
+    /// "All saved" and each group, then New group and the group menu.
+    private var groupChips: some View {
+        let theme = Theme.current
+        let selected: GroupChoice = {
+            if case .group(let id) = groupChoice, model.group(named: id) != nil { return .group(id) }
+            return .all
+        }()
+        let choices = [GroupChoice.all] + model.groups.map { GroupChoice.group($0.id) }
+        return VStack(alignment: .leading, spacing: Space.s2) {
+            FilterPills(choices, selection: $groupChoice) { choice in
+                switch choice {
+                case .all: "All saved · \(model.saved.count)"
+                case .group(let id): "\(model.group(named: id)?.name ?? "Group") · \(model.savedTrails(in: id).count)"
+                }
+            }
+            HStack(spacing: Space.s4) {
+                Button { makingGroup = true } label: { Label("New group", systemImage: "plus") }
+                if case .group(let id) = selected, let group = model.group(named: id) {
+                    Menu {
+                        Button("Rename \u{201C}\(group.name)\u{201D}", systemImage: "pencil") {
+                            managing = group
+                            renamedGroup = group.name
+                            renamingGroup = true
+                        }
+                        Button("Delete group", systemImage: "trash", role: .destructive) {
+                            managing = group
+                            confirmsDeleteGroup = true
+                        }
+                    } label: {
+                        Label("Manage group", systemImage: "ellipsis.circle")
+                    }
+                }
+            }
+            .font(Typeface.callout)
+            .foregroundStyle(theme.accent.color)
         }
     }
 

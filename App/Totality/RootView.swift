@@ -32,6 +32,8 @@ struct RootView: View {
     @State private var clock: ClockModel?
     @State private var contacts: ContactsModel?
     @State private var hiking: HikingModel?
+    /// A .gpx file opened in Totality, waiting for Hiking to be ready to take it.
+    @State private var pendingGPX: URL?
     /// Shared task lists, over Messages' Matrix connection (step 6).
     @State private var sharedLists: SharedListsModel?
     /// Social, made the first time it's opened (issue 149). It needs the sign-in, not the content key.
@@ -221,8 +223,15 @@ struct RootView: View {
             Task { await NotificationHub.shared.updateBadge() }
         }
         #endif
+        .onChange(of: hiking != nil) { deliverGPX() }
+        .onChange(of: isSignedIn) { deliverGPX() }
         .onChange(of: ObjectIdentifier(mail.current)) { Task { await warmMailForHome() } }
         .onOpenURL { url in
+            if url.isFileURL, url.pathExtension.lowercased() == "gpx" {
+                pendingGPX = url
+                deliverGPX()
+                return
+            }
             if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
         }
     }
@@ -565,6 +574,17 @@ struct RootView: View {
         default:
             return nil
         }
+    }
+
+    /// Hands a .gpx file to Hiking, which opens its import preview. Nothing is saved until the person saves.
+    private func deliverGPX() {
+        guard let url = pendingGPX else { return }
+        guard isSignedIn else { return }
+        prepareContent()
+        guard let hiking else { return }
+        pendingGPX = nil
+        hiking.pendingImport = url
+        bringUp(.hiking)
     }
 
     private func bringUp(_ module: ModuleID) {
