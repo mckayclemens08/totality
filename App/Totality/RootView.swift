@@ -118,6 +118,10 @@ struct RootView: View {
             contentKeys.willMove = { await closeContent() }
             contentKeys.didMove = { account?.sync?.resume() }
             watchAccountChanges()
+            // A push or a background refresh can start Totality while the phone is locked, when the saved
+            // sign-in and the content key can't be read. Opening then would find nobody here and leave
+            // Home empty, so launch waits for the unlock (owner, 2026-11-26).
+            await ProtectedDataGate.system.waitUntilAvailable()
             // Reads the saved session only, so Home or the sign-in page can be chosen at once.
             await account?.restore()
             await launch()
@@ -126,6 +130,8 @@ struct RootView: View {
         }
         // However slow a module is, the launch screen goes after `LaunchView.limit`.
         .task(id: launchTurn) {
+            // Counted from the unlock: nobody is looking at a locked phone's launch screen.
+            await ProtectedDataGate.system.waitUntilAvailable()
             try? await Task.sleep(for: LaunchView.limit)
             guard !Task.isCancelled else { return }
             endLaunch()
@@ -190,6 +196,8 @@ struct RootView: View {
             switch scenePhase {
             case .active:
                 Task {
+                    // Home is never left empty: content that couldn't open before opens now.
+                    if needsHomeAgain { await warmUp() }
                     await refreshAhead()
                     await account?.sync?.syncNow()
                     // An account whose Matrix address couldn't be made at sign-up gets another try.
@@ -245,6 +253,12 @@ struct RootView: View {
             return
         }
         if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
+    }
+
+    /// Signed in, done launching, and still no content open: something stopped it opening, such as a
+    /// locked phone, so coming to the front tries again, as opening a module would.
+    private var needsHomeAgain: Bool {
+        isSignedIn && !launching && reader == nil && !contentKeys.isMoving && ProtectedDataGate.system.canRead
     }
 
     private var isSignedIn: Bool {
