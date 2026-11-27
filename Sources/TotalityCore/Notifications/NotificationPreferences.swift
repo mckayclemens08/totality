@@ -115,6 +115,7 @@ public final class NotificationSettingsStore: @unchecked Sendable {
 public struct PlannedAlert: Equatable, Sendable {
     public let identifier: String
     public let title: String
+    public let subtitle: String
     public let body: String
     /// Quiet hours: it arrives in Notification Centre with no sound and no banner.
     public let isQuiet: Bool
@@ -129,13 +130,16 @@ public struct PlannedAlert: Equatable, Sendable {
         guard preferences.isOn(note.kind) else { return nil }
         let quiet = preferences.isQuiet(at: now, in: calendar) && !(note.fromCloseFriend && preferences.closeFriendsBreakThrough)
         let thread: String = switch preferences.grouping {
+        // Mail's thread is the account it came to, and each account is a group of its own even by app.
+        case .module where note.target.module == .mail: note.target.module.rawValue + "." + note.thread
         case .module: note.target.module.rawValue
         case .thread: note.target.module.rawValue + "." + note.thread
         case .off: ""
         }
         let body = note.isPrivate && !preferences.showsPrivateText ? "" : note.body
         return PlannedAlert(
-            identifier: "totality." + note.id, title: note.title, body: body, isQuiet: quiet, thread: thread,
+            identifier: "totality." + note.id, title: note.title,
+            subtitle: note.subtitle ?? NotificationWording.subtitle(for: note.target.module), body: body, isQuiet: quiet, thread: thread,
             category: category(for: note.actions), userInfo: note.target.userInfo
         )
     }

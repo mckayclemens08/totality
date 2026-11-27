@@ -228,6 +228,7 @@ final class SystemAlertPoster: AlertPoster {
     func post(_ alert: PlannedAlert) async {
         let content = UNMutableNotificationContent()
         content.title = alert.title
+        content.subtitle = alert.subtitle
         content.body = alert.body
         content.threadIdentifier = alert.thread
         content.categoryIdentifier = alert.category

@@ -172,6 +172,7 @@ public final class SystemTaskReminders: NSObject, TaskReminderScheduling, @unche
     static func request(id: String, taskID: UUID, title: String, body: String, at date: Date?) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = title
+        content.subtitle = NotificationWording.subtitle(for: .tasks)
         content.body = body
         content.sound = .default
         content.categoryIdentifier = ReminderAction.category

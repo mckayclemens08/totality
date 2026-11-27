@@ -113,6 +113,7 @@ public struct SystemReminders: ReminderScheduler {
         for reminder in reminders {
             let content = UNMutableNotificationContent()
             content.title = reminder.title
+            content.subtitle = NotificationWording.subtitle(for: .calendar)
             content.body = reminder.body
             // The same buttons as every Totality alert: Snooze 10 min and Open, which the hub handles.
             content.categoryIdentifier = PlannedAlert.category(for: [.snoozeTen, .open])
