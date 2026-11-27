@@ -52,8 +52,8 @@ struct NewsTwoUserTests {
         _ = try await first.update { $0.saved = [article] }
         #expect(try await first.read().saved == [article])
         #expect(try await second.read().saved.isEmpty)
-        let blob = try #require(firstStore.names().first)
-        let data = try #require(firstStore.read(blob))
+        let blob = try #require(try firstStore.names().first)
+        let data = try #require(try firstStore.read(blob))
         #expect(data.range(of: Data(url.absoluteString.utf8)) == nil)
         let wrongKey = NewsLibrary(store: firstStore, rootKey: secondKey)
         await #expect(throws: (any Error).self) { try await wrongKey.read() }
