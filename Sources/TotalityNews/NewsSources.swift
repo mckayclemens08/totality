@@ -4,6 +4,21 @@ struct NewsSource: Codable, Hashable, Identifiable, Sendable {
     let name: String
     let url: URL
     var id: URL { url }
+    var indexedPublisher: Bool? = nil
+
+    static func publisher(_ input: String, name: String? = nil) -> NewsSource? {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.contains(where: \.isWhitespace),
+              let website = URL(string: text.contains("://") ? text : "https://" + text),
+              NewsNetwork.allowsFeed(website),
+              let host = website.host?.lowercased(),
+              host.range(of: #"^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$"#, options: .regularExpression) != nil
+        else { return nil }
+        let domain = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        let localSuffixes = [".local", ".internal", ".localhost", ".test", ".invalid", ".example", ".onion"]
+        guard !localSuffixes.contains(where: domain.hasSuffix), let url = URL(string: "https://" + domain) else { return nil }
+        return NewsSource(name: name ?? domain, url: url, indexedPublisher: true)
+    }
 
     static let defaults = [
         NewsSource(name: "NASA News Releases", url: URL(string: "https://www.nasa.gov/news-release/feed/")!),
@@ -25,6 +40,7 @@ struct NewsArticle: Codable, Hashable, Identifiable, Sendable {
     let date: Date?
     var id: URL { url }
     var feedURL: URL? = nil
+    var throughGDELT: Bool? = nil
 }
 
 enum NewsError: Error {
@@ -35,6 +51,11 @@ enum NewsError: Error {
 protocol NewsFetching: Sendable {
     func feed(_ source: NewsSource) async throws -> [NewsArticle]
     func discover(_ topic: String) async throws -> [NewsArticle]
+    func publishers(matching query: String) async throws -> [NewsSource]
+}
+
+extension NewsFetching {
+    func publishers(matching query: String) async throws -> [NewsSource] { [] }
 }
 
 struct NewsNetwork: NewsFetching {
@@ -61,7 +82,7 @@ struct NewsNetwork: NewsFetching {
         guard Self.allowsFeed(url) else { throw NewsError.invalidAddress }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
         request.setValue(accept, forHTTPHeaderField: "Accept")
-        request.setValue("Totality News RSS Reader", forHTTPHeaderField: "User-Agent")
+        request.setValue("TotalityNews/1.0 (https://usetotality.com/)", forHTTPHeaderField: "User-Agent")
         let (bytes, response) = try await Self.session.bytes(for: request)
         let limit = 2 * 1024 * 1024
         guard let http = response as? HTTPURLResponse else { throw NewsError.badResponse }
@@ -76,8 +97,42 @@ struct NewsNetwork: NewsFetching {
     }
 
     func feed(_ source: NewsSource) async throws -> [NewsArticle] {
+        if source.indexedPublisher == true {
+            guard let publisher = NewsSource.publisher(source.url.absoluteString), let domain = publisher.url.host
+            else { throw NewsError.invalidAddress }
+            if let articles = try? await publicPublisherFeed(source) { return articles }
+            let stories = try await discover("(domainis:" + domain + " OR domainis:www." + domain + ")")
+            return stories.filter { NewsSource.publisher($0.url.absoluteString)?.url == publisher.url }.map {
+                NewsArticle(title: $0.title, summary: "", source: source.name, url: $0.url, date: $0.date, feedURL: source.url, throughGDELT: true)
+            }
+        }
         let data = try await download(source.url, accept: "application/atom+xml, application/rss+xml, application/xml, text/xml")
         return try NewsXML.read(data, source: source)
+    }
+
+    private func publicPublisherFeed(_ publisher: NewsSource) async throws -> [NewsArticle] {
+        let page = try await download(publisher.url, accept: "text/html")
+        let html = String(decoding: page, as: UTF8.self)
+        let pattern = try NSRegularExpression(pattern: #"<link\b[^>]*>"#, options: .caseInsensitive)
+        let links = pattern.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        for link in links {
+            guard let range = Range(link.range, in: html) else { continue }
+            let tag = String(html[range])
+            guard tag.range(of: #"application/(rss|atom)\+xml"#, options: [.regularExpression, .caseInsensitive]) != nil,
+                  let href = tag.range(of: #"(?i)\bhref\s*=\s*['"][^'"]+['"]"#, options: .regularExpression),
+                  let quote = tag[href].firstIndex(where: { $0.asciiValue == 34 || $0.asciiValue == 39 })
+            else { continue }
+            let relative = String(tag[tag.index(after: quote)..<tag.index(before: href.upperBound)])
+                .replacingOccurrences(of: "&amp;", with: "&")
+            guard let url = URL(string: relative, relativeTo: publisher.url)?.absoluteURL,
+                  NewsSource.publisher(url.absoluteString)?.url == publisher.url else { continue }
+            let data = try await download(url, accept: "application/atom+xml, application/rss+xml, application/xml")
+            // Keep the publisher as the stable follow identifier and show links and titles only.
+            return try NewsXML.read(data, source: NewsSource(name: publisher.name, url: url)).map {
+                NewsArticle(title: $0.title, summary: "", source: publisher.name, url: $0.url, date: $0.date, feedURL: publisher.url)
+            }
+        }
+        throw NewsError.invalidFeed
     }
 
     func discover(_ topic: String) async throws -> [NewsArticle] {
@@ -91,6 +146,49 @@ struct NewsNetwork: NewsFetching {
         ]
         let data = try await download(url.url!, accept: "application/json")
         return try Self.discoveryArticles(data)
+    }
+
+    func publishers(matching query: String) async throws -> [NewsSource] {
+        struct Matches: Decodable {
+            struct Item: Decodable { let id: String; let label: String }
+            let search: [Item]
+        }
+        struct Entities: Decodable {
+            struct Entity: Decodable {
+                struct Claim: Decodable {
+                    struct Snak: Decodable {
+                        struct Value: Decodable { let value: String }
+                        let datavalue: Value?
+                    }
+                    let mainsnak: Snak
+                }
+                struct Claims: Decodable {
+                    let websites: [Claim]?
+                    enum CodingKeys: String, CodingKey { case websites = "P856" }
+                }
+                let claims: Claims?
+            }
+            let entities: [String: Entity]
+        }
+        func request(_ parameters: [String: String]) async throws -> Data {
+            var endpoint = URLComponents(string: "https://www.wikidata.org/w/api.php")!
+            endpoint.queryItems = parameters.map { URLQueryItem(name: $0.key, value: $0.value) }
+                + [URLQueryItem(name: "format", value: "json")]
+            return try await download(endpoint.url!, accept: "application/json")
+        }
+        let data = try await request(["action": "wbsearchentities", "language": "en", "search": query, "limit": "8"])
+        let matches = try JSONDecoder().decode(Matches.self, from: data).search
+        guard !matches.isEmpty else { return [] }
+        let details = try await request(["action": "wbgetentities", "ids": matches.map(\.id).joined(separator: "|"),
+                                         "props": "claims", "languages": "en"])
+        let entries = try JSONDecoder().decode(Entities.self, from: details).entities
+        var seen = Set<URL>()
+        return matches.compactMap { match in
+            let websites = entries[match.id]?.claims?.websites ?? []
+            return websites.lazy.compactMap { claim in
+                claim.mainsnak.datavalue.flatMap { NewsSource.publisher($0.value, name: match.label) }
+            }.first
+        }.filter { seen.insert($0.url).inserted }
     }
 
     static func discoveryArticles(_ data: Data) throws -> [NewsArticle] {
@@ -111,7 +209,7 @@ struct NewsNetwork: NewsFetching {
         return (response.articles ?? []).compactMap { item in
             guard Self.allows(item.url), !item.title.isEmpty else { return nil }
             return NewsArticle(title: String(item.title.prefix(500)), summary: "", source: item.domain ?? item.url.host ?? "GDELT",
-                               url: item.url, date: item.seendate.flatMap(format.date(from:)))
+                               url: item.url, date: item.seendate.flatMap(format.date(from:)), throughGDELT: true)
         }
     }
 }

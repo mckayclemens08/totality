@@ -67,6 +67,11 @@ private actor TestNewsNetwork: NewsFetching {
 
     func fail() { failed = true }
 
+    func publishers(matching query: String) async throws -> [NewsSource] {
+        guard let source = NewsSource.publisher("propublica.org", name: query) else { return [] }
+        return [source]
+    }
+
     func feed(_ source: NewsSource) async throws -> [NewsArticle] {
         guard !failed, source == NewsSource.defaults[0] else { throw NewsError.badResponse }
         return [NewsArticle(title: "NASA’s Artemis II mission", summary: "Four astronauts fly around the Moon.",
@@ -98,6 +103,42 @@ extension NewsTests {
         #expect(try await library.read().sources.contains(publisher))
         await model.remove(publisher)
         #expect(try await !library.read().sources.contains(publisher))
+    }
+
+    @MainActor
+    @Test func websiteLookupSupportsPublishersOutsideTheCatalog() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let library = NewsLibrary(store: try FileBlobStore(directory: directory), rootKey: try ContentRootKey.generate())
+        let model = NewsModel(library: library, network: TestNewsNetwork())
+        await model.searchPublishers("ProPublica")
+        #expect(model.publisherResults.first?.name == "ProPublica")
+        await model.searchPublishers("https://www.propublica.org/")
+        let result = try #require(model.publisherResults.first)
+        #expect(result.url.host == "propublica.org")
+        #expect(!NewsSource.catalog.contains(result))
+        await model.follow(result)
+        #expect(try await library.read().sources.contains(result))
+        await model.remove(result)
+        #expect(try await library.read().sources.contains(result) == false)
+        #expect(NewsSource.publisher("news.google.com") == nil)
+    }
+
+    @MainActor
+    @Test func todayShowsDifferentPublishersBeforeRepeats() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let library = NewsLibrary(store: try FileBlobStore(directory: directory), rootKey: try ContentRootKey.generate())
+        let model = NewsModel(library: library, network: TestNewsNetwork())
+        let local = NewsArticle(title: "Idaho weather alerts", summary: "", source: "National Weather Service",
+                                url: URL(string: "https://www.weather.gov/boi/")!, date: nil)
+        let secondAlert = NewsArticle(title: "Idaho mountain forecast", summary: "", source: "National Weather Service",
+                                      url: URL(string: "https://www.weather.gov/boi/forecast")!, date: nil)
+        let space = NewsArticle(title: "Artemis II mission", summary: "", source: "NASA",
+                                url: URL(string: "https://www.nasa.gov/mission/artemis-ii/")!, date: nil)
+        _ = try await library.update { $0.latest = [local, secondAlert, space] }
+        await model.load()
+        #expect(model.todayStories.map(\.title) == [local.title, space.title, secondAlert.title])
     }
 
     @MainActor

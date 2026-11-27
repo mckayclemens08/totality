@@ -15,6 +15,10 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
     private(set) var loading = false
     private(set) var discovering = false
     private(set) var discoveryLoaded = false
+    private(set) var publisherResults: [NewsSource] = []
+    private(set) var searchingPublishers = false
+    private(set) var publisherNotice: String?
+    private var publisherSearchID = UUID()
     private(set) var notice: String?
     private(set) var discoveryNotice: String?
     private let library: NewsLibrary
@@ -47,6 +51,8 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
         record = NewsRecord(sources: [])
         discovered = []
         topStories = []
+        publisherResults = []
+        publisherNotice = nil
         await library.close()
     }
 
@@ -127,8 +133,36 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
         }
     }
 
+    func clearPublisherSearch() {
+        publisherSearchID = UUID()
+        publisherNotice = nil
+        publisherResults = []
+        searchingPublishers = false
+    }
+
+    func searchPublishers(_ text: String) async {
+        let query = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        clearPublisherSearch()
+        let requestID = publisherSearchID
+        guard active, !query.isEmpty else { return }
+        if let publisher = NewsSource.publisher(query) {
+            publisherResults = [publisher]
+            return
+        }
+        searchingPublishers = true
+        defer { if publisherSearchID == requestID { searchingPublishers = false } }
+        do {
+            let matches = try await network.publishers(matching: query)
+            if active, publisherSearchID == requestID, !Task.isCancelled { publisherResults = matches }
+        } catch {
+            if active, publisherSearchID == requestID, !Task.isCancelled {
+                publisherNotice = "Publisher search is unavailable. Try the publisher’s website."
+            }
+        }
+    }
+
     func follow(_ source: NewsSource) async {
-        guard NewsSource.catalog.contains(source) else { return }
+        guard NewsSource.catalog.contains(source) || (source.indexedPublisher == true && NewsSource.publisher(source.url.absoluteString) != nil) else { return }
         await change { record in
             if !record.sources.contains(where: { $0.url == source.url }) {
                 record.sources.append(source)
@@ -148,8 +182,12 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
     }
 
     func source(for article: NewsArticle) -> NewsSource? {
-        guard let feedURL = article.feedURL else { return nil }
-        return (record.sources + NewsSource.catalog).first { $0.url == feedURL }
+        let publishers = record.sources + NewsSource.catalog
+        if let feedURL = article.feedURL, let followed = publishers.first(where: { $0.url == feedURL }) {
+            return followed
+        }
+        guard let publisher = NewsSource.publisher(article.url.absoluteString, name: article.source) else { return nil }
+        return publishers.first { NewsSource.publisher($0.url.absoluteString)?.url == publisher.url } ?? publisher
     }
 
     func remove(_ source: NewsSource) async {
@@ -199,7 +237,18 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
 
     var todayStories: [NewsArticle] {
         var seen = Set<URL>()
-        return (topStories + record.latest).filter { seen.insert($0.url).inserted }
+        let unique = (topStories + record.latest).filter { seen.insert($0.url).inserted }
+        var publishers = Set<String>()
+        var first: [NewsArticle] = []
+        var rest: [NewsArticle] = []
+        for article in unique {
+            if publishers.insert(article.source.lowercased()).inserted {
+                first.append(article)
+            } else {
+                rest.append(article)
+            }
+        }
+        return first + rest
     }
 
     private var articles: [NewsArticle] { record.saved + todayStories + discovered }

@@ -97,8 +97,8 @@ public struct NewsHomeView: View {
             let articles = model.todayStories
             if let lead = articles.first {
                 story(lead, featured: true)
-                if !model.topStories.isEmpty {
-                    Link("Top stories via the GDELT Project", destination: URL(string: "https://www.gdeltproject.org/")!)
+                if articles.contains(where: { $0.throughGDELT == true }) {
+                    Link("Some stories via the GDELT Project", destination: URL(string: "https://www.gdeltproject.org/")!)
                         .font(Typeface.caption)
                         .foregroundStyle(Theme.current.accent.color)
                 }
@@ -153,16 +153,43 @@ public struct NewsHomeView: View {
         let publishers = NewsSource.catalog + model.record.sources.filter { source in
             !NewsSource.catalog.contains { $0.url == source.url }
         }
-        let matching = publishers.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+        let websiteMatch = NewsSource.publisher(query)?.url
+        let local = publishers.filter {
+            query.isEmpty || $0.name.localizedCaseInsensitiveContains(query)
+                || $0.url.host?.localizedCaseInsensitiveContains(query) == true
+                || (websiteMatch != nil && NewsSource.publisher($0.url.absoluteString)?.url == websiteMatch)
+        }
+        var seen = Set(local.map(\.url))
+        seen.formUnion(local.compactMap { NewsSource.publisher($0.url.absoluteString)?.url })
+        let matching = local + model.publisherResults.filter { seen.insert($0.url).inserted }
         return VStack(alignment: .leading, spacing: Space.s3) {
-            TextField("Find a publisher", text: $publisherQuery).raisedField()
-            if matching.isEmpty {
-                Text("No matching publishers.").foregroundStyle(Theme.current.textSecondary.color)
+            TextField("Publisher name or website", text: $publisherQuery).raisedField()
+                .submitLabel(.search)
+                .onSubmit { Task { await model.searchPublishers(query) } }
+                .onChange(of: publisherQuery) { _, _ in model.clearPublisherSearch() }
+            if !query.isEmpty {
+                HeaderPill("Search publishers", systemImage: "magnifyingglass") {
+                    Task { await model.searchPublishers(query) }
+                }
+                .disabled(model.searchingPublishers)
+                Text("Name searches use Wikidata.").font(Typeface.caption)
+                    .foregroundStyle(Theme.current.textSecondary.color)
+            }
+            if model.searchingPublishers { ProgressView().accessibilityLabel("Searching publishers") }
+            if let notice = model.publisherNotice {
+                Text(notice).foregroundStyle(Theme.current.textSecondary.color)
+            } else if matching.isEmpty && !model.searchingPublishers {
+                Text("Search by name or enter the publisher’s website.").foregroundStyle(Theme.current.textSecondary.color)
             }
             ForEach(matching) { source in
                 let followed = model.record.sources.contains { $0.url == source.url }
                 HStack {
-                    Text(source.name).font(Typeface.headline)
+                    VStack(alignment: .leading, spacing: Space.s1) {
+                        Text(source.name).font(Typeface.headline)
+                        if source.indexedPublisher == true, let domain = source.url.host, domain != source.name {
+                            Text(domain).font(Typeface.caption).foregroundStyle(Theme.current.textSecondary.color)
+                        }
+                    }
                     Spacer()
                     HeaderPill(followed ? "Unfollow" : "Follow", isProminent: !followed) {
                         changeFollowing(source, follow: !followed)
@@ -190,16 +217,23 @@ public struct NewsHomeView: View {
     private func rows(_ articles: some RandomAccessCollection<NewsArticle>) -> some View {
         LazyVStack(alignment: .leading, spacing: Space.s3) {
             ForEach(articles) { article in story(article) }
+            if section == .saved && articles.contains(where: { $0.throughGDELT == true }) {
+                Link("Some stories via the GDELT Project", destination: URL(string: "https://www.gdeltproject.org/")!)
+                    .font(Typeface.caption)
+                    .foregroundStyle(Theme.current.accent.color)
+            }
         }
     }
 
     private func story(_ article: NewsArticle, featured: Bool = false) -> some View {
         let saved = model.record.saved.contains { $0.url == article.url }
         return HStack(alignment: .top, spacing: Space.s2) {
+            if !featured { NewsStoryArtwork(article: article, featured: false) }
             Button {
                 onOpen(model.reference(article))
             } label: {
                 VStack(alignment: .leading, spacing: Space.s2) {
+                    if featured { NewsStoryArtwork(article: article, featured: true) }
                     Text(article.source)
                         .font(Typeface.caption)
                         .foregroundStyle(Theme.current.textSecondary.color)

@@ -4,10 +4,10 @@ News gives people a chronological list of headlines from feeds they follow, a to
 
 ## Screens
 
-- **Today** combines followed RSS and Atom feeds. It leads with general top stories when GDELT is available, then mixes in followed headlines. If discovery is unavailable, the newest followed story leads. Tap any headline to read it. Pull to refresh. One failed feed leaves the others usable and the last loaded copy visible.
+- **Today** combines followed RSS and Atom feeds. It leads with general top stories when GDELT is available, then mixes in followed headlines. If discovery is unavailable, the newest followed story leads. Today gives each available publisher a turn before repeating a source, with local editorial illustrations for the lead and story rows. Tap any headline to read it. Pull to refresh. One failed feed leaves the others usable and the last loaded copy visible.
 - **Search** starts with a general top-stories query. A topic search goes directly to the GDELT Project and names that destination alongside the search box.
 - **Saved** holds the headline, summary, source and original link. Save and remove are available beside the headline. The list is encrypted locally with the account’s content key.
-- **Following** lists publishers by name with searchable Follow and Unfollow controls. A followed story also offers an Unfollow action. The publisher directory manages feed addresses internally.
+- **Following** shows publishers by name with Follow and Unfollow controls. Search by name through the [Wikidata public directory](https://www.wikidata.org/wiki/Help:Data_access), or enter a publisher’s website. News tries an advertised public feed and falls back to GDELT headline links. A publisher with neither may have no stories to show. A followed story also offers an Unfollow action. The publisher directory manages feed addresses internally.
 - **Home** offers a News tile in three sizes and finds loaded and saved headlines through local search.
 
 The UI follows the existing Totality theme and raised controls. First load, an empty feed or reading list, partial failure, and retry each have a dedicated state.
@@ -29,4 +29,4 @@ Reviewed November 27, 2026. Default feeds are deliberately limited to sources wi
 
 ## Data and cost
 
-The phone contacts publishers and GDELT directly. The Totality server receives no feed lists, topic queries, reading list, or article opens from News. Publishers receive requests addressed to them and GDELT receives topics the user submits. News uses no paid key, backend, database migration, or media service. Subscriptions and saved articles are account-scoped and encrypted on this device. Article bodies remain with their publishers. Expect HTTPS for feeds and links under the app’s normal transport policy.
+The phone contacts publishers, Wikidata, and GDELT directly. The Totality server receives no feed lists, topic queries, reading list, or article opens from News. Publishers receive requests addressed to them and GDELT receives topics the user submits. News uses no paid key, backend, database migration, or media service. Subscriptions and saved articles are account-scoped and encrypted on this device. Article bodies remain with their publishers. Expect HTTPS for feeds and links under the app’s normal transport policy.
