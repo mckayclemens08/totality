@@ -30,7 +30,7 @@ extension MatrixMessagesService {
                 events: ChannelSettings.followerEvents.mapValues(Int32.init)
             )
             let id = try await client.createRoom(request: CreateRoomParameters(
-                name: name, isEncrypted: true, isDirect: false, visibility: .private, preset: .privateChat,
+                name: name, topic: ChannelMarker.topic, isEncrypted: true, isDirect: false, visibility: .private, preset: .privateChat,
                 invite: people.isEmpty ? nil : people, powerLevelContentOverride: levels
             ))
             for _ in 0..<50 {

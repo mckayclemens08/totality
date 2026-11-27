@@ -42,6 +42,33 @@ test('only the service role can ask the gate', async () => {
   await assert.rejects(rpc(null, 'select * from public.message_gate($1, $2)', [mia.handle, [leo.handle]]), /permission denied/)
 })
 
+describe('inviting to a broadcast channel', () => {
+  const channelGate = async (sender, recipients) => {
+    await db.exec('set role service_role')
+    try {
+      return Object.fromEntries((await db.query('select * from public.channel_gate($1, $2)', [sender, recipients])).rows
+        .map((r) => [r.handle, r.allowed]))
+    } finally { await db.exec('reset role') }
+  }
+
+  test('only people who follow the inviter may be invited', async () => {
+    const [mia, leo, zoe] = await pair()
+    await follow(leo, mia)
+    assert.deepEqual(await channelGate(mia.handle, [leo.handle, zoe.handle, 'nobody_here']),
+      { [leo.handle]: true, [zoe.handle]: false, nobody_here: false })
+    // Following the other way round doesn't count: it's the invitee who must follow the inviter.
+    assert.deepEqual(await channelGate(leo.handle, [mia.handle]), { [mia.handle]: false })
+  })
+
+  test('a block ends it, and only the service role can ask', async () => {
+    const [mia, leo] = await pair()
+    await follow(leo, mia)
+    await block(mia, leo)
+    assert.deepEqual(await channelGate(mia.handle, [leo.handle]), { [leo.handle]: false })
+    await assert.rejects(rpc(mia, 'select * from public.channel_gate($1, $2)', [mia.handle, [leo.handle]]), /permission denied/)
+  })
+})
+
 describe('the setting', () => {
   test('starts at Anyone and changes nothing else in Social settings', async () => {
     const [mia, leo] = await pair()

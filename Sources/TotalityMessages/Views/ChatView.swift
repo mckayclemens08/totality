@@ -51,6 +51,7 @@ struct ChatView: View {
     @State private var confirmingLeave = false
     @State private var editingGroup = false
     @State private var invitingToChannel = false
+    @State private var showingInfo = false
     @State private var viewing: ChatMessage?
     @State private var viewingOnce: ChatMessage?
     /// Choosing how to send a photo that opens once.
@@ -74,7 +75,7 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: Space.s2) {
                         if let access = model.channelAccess {
-                            ChannelNote(access: access, followers: max(0, model.channelMembers - 1))
+                            ChannelNote(access: access, followers: model.channelFollowers, invited: model.channelInvited)
                         } else {
                             EncryptionNote(isGroup: model.isGroup)
                         }
@@ -201,7 +202,10 @@ struct ChatView: View {
         .addToTasksSheet($taskDraft, maker: messages.taskMaker) { made in model.notice = made.line }
         .toolbar { chatMenu }
         .sheet(isPresented: $invitingToChannel) {
-            InviteToChannelView(model: messages, chat: model.chatID, members: model.channelMembers) { invitingToChannel = false }
+            InviteToChannelView(model: messages, chat: model.chatID, members: model.channelMembers, invited: model.channelInvited) { invitingToChannel = false }
+        }
+        .sheet(isPresented: $showingInfo) {
+            ChatInfoView(chat: model, messages: messages, onLeft: { showingInfo = false; onGone() }, onDone: { showingInfo = false })
         }
         .sheet(isPresented: $editingGroup) {
             GroupDetailsView(chat: model, messages: messages) { editingGroup = false }
@@ -367,6 +371,26 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(chatTitle), view profile")
+            }
+        }
+        if model.isGroup {
+            ToolbarItem(placement: .principal) {
+                Button { showingInfo = true } label: {
+                    HStack(spacing: Space.s2) {
+                        if model.channelAccess != nil {
+                            Image(systemName: "megaphone.fill").foregroundStyle(Theme.current.accent.color)
+                        }
+                        Text(model.title)
+                            .font(Typeface.headline)
+                            .foregroundStyle(Theme.current.textPrimary.color)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(Typeface.micro)
+                            .foregroundStyle(Theme.current.textSecondary.color)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(model.title), \(model.channelAccess != nil ? "channel" : "group") info")
             }
         }
         ToolbarItem(placement: .primaryAction) {
@@ -870,27 +894,12 @@ struct NewMessageView: View {
     let onDone: (String?) -> Void
     @State private var username = ""
     @State private var working = false
-    @FocusState private var focused: Bool
 
     var body: some View {
         let theme = Theme.current
         NavigationStack {
             VStack(alignment: .leading, spacing: Space.s4) {
-                HStack(spacing: Space.s1) {
-                    // The @ is already there, so people type only the name.
-                    Text("@").foregroundStyle(theme.textSecondary.color).accessibilityHidden(true)
-                    TextField("username", text: $username)
-                        .textFieldStyle(.plain)
-                        .autocorrectionDisabled()
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .focused($focused)
-                        .onSubmit(start)
-                        .accessibilityLabel("Their username")
-                }
-                .font(Typeface.body)
-                .raisedField()
+                UsernameField(people: model.people, text: $username, autofocus: true, onSubmit: start)
                 Text("If you haven't talked before, they'll see a request to accept first.")
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
@@ -927,7 +936,6 @@ struct NewMessageView: View {
             model.notice = nil
             model.needsRequest = nil
             model.sentRequestTo = nil
-            focused = true
         }
         .onChange(of: username) {
             model.needsRequest = nil

@@ -329,9 +329,30 @@ public protocol ChatChannel: AnyObject, Sendable {
     var channelOwner: String? { get }
     /// People in a channel, followers and admins together, invited ones included.
     var channelMembers: Int { get }
+    /// Everyone joined or invited, with their power levels. Throws when the list couldn't be read.
+    func members() async throws -> [ChatMember]
+    /// Of `channelMembers`, how many are invited and haven't accepted.
+    var channelInvited: Int { get }
+    /// Takes back an invite that hasn't been accepted.
+    func cancelInvite(_ person: String) async throws
+    /// Makes someone an admin, or takes it away. Only the owner may.
+    func setAdmin(_ person: String, to isAdmin: Bool) async throws
+    /// Tells Totality's server's admins about this chat. Nothing from the chat goes with it.
+    func report(_ reason: String) async throws
 }
 
 public extension ChatChannel {
+    func members() async throws -> [ChatMember] { [] }
+    var channelInvited: Int { 0 }
+    func cancelInvite(_ person: String) async throws {
+        throw MessagesError.failed("Invites can't be taken back here.")
+    }
+    func setAdmin(_ person: String, to isAdmin: Bool) async throws {
+        throw MessagesError.failed("Admins can't be changed here.")
+    }
+    func report(_ reason: String) async throws {
+        throw MessagesError.failed("Reports aren't available here.")
+    }
     var channelAccess: ChannelAccess? { nil }
     var channelOwner: String? { nil }
     var channelMembers: Int { 0 }

@@ -21,6 +21,8 @@ public final class MessagesPeople {
 
     /// Set by the app from the `ModuleRegistry`. Without it, everyone shows as their handle.
     public var directory: (any ProfileDirectory)?
+    /// Who follows this person on Social, from the app through Core. A broadcast channel invites only these.
+    public var followers: (any FollowerDirectory)?
     /// The person's own Contacts, through the registry. In memory only; nothing is fetched for it.
     @ObservationIgnored public var lookup: (any PeopleLookup)?
     private(set) var entries: [String: Entry] = [:]

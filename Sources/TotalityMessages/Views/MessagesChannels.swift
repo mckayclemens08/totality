@@ -5,11 +5,12 @@ import TotalityUI
 struct ChannelNote: View {
     let access: ChannelAccess
     let followers: Int
+    var invited = 0
 
     var body: some View {
         let theme = Theme.current
         VStack(spacing: Space.s2) {
-            Label("Broadcast channel · \(ChannelLabels.followers(followers))", systemImage: "megaphone")
+            Label("Broadcast channel · \(ChannelLabels.followers(followers))\(invited > 0 && access.canInvite ? " · \(invited) invited" : "")", systemImage: "megaphone")
                 .font(Typeface.caption.weight(.semibold))
             Text(ChannelLabels.encrypted)
             Text(ChannelLabels.nameNotEncrypted)
@@ -66,16 +67,13 @@ struct NewChannelView: View {
                     .font(Typeface.body)
                     .raisedField()
                     .accessibilityLabel("Channel name")
-                TextField("Admins who can post too (optional)", text: $admins, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    #endif
-                    .font(Typeface.body)
-                    .lineLimit(1...3)
-                    .raisedField()
-                    .accessibilityLabel("Admin usernames")
+                UsernameField(
+                    people: model.people, text: $admins, placeholder: "admins who can post too (optional)",
+                    label: "Admin usernames", multiple: true, followersOnly: true
+                )
+                Text(ChannelInviteRule.line)
+                    .font(Typeface.caption)
+                    .foregroundStyle(theme.textSecondary.color)
                 Group {
                     Text(ChannelLabels.encrypted)
                     Text(ChannelLabels.nameNotEncrypted)
@@ -131,7 +129,11 @@ struct NewChannelView: View {
 struct InviteToChannelView: View {
     let model: MessagesModel
     let chat: String
+    /// Everyone in the room, invited ones included, as the size cap counts them.
     let members: Int
+    var invited = 0
+    /// A group's "add people" rather than a channel's "invite followers".
+    var isGroup = false
     let onDone: () -> Void
     @State private var usernames = ""
     @State private var working = false
@@ -141,17 +143,11 @@ struct InviteToChannelView: View {
         let theme = Theme.current
         NavigationStack {
             VStack(alignment: .leading, spacing: Space.s4) {
-                TextField("Usernames, separated by commas", text: $usernames, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    #endif
-                    .font(Typeface.body)
-                    .lineLimit(1...4)
-                    .raisedField()
-                    .accessibilityLabel("Usernames to invite")
-                Text("\(ChannelLabels.followers(max(0, members - 1))). Room for \(ChannelLimits.room(members: members)) more. Each person gets a request to accept.")
+                UsernameField(
+                    people: model.people, text: $usernames, placeholder: "username, username",
+                    label: "Usernames to invite", multiple: true, autofocus: true, followersOnly: !isGroup
+                )
+                Text(summary)
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
                 if let problem {
@@ -161,7 +157,7 @@ struct InviteToChannelView: View {
             }
             .padding(Space.s5)
             .background(theme.bg.color)
-            .navigationTitle("Invite followers")
+            .navigationTitle(isGroup ? "Add people" : "Invite followers")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -171,7 +167,7 @@ struct InviteToChannelView: View {
                     if working {
                         ProgressView()
                     } else {
-                        Button("Invite", action: invite)
+                        Button(isGroup ? "Add" : "Invite", action: invite)
                             .disabled(usernames.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
@@ -181,11 +177,21 @@ struct InviteToChannelView: View {
         .onChange(of: usernames) { problem = nil }
     }
 
+    private var summary: String {
+        if isGroup {
+            return "\(ChatInfoLabels.memberCount(members)). Room for \(max(0, GroupMembers.limit - members)) more. Each person gets a request to accept."
+        }
+        let pending = invited > 0 ? ", and \(invited) invited" : ""
+        return "\(ChannelInviteRule.line) \(ChannelLabels.followers(ChannelCounts.followers(members: members, invited: invited)))\(pending). Room for \(ChannelLimits.room(members: members)) more, counting people invited. Each person gets a request to accept."
+    }
+
     private func invite() {
         guard !working else { return }
         working = true
         Task {
-            let ok = await model.invite(usernames, toChannel: chat)
+            let ok = isGroup
+                ? await model.addPeople(usernames, toGroup: chat, current: members)
+                : await model.invite(usernames, toChannel: chat)
             working = false
             if ok {
                 onDone()

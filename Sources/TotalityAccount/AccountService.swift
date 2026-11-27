@@ -358,6 +358,26 @@ extension SupabaseAccountService: ProfileDirectory {
     public func profiles(of usernames: [String], photos: [String: Data]) async throws -> [String: PublicProfile] {
         try await otherProfiles(usernames.compactMap { Username($0) }, photos: photos)
     }
+
+    public func suggestions(matching typed: String, limit: Int) async throws -> [ProfileSuggestion] {
+        let query = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty, query.count <= 24 else { return [] }
+        let rows: [SuggestionRow] = try await mapErrors {
+            try await client.rpc("social_search_people", params: SuggestionParams(p_query: query, p_limit: min(max(limit, 1), 20)))
+                .execute().value as [SuggestionRow]
+        }
+        return rows.map { ProfileSuggestion(handle: $0.handle, displayName: $0.display_name) }
+    }
+
+    private struct SuggestionParams: Encodable, Sendable {
+        let p_query: String
+        let p_limit: Int
+    }
+
+    private struct SuggestionRow: Decodable, Sendable {
+        let handle: String
+        let display_name: String?
+    }
 }
 
 /// Where someone's photo may be: in their own folder, under a name this app gives it. Anything else in

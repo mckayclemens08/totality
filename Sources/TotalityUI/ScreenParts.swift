@@ -298,6 +298,9 @@ public struct HeaderMenu<MenuContent: View>: View {
     }
 
     public var body: some View {
+        // The raised disc is drawn behind the menu, not inside its label. UIKit lifts and puts back a
+        // menu's label as a snapshot when the menu closes or a sheet it opened is dismissed, and a
+        // shadow inside that snapshot flashed as a stray shape around the button.
         Menu {
             content
         } label: {
@@ -305,10 +308,15 @@ public struct HeaderMenu<MenuContent: View>: View {
                 .font(Typeface.body.weight(.semibold))
                 .foregroundStyle(Theme.current.textSecondary.color)
                 .frame(width: Metric.headerButton, height: Metric.headerButton)
-                .neumorphic(.subtle, in: Circle())
                 .contentShape(Circle())
         }
-        .buttonStyle(SoftPress())
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .background {
+            Color.clear
+                .frame(width: Metric.headerButton, height: Metric.headerButton)
+                .neumorphic(.subtle, in: Circle())
+        }
         .accessibilityLabel(title)
     }
 }

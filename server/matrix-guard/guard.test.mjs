@@ -17,6 +17,12 @@ before(async () => {
       res.writeHead(user ? 200 : 401, { 'Content-Type': 'application/json' })
       return res.end(JSON.stringify(user ? { user_id: user } : { errcode: 'M_UNKNOWN_TOKEN' }))
     }
+    if (req.method === 'GET' && req.url.includes('/state/m.room.power_levels')) {
+      const room = decodeURIComponent(req.url.split('/rooms/')[1].split('/')[0])
+      const status = room === '!broken:usetotality.com' ? 500 : room === '!gone:usetotality.com' ? 404 : 200
+      res.writeHead(status, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ events_default: room === '!chan:usetotality.com' ? 50 : 0 }))
+    }
     const chunks = []
     req.on('data', (c) => chunks.push(c))
     req.on('end', () => {
@@ -26,10 +32,11 @@ before(async () => {
     })
   }).listen(0)
   await new Promise((r) => upstream.once('listening', r))
-  const gate = async (sender, recipients) => {
-    gateCalls.push({ sender, recipients })
+  const gate = async (sender, recipients, channel = false) => {
+    gateCalls.push(channel ? { sender, recipients, channel: true } : { sender, recipients })
     if (gateDown) throw new Error('down')
-    return Object.fromEntries(recipients.map((r) => [r, allows(sender, r)]))
+    // In a channel, the person invited must also follow the inviter. Ana doesn't follow Leo.
+    return Object.fromEntries(recipients.map((r) => [r, allows(sender, r) && (!channel || !(sender === 'leo_m' && r === 'ana_k'))]))
   }
   front = createServer(guard({ upstream: `http://127.0.0.1:${upstream.address().port}`, serverName: SERVER, gate })).listen(0)
   await new Promise((r) => front.once('listening', r))
@@ -180,6 +187,57 @@ describe('checks every way to invite', () => {
       assert.equal(r.status, 503)
       assert.equal(seen.length, 0)
     } finally { gateDown = false }
+  })
+})
+
+describe('broadcast channels', () => {
+  test('inviting to an existing channel asks whether the invitee follows the inviter', async () => {
+    const refused = await send('POST', '/_matrix/client/v3/rooms/!chan:usetotality.com/invite', { body: { user_id: '@ana_k:usetotality.com' } })
+    assert.equal(refused.status, 403)
+    assert.match(json(refused).error, /follow you/)
+    assert.deepEqual(gateCalls, [{ sender: 'leo_m', recipients: ['ana_k'], channel: true }])
+    assert.equal(seen.length, 0)
+    const ok = await send('POST', '/_matrix/client/v3/rooms/!chan:usetotality.com/invite', { token: 'token-mia', body: { user_id: '@leo_m:usetotality.com' } })
+    assert.equal(ok.status, 200)
+    assert.equal(gateCalls[0].channel, true)
+  })
+
+  test('a room whose posting is open is a group and keeps the ordinary rule', async () => {
+    const r = await send('POST', '/_matrix/client/v3/rooms/!a:usetotality.com/invite', { body: { user_id: '@ana_k:usetotality.com' } })
+    assert.equal(r.status, 200)
+    assert.deepEqual(gateCalls, [{ sender: 'leo_m', recipients: ['ana_k'] }])
+  })
+
+  test('a new room that restricts posting is a channel, however its levels are given', async () => {
+    let r = await send('POST', '/_matrix/client/v3/createRoom', { body: { power_level_content_override: { events_default: 50 }, invite: ['@ana_k:usetotality.com'] } })
+    assert.equal(r.status, 403)
+    assert.equal(gateCalls[0].channel, true)
+    r = await send('POST', '/_matrix/client/v3/createRoom', {
+      body: { initial_state: [{ type: 'm.room.power_levels', state_key: '', content: { events_default: '50' } }], invite: ['@ana_k:usetotality.com'] },
+    })
+    assert.equal(r.status, 403)
+    r = await send('POST', '/_matrix/client/v3/createRoom', { body: { power_level_content_override: { events_default: 0 }, invite: ['@ana_k:usetotality.com'] } })
+    assert.equal(r.status, 200)
+  })
+
+  test('a member invite is checked the same way, and an unreadable room fails closed', async () => {
+    let r = await send('PUT', '/_matrix/client/v3/rooms/!chan:usetotality.com/state/m.room.member/@ana_k:usetotality.com', { body: { membership: 'invite' } })
+    assert.equal(r.status, 403)
+    r = await send('POST', '/_matrix/client/v3/rooms/!broken:usetotality.com/invite', { body: { user_id: '@ana_k:usetotality.com' } })
+    assert.equal(r.status, 503)
+    assert.equal(seen.length, 0)
+    r = await send('POST', '/_matrix/client/v3/rooms/!gone:usetotality.com/invite', { body: { user_id: '@ana_k:usetotality.com' } })
+    assert.equal(r.status, 200)
+  })
+
+  test('the live gate says when it is asking about a channel', async () => {
+    const bodies = []
+    const fetcher = async (url, init) => { bodies.push(JSON.parse(init.body)); return { ok: true, json: async () => ({ allowed: {} }) } }
+    const ask = liveGate({ url: 'x', secret: 's'.repeat(40), fetcher })
+    await ask('leo_m', ['mia_r'])
+    await ask('leo_m', ['mia_r'], true)
+    assert.equal(bodies[0].channel, undefined)
+    assert.equal(bodies[1].channel, true)
   })
 })
 

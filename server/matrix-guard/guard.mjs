@@ -12,6 +12,11 @@
 // anyone outside this server are refused outright. If the gate can't be reached, nothing is invited.
 // Federation is off, so the Matrix client API is the only way an invite can be made.
 //
+// A broadcast channel is recognised by its power levels, which the app can't change without the channel
+// stopping being one: posting needs level 50 or more (events_default). Everyone invited to a channel must
+// follow the person inviting them, as well as pass "who can message me", so a channel can't be used to reach
+// people who never chose to hear from the inviter. The gate is asked with channel: true.
+//
 // Message content never passes the guard's checks: an invite carries none, and messages themselves are
 // end-to-end encrypted and streamed straight through. Nothing here logs a request, a token or a name.
 import { createServer, request as httpRequest } from 'node:http'
@@ -20,6 +25,8 @@ import { pathToFileURL } from 'node:url'
 export const MAX_BODY = 256 * 1024
 const HANDLE = /^[a-z0-9_]{3,24}$/
 const HOP = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te', 'trailer', 'host', 'content-length'])
+/// What a room's events_default must reach for it to be a broadcast channel. Matches ChannelPower.post in the app.
+export const CHANNEL_POST_LEVEL = 50
 const MEMBERSHIPS_WITHOUT_INVITE = new Set(['join', 'leave', 'ban', 'knock'])
 
 export class Refusal extends Error {
@@ -49,7 +56,18 @@ export function classify(method, url) {
   if (!createRoom && !invite && !member) return { gated: false }
   if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return { gated: false }
   if (method !== 'POST' && method !== 'PUT') throw new Refusal(405, 'M_UNRECOGNIZED', 'Method not allowed.')
-  return { gated: true, createRoom, invite, member, stateKey: member ? (segments[stateAt + 2] ?? '') : null }
+  const roomAt = lower.indexOf('rooms')
+  const room = roomAt >= 0 ? (segments[roomAt + 1] ?? null) : null
+  return { gated: true, createRoom, invite, member, room, stateKey: member ? (segments[stateAt + 2] ?? '') : null }
+}
+
+const postsNeedLevel = (levels) =>
+  levels !== null && typeof levels === 'object' && Number(levels.events_default) >= CHANNEL_POST_LEVEL
+
+/// Whether a new room's own settings make it a channel: the power levels it asks for, either way they can be given.
+export function createsChannel(body) {
+  if (postsNeedLevel(body.power_level_content_override)) return true
+  return Array.isArray(body.initial_state) && body.initial_state.some((e) => e.type === 'm.room.power_levels' && postsNeedLevel(e.content))
 }
 
 /// The usernames this body would invite. Throws a Refusal for anything that may never be sent.
@@ -109,11 +127,11 @@ function forwardHeaders(headers) {
 
 /// Asks Supabase's message-gate function. Answers { name: true|false } or throws.
 export function liveGate({ url, secret, fetcher = fetch, timeoutMs = 8_000 }) {
-  return async (sender, recipients) => {
+  return async (sender, recipients, channel = false) => {
     const answer = await fetcher(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Gate-Secret': secret },
-      body: JSON.stringify({ sender, recipients }),
+      body: JSON.stringify(channel ? { sender, recipients, channel: true } : { sender, recipients }),
       signal: AbortSignal.timeout(timeoutMs),
     })
     if (!answer.ok) throw new Error('gate refused')
@@ -145,6 +163,21 @@ export function guard({ upstream, serverName, gate }) {
     req.on('aborted', () => out.destroy())
     if (body !== undefined) out.end(body)
     else req.pipe(out)
+  }
+
+  /// Whether an existing room is a channel, from its power levels as the sender sees them. A room the sender
+  /// can't read, or one without power levels, isn't one: Tuwunel refuses an invite from outside the room anyway.
+  async function roomIsChannel(req, room) {
+    if (!room) return false
+    const query = new URLSearchParams(req.url.split('?')[1] ?? '')
+    const token = query.get('access_token')
+    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(room)}/state/m.room.power_levels` + (token ? `?access_token=${encodeURIComponent(token)}` : '')
+    const headers = {}
+    if (req.headers.authorization) headers.authorization = req.headers.authorization
+    const answer = await fetch(new URL(path, target), { headers, signal: AbortSignal.timeout(8_000) })
+    if (answer.status === 404 || answer.status === 403) return false
+    if (!answer.ok) throw new Error('power levels unreadable')
+    return postsNeedLevel(await answer.json())
   }
 
   async function whoami(req) {
@@ -189,10 +222,16 @@ export function guard({ upstream, serverName, gate }) {
     }
     const sender = localpart(who.user, serverName)
     if (!sender) throw new Refusal(403, 'M_FORBIDDEN', 'Only Totality accounts can invite.')
+    let channel
+    try {
+      channel = kind.createRoom ? createsChannel(body) : await roomIsChannel(req, kind.room)
+    } catch { throw new Refusal(503, 'M_UNKNOWN', 'Try again in a moment.') }
     let allowed
-    try { allowed = await gate(sender, names) } catch { throw new Refusal(503, 'M_UNKNOWN', 'Try again in a moment.') }
+    try { allowed = await gate(sender, names, channel) } catch { throw new Refusal(503, 'M_UNKNOWN', 'Try again in a moment.') }
     if (!names.every((n) => allowed[n] === true)) {
-      throw new Refusal(403, 'M_FORBIDDEN', 'Who can message them does not include you. Send a message request.')
+      throw new Refusal(403, 'M_FORBIDDEN', channel
+        ? 'You can only invite people who follow you to a channel.'
+        : 'Who can message them does not include you. Send a message request.')
     }
     pass(req, res, checked)
   }
