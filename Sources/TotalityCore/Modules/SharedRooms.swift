@@ -93,6 +93,34 @@ public struct SharedRoomHistory: Equatable, Sendable {
     }
 }
 
+extension SharedRoomHistory {
+    /// A room's history as a device replays it: `timeline` is what its timeline gave, oldest first.
+    ///
+    /// The room's creators hold the owner's level from its first event on. In room version 12, which
+    /// Totality's server makes, they're never listed in the power levels, so every `.roles` gets them added,
+    /// and the history opens with them, so the owner's first posts count even when the room's first power
+    /// levels never reach the timeline. When the oldest part didn't load, or no power levels came at all,
+    /// it opens with everyone's roles as they are now instead, rather than drop every post.
+    public static func reading(
+        timeline: [SharedRoomEvent], creators: [String], members: [SharedRoomMember], reachedStart: Bool, isEncrypted: Bool = true
+    ) -> SharedRoomHistory {
+        let creatorLevels = Dictionary(creators.map { ($0, SharedRole.owner.rawValue) }, uniquingKeysWith: { first, _ in first })
+        func withCreators(_ levels: [String: Int]) -> [String: Int] {
+            levels.merging(creatorLevels) { listed, _ in listed }
+        }
+        let sawRoles = timeline.contains { if case .roles = $0 { true } else { false } }
+        var opening = creatorLevels
+        if !reachedStart || !sawRoles {
+            opening = withCreators(Dictionary(members.map { ($0.username, $0.role.rawValue) }, uniquingKeysWith: max))
+        }
+        let events: [SharedRoomEvent] = [.roles(opening)] + timeline.map {
+            if case .roles(let levels) = $0 { return .roles(withCreators(levels)) }
+            return $0
+        }
+        return SharedRoomHistory(events: events, members: members, isEncrypted: isEncrypted)
+    }
+}
+
 public enum SharedRoomError: Error, Equatable, Sendable {
     case unavailable(String)
     case noSuchPerson(String)
