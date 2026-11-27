@@ -106,5 +106,9 @@
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
 	</dict>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
+	<key>TotalityWeatherKit</key>
+	<true/>
 </dict>
 </plist>
