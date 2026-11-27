@@ -44,6 +44,8 @@ public final class SocialModel {
     public var tag: String? {
         didSet { if tag != oldValue { Task { await loadForYou() } } }
     }
+    /// Counts each tap on a #tag, so the screen showing can leave whatever is open and go to that tag's posts.
+    public private(set) var tagRequests = 0
     public private(set) var me: String?
     /// A short note after something didn't go through, shown over the screen.
     public var notice: String?
@@ -238,6 +240,14 @@ public final class SocialModel {
         if timelines.contains(where: { $0.owner == me && $0.audience == .friends }) {
             try? await privatePosts.setMembers(friends, of: .friends)
         }
+    }
+
+    /// Opens a #tag's page: For You filtered to it. Whatever is open, a post or a profile, gives way (the home
+    /// view watches `tagRequests`).
+    public func showTag(_ name: String) {
+        feed = .forYou
+        tag = name.lowercased()
+        tagRequests += 1
     }
 
     public func refresh() async { await load() }
