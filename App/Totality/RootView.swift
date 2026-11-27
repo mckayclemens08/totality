@@ -674,6 +674,7 @@ struct RootView: View {
             mail.onSentToReader = { Task { await reader?.load() } }
             registry = content.registry
             messages.people.directory = content.registry.profiles
+            messages.people.followers = makeFollowerDirectory()
             connectTasks(content.registry)
             AppRefresh.shared.registry = content.registry
             syncAreas = content.areas
@@ -777,6 +778,14 @@ struct RootView: View {
         await social?.load()
     }
 
+    /// Who follows the signed-in person, for Messages' broadcast channels, which invite only followers.
+    /// Messages never imports Social: it only sees Core's `FollowerDirectory`.
+    private func makeFollowerDirectory() -> (any FollowerDirectory)? {
+        guard let config = AccountSetup.config, let token = AccountSetup.searchToken, let username = AccountSetup.username else { return nil }
+        let server = RestSocialServer(base: config.url, publishableKey: config.publishableKey, token: token, username: username)
+        return SocialFollowerDirectory(server: server, username: username)
+    }
+
     /// Social for whoever is signed in. Friends and Close-friends posts ride Messages' Matrix connection,
     /// in their own encrypted rooms, which only the iPhone build has.
     private func makeSocial() -> SocialModel? {
@@ -839,6 +848,7 @@ struct RootView: View {
         registry = nil
         homeChoices.close()
         messages.people.directory = nil
+        messages.people.followers = nil
         messages.taskMaker = nil
         AppRefresh.shared.registry = nil
         syncAreas = []

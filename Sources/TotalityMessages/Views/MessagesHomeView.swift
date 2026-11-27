@@ -228,7 +228,11 @@ public struct MessagesHomeView: View {
                         HeaderButton("Camera", systemImage: "camera.fill") { showingCamera = true }
                     }
                     #endif
-                    HeaderButton("New message", systemImage: "square.and.pencil") { composing = true }
+                    HeaderMenu("New", systemImage: "square.and.pencil") {
+                        Button("New message", systemImage: "square.and.pencil") { composing = true }
+                        Button("New group", systemImage: "person.3") { makingGroup = true }
+                        Button("New broadcast channel", systemImage: "megaphone") { makingChannel = true }
+                    }
                 }
             }
             .frame(minHeight: Metric.headerButton)
@@ -247,8 +251,6 @@ public struct MessagesHomeView: View {
 
     private var settingsMenu: some View {
         HeaderMenu("Messages settings", systemImage: "gearshape.fill") {
-            Button("New group", systemImage: "person.3") { makingGroup = true }
-            Button("New broadcast channel", systemImage: "megaphone") { makingChannel = true }
             Button("Who can message me", systemImage: "person.crop.circle.badge.checkmark") { showingPrivacy = true }
             Button("Blocked people", systemImage: "hand.raised") { showingBlocked = true }
             Toggle("Send read receipts and typing", isOn: $shareReadAndTyping)
@@ -351,10 +353,13 @@ private struct RequestRow: View {
             HStack(spacing: Space.s3) {
                 Initial(name: request.title)
                 VStack(alignment: .leading, spacing: Space.s1) {
-                    Text("@\(request.title)")
+                    // A group or channel invite's title already says what it is and who from.
+                    Text(request.isGroup ? request.title : "@\(request.title)")
                         .font(Typeface.headline)
                         .foregroundStyle(theme.textPrimary.color)
-                    Text("Wants to message you. They can't see anything about you until you accept.")
+                    Text(request.isChannel
+                        ? "Invited you to follow a broadcast channel. They can't see anything about you until you accept."
+                        : "Wants to message you. They can't see anything about you until you accept.")
                         .font(Typeface.caption)
                         .foregroundStyle(theme.textSecondary.color)
                 }
@@ -441,23 +446,15 @@ struct NewGroupView: View {
     @State private var working = false
     /// Kept here: the chat list clears its own notices after a moment.
     @State private var problem: String?
-    @FocusState private var focused: Bool
 
     var body: some View {
         let theme = Theme.current
         NavigationStack {
             VStack(alignment: .leading, spacing: Space.s4) {
-                TextField("Usernames, separated by commas", text: $usernames, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .autocorrectionDisabled()
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    #endif
-                    .font(Typeface.body)
-                    .lineLimit(1...4)
-                    .focused($focused)
-                    .raisedField()
-                    .accessibilityLabel("Their usernames")
+                UsernameField(
+                    people: model.people, text: $usernames, placeholder: "username, username", label: "Their usernames",
+                    multiple: true, autofocus: true
+                )
                 Text("Up to \(GroupMembers.limit) people, you included. Each of them gets a request to accept.")
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
@@ -486,7 +483,6 @@ struct NewGroupView: View {
             }
         }
         .tint(theme.accent.color)
-        .onAppear { focused = true }
         .onChange(of: usernames) { problem = nil }
     }
 

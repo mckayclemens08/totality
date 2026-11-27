@@ -44,9 +44,27 @@ public protocol ProfileDirectory: Sendable {
     /// account can see. `photos` holds the rebuilt photos already on this device by file name, so a photo
     /// whose name hasn't changed is reused rather than downloaded. Throws when the directory couldn't be asked.
     func profiles(of usernames: [String], photos: [String: Data]) async throws -> [String: PublicProfile]
+    /// People whose handle or name matches what's been typed so far, for tappable suggestions. Best matches
+    /// first, at most `limit`. Only handles and names, which are public. Empty when it can't be asked.
+    func suggestions(matching typed: String, limit: Int) async throws -> [ProfileSuggestion]
+}
+
+/// One tappable suggestion while someone types a username.
+public struct ProfileSuggestion: Equatable, Hashable, Sendable, Identifiable {
+    public let handle: String
+    public let displayName: String?
+    public var id: String { handle }
+
+    public init(handle: String, displayName: String?) {
+        self.handle = handle
+        self.displayName = displayName
+    }
 }
 
 extension ProfileDirectory {
+    /// A directory that can't search suggests nobody.
+    public func suggestions(matching typed: String, limit: Int) async throws -> [ProfileSuggestion] { [] }
+
     /// One person. Nil when there's no profile this account can see.
     public func profile(of username: String) async throws -> PublicProfile? {
         try await profiles(of: [username], photos: [:])[username]

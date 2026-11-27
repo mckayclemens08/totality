@@ -46,10 +46,39 @@ private let mckay = "8b3c1f0e-2d4a-4c6b-9e8f-0a1b2c3d4e5f"
 
 // MARK: Model
 
+/// Who follows the signed-in person on Social, for the channel invite rule.
+private struct FakeFollowers: FollowerDirectory {
+    let handles: Set<String>
+    func followers(matching typed: String, limit: Int) async throws -> [ProfileSuggestion] {
+        handles.filter { $0.hasPrefix(typed) }.sorted().map { ProfileSuggestion(handle: $0, displayName: nil) }
+    }
+    func followers(among usernames: [String]) async throws -> Set<String> { handles.intersection(usernames) }
+}
+
+@MainActor
+@Test func onlyFollowersCanBeInvitedToAChannel() async {
+    let service = FakeServiceForChannels()
+    let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    await model.connect()
+    // Social can't be asked: nothing goes through on a guess.
+    #expect(await !model.invite("ana_ruiz", toChannel: "!channel"))
+    #expect(model.notice?.contains("couldn't be checked") == true)
+    model.people.followers = FakeFollowers(handles: ["ana_ruiz"])
+    #expect(await !model.invite("ana_ruiz, mckay_test", toChannel: "!channel"))
+    #expect(model.notice == "@mckay_test doesn't follow you. You can only invite people who follow you.")
+    #expect(await model.startChannel(name: "Trail", admins: "mckay_test") == nil)
+    #expect(model.notice?.contains("follow you") == true)
+    #expect(await model.invite("ana_ruiz", toChannel: "!channel"))
+    // Suggestions come from followers only.
+    #expect(await model.people.followerSuggestions(for: "an").map(\.handle) == ["ana_ruiz"])
+    #expect(await model.people.followerSuggestions(for: "zz").isEmpty)
+}
+
 @MainActor
 @Test func startingAChannelNamesItAndSendsAdminsAlong() async {
     let service = FakeServiceForChannels()
     let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    model.people.followers = FakeFollowers(handles: ["ana_ruiz", "nobody_here"])
     await model.connect()
     #expect(await model.startChannel(name: "  ", admins: "") == nil)
     #expect(model.notice == "Give the channel a name.")
@@ -62,6 +91,7 @@ private let mckay = "8b3c1f0e-2d4a-4c6b-9e8f-0a1b2c3d4e5f"
 @Test func inviteStopsAtTheLimit() async {
     let service = FakeServiceForChannels()
     let model = MessagesModel(account: { mckay }, connector: { _ in service })
+    model.people.followers = FakeFollowers(handles: ["ana_ruiz", "mckay_test"])
     await model.connect()
     #expect(await model.invite("ana_ruiz mckay_test", toChannel: "!channel"))
     service.members = 499

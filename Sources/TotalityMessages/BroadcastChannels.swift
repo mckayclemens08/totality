@@ -50,7 +50,7 @@ public enum ChannelLimits {
 /// What the screens say about a channel. Each line is literally true.
 public enum ChannelLabels {
     public static let encrypted = "Posts are end-to-end encrypted. Only you and the admins you pick can post; followers can read and react."
-    public static let nameNotEncrypted = "The channel's name isn't end-to-end encrypted, and the server can see it."
+    public static let nameNotEncrypted = "The channel's name isn't end-to-end encrypted, and neither is the fact that it's a channel. The server can see both."
     /// Matrix shows a room's member list to everyone in it, so this doesn't claim followers are hidden.
     public static let followersVisible = "Totality only shows followers a count. Everyone in a channel can be listed by Matrix, so don't count on staying unseen."
     public static let inviteOnly = "Channels are invite-only. You invite people by username, and they accept to join."
@@ -70,6 +70,26 @@ public struct ChannelAccess: Equatable, Sendable {
     public var canInvite: Bool { ChannelPower.canInvite(level: level) }
     public var isOwner: Bool { level >= ChannelPower.owner }
     public var title: String { isOwner ? "Owner" : canPost ? "Admin" : "Follower" }
+}
+
+/// Follower counts. Matrix holds invited people in the room too, and the size cap counts them, but only
+/// people who accepted are followers.
+public enum ChannelCounts {
+    /// People who joined, not counting the owner. `members` is joined plus invited, as the cap counts it.
+    public static func followers(members: Int, invited: Int) -> Int { max(0, members - max(0, invited) - 1) }
+}
+
+/// How a channel shows itself on an invite, before it's accepted. Matrix sends an invitee only a room's name,
+/// topic and photo, so the topic carries the mark.
+public enum ChannelMarker {
+    public static let topic = "Totality broadcast channel"
+
+    public static func isChannel(topic: String?) -> Bool { topic == Self.topic }
+
+    /// What a request from someone's invite is called.
+    public static func requestTitle(from name: String, isChannel: Bool) -> String {
+        isChannel ? "Channel from \(name)" : "Group from \(name)"
+    }
 }
 
 /// Usernames typed for a channel's invites or admins, separated by commas or spaces. One person is fine.

@@ -152,10 +152,12 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         case .invited:
             let inviter = info.inviter?.userId
             let name = inviter.map(MessagesUsername.display) ?? info.displayName ?? "Someone"
+            // An invite carries no power levels, so a channel says so in its topic. Only text: no photo is fetched.
+            let isChannel = !info.isDirect && ChannelMarker.isChannel(topic: info.topic)
             return ChatSummary(
                 id: info.id,
-                title: info.isDirect ? name : "Group from \(name)",
-                isRequest: true, from: inviter, lastActivity: nil, isGroup: !info.isDirect
+                title: info.isDirect ? name : ChannelMarker.requestTitle(from: name, isChannel: isChannel),
+                isRequest: true, from: inviter, lastActivity: nil, isGroup: !info.isDirect, isChannel: isChannel
             )
         case .joined:
             // Messages only shows end-to-end encrypted chats, so its label stays true.
@@ -400,7 +402,8 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
                 client: client, room: room, timeline: try await room.timeline(), title: title, ownUserID: userID,
                 isGroup: isGroup, otherPerson: other, extraPeople: extra, photo: isGroup ? info?.avatarUrl : nil,
                 channelAccess: Self.channelAccess(of: room, info: info), channelOwner: info?.creators?.first,
-                channelMembers: info.map { Int($0.joinedMembersCount + $0.invitedMembersCount) } ?? 0
+                channelMembers: info.map { Int($0.joinedMembersCount + $0.invitedMembersCount) } ?? 0,
+                channelInvited: info.map { Int($0.invitedMembersCount) } ?? 0
             )
         } catch {
             throw Self.translate(error)
@@ -493,11 +496,14 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
     let channelAccess: ChannelAccess?
     let channelOwner: String?
     let channelMembers: Int
+    let channelInvited: Int
 
     init(
         client: Client, room: Room, timeline: Timeline, title: String, ownUserID: String, isGroup: Bool, otherPerson: String?,
-        extraPeople: [String], photo: String?, channelAccess: ChannelAccess? = nil, channelOwner: String? = nil, channelMembers: Int = 0
+        extraPeople: [String], photo: String?, channelAccess: ChannelAccess? = nil, channelOwner: String? = nil, channelMembers: Int = 0,
+        channelInvited: Int = 0
     ) {
+        self.channelInvited = channelInvited
         self.channelAccess = channelAccess
         self.channelOwner = channelOwner
         self.channelMembers = channelMembers
@@ -553,6 +559,54 @@ final class MatrixChat: ChatChannel, @unchecked Sendable {
             } else {
                 try await room.removeAvatar()
             }
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    // MARK: Info screen
+
+    func members() async throws -> [ChatMember] {
+        do {
+            let iterator = try await room.members()
+            var found: [ChatMember] = []
+            while let chunk = iterator.nextChunk(chunkSize: 100) {
+                for member in chunk where member.membership == .join || member.membership == .invite {
+                    let level: Int
+                    switch member.powerLevel {
+                    case .infinite: level = ChannelPower.owner
+                    case .value(let value): level = Int(clamping: value)
+                    }
+                    found.append(ChatMember(id: member.userId, level: level, invited: member.membership == .invite))
+                }
+            }
+            return found
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func setAdmin(_ person: String, to isAdmin: Bool) async throws {
+        do {
+            try await room.updatePowerLevelsForUsers(updates: [
+                UserPowerLevelUpdate(userId: person, powerLevel: Int64(isAdmin ? ChannelPower.admin : ChannelPower.follower))
+            ])
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func cancelInvite(_ person: String) async throws {
+        do {
+            try await room.kickUser(userId: person, reason: nil)
+        } catch {
+            throw MatrixMessagesService.translate(error)
+        }
+    }
+
+    func report(_ reason: String) async throws {
+        do {
+            try await room.reportRoom(reason: reason)
         } catch {
             throw MatrixMessagesService.translate(error)
         }

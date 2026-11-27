@@ -475,7 +475,23 @@ public final class ChatModel {
     /// Nil in a chat or group. In a broadcast channel, what you can do there.
     public var channelAccess: ChannelAccess? { channel.channelAccess }
     public var channelOwner: String? { channel.channelOwner }
+    /// Joined and invited, as Matrix and the size cap count them.
     public var channelMembers: Int { channel.channelMembers }
+    public var channelInvited: Int { channel.channelInvited }
+    /// People who accepted, not counting the owner.
+    public var channelFollowers: Int { ChannelCounts.followers(members: channelMembers, invited: channelInvited) }
+
+    /// Takes back a pending invite. True once it's gone.
+    public func cancelInvite(_ person: String) async -> Bool {
+        do {
+            notice = nil
+            try await channel.cancelInvite(person)
+            return true
+        } catch {
+            notice = MessagesModel.describe(error)
+            return false
+        }
+    }
     public private(set) var sendingVideo = false
     private let channel: any ChatChannel
     private var typingSent = false
@@ -565,6 +581,40 @@ public final class ChatModel {
             notice = nil
             let prepared = try original.map { try GroupPhoto.prepare($0) }
             try await channel.setPhoto(prepared)
+            return true
+        } catch {
+            notice = MessagesModel.describe(error)
+            return false
+        }
+    }
+
+    /// Everyone in the room with their levels, for the info screen. Empty with `notice` when it can't be read.
+    public func loadMembers() async -> [ChatMember] {
+        do {
+            return try await channel.members()
+        } catch {
+            notice = MessagesModel.describe(error)
+            return []
+        }
+    }
+
+    /// Makes someone an admin or not. True once the room has it.
+    public func setAdmin(_ person: String, to isAdmin: Bool) async -> Bool {
+        do {
+            notice = nil
+            try await channel.setAdmin(person, to: isAdmin)
+            return true
+        } catch {
+            notice = MessagesModel.describe(error)
+            return false
+        }
+    }
+
+    /// Reports this chat to Totality's server admins. True once it's sent.
+    public func report(_ reason: String) async -> Bool {
+        do {
+            notice = nil
+            try await channel.report(reason)
             return true
         } catch {
             notice = MessagesModel.describe(error)

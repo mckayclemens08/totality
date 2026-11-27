@@ -39,7 +39,7 @@ public final class MessagesNotifications: NotificationSource {
         while Self.newest(model.chats + model.requests) <= since, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(300))
         }
-        let notes = Self.notes(chats: model.chats, requests: model.requests, since: since)
+        let notes = Self.notes(chats: model.chats, requests: model.requests, since: since, muted: MutedChats.all(defaults))
         cursor.date = max(since, Self.newest(model.chats + model.requests))
         return notes
     }
@@ -49,10 +49,10 @@ public final class MessagesNotifications: NotificationSource {
     }
 
     /// One alert per chat with something unread from someone else since `since`, and one per new request.
-    static func notes(chats: [ChatSummary], requests: [ChatSummary], since: Date) -> [AppNotification] {
+    static func notes(chats: [ChatSummary], requests: [ChatSummary], since: Date, muted: Set<String> = []) -> [AppNotification] {
         var notes: [AppNotification] = []
         for chat in chats {
-            guard chat.unread > 0, let sender = chat.lastSender, let at = chat.lastActivity, at > since else { continue }
+            guard chat.unread > 0, !muted.contains(chat.id), let sender = chat.lastSender, let at = chat.lastActivity, at > since else { continue }
             let who = MessagesUsername.display(sender)
             let target = NotificationTarget(module: .messages, kind: "chat", item: chat.id)
             notes.append(AppNotification(

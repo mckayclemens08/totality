@@ -38,14 +38,18 @@ Deno.serve(async (request) => {
   if (!Array.isArray(recipients) || recipients.length === 0 || recipients.length > maxRecipients
       || !recipients.every((r) => typeof r === "string" && handleRule.test(r))) return reply(400);
 
-  const answer = await fetch(`${supabaseURL}/rest/v1/rpc/message_gate`, {
+  // A broadcast channel (the guard says so, from the room's power levels) also needs each invitee to follow
+  // the sender. Both rules must say yes.
+  const channel = (input as { channel?: unknown }).channel === true;
+  const ask = (name: string) => fetch(`${supabaseURL}/rest/v1/rpc/${name}`, {
     method: "POST",
     headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ p_sender: sender, p_recipients: recipients }),
   });
-  if (!answer.ok) return reply(502);
-  const rows: { handle: string; allowed: boolean }[] = await answer.json();
+  const answers = await Promise.all(channel ? [ask("message_gate"), ask("channel_gate")] : [ask("message_gate")]);
+  if (!answers.every((a) => a.ok)) return reply(502);
+  const sets: { handle: string; allowed: boolean }[][] = await Promise.all(answers.map((a) => a.json()));
   const allowed: Record<string, boolean> = {};
-  for (const r of recipients) allowed[r] = rows.some((row) => row.handle === r && row.allowed === true);
+  for (const r of recipients) allowed[r] = sets.every((rows) => rows.some((row) => row.handle === r && row.allowed === true));
   return reply(200, { allowed });
 });
