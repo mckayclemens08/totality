@@ -56,6 +56,8 @@ public final class ReaderModel {
     public var places: ReadingPlaceBook?
     /// Docs shared with other Totality users (issue 228), or nil where Messages' rooms aren't linked.
     public var shared: SharedDocsModel?
+    /// Where the Reader notes which private doc each shared room came from. Tests use their own.
+    @ObservationIgnored public var sharedFrom = UserDefaults.standard
     /// Where the person is in the front item, for the home square, such as "Page 112".
     public internal(set) var homePlace: String?
     /// The journal's code, in its own file, reaches the vault too.

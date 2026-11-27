@@ -107,11 +107,28 @@ struct SharedDocScreen: View {
                 detail: "Its owner may have stopped sharing it, or removed you."
             )
         } else if let doc, !doc.isComplete {
-            ReaderMessage(
-                systemImage: "hourglass",
-                title: "Waiting for a copy",
-                detail: "You joined after this doc was written, so this device asked the people in it for a copy. It opens when one of them next has it open."
-            )
+            VStack(spacing: Space.s3) {
+                ReaderMessage(
+                    systemImage: "hourglass",
+                    title: "Waiting for a copy",
+                    detail: shared.isOwner(room)
+                        ? "This device can't open the doc it shared yet, so it asked the people in it for a copy. It opens when one of them next has Totality open."
+                        : "You joined after this doc was written, so this device asked the people in it for a copy. It opens when one of them next has Totality open."
+                )
+                if let copy = model.privateCopy(of: doc) {
+                    // The private copy it was shared from is still in Recently Deleted: bring it back.
+                    Button("Restore your copy") {
+                        Task {
+                            await model.restore(copy.item)
+                            shared.notice = "\(copy.item.displayTitle) is back in your Reader."
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(Typeface.callout)
+                    .foregroundStyle(theme.accent.color)
+                    .padding(.bottom, Space.s6)
+                }
+            }
         } else if canEdit {
             VStack(alignment: .leading, spacing: Space.s2) {
                 TextField("Title", text: $title)

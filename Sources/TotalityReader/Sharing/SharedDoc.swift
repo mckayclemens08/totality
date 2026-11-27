@@ -119,6 +119,8 @@ public struct SharedDocState: Sendable, Equatable, Identifiable {
     /// Posts dropped because their sender wasn't allowed to make them.
     public private(set) var refused = 0
     public private(set) var lastChange: Date?
+    /// When the room's first post was sent, readable or not: about when the doc was shared.
+    public private(set) var started: Date?
     public let isEncrypted: Bool
     private var roles: [String: Int] = [:]
 
@@ -147,9 +149,11 @@ public struct SharedDocState: Sendable, Equatable, Identifiable {
         switch event {
         case .roles(let levels):
             roles = levels
-        case .unreadable:
+        case .unreadable(_, _, let date):
             unreadable += 1
+            if started == nil { started = date }
         case .post(_, let sender, let date, let body):
+            if started == nil { started = date }
             guard let post = SharedDocPost.decode(body) else { return }
             if !apply(post, sender: sender, date: date) { refused += 1 }
         }
