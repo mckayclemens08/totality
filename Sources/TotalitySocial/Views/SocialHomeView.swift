@@ -52,6 +52,18 @@ public struct SocialHomeView: View {
             }
             .hidesNavigationBar()
         }
+        // Any #tag link, in a post's text or on a card, opens that tag's posts.
+        .environment(\.openURL, OpenURLAction { url in
+            guard let name = PostTags.tag(from: url) else { return .systemAction }
+            model.showTag(name)
+            return .handled
+        })
+        // A tapped tag leaves the post or profile it was tapped in and shows the feed filtered to it.
+        .onChange(of: model.tagRequests) { _, _ in
+            path = NavigationPath()
+            tab = .feed
+            watching = nil
+        }
         .sheet(isPresented: $composing) { ComposeView(model: model) { composing = false } }
         .sheet(isPresented: $newStory) { StoryComposer(model: model) { newStory = false } }
         .storyCover(item: $watching) { watch in
@@ -278,6 +290,7 @@ struct GridCard: View {
                 } else if !post.body.isEmpty || post.media.isEmpty {
                     Text(post.body).font(Typeface.body).foregroundStyle(theme.textPrimary.color).lineLimit(post.media.isEmpty ? 8 : 3)
                 }
+                TagLine(model: model, tags: post.tags)
                 HStack {
                     Text(Handle.display(post.author)).lineLimit(1)
                     Spacer(minLength: Space.s1)
@@ -338,6 +351,7 @@ struct FollowingCard: View {
                 }
             }
             .likesOnDoubleTap(onOpen: onOpen, onLike: onDoubleTap)
+            TagLine(model: model, tags: post.tags)
             if !post.media.isEmpty { PostMediaView(model: model, post: post, photoHeight: 260) }
             PostPlainActions(model: model, post: post, onComments: onOpen)
         }

@@ -389,4 +389,49 @@ import TotalityCore
         try await world.person("priya").removeMedia([audio])
         #expect(world.files[audio.path] != nil)
     }
+
+    @Test("Several live stories per person, each with its own audience, play in order for the right viewers")
+    func severalStoriesWithDifferentAudiencesReachTheRightViewers() async throws {
+        matrix.clock = Date()  // stories live a day of real time, so the fake Matrix clock starts now
+        let maya = device("maya"), jonah = device("jonah"), priya = device("priya")
+        await maya.load(); await jonah.load()
+        _ = await maya.setFollowing(true, "jonah"); _ = await jonah.setFollowing(true, "maya")
+        await priya.load()
+        #expect(await priya.setFollowing(true, "maya"))
+        await maya.load()
+        let photo = try Attachment.photo(sampleJPEG(width: 400, height: 300))
+        #expect(await maya.postStory(.friends, kind: .photo, text: "", background: nil, attachments: [photo]))
+        #expect(await maya.postStory(.friends, kind: .text, text: "Second one for friends.", background: nil, attachments: []))
+        #expect(await maya.postStory(.everyone, kind: .text, text: "Frost on the boardwalk.", background: .sage, attachments: []))
+        #expect(await maya.postStory(.everyone, kind: .text, text: "Another public one.", background: nil, attachments: []))
+        #expect(maya.ring(for: "maya")?.stories.count == 4, "your own four all stay live")
+        await jonah.load()
+        let seenByJonah = try #require(jonah.ring(for: "maya")).stories
+        #expect(seenByJonah.count == 4)
+        #expect(seenByJonah.map(\.date) == seenByJonah.map(\.date).sorted(), "played oldest first")
+        #expect(seenByJonah.allSatisfy { $0.expires == $0.date.addingTimeInterval(24 * 3600) })
+        await priya.load()
+        let seenByPriya = try #require(priya.ring(for: "maya")).stories
+        #expect(seenByPriya.count == 2 && seenByPriya.allSatisfy { $0.audience == .everyone }, "a follower who isn't a friend sees the public ones only")
+    }
+}
+
+@MainActor
+@Suite struct SocialTagRoutingTests {
+    let world = FakeSocialWorld()
+    let matrix = FakeServer()
+
+    @Test("Tapping #Hegel in a post goes to the Hegel tag, never to a profile")
+    func aTappedTagOpensThatTagsPosts() async throws {
+        let maya = SocialModel(server: world.person("maya"), privateRooms: matrix.device(for: "maya"))
+        await maya.load()
+        #expect(await maya.publish(.everyone, title: "", body: "First post #Hegel"))
+        let link = try #require(PostTags.linked("First post #Hegel").runs.compactMap(\.link).first)
+        let name = try #require(PostTags.tag(from: link), "the link is a tag link, not a profile route")
+        maya.feed = .following
+        let before = maya.tagRequests
+        maya.showTag(name)
+        #expect(maya.tag == "hegel" && maya.feed == .forYou)
+        #expect(maya.tagRequests == before + 1, "the screen is told to leave the post or profile it was on")
+    }
 }

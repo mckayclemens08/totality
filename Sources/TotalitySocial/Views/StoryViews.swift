@@ -81,6 +81,9 @@ struct StoryRowView: View {
                             Image(systemName: "plus").font(Typeface.micro.weight(.bold)).foregroundStyle(theme.accentOn.color)
                                 .frame(width: Space.s5, height: Space.s5)
                                 .background(theme.accent.color, in: Circle())
+                                // A full-size target, so a second story is never one missed tap away from opening your first.
+                                .padding(Space.s2)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(SoftPress())
                         .accessibilityLabel("New story")

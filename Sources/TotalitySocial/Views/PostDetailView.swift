@@ -57,13 +57,6 @@ struct PostDetailView: View {
                         commentBox(post)
                     }
                 }
-                .environment(\.openURL, OpenURLAction { url in
-                    guard let tag = PostTags.tag(from: url) else { return .systemAction }
-                    model.feed = .forYou
-                    model.tag = tag
-                    dismiss()
-                    return .handled
-                })
                 .task(id: post.comments) { await loadComments(post) }
                 .task { if post.audience == .everyone { authorProfile = try? await model.profile(post.author) } }
                 .sheet(item: $reporting) { comment in
