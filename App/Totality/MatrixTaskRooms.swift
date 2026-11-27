@@ -217,7 +217,6 @@ final class MatrixTaskRooms: SharedRooms {
         guard await room.isEncrypted() else { throw SharedRoomError.notEncrypted }
         do {
             let info = try await room.roomInfo()
-            let creators = (info.creators ?? []).compactMap { Self.handle($0) }
             let timeline = try await room.timeline()
             let items = TimelineItems()
             let handle = await timeline.addListener(listener: TaskTimelineListener { items.apply($0) })
@@ -229,11 +228,11 @@ final class MatrixTaskRooms: SharedRooms {
             // The listener hears the last pages a moment after paginating returns.
             try? await Task.sleep(for: .milliseconds(150))
             var events: [SharedRoomEvent] = []
-            let members = try await Self.members(of: room)
-            if !reachedStart {
-                // The oldest part didn't load: count it under today's roles rather than drop it.
-                events.append(.roles(Dictionary(uniqueKeysWithValues: members.map { ($0.username, $0.role.rawValue) })))
-            }
+            let (members, unlimited) = try await Self.members(of: room)
+            // The room's creators, or, before the SDK has its create event, whoever holds unlimited power,
+            // which in room version 12 only a creator can.
+            let listed = (info.creators ?? []).compactMap { Self.handle($0) }
+            let creators = listed.isEmpty ? unlimited : listed
             for item in items.snapshot() {
                 guard let event = item.asEvent(), let sender = Self.handle(event.sender) else { continue }
                 let eventID: String = switch event.eventOrTransactionId {
@@ -256,14 +255,14 @@ final class MatrixTaskRooms: SharedRooms {
                 case .state(_, .roomPowerLevels(_, _, let users, _, _, _)):
                     var levels: [String: Int] = [:]
                     for (user, level) in users { if let name = Self.handle(user) { levels[name] = Int(clamping: level) } }
-                    // In newer room versions the creator holds power without being listed.
-                    for creator in creators where levels[creator] == nil { levels[creator] = SharedRole.owner.rawValue }
                     events.append(.roles(levels))
                 default:
                     break
                 }
             }
-            return SharedRoomHistory(events: events, members: members, isEncrypted: true)
+            // The creators are added to every set of roles, and the oldest part, if it didn't load, counts
+            // under today's roles rather than being dropped.
+            return SharedRoomHistory.reading(timeline: events, creators: creators, members: members, reachedStart: reachedStart)
         } catch let error as SharedRoomError {
             throw error
         } catch {
@@ -271,16 +270,19 @@ final class MatrixTaskRooms: SharedRooms {
         }
     }
 
-    private static func members(of room: Room) async throws -> [SharedRoomMember] {
+    /// Who's in the room or invited, and who among them holds unlimited power.
+    private static func members(of room: Room) async throws -> ([SharedRoomMember], [String]) {
         let iterator = try await room.members()
         var result: [SharedRoomMember] = []
+        var unlimited: [String] = []
         while let chunk = iterator.nextChunk(chunkSize: 100) {
             for member in chunk {
                 guard let name = handle(member.userId), member.membership == .join || member.membership == .invite else { continue }
+                if case .infinite = member.powerLevel { unlimited.append(name) }
                 result.append(SharedRoomMember(username: name, role: SharedRole(powerLevel: level(member.powerLevel)), isInvited: member.membership == .invite))
             }
         }
-        return result
+        return (result, unlimited)
     }
 
     func post(_ body: String, to id: String) async throws {

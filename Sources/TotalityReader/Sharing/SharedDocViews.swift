@@ -109,7 +109,7 @@ struct SharedDocsView: View {
                             Text(doc.isComplete ? doc.displayTitle : "Waiting for a copy")
                                 .font(Typeface.headline)
                                 .foregroundStyle(theme.textPrimary.color)
-                            Text(detail(of: doc))
+                            Text(shared.detail(of: doc))
                                 .font(Typeface.caption)
                                 .foregroundStyle(theme.textSecondary.color)
                         }
@@ -130,12 +130,6 @@ struct SharedDocsView: View {
         .task { await shared.refresh() }
     }
 
-    private func detail(of doc: SharedDocState) -> String {
-        let others = doc.members.filter { $0.username != shared.own }.map { shared.name(of: $0.username) }
-        let people = others.isEmpty ? "Just you" : others.prefix(3).joined(separator: ", ")
-        let role = shared.own.flatMap { doc.member($0)?.role.name } ?? ""
-        return [people, role].filter { !$0.isEmpty }.joined(separator: " · ")
-    }
 }
 
 private struct InviteRow: View {

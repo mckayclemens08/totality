@@ -660,6 +660,13 @@ struct RootView: View {
             content.hiking.onShare = { draft in shareToSocial(draft) }
             sharedLists = makeSharedLists(directory: content.registry.profiles)
             content.reader.shared = makeSharedDocs(directory: content.registry.profiles)
+            // Shared docs answer asks for a copy on the refresh beat, at launch, on coming back and in
+            // the background, so someone who joined later isn't left waiting for the Reader to be opened.
+            // Only while Messages is connected: this never signs in to it.
+            AppRefresh.shared.extras["sharedDocs"] = { @MainActor [weak reader = content.reader, messages] in
+                guard messages.phase == .ready else { return }
+                await reader?.shared?.refresh()
+            }
             refreshers[.reader] = content.reader.refresher
             refreshers[.tasks] = content.tasks.refresher
             refreshers[.calendar] = content.calendar.refresher
@@ -857,6 +864,7 @@ struct RootView: View {
         await hiking?.stopForKeyChange()
         hiking = nil
         reader = nil
+        AppRefresh.shared.extras["sharedDocs"] = nil
         calendar = nil
         web = nil
         tasks = nil

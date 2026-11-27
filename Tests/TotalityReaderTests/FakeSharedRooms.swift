@@ -15,6 +15,10 @@ final class FakeServer {
         var events: [SharedRoomEvent] = []
         var isEncrypted = true
         var everJoined: Set<String> = []
+        var creator = ""
+        /// For each post, who could open it: those in the room or invited when it was sent. Matrix shares a
+        /// room's key with them, from that post on, and never with anyone later.
+        var readers: [String: Set<String>] = [:]
     }
 
     var rooms: [String: Room] = [:]
@@ -27,6 +31,18 @@ final class FakeServer {
     var sentMessages: [(from: String, to: String, text: String)] = []
     private var count = 0
     var clock = Date(timeIntervalSince1970: 1_795_000_000)
+    /// Room version 12, as Totality's server makes: the creator outranks everyone without being listed in
+    /// the power levels.
+    var roomVersion12 = false
+    /// Posts are readable only to those in the room, or invited, when they were sent, as with Matrix keys.
+    var keysFromInvite = false
+    /// Power levels never reach the timeline, as when the room's first state comes with sync instead.
+    var rolesMissingFromTimeline = false
+    /// How many reads of a room pass before someone's own post shows in it, as it only comes back with
+    /// the next sync.
+    var ownPostLag = 0
+    var reads: [String: Int] = [:]
+    var sentAtRead: [String: Int] = [:]
 
     func tick() -> Date {
         clock = clock.addingTimeInterval(1)
@@ -63,7 +79,12 @@ final class FakeRooms: SharedRooms {
     }
 
     private func requireOwner(_ id: String) throws {
-        guard try room(id).levels[me] ?? 0 >= 100, try room(id).joined.contains(me) else { throw SharedRoomError.notAllowed }
+        let room = try room(id)
+        guard level(of: me, in: room) >= 100, room.joined.contains(me) else { throw SharedRoomError.notAllowed }
+    }
+
+    private func level(of person: String, in room: FakeServer.Room) -> Int {
+        server.roomVersion12 && person == room.creator ? 100 : room.levels[person] ?? 0
     }
 
     private func changeLevels(_ id: String, _ change: (inout [String: Int]) -> Void) {
@@ -87,8 +108,9 @@ final class FakeRooms: SharedRooms {
 
     func create(inviting people: [String: SharedRole]) async throws -> String {
         let id = server.nextID("!room")
-        server.rooms[id] = FakeServer.Room(joined: [me], everJoined: [me])
-        changeLevels(id) { $0 = [me: 100] }
+        server.rooms[id] = FakeServer.Room(joined: [me], everJoined: [me], creator: me)
+        let v12 = server.roomVersion12
+        changeLevels(id) { $0 = v12 ? [:] : [me: 100] }
         for (person, role) in people { try await invite(person, as: role, to: id) }
         return id
     }
@@ -138,20 +160,42 @@ final class FakeRooms: SharedRooms {
         let room = try room(id)
         guard room.joined.contains(me) else { throw SharedRoomError.notAllowed }
         guard room.isEncrypted else { throw SharedRoomError.notEncrypted }
-        let members = room.joined.map { SharedRoomMember(username: $0, role: SharedRole(powerLevel: room.levels[$0] ?? 0)) }
-            + room.invited.keys.sorted().map { SharedRoomMember(username: $0, role: SharedRole(powerLevel: room.levels[$0] ?? 0), isInvited: true) }
-        var events = room.events
+        let members = room.joined.map { SharedRoomMember(username: $0, role: SharedRole(powerLevel: level(of: $0, in: room))) }
+            + room.invited.keys.sorted().map { SharedRoomMember(username: $0, role: SharedRole(powerLevel: level(of: $0, in: room)), isInvited: true) }
+        let read = server.reads[me + id, default: 0] + 1
+        server.reads[me + id] = read
+        var events: [SharedRoomEvent] = room.events.compactMap { event in
+            switch event {
+            case .roles where server.rolesMissingFromTimeline:
+                return nil
+            case .post(let eventID, let sender, let date, _):
+                if sender == me, let sent = server.sentAtRead[eventID], read - sent <= server.ownPostLag { return nil }
+                if server.keysFromInvite, room.readers[eventID]?.contains(me) == false {
+                    return .unreadable(id: eventID, sender: sender, date: date)
+                }
+                return event
+            default:
+                return event
+            }
+        }
         if let hide = server.hidden[id], hide.person == me {
             for index in events.indices where index < hide.before {
                 if case .post(let eventID, let sender, let date, _) = events[index] { events[index] = .unreadable(id: eventID, sender: sender, date: date) }
             }
         }
-        return SharedRoomHistory(events: events, members: members, isEncrypted: true)
+        // Read the way the app reads a Matrix room's timeline.
+        return SharedRoomHistory.reading(
+            timeline: events, creators: server.roomVersion12 ? [room.creator] : [], members: members, reachedStart: true
+        )
     }
 
     func post(_ body: String, to id: String) async throws {
         guard try room(id).joined.contains(me) else { throw SharedRoomError.notAllowed }
-        server.rooms[id]!.events.append(.post(id: server.nextID("$e"), sender: me, date: server.tick(), body: body))
+        let eventID = server.nextID("$e")
+        let room = server.rooms[id]!
+        server.rooms[id]!.readers[eventID] = Set(room.joined).union(room.invited.keys)
+        server.sentAtRead[eventID] = server.reads[me + id, default: 0]
+        server.rooms[id]!.events.append(.post(id: eventID, sender: me, date: server.tick(), body: body))
     }
 
     func chatPartners() async -> [String] { server.chats[me] ?? [] }
