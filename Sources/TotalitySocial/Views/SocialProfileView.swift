@@ -37,6 +37,7 @@ struct SocialProfileView: View {
     /// Your own profile shown as the Profile tab, where there is nothing to go back to.
     var isTab = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var profile: SocialProfile?
     @State private var fetched: [SocialPost] = []
     @State private var postsLoaded = false
@@ -50,6 +51,11 @@ struct SocialProfileView: View {
     @State private var editingPrivacy = false
     @State private var showingRequests = false
     @State private var reporting = false
+    @State private var editingBackground = false
+    @State private var backgroundImage: CGImage?
+    @State private var loadedBackgroundKey: String?
+    @State private var backgroundFailed = false
+    @State private var backgroundRetry = 0
     @State private var confirmingBlock = false
     /// On your own profile: your posts, or the public posts you saved. Only you see your saves.
     @State private var showingSaved = false
@@ -69,13 +75,22 @@ struct SocialProfileView: View {
         let theme = Theme.current
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
-                HStack {
-                    if !isTab { HeaderButton("Back", systemImage: "chevron.left") { dismiss() } }
-                    Spacer()
-                    if let profile { menu(profile) }
-                }
                 if let profile {
-                    header(profile)
+                    if profile.backgroundKey != nil {
+                        VStack(alignment: .leading, spacing: Space.s4) {
+                            navigationRow(profile)
+                            header(profile)
+                        }
+                        .padding(Space.s4)
+                        .background { photoBackdrop }
+                    } else {
+                        navigationRow(profile)
+                        header(profile)
+                    }
+                    if isMe {
+                        Text("Your profile is public: anyone signed in to Totality can see your photo, background, name, bio and public posts. Edit them from Account.")
+                            .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
+                    }
                     HStack(spacing: Space.s2) {
                         FilterPill("Posts", isSelected: !showingSaved && mediaTab == nil) { showingSaved = false; mediaTab = nil }
                         FilterPill("Photos", isSelected: !showingSaved && mediaTab == .photo) { showingSaved = false; mediaTab = .photo }
@@ -110,10 +125,12 @@ struct SocialProfileView: View {
                         }) { open(.post($0.id)) }
                     }
                 } else if let problem {
+                    navigationRow(nil)
                     ProblemView(systemImage: "person.crop.circle.badge.questionmark", title: "This profile didn't open", detail: problem) {
                         Task { await load() }
                     }
                 } else {
+                    navigationRow(nil)
                     LoadingGrid()
                 }
             }
@@ -123,6 +140,14 @@ struct SocialProfileView: View {
         .hidesNavigationBar()
         .refreshable { await load() }
         .task { await load() }
+        .task(id: "\(profile?.backgroundKey ?? "")/\(backgroundRetry)") { await loadBackground() }
+        .sheet(isPresented: $editingBackground, onDismiss: { Task { await load() } }) {
+            if let store = model.backgroundStore, let profile {
+                ProfileBackgroundEditor(store: store, key: profile.backgroundKey, name: profile.name) {
+                    self.profile?.backgroundKey = $0
+                }
+            }
+        }
         .confirmationDialog("Unfollow \(Handle.display(username))?", isPresented: $confirmingUnfollow, titleVisibility: .visible) {
             Button("Unfollow", role: .destructive) { Task { await follow(false) } }
         } message: {
@@ -131,7 +156,7 @@ struct SocialProfileView: View {
         .sheet(isPresented: $editingCloseFriends) { CloseFriendsView(model: model) { editingCloseFriends = false } }
         .sheet(isPresented: $editingPrivacy) { PrivacySettingsView(model: model) { editingPrivacy = false; Task { await load() } } }
         .sheet(isPresented: $showingRequests) { FollowRequestsView(model: model) { showingRequests = false; Task { await load() } } }
-        .sheet(isPresented: $reporting) { ReportSheet(model: model, username: username, post: nil, comment: nil) { reporting = false } }
+        .sheet(isPresented: $reporting) { ReportSheet(model: model, username: username, post: nil, comment: nil, backgroundKey: profile?.backgroundKey) { reporting = false } }
         .confirmationDialog("Block \(Handle.display(username))?", isPresented: $confirmingBlock, titleVisibility: .visible) {
             Button("Block", role: .destructive) {
                 Task { if let profile, await model.setBlocked(true, profile) { dismiss() } }
@@ -141,24 +166,112 @@ struct SocialProfileView: View {
         }
     }
 
+    private func navigationRow(_ profile: SocialProfile?) -> some View {
+        HStack {
+            if !isTab {
+                if profile?.backgroundKey != nil {
+                    Button { dismiss() } label: { glassIcon("chevron.left") }
+                        .buttonStyle(SoftPress()).accessibilityLabel("Back")
+                } else {
+                    HeaderButton("Back", systemImage: "chevron.left") { dismiss() }
+                }
+            }
+            Spacer()
+            if let profile { menu(profile) }
+        }
+    }
+
+    private func glassIcon(_ icon: String) -> some View {
+        Image(systemName: icon)
+            .font(Typeface.headline)
+            .foregroundStyle(ProfileBackgroundStyle.ink.color)
+            .frame(width: Metric.headerButton, height: Metric.headerButton)
+            .background(ProfileBackgroundStyle.glass.color, in: Circle())
+    }
+
+    private var photoBackdrop: some View {
+        let theme = Theme.current
+        return GeometryReader { geometry in
+            let actionMidline = max(0, 1 - (Space.s4 + Metric.headerButton / 2) / max(1, geometry.size.height))
+            ZStack {
+                theme.highlight.color
+                if loadedBackgroundKey == profile?.backgroundKey, let backgroundImage {
+                    Image(decorative: backgroundImage, scale: 1).resizable().scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                }
+                ProfileBackgroundStyle.scrim.color
+                if loadedBackgroundKey == nil && !backgroundFailed && model.backgroundStore != nil {
+                    VStack {
+                        ProgressView().tint(ProfileBackgroundStyle.ink.color)
+                        Spacer()
+                    }
+                    .padding(.top, Space.s4)
+                }
+                LinearGradient(stops: [
+                    .init(color: .clear, location: max(0, actionMidline - 0.34)),
+                    .init(color: ProfileBackgroundStyle.glass.color, location: max(0, actionMidline - 0.12)),
+                    .init(color: theme.bg.color, location: actionMidline),
+                    .init(color: theme.bg.color, location: 1),
+                ], startPoint: .top, endPoint: .bottom)
+            }
+        }
+        .clipShape(.rect(cornerRadius: Radius.lg))
+        .accessibilityHidden(true)
+    }
+
+    private func loadBackground() async {
+        backgroundImage = nil
+        loadedBackgroundKey = nil
+        backgroundFailed = false
+        guard let key = profile?.backgroundKey, let store = model.backgroundStore else { return }
+        do {
+            let data = try await store.backgroundPhoto(key)
+            let image = await Task.detached { ProfileBackgroundPhoto.decode(data) }.value
+            try Task.checkCancellation()
+            backgroundImage = image
+            loadedBackgroundKey = key
+            backgroundFailed = image == nil
+        } catch {
+            if !Task.isCancelled { backgroundFailed = true }
+        }
+    }
+
     @ViewBuilder
     private func menu(_ profile: SocialProfile) -> some View {
         if isMe {
-            HeaderButton("Privacy", systemImage: "hand.raised") { editingPrivacy = true }
+            if profile.backgroundKey != nil {
+                Button { editingPrivacy = true } label: { glassIcon("gearshape") }
+                    .buttonStyle(SoftPress()).accessibilityLabel("Settings")
+            } else {
+                HeaderButton("Settings", systemImage: "gearshape") { editingPrivacy = true }
+            }
         } else {
-            HeaderMenu("More", systemImage: "ellipsis") {
-                Button(profile.muted ? "Unmute" : "Mute", systemImage: profile.muted ? "speaker.wave.2" : "speaker.slash") {
-                    Task { if await model.setMuted(!profile.muted, profile) { await load() } }
+            if profile.backgroundKey != nil {
+                Menu {
+                    otherProfileActions(profile)
+                } label: {
+                    glassIcon("ellipsis")
                 }
-                if profile.followsMe {
-                    Button("Remove follower", systemImage: "person.badge.minus") {
-                        Task { if await model.removeFollower(username) { await load() } }
-                    }
-                }
-                Button("Report", systemImage: "flag") { reporting = true }
-                Button("Block", systemImage: "hand.raised", role: .destructive) { confirmingBlock = true }
+                .menuIndicator(.hidden)
+                .accessibilityLabel("More")
+            } else {
+                HeaderMenu("More", systemImage: "ellipsis") { otherProfileActions(profile) }
             }
         }
+    }
+
+    @ViewBuilder
+    private func otherProfileActions(_ profile: SocialProfile) -> some View {
+        Button(profile.muted ? "Unmute" : "Mute", systemImage: profile.muted ? "speaker.wave.2" : "speaker.slash") {
+            Task { if await model.setMuted(!profile.muted, profile) { await load() } }
+        }
+        if profile.followsMe {
+            Button("Remove follower", systemImage: "person.badge.minus") {
+                Task { if await model.removeFollower(username) { await load() } }
+            }
+        }
+        Button("Report", systemImage: "flag") { reporting = true }
+        Button("Block", systemImage: "hand.raised", role: .destructive) { confirmingBlock = true }
     }
 
     private var isMe: Bool { username == model.me }
@@ -167,47 +280,62 @@ struct SocialProfileView: View {
     func header(_ profile: SocialProfile) -> some View {
         let theme = Theme.current
         return VStack(alignment: .leading, spacing: Space.s3) {
-            HStack(spacing: Space.s4) {
-                StoryFace(photo: model.photos[username], name: profile.name, ring: model.ring(for: username), diameter: Space.s8 + Space.s4)
-                    .onTapGesture { if model.ring(for: username) != nil { model.requestedStories = username } }
-                VStack(alignment: .leading, spacing: Space.s1) {
-                    Text(profile.name).font(Typeface.title).foregroundStyle(theme.textPrimary.color)
-                    Text(Handle.display(profile.username)).font(Typeface.callout).foregroundStyle(theme.textSecondary.color)
-                    if profile.followsMe && !isMe {
-                        Text(profile.iFollow ? "Friends" : "Follows you").font(Typeface.micro).foregroundStyle(theme.success.color)
-                    }
+            if profile.backgroundKey != nil {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    avatar(profile)
+                    identity(profile)
+                }
+            } else {
+                HStack(spacing: Space.s4) {
+                    avatar(profile)
+                    identity(profile)
                 }
             }
             if let bio = profile.bio, !bio.isEmpty {
-                Text(bio).font(Typeface.body).foregroundStyle(theme.textPrimary.color)
+                Text(bio).font(Typeface.body).foregroundStyle(profile.backgroundKey == nil ? theme.textPrimary.color : ProfileBackgroundStyle.ink.color)
             }
             ProfileLinkChips(stored: profile.links)
             // Three even columns, number above label. A private account's lists are only for it and its
             // approved followers; others see the same numbers without the tap.
             let canOpen = isMe || !profile.isClosed
-            HStack(spacing: 0) {
+            let canEditBackground = isMe && profile.backgroundKey != nil && model.backgroundStore != nil
+            HStack(spacing: canEditBackground ? Space.s2 : 0) {
                 stat(model.postCount(profile), Self.label(model.postCount(profile), "post", "posts"))
                 stat(profile.followers, Self.label(profile.followers, "follower", "followers"), canOpen: canOpen) {
                     open(.people(username, followers: true))
                 }
                 stat(profile.following, "following", canOpen: canOpen) { open(.people(username, followers: false)) }
+                if canEditBackground && !backgroundFailed && !typeSize.isAccessibilitySize { changeBackgroundButton }
             }
             .padding(.vertical, Space.s2)
-            HStack(spacing: Space.s3) {
+            if canEditBackground && backgroundFailed {
+                HStack {
+                    Text("Background didn’t load").font(Typeface.caption)
+                        .foregroundStyle(ProfileBackgroundStyle.ink.color)
+                    HeaderPill("Try again") { backgroundRetry += 1 }
+                }
+            } else if canEditBackground && typeSize.isAccessibilitySize {
+                changeBackgroundButton
+            }
+            let expands = profile.backgroundKey != nil
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s3))
+                : AnyLayout(HStackLayout(spacing: Space.s3))
+            layout {
                 if isMe {
-                    HeaderPill("Close friends · \(model.closeFriends.count)", systemImage: "star.circle") { editingCloseFriends = true }
+                    HeaderPill("Close friends · \(model.closeFriends.count)", systemImage: "star.circle", expands: expands) { editingCloseFriends = true }
                         .disabled(model.privateReason != nil)
                     if model.settings.privateAccount {
-                        HeaderPill("Requests · \(model.followRequests.count)", systemImage: "person.crop.circle.badge.questionmark") { showingRequests = true }
+                        HeaderPill("Requests · \(model.followRequests.count)", systemImage: "person.crop.circle.badge.questionmark", expands: expands) { showingRequests = true }
                     }
                 } else if profile.iFollow {
-                    HeaderPill("Following", systemImage: "checkmark") { confirmingUnfollow = true }.disabled(busy)
+                    HeaderPill("Following", systemImage: "checkmark", expands: expands) { confirmingUnfollow = true }.disabled(busy)
                     messageButton(profile)
                 } else if profile.requested {
-                    HeaderPill("Requested", systemImage: "clock") { Task { await follow(false) } }.disabled(busy)
+                    HeaderPill("Requested", systemImage: "clock", expands: expands) { Task { await follow(false) } }.disabled(busy)
                         .accessibilityHint("Takes back your request")
                 } else {
-                    HeaderPill(profile.privateAccount ? "Request to follow" : profile.followsMe ? "Follow back" : "Follow", isProminent: true) {
+                    HeaderPill(profile.privateAccount ? "Request to follow" : profile.followsMe ? "Follow back" : "Follow", isProminent: true, expands: expands) {
                         Task { await follow(true) }
                     }
                     .disabled(busy)
@@ -216,18 +344,63 @@ struct SocialProfileView: View {
             }
             .frame(maxWidth: .infinity, alignment: isMe ? .leading : .center)
             .padding(.top, Space.s1)
-            if isMe {
-                Text("Your profile is public: anyone on Totality can see your photo, name, bio and public posts. Edit them from Account.")
-                    .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
+        }
+    }
+
+    private func identity(_ profile: SocialProfile) -> some View {
+        let theme = Theme.current
+        return VStack(alignment: .leading, spacing: Space.s1) {
+            Text(profile.name).font(Typeface.title)
+                .foregroundStyle(profile.backgroundKey == nil ? theme.textPrimary.color : ProfileBackgroundStyle.ink.color)
+            Text(Handle.display(profile.username)).font(Typeface.callout)
+                .foregroundStyle(profile.backgroundKey == nil ? theme.textSecondary.color : ProfileBackgroundStyle.secondaryInk.color)
+            if profile.followsMe && !isMe {
+                Text(profile.iFollow ? "Friends" : "Follows you").font(Typeface.micro)
+                    .foregroundStyle(profile.backgroundKey == nil ? theme.success.color : ProfileBackgroundStyle.ink.color)
             }
         }
+    }
+
+    private var changeBackgroundButton: some View {
+        Button { editingBackground = true } label: {
+            Text("Change")
+                .font(Typeface.caption.weight(.semibold))
+                .foregroundStyle(ProfileBackgroundStyle.ink.color)
+                .padding(.horizontal, Space.s3)
+                .padding(.vertical, Space.s2)
+                .background(ProfileBackgroundStyle.glass.color, in: Capsule())
+                .frame(minHeight: Metric.headerButton)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(SoftPress())
+        .accessibilityLabel("Change background")
+    }
+
+    private func avatar(_ profile: SocialProfile) -> some View {
+        StoryFace(photo: model.photos[username], name: profile.name, ring: model.ring(for: username),
+                  diameter: Space.s8 + Space.s4, overPhoto: profile.backgroundKey != nil)
+            .onTapGesture { if model.ring(for: username) != nil { model.requestedStories = username } }
+            .overlay(alignment: .bottomTrailing) {
+                if isMe {
+                    Button { model.requestsStoryComposer = true } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(Typeface.headline)
+                            .foregroundStyle(Theme.current.accent.color)
+                            .background(Theme.current.surface.color, in: Circle())
+                            .frame(width: Metric.headerButton, height: Metric.headerButton, alignment: .bottomTrailing)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(SoftPress())
+                    .accessibilityLabel("Add to your story")
+                }
+            }
     }
 
     /// Opens your chat with them in Messages, when their "Who can message me" lets you.
     @ViewBuilder
     private func messageButton(_ profile: SocialProfile) -> some View {
         if let onMessage = model.onMessage, profile.canMessage {
-            HeaderPill("Message", systemImage: "bubble.left", iconOnly: true) { onMessage(profile.username) }
+            HeaderPill("Message", systemImage: "bubble.left", iconOnly: profile.backgroundKey == nil, expands: profile.backgroundKey != nil) { onMessage(profile.username) }
         }
         if let maker = model.contactMaker {
             AddToContactsButton(maker: maker, username: profile.username, displayName: profile.displayName)
@@ -240,8 +413,8 @@ struct SocialProfileView: View {
     private func statLabel(_ value: Int, _ label: String) -> some View {
         let theme = Theme.current
         return VStack(spacing: Space.s1 / 2) {
-            Text("\(value)").font(Typeface.headline).foregroundStyle(theme.textPrimary.color).monospacedDigit()
-            Text(label).font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
+            Text("\(value)").font(Typeface.headline).foregroundStyle(profile?.backgroundKey == nil ? theme.textPrimary.color : ProfileBackgroundStyle.ink.color).monospacedDigit()
+            Text(label).font(Typeface.caption).foregroundStyle(profile?.backgroundKey == nil ? theme.textSecondary.color : ProfileBackgroundStyle.secondaryInk.color)
         }
         .lineLimit(1)
         .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
@@ -270,6 +443,12 @@ struct SocialProfileView: View {
             hasMore = model.hasMore(after: fetched)
             model.remember(fetched)
             problem = nil
+        } catch SocialError.noSuchPerson(_) {
+            // The same response is used for a missing profile and for a block.
+            profile = nil
+            backgroundImage = nil
+            loadedBackgroundKey = nil
+            problem = "This profile is unavailable."
         } catch {
             problem = SocialModel.message(error)
         }

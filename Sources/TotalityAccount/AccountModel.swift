@@ -60,6 +60,9 @@ public final class AccountModel {
     /// Browsers paired with the website, listed under Devices with Remove.
     public var browsers: BrowsersModel?
     private let service: any AccountService
+    public var backgroundStore: (any ProfileBackgroundStore)? { service as? any ProfileBackgroundStore }
+
+    func didChangeBackground(_ key: String?) { profile?.backgroundKey = key }
     /// Usernames whose Matrix address is known to exist, so it's set up once and not on every launch.
     private let marks: UserDefaults
     private static let messagesReadyKey = "account.messagesAccountReady"

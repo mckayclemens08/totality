@@ -69,6 +69,8 @@ public final class SocialModel {
     public var requestedProfile: String?
     /// Someone whose stories to play, asked for by a ringed photo outside the story row.
     public var requestedStories: String?
+    public var backgroundStore: (any ProfileBackgroundStore)?
+    public var requestsStoryComposer = false
     /// A post asked for from outside Social, such as a task's link back to where it came from.
     public var requestedPost: UUID?
     /// A screen the home tile asked for: the composer or Search.
@@ -725,6 +727,17 @@ public final class SocialModel {
         let publicPost = post?.audience == .everyone ? post?.id : nil
         do {
             try await server.report(username, post: publicPost, comment: publicPost == nil ? nil : comment?.id, reason: reason.rawValue)
+            notice = "Thanks. Your report went to Totality's moderator."
+            return true
+        } catch {
+            notice = Self.message(error)
+            return false
+        }
+    }
+
+    func reportBackground(_ username: String, key: String) async -> Bool {
+        do {
+            try await server.report(username, post: nil, comment: nil, reason: "Background image: \(key)")
             notice = "Thanks. Your report went to Totality's moderator."
             return true
         } catch {

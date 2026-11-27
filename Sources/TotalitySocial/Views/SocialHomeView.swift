@@ -65,6 +65,11 @@ public struct SocialHomeView: View {
             watching = nil
         }
         .sheet(isPresented: $composing) { ComposeView(model: model) { composing = false } }
+        .onChange(of: model.requestsStoryComposer) { _, requested in
+            guard requested else { return }
+            model.requestsStoryComposer = false
+            newStory = true
+        }
         .sheet(isPresented: $newStory) { StoryComposer(model: model) { newStory = false } }
         .storyCover(item: $watching) { watch in
             StoryViewer(model: model, rings: watch.rings, start: watch.author) { watching = nil }

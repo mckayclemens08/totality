@@ -828,6 +828,7 @@ struct RootView: View {
         model.taskMaker = registry?.taskMaker
         model.receiver = registry?.receiver(for: .social)
         model.contactMaker = registry?.contactMaker
+        model.backgroundStore = account?.backgroundStore
         model.onMessage = { name in
             Task {
                 guard let chat = await messages.startChat(with: name) else { return }

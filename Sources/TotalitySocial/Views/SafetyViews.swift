@@ -13,6 +13,7 @@ struct ReportSheet: View {
     let username: String
     let post: SocialPost?
     let comment: SocialComment?
+    var backgroundKey: String? = nil
     let onClose: () -> Void
     @State private var sending = false
 
@@ -30,6 +31,19 @@ struct ReportSheet: View {
                 .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
             ScrollView {
                 VStack(spacing: Space.s2) {
+                    if let backgroundKey {
+                        Button {
+                            Task {
+                                sending = true
+                                if await model.reportBackground(username, key: backgroundKey) { onClose() }
+                                sending = false
+                            }
+                        } label: {
+                            Text("Background image").font(Typeface.body).foregroundStyle(theme.textPrimary.color).itemCard()
+                        }
+                        .buttonStyle(SoftPress())
+                        .disabled(sending)
+                    }
                     ForEach(ReportReason.allCases) { reason in
                         Button {
                             Task {
@@ -79,7 +93,7 @@ struct PrivacySettingsView: View {
                 }
                 SettingToggle(
                     title: "Private account", isOn: $draft.privateAccount,
-                    detail: "Your public posts are seen only by followers you approve. Your profile's photo, name and bio stay public."
+                    detail: "Your public posts are seen only by followers you approve. Your profile's photo, background, name and bio stay public."
                 )
                 ReachPicker(title: "Who can comment on your posts", choices: Reach.allCases, selection: $draft.whoCanComment)
                 ReachPicker(title: "Who can message you", choices: Reach.forMessages, selection: $draft.whoCanMessage)

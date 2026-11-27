@@ -41,11 +41,12 @@ struct StoryFace: View {
     let name: String
     let ring: StoryRing?
     var diameter: CGFloat = Space.s7
+    var overPhoto = false
 
     var body: some View {
         let theme = Theme.current
         let width = max(2, diameter / 18)
-        PersonFace(photo: photo, name: name, diameter: diameter)
+        PersonFace(photo: photo, name: name, diameter: diameter, overPhoto: overPhoto)
             .padding(width + 2)
             .overlay {
                 if let ring {

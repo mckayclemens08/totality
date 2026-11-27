@@ -13,11 +13,13 @@ public struct PersonFace: View {
     let photo: Data?
     let name: String
     let diameter: CGFloat
+    let overPhoto: Bool
 
-    public init(photo: Data?, name: String, diameter: CGFloat = Space.s7) {
+    public init(photo: Data?, name: String, diameter: CGFloat = Space.s7, overPhoto: Bool = false) {
         self.photo = photo
         self.name = name
         self.diameter = diameter
+        self.overPhoto = overPhoto
     }
 
     public var body: some View {
@@ -33,7 +35,14 @@ public struct PersonFace: View {
         }
         .frame(width: diameter, height: diameter)
         .clipShape(Circle())
-        .neumorphic(.raised, in: Circle())
+        .background {
+            if overPhoto {
+                Circle().fill(theme.surface.color)
+                    .overlay { Circle().strokeBorder(ProfileBackgroundStyle.ink.color, lineWidth: Space.s1 / 2) }
+            } else {
+                Color.clear.neumorphic(.raised, in: Circle())
+            }
+        }
         .accessibilityHidden(true)
     }
 

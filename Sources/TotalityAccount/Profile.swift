@@ -12,15 +12,17 @@ public struct Profile: Equatable, Sendable {
     public var displayName: String?
     public var bio: String?
     public var avatarURL: URL?
+    public var backgroundKey: String?
     /// Up to five https links, already checked. See `ProfileLinks`.
     public var links: [String]
 
-    public init(username: String, displayName: String? = nil, bio: String? = nil, avatarURL: URL? = nil, links: [String] = []) {
+    public init(username: String, displayName: String? = nil, bio: String? = nil, avatarURL: URL? = nil, links: [String] = [], backgroundKey: String? = nil) {
         self.username = username
         self.displayName = displayName
         self.bio = bio
         self.avatarURL = avatarURL
         self.links = links
+        self.backgroundKey = backgroundKey
     }
 }
 
