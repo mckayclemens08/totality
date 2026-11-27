@@ -729,6 +729,10 @@ struct Bubble: View {
                 .padding(.horizontal, Space.s3)
                 .padding(.vertical, Space.s2)
                 .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md))
+        case .text where message.decrypted && SharedContentLink.parse(message.body) != nil:
+            if let shared = SharedContentLink.parse(message.body) {
+                SharedContentBubble(shared: shared, hooks: model.sharedContent)
+            }
         case .text:
             Text(message.decrypted ? message.body : LockedMessage.placeholder(isOwn: message.isOwn))
                 .font(message.decrypted ? Typeface.body : Typeface.caption)

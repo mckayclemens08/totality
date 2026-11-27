@@ -1,4 +1,5 @@
 import Foundation
+import TotalityCore
 
 // What Messages shows, in plain types that don't depend on the Matrix SDK, so the screens and their
 // logic work and test on every platform.
@@ -122,7 +123,7 @@ public struct ChatMessage: Identifiable, Sendable, Equatable {
     /// Only your own messages, and only once they exist on the server or failed to get there.
     public var canDelete: Bool { isOwn && kind != .deleted }
     /// Text you can copy. Photos and deleted messages have none.
-    public var copyableText: String? { kind == .text && decrypted ? body : nil }
+    public var copyableText: String? { kind == .text && decrypted && SharedContentLink.parse(body) == nil ? body : nil }
     public var isPhoto: Bool { if case .photo = kind { true } else { false } }
     public var isVideo: Bool { if case .video = kind { true } else { false } }
 }

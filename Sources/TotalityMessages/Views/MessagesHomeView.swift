@@ -300,7 +300,7 @@ private struct ChatRow: View {
                     }
                 }
                 HStack(alignment: .firstTextBaseline) {
-                    Text(chat.lastMessage ?? "No messages yet")
+                    Text(chat.lastLine ?? "No messages yet")
                         .font(unread ? Typeface.caption.weight(.semibold) : Typeface.caption)
                         .foregroundStyle(unread ? theme.accent.color : theme.textSecondary.color)
                         .lineLimit(1)

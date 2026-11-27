@@ -24,6 +24,19 @@ public final class SocialModel {
     }
 
     public private(set) var phase: Phase = .loading
+    /// How many loads of the feeds are running. An empty list is only "nothing here" once this is zero.
+    private var loadingCount = 0
+    public var isLoading: Bool { loadingCount > 0 }
+    /// Whether `saved` has been fetched at least once, so an empty Saved tab isn't shown while it's still coming.
+    public private(set) var savedLoaded = false
+    /// Each profile's first page as last fetched, kept in memory only so a profile opens at once and refreshes
+    /// behind it. Friends and Close-friends posts are in it, so it is never written to disk.
+    private var profileCache: [String: [SocialPost]] = [:]
+
+    /// The empty text shows only when loading has finished and found nothing, never while it's still coming.
+    public static func showsEmpty(loaded: Bool, count: Int) -> Bool { loaded && count == 0 }
+
+    public func cachedPosts(by username: String) -> [SocialPost]? { profileCache[username.lowercased()] }
     public var feed: Feed = .forYou
     public private(set) var forYou: [SocialPost] = []
     public private(set) var following: [SocialPost] = []
@@ -44,6 +57,11 @@ public final class SocialModel {
     public private(set) var savedToReader: Set<UUID> = []
     private var savingToReader: Set<UUID> = []
     public private(set) var friends: Set<String> = []
+    /// People you blocked in this session. Their posts get no Share button.
+    public private(set) var blockedAuthors: Set<String> = []
+    /// Friends and Close-friends posts you saved. They live in encrypted rooms, so the save is only the post's ID,
+    /// kept on this phone: it is never sent to the server.
+    public private(set) var savedPrivate: Set<UUID> = []
     /// Who you follow, for the Following feed and for which rooms' invites to accept.
     public private(set) var followingSet: Set<String> = []
     public var requestedProfile: String?
@@ -64,6 +82,8 @@ public final class SocialModel {
     public var taskMaker: (any TaskMaker)?
     /// Keeps a copy of a post in the Reader, sealed there like any note.
     public var receiver: (any ContentReceiver)?
+    /// Opens the share sheet for a post: the app shows Messages' picker with it (issue 149, share to chat).
+    public var onShare: (@MainActor (ShareRequest) -> Void)?
     /// Opens your chat with someone in Messages.
     public var onMessage: (@MainActor (String) -> Void)?
     /// Keeps a private card for someone in Contacts. Only their handle and shown name go over.
@@ -112,6 +132,8 @@ public final class SocialModel {
     // MARK: Loading
 
     public func load() async {
+        loadingCount += 1
+        defer { loadingCount -= 1 }
         if forYou.isEmpty && following.isEmpty { phase = .loading }
         do {
             let me = try await server.me()
@@ -120,6 +142,7 @@ public final class SocialModel {
             self.me = me
             if closeFriends.isEmpty { closeFriends = rememberedCloseFriends(of: me) }
             savedToReader.formUnion(rememberedReaderSaves(of: me))
+            savedPrivate.formUnion(rememberedPrivateSaves(of: me))
             followingSet = Set(try await server.followed(by: me))
             tags = (try? await server.topTags()) ?? tags
             settings = (try? await server.settings()) ?? settings
@@ -158,9 +181,13 @@ public final class SocialModel {
         friends = []
         closeFriends = []
         savedToReader = []
+        savedPrivate = []
+        blockedAuthors = []
         followingSet = []
         followRequests = []
         saved = []
+        savedLoaded = false
+        profileCache = [:]
         settings = SocialSettings()
         photos = [:]
         requestedProfile = nil
@@ -169,6 +196,8 @@ public final class SocialModel {
     }
 
     func loadForYou() async {
+        loadingCount += 1
+        defer { loadingCount -= 1 }
         do {
             forYou = try await server.forYou(tag: tag)
         } catch {
@@ -183,7 +212,12 @@ public final class SocialModel {
         } catch {
             notice = "Friends posts didn't load: \((error as? SharedRoomError)?.message ?? "try again")."
         }
-        following = (publicPosts + privateFeed).sorted { $0.feedDate > $1.feedDate }
+        following = (publicPosts + privateFeed).sorted { $0.feedDate > $1.feedDate }.map { post in
+            guard post.audience != .everyone, savedPrivate.contains(post.id) else { return post }
+            var post = post
+            post.saved = true
+            return post
+        }
         await loadStories()
     }
 
@@ -464,7 +498,9 @@ public final class SocialModel {
         if publicPosts.count >= SocialPage.size, let oldest = publicPosts.map(\.feedDate).min() {
             privateOnes = privateOnes.filter { $0.feedDate >= oldest }
         }
-        return (publicPosts + privateOnes).sorted { $0.feedDate > $1.feedDate }
+        let page = (publicPosts + privateOnes).sorted { $0.feedDate > $1.feedDate }
+        if before == nil { profileCache[username.lowercased()] = page }
+        return page
     }
 
     /// Whether a page of a profile's posts could be followed by another.
@@ -558,6 +594,15 @@ public final class SocialModel {
         Set((remembered.stringArray(forKey: "social.readerSaves." + account) ?? []).compactMap(UUID.init(uuidString:)))
     }
 
+    private func rememberedPrivateSaves(of account: String) -> Set<UUID> {
+        Set((remembered.stringArray(forKey: "social.privateSaves." + account) ?? []).compactMap(UUID.init(uuidString:)))
+    }
+
+    private func remember(privateSaves ids: Set<UUID>) {
+        guard let me else { return }
+        remembered.set(ids.map(\.uuidString).sorted(), forKey: "social.privateSaves." + me)
+    }
+
     private func remember(closeFriends people: Set<String>) {
         guard let me else { return }
         remembered.set(people.sorted(), forKey: "social.closeFriends." + me)
@@ -646,6 +691,7 @@ public final class SocialModel {
         guard let id = profile.id else { return false }
         do {
             try await server.setBlocked(blocked, id)
+            if blocked { blockedAuthors.insert(profile.username.lowercased()) } else { blockedAuthors.remove(profile.username.lowercased()) }
             if blocked {
                 followingSet.remove(profile.username)
                 forYou.removeAll { $0.author == profile.username }
@@ -722,7 +768,7 @@ public final class SocialModel {
 
     public func toggleSaved(_ post: SocialPost) async {
         guard post.audience == .everyone else {
-            notice = "Friends and Close-friends posts can't be saved yet."
+            toggleSavedPrivate(post)
             return
         }
         let on = !post.saved
@@ -736,8 +782,28 @@ public final class SocialModel {
         }
     }
 
+    /// A Friends or Close-friends post is saved on this phone only: its ID, never its words.
+    private func toggleSavedPrivate(_ post: SocialPost) {
+        let on = !(self.post(post.id)?.saved ?? post.saved)
+        if on { savedPrivate.insert(post.id) } else { savedPrivate.remove(post.id) }
+        remember(privateSaves: savedPrivate)
+        update(post.id) { $0.saved = on }
+        if on {
+            if !saved.contains(where: { $0.id == post.id }) { var p = post; p.saved = true; saved.insert(p, at: 0) }
+            notice = "Saved on this phone only. It isn't sent to Totality's server."
+        } else {
+            saved.removeAll { $0.id == post.id }
+        }
+    }
+
     public func loadSaved() async {
-        do { saved = try await server.saved() } catch { notice = Self.message(error) }
+        defer { savedLoaded = true }
+        do {
+            let onServer = try await server.saved()
+            let mine = (following + privateFeed).filter { $0.audience != .everyone && savedPrivate.contains($0.id) }
+            var seen = Set<UUID>()
+            saved = (onServer + mine.map { var p = $0; p.saved = true; return p }).filter { seen.insert($0.id).inserted }
+        } catch { notice = Self.message(error) }
     }
 
     static func message(_ error: any Error) -> String {

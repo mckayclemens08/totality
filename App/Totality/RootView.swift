@@ -38,6 +38,8 @@ struct RootView: View {
     @State private var sharedLists: SharedListsModel?
     /// Social, made the first time it's opened (issue 149). It needs the sign-in, not the content key.
     @State private var social: SocialModel?
+    /// A post Social asked to send to a chat, which Messages' picker takes over (share to chat, 2026-11-26).
+    @State private var shareRequest: ShareRequest?
     /// Quick add from the Tasks tile, over the home page.
     @State private var quickAddingTask = false
     @State private var messages: MessagesModel
@@ -112,6 +114,7 @@ struct RootView: View {
         }
         .motion(Motion.smooth, value: account?.showsSignInPage)
         .task {
+            connectSharedContent()
             contentKeys.willMove = { await closeContent() }
             contentKeys.didMove = { account?.sync?.resume() }
             watchAccountChanges()
@@ -458,6 +461,10 @@ struct RootView: View {
                     ) { linkedProfile = nil }
                 }
             }
+            .sheet(item: $shareRequest) { request in
+                ShareToChatSheet(model: messages, request: request) { shareRequest = nil }
+                    .presentationDetents([.large])
+            }
             .sheet(isPresented: gate($quickAddingTask)) {
                 if let tasks {
                     QuickAddView(model: tasks, bucket: .today) { quickAddingTask = false }
@@ -798,6 +805,7 @@ struct RootView: View {
                 bringUp(.messages)
             }
         }
+        model.onShare = { request in shareRequest = request }
         #if os(iOS)
         NotificationsSetup.connect(social: model)
         #endif
@@ -1015,9 +1023,32 @@ struct RootView: View {
         }
     }
 
+    /// Messages draws and opens a post shared in a chat without importing Social: the app asks the owning module,
+    /// by the ref's module, what the recipient may see.
+    private func connectSharedContent() {
+        messages.sharedContent = SharedContentHooks(
+            resolve: { ref, author in
+                guard ref.module == .social else { return .unavailable(author: author) }
+                if social == nil { social = makeSocial() }
+                guard let social else { return .failed }
+                return await social.sharedCard(ref, author: author)
+            },
+            open: { ref in show(ref) },
+            openAuthor: { name in
+                if social == nil { social = makeSocial() }
+                social?.requestedProfile = name
+                bringUp(.social)
+            }
+        )
+    }
+
     /// A ref opens in its own module: the Reader's items, and Contacts' cards.
     private func show(_ ref: ContentRef) {
         switch ref.module {
+        case .social:
+            if social == nil { social = makeSocial() }
+            social?.requestedPost = ref.id
+            bringUp(.social)
         case .reader:
             reader?.requestedItem = ref.id
             bringUp(.reader)

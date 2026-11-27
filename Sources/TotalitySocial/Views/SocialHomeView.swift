@@ -152,7 +152,9 @@ public struct SocialHomeView: View {
                     if model.phase == .offline { OfflineLine { Task { await model.refresh() } } }
                     if model.feed == .forYou {
                         if !model.tags.isEmpty || model.tag != nil { tagChips }
-                        if model.forYou.isEmpty {
+                        if model.forYou.isEmpty && model.isLoading {
+                            LoadingGrid()
+                        } else if model.forYou.isEmpty {
                             EmptyFeed(
                                 systemImage: "sparkles", title: "Nothing new right now",
                                 detail: model.tag == nil ? "You've seen every recent public post. Check back later, or post something yourself." : "No new posts tagged #\(model.tag!)."
@@ -163,7 +165,9 @@ public struct SocialHomeView: View {
                     } else {
                         // Stories sit in a row of rings at the top of Following (owner, 2026-11-17).
                         StoryRowView(model: model, onOpen: openStories) { newStory = true }
-                        if model.following.isEmpty {
+                        if model.following.isEmpty && model.isLoading {
+                            LoadingGrid()
+                        } else if model.following.isEmpty {
                             EmptyFeed(
                                 systemImage: "person.badge.plus", title: "Nothing here yet",
                                 detail: "Follow people from For You or search, and their posts show up here, newest first."
@@ -173,8 +177,6 @@ public struct SocialHomeView: View {
                                 FollowingCard(model: model, post: post, photo: model.photos[post.author], ring: model.ring(for: post.author),
                                               onAuthor: { open(.profile(post.author)) }) {
                                     open(.post(post.id))
-                                } onLike: {
-                                    Task { await model.toggleLike(post) }
                                 } onDoubleTap: {
                                     Task { await model.like(post) }
                                 }
@@ -304,10 +306,8 @@ struct FollowingCard: View {
     var ring: StoryRing?
     let onAuthor: () -> Void
     let onOpen: () -> Void
-    let onLike: () -> Void
     /// A double tap on the text: only ever adds the like.
     let onDoubleTap: () -> Void
-    @AppStorage(LikeCountsPreference.key) private var hideEverywhere = false
 
     var body: some View {
         let theme = Theme.current
@@ -320,14 +320,15 @@ struct FollowingCard: View {
                             .onTapGesture { if ring != nil { model.requestedStories = post.author } else { onAuthor() } }
                         VStack(alignment: .leading, spacing: 0) {
                             Text(post.displayName).font(Typeface.headline).foregroundStyle(theme.textPrimary.color)
-                            Text("\(Handle.display(post.author)) · \(post.date.formatted(.relative(presentation: .numeric)))")
+                            Text("\(Handle.display(post.author)) · \(post.date.formatted(.relative(presentation: .numeric)))\(post.audience == .everyone ? "" : " · " + post.audience.name)")
                                 .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
+                                .accessibilityLabel("\(Handle.display(post.author)), \(post.audience.label)")
                         }
                     }
                 }
                 .buttonStyle(SoftPress())
                 Spacer(minLength: 0)
-                AudienceTag(audience: post.audience)
+                PostTopIcons(model: model, post: post)
             }
             VStack(alignment: .leading, spacing: Space.s2) {
                 if let title = post.title { Text(title).font(Typeface.headline).foregroundStyle(theme.textPrimary.color) }
@@ -338,19 +339,7 @@ struct FollowingCard: View {
             }
             .likesOnDoubleTap(onOpen: onOpen, onLike: onDoubleTap)
             if !post.media.isEmpty { PostMediaView(model: model, post: post, photoHeight: 260) }
-            HStack(spacing: Space.s5) {
-                Button(action: onLike) {
-                    Label(LikeText.count(post, hideEverywhere: hideEverywhere), systemImage: post.liked ? "heart.fill" : "heart")
-                        .foregroundStyle(post.liked ? theme.accent.color : theme.textSecondary.color)
-                }
-                .accessibilityLabel(post.liked ? "Unlike" : "Like")
-                RepostControl(model: model, post: post)
-                Button(action: onOpen) {
-                    Text(post.comments == 1 ? "1 comment" : "\(post.comments) comments").foregroundStyle(theme.textSecondary.color)
-                }
-            }
-            .font(Typeface.callout)
-            .buttonStyle(SoftPress())
+            PostPlainActions(model: model, post: post, onComments: onOpen)
         }
         .itemCard()
     }

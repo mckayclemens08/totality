@@ -109,6 +109,75 @@ import TotalityCore
         #expect(!jonah.following.contains { $0.audience == .closeFriends })
     }
 
+    @Test("A post shared in a chat is a card for a friend and only a placeholder for someone who can't open it")
+    func aSharedFriendsPostIsAPlaceholderForANonFriend() async throws {
+        let maya = device("maya"), jonah = device("jonah"), priya = device("priya")
+        for (a, b) in [(jonah, "maya"), (maya, "jonah"), (priya, "maya")] { await a.load(); #expect(await a.setFollowing(true, b)) }
+        await maya.load()
+        #expect(await maya.publish(.friends, title: "", body: "The spare key is under the fern."))
+        await jonah.load()
+        await priya.load()
+        let post = try #require(jonah.following.first)
+        #expect(jonah.canShare(post), "a friend can share a Friends post")
+
+        // Jonah sends it to a chat: the message holds the id and the author's handle, nothing else.
+        let text = SharedContentLink.text(for: SocialModel.ref(for: post), author: post.author)
+        #expect(!text.contains("fern") && !text.contains("key"))
+        let shared = try #require(SharedContentLink.parse(text))
+
+        // Jonah's phone resolves it to the full card. Priya follows Maya but isn't her friend: placeholder only.
+        guard case .card(let card) = await jonah.sharedCard(shared.ref, author: shared.author) else { Issue.record("a friend sees the card"); return }
+        #expect(card.text == "The spare key is under the fern.")
+        let theirs = await priya.sharedCard(shared.ref, author: shared.author)
+        #expect(theirs == .unavailable(author: "maya"))
+    }
+
+    @Test("Only the author can share a Close-friends post")
+    func closeFriendsPostsAreSharedOnlyByTheirAuthor() async throws {
+        let maya = device("maya"), priya = device("priya")
+        for (a, b) in [(priya, "maya"), (maya, "priya")] { await a.load(); _ = await a.setFollowing(true, b) }
+        await maya.load()
+        #expect(await maya.setCloseFriends(["priya"]))
+        #expect(await maya.publish(.closeFriends, title: "Kyoto list", body: "Close friends only."))
+        await priya.load()
+        let mine = try #require(maya.following.first { $0.audience == .closeFriends })
+        let theirs = try #require(priya.following.first { $0.audience == .closeFriends })
+        #expect(maya.canShare(mine))
+        #expect(!priya.canShare(theirs))
+    }
+
+    @Test("A public post shared in a chat is a card for anyone, and a missing one a placeholder")
+    func aSharedPublicPostIsACardForAnyone() async throws {
+        let maya = device("maya"), priya = device("priya")
+        await maya.load(); await priya.load()
+        #expect(await maya.publish(.everyone, title: "Delicate Arch", body: "Sunrise at 7:12."))
+        let id = try #require(world.posts.keys.first)
+        let ref = ContentRef(module: .social, kind: .post, id: id, keyRef: .plain, preview: .init(title: "x"))
+        guard case .card(let card) = await priya.sharedCard(ref, author: "maya") else { Issue.record("expected a card"); return }
+        #expect(card.author == "maya" && card.audience == "Public")
+        let gone = ContentRef(module: .social, kind: .post, id: UUID(), keyRef: .plain, preview: .init(title: "x"))
+        #expect(await priya.sharedCard(gone, author: "maya") == .unavailable(author: "maya"))
+        let wrong = ContentRef(module: .reader, kind: .note, id: id, keyRef: .plain, preview: .init(title: "x"))
+        #expect(await priya.sharedCard(wrong, author: nil) == .unavailable(author: nil))
+    }
+
+    @Test("A Friends post can be saved, on this phone only, and unsaved")
+    func friendsPostsCanBeSaved() async throws {
+        let maya = device("maya"), jonah = device("jonah")
+        for (a, b) in [(jonah, "maya"), (maya, "jonah")] { await a.load(); _ = await a.setFollowing(true, b) }
+        await maya.load()
+        #expect(await maya.publish(.friends, title: "", body: "Sourdough number six."))
+        await jonah.load()
+        let post = try #require(jonah.following.first)
+        await jonah.toggleSaved(post)
+        #expect(jonah.following.first?.saved == true)
+        #expect(world.saves["jonah"]?.isEmpty ?? true, "a Friends save never reaches the server")
+        await jonah.loadSaved()
+        #expect(jonah.saved.map(\.id) == [post.id])
+        await jonah.toggleSaved(try #require(jonah.following.first))
+        #expect(jonah.following.first?.saved == false && jonah.saved.isEmpty)
+    }
+
     @Test func aStrangerCannotPutPostsInYourFeed() async throws {
         let maya = device("maya")
         let stranger = matrix.device(for: "stranger")
