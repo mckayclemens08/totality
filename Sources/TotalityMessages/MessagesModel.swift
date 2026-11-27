@@ -40,6 +40,9 @@ public final class MessagesModel {
     @ObservationIgnored var autoJoined: Set<String> = []
     /// Makes tasks from messages, through the registry (issue 123, step 4).
     @ObservationIgnored public var taskMaker: (any TaskMaker)?
+    /// How a shared post or other item in a chat is drawn and opened, set by the app so Messages never imports
+    /// the module that owns it.
+    @ObservationIgnored public var sharedContent: SharedContentHooks?
     public private(set) var keys: MessageKeys = .checking
     /// The secret that locks the key backup, from the recovery key. Nil until it's on this device.
     /// Asked for the account Messages is connected as, so it's never one person's secret for another.
@@ -328,7 +331,9 @@ public final class MessagesModel {
 
     public func open(_ chat: String) async throws -> ChatModel {
         guard let service else { throw MessagesError.notSignedIn }
-        return ChatModel(channel: try await service.openChat(chat))
+        let model = ChatModel(channel: try await service.openChat(chat))
+        model.sharedContent = sharedContent
+        return model
     }
 
     /// Sends a photo from the camera straight into a chat, without opening it. True once it's queued.
@@ -477,6 +482,8 @@ public final class ChatModel {
     public var channelOwner: String? { channel.channelOwner }
     public var channelMembers: Int { channel.channelMembers }
     public private(set) var sendingVideo = false
+    /// Draws and opens shared posts in this chat. Set by `MessagesModel.open`.
+    @ObservationIgnored public var sharedContent: SharedContentHooks?
     private let channel: any ChatChannel
     private var typingSent = false
     private let defaults: UserDefaults

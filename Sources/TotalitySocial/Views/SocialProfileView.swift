@@ -38,7 +38,8 @@ struct SocialProfileView: View {
     var isTab = false
     @Environment(\.dismiss) private var dismiss
     @State private var profile: SocialProfile?
-    @State private var posts: [SocialPost] = []
+    @State private var fetched: [SocialPost] = []
+    @State private var postsLoaded = false
     @State private var problem: String?
     /// Whether the server may have older posts than the ones shown.
     @State private var hasMore = false
@@ -54,6 +55,10 @@ struct SocialProfileView: View {
     @State private var showingSaved = false
     /// The Photos or Audio tab: only posts that carry that kind of media.
     @State private var mediaTab: PostMedia.Kind?
+
+    /// What this profile showed last time while the new page is fetched, or what was just fetched.
+    private var posts: [SocialPost] { postsLoaded ? fetched : (model.cachedPosts(by: username) ?? []) }
+    private var hasPosts: Bool { postsLoaded || model.cachedPosts(by: username) != nil }
 
     private var shownPosts: [SocialPost] {
         guard let mediaTab else { return posts }
@@ -84,11 +89,15 @@ struct SocialProfileView: View {
                                   detail: profile.requested ? "You asked to follow \(profile.name). Once they accept, you'll see their posts."
                                                             : "Once \(profile.name) accepts your request, you'll see their posts.")
                     } else if isMe && showingSaved {
-                        if model.saved.isEmpty {
+                        if !model.savedLoaded && model.saved.isEmpty {
+                            LoadingGrid()
+                        } else if model.saved.isEmpty {
                             EmptyFeed(systemImage: "bookmark", title: "Nothing saved yet", detail: "Tap Save on a public post to keep it here. Only you can see what you saved.")
                         } else {
                             PostGrid(model: model, posts: model.saved, photos: model.photos, onShow: { _ in }) { open(.post($0.id)) }
                         }
+                    } else if !hasPosts {
+                        LoadingGrid()
                     } else if shownPosts.isEmpty, let mediaTab {
                         EmptyFeed(systemImage: mediaTab == .photo ? "photo" : "mic", title: mediaTab == .photo ? "No photos yet" : "No audio yet",
                                   detail: isMe ? "Posts with \(mediaTab == .photo ? "photos" : "audio") show here." : "When \(profile.name) posts \(mediaTab == .photo ? "photos" : "audio"), they show here.")
@@ -256,9 +265,10 @@ struct SocialProfileView: View {
     private func load() async {
         do {
             profile = try await model.profile(username)
-            posts = try await model.posts(by: username)
-            hasMore = model.hasMore(after: posts)
-            model.remember(posts)
+            fetched = try await model.posts(by: username)
+            postsLoaded = true
+            hasMore = model.hasMore(after: fetched)
+            model.remember(fetched)
             problem = nil
         } catch {
             problem = SocialModel.message(error)
@@ -267,12 +277,12 @@ struct SocialProfileView: View {
 
     /// The next page, once the oldest post shown scrolls into view.
     private func loadMore() async {
-        guard hasMore, !loadingMore, let oldest = posts.last?.feedDate else { return }
+        guard hasMore, !loadingMore, let oldest = fetched.last?.feedDate else { return }
         loadingMore = true
         defer { loadingMore = false }
         guard let page = try? await model.posts(by: username, before: oldest) else { return }
-        let shown = Set(posts.map(\.id))
-        posts += page.filter { !shown.contains($0.id) }
+        let shown = Set(fetched.map(\.id))
+        fetched += page.filter { !shown.contains($0.id) }
         hasMore = model.hasMore(after: page)
         model.remember(page)
     }
@@ -292,6 +302,8 @@ struct PeopleSearchView: View {
     var onClose: (() -> Void)?
     @State private var query = ""
     @State private var results: [SocialProfile] = []
+    /// The query the shown results answer, so "No one matches" never shows while a newer search is still running.
+    @State private var answered = ""
 
     var body: some View {
         let theme = Theme.current
@@ -318,7 +330,9 @@ struct PeopleSearchView: View {
                         }
                         .buttonStyle(SoftPress())
                     }
-                    if results.isEmpty && !query.isEmpty {
+                    if results.isEmpty && !query.isEmpty && answered != query {
+                        ProgressView().padding(Space.s4).accessibilityLabel("Searching")
+                    } else if results.isEmpty && !query.isEmpty {
                         Text("No one matches \"\(query)\".").font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
                     }
                 }
@@ -329,7 +343,9 @@ struct PeopleSearchView: View {
         .task(id: query) {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            results = await model.search(query)
+            let asked = query
+            results = await model.search(asked)
+            answered = asked
         }
     }
 }

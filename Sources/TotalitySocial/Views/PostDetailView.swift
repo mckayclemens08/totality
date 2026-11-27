@@ -13,13 +13,9 @@ struct PostDetailView: View {
     @State private var draft = ""
     @State private var replyingTo: SocialComment?
     @State private var sending = false
-    @State private var confirmingDelete = false
     @State private var reporting: SocialComment?
-    @State private var reportingPost = false
     /// The author's settings that matter here: whether you may comment.
     @State private var authorProfile: SocialProfile?
-    @AppStorage(LikeCountsPreference.key) private var hideEverywhere = false
-    @State private var taskDraft: TaskDraft?
 
     var body: some View {
         let theme = Theme.current
@@ -70,20 +66,8 @@ struct PostDetailView: View {
                 })
                 .task(id: post.comments) { await loadComments(post) }
                 .task { if post.audience == .everyone { authorProfile = try? await model.profile(post.author) } }
-                .sheet(isPresented: $reportingPost) {
-                    ReportSheet(model: model, username: post.author, post: post, comment: nil) { reportingPost = false }
-                }
                 .sheet(item: $reporting) { comment in
                     ReportSheet(model: model, username: comment.author, post: post, comment: comment) { reporting = nil }
-                }
-                .confirmationDialog("Delete this post?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-                    Button("Delete for everyone", role: .destructive) {
-                        Task { await model.delete(post); dismiss() }
-                    }
-                } message: {
-                    Text(post.audience == .everyone
-                         ? "It's removed from Totality's server. Anyone who already saw it may remember it."
-                         : "It's removed from your encrypted room. People who already opened it keep what they saw.")
                 }
             } else {
                 EmptyFeed(systemImage: "questionmark.circle", title: "This post isn't here any more", detail: "Its author may have deleted it.")
@@ -93,7 +77,6 @@ struct PostDetailView: View {
         .background(theme.bg.color.ignoresSafeArea())
         // The post screen shows its own notice, so "Saved to the Reader." appears where it was asked for.
         .noticeBanner(Binding(get: { model.notice }, set: { model.notice = $0 }))
-        .addToTasksSheet($taskDraft, maker: model.taskMaker) { _ in model.notice = "Added to Tasks." }
     }
 
     private func author(_ post: SocialPost) -> some View {
@@ -112,70 +95,14 @@ struct PostDetailView: View {
             }
             .buttonStyle(SoftPress())
             Spacer(minLength: 0)
-            HeaderMenu("More", systemImage: "ellipsis") {
-                if model.taskMaker != nil {
-                    Button("Add to Tasks", systemImage: "checklist") { taskDraft = model.taskDraft(post) }
-                }
-                if model.receiver != nil {
-                    Button(model.isSavedToReader(post) ? "Saved to Reader" : "Save to Reader", systemImage: "books.vertical") {
-                        Task { await model.saveToReader(post) }
-                    }
-                    .disabled(model.isSavingToReader(post) || model.isSavedToReader(post))
-                }
-                if post.author == model.me {
-                    Button("Delete post", systemImage: "trash", role: .destructive) { confirmingDelete = true }
-                } else {
-                    if post.audience == .everyone {
-                        Button("Not interested", systemImage: "hand.thumbsdown") {
-                            Task { await model.notInterested(post); dismiss() }
-                        }
-                    }
-                    Button("Report post", systemImage: "flag") { reportingPost = true }
-                }
-            }
+            PostTopIcons(model: model, post: post) { dismiss() }
         }
     }
 
     private func actions(_ post: SocialPost) -> some View {
         let theme = Theme.current
         return VStack(alignment: .leading, spacing: Space.s2) {
-            HStack(spacing: Space.s3) {
-                Button { Task { await model.toggleLike(post) } } label: {
-                    Label(LikeText.count(post, hideEverywhere: hideEverywhere), systemImage: post.liked ? "heart.fill" : "heart")
-                        .font(Typeface.callout)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .foregroundStyle(post.liked ? theme.accent.color : theme.textSecondary.color)
-                        .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
-                        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                }
-                .accessibilityLabel(post.liked ? "Unlike" : "Like")
-                if post.audience == .everyone {
-                    Button { Task { await model.toggleSaved(post) } } label: {
-                        Image(systemName: post.saved ? "bookmark.fill" : "bookmark")
-                            .font(Typeface.callout)
-                            .foregroundStyle(post.saved ? theme.accent.color : theme.textSecondary.color)
-                            .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
-                            .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                    }
-                    .accessibilityLabel(post.saved ? "Saved" : "Save")
-                }
-                if post.canRepost(by: model.me) || post.reposts > 0 {
-                    RepostControl(model: model, post: post)
-                        .font(Typeface.callout)
-                        .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
-                        .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-                }
-                Label("\(post.comments)", systemImage: "bubble.right")
-                    .accessibilityLabel(post.comments == 1 ? "1 comment" : "\(post.comments) comments")
-                    .font(Typeface.callout)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity, minHeight: Metric.headerButton)
-                    .neumorphic(.subtle, in: RoundedRectangle(cornerRadius: Radius.md, style: .continuous))
-            }
-            .buttonStyle(SoftPress())
+            PostPlainActions(model: model, post: post)
             Label(post.audience.label, systemImage: post.audience.systemImage)
                 .font(Typeface.caption)
                 .foregroundStyle(post.audience.isEncrypted ? theme.success.color : theme.textSecondary.color)

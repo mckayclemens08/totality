@@ -115,7 +115,9 @@ struct SavedPostsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
                 ScreenTitle("Saved")
-                if model.saved.isEmpty {
+                if !model.savedLoaded && model.saved.isEmpty {
+                    LoadingGrid()
+                } else if model.saved.isEmpty {
                     EmptyFeed(systemImage: "bookmark", title: "Nothing saved yet", detail: "Tap Save on a public post to keep it here. Only you can see what you saved.")
                         .frame(maxWidth: .infinity)
                 } else {

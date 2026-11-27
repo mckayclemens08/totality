@@ -37,7 +37,7 @@ extension MessagesModel {
 
     /// A row's last line. A group's names who said it, unless it was you.
     public func homeLastLine(of chat: ChatSummary) -> String? {
-        guard let text = chat.lastMessage else { return nil }
+        guard let text = chat.lastLine else { return nil }
         guard chat.isGroup, let sender = chat.lastSender else { return text }
         return "\(TileNames.first(people.name(ofMatrixID: sender))): \(text)"
     }

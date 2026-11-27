@@ -57,7 +57,7 @@ public final class MessagesNotifications: NotificationSource {
             let target = NotificationTarget(module: .messages, kind: "chat", item: chat.id)
             notes.append(AppNotification(
                 id: "messages.\(chat.id).\(Int(at.timeIntervalSince1970 * 1000))", kind: message,
-                title: chat.isGroup ? "\(who) in \(chat.title)" : chat.title, body: chat.lastMessage ?? "New message",
+                title: chat.isGroup ? "\(who) in \(chat.title)" : chat.title, body: chat.lastLine ?? "New message",
                 isPrivate: true, thread: chat.id, target: target, actions: [.reply, .markRead], date: at
             ))
         }
