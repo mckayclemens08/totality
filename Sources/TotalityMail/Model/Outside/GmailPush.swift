@@ -148,26 +148,50 @@ extension GoogleOAuth {
 public struct NewMailNote: Equatable, Sendable {
     public let id: UUID
     public let title: String
+    /// Says it's an email, and from which kind of account, so it can't be mistaken for anything else.
+    public let subtitle: String
     public let body: String
     public let conversationID: UUID
+    /// The account it came to, so one account's alerts group together.
+    public let account: UUID
 
-    /// Unread Inbox mail from Gmail accounts that's in `after` but wasn't in `before`, newest first. With
-    /// `details` off, each just says "New mail" and which account.
+    public init(id: UUID, title: String, subtitle: String, body: String, conversationID: UUID, account: UUID) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.body = body
+        self.conversationID = conversationID
+        self.account = account
+    }
+
+    /// "New email · Gmail".
+    public static func subtitle(for provider: OutsideProvider) -> String {
+        "New email \u{00B7} \(provider.name)"
+    }
+
+    /// Unread Gmail mail that the Inbox lists in `after` but wasn't in `before`, newest first. Only what
+    /// the Inbox lists: mail Gmail sorted into Promotions, Social or Updates sits in that tab, so an alert
+    /// for it would open to an Inbox without it (owner, 2026-11-26). With `details` off, each just says
+    /// "New email" and which account.
     public static func notes(before: Mailbox, after: Mailbox, details: Bool, most: Int = 5) -> [NewMailNote] {
         let known = Set(before.messages.map(\.id))
         let fresh = after.messages
-            .filter { !known.contains($0.id) && $0.outsideAccount?.provider == .gmail && $0.marks.isUnread && $0.marks.folder == .inbox }
+            .filter { !known.contains($0.id) && $0.outsideAccount?.provider == .gmail && $0.marks.isUnread && MailPlace.inbox.lists($0) }
             .sorted { $0.date > $1.date }
-        return fresh.prefix(most).map { message in
-            let account = message.outsideAccount?.address ?? ""
+        return fresh.prefix(most).compactMap { message in
+            guard let account = message.outsideAccount else { return nil }
+            let subtitle = subtitle(for: account.provider)
             if details {
                 let subject = message.subject.trimmingCharacters(in: .whitespacesAndNewlines)
                 return NewMailNote(
-                    id: message.id, title: message.from.displayName,
-                    body: subject.isEmpty ? "No subject" : subject, conversationID: message.conversationID
+                    id: message.id, title: message.from.displayName, subtitle: subtitle,
+                    body: subject.isEmpty ? "No subject" : subject, conversationID: message.conversationID, account: account.id
                 )
             }
-            return NewMailNote(id: message.id, title: "New mail", body: account, conversationID: message.conversationID)
+            return NewMailNote(
+                id: message.id, title: "New email", subtitle: subtitle, body: account.address,
+                conversationID: message.conversationID, account: account.id
+            )
         }
     }
 }

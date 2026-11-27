@@ -43,14 +43,39 @@ private func defaults() -> UserDefaults {
             message("Totality mail", account: nil),
         ])
         let notes = NewMailNote.notes(before: before, after: after, details: true)
-        #expect(notes == [NewMailNote(id: fresh.id, title: "Rosa Delgado", body: "Kitchen drawings", conversationID: fresh.conversationID)])
+        #expect(notes == [NewMailNote(
+            id: fresh.id, title: "Rosa Delgado", subtitle: "New email \u{00B7} Gmail", body: "Kitchen drawings",
+            conversationID: fresh.conversationID, account: gmail.id
+        )])
     }
 
     @Test func newMailOnlySaysWhichAccount() {
         let fresh = message("Kitchen drawings")
         let notes = NewMailNote.notes(before: mailbox([]), after: mailbox([fresh]), details: false)
-        #expect(notes.map(\.title) == ["New mail"])
+        #expect(notes.map(\.title) == ["New email"])
+        #expect(notes.map(\.subtitle) == ["New email \u{00B7} Gmail"])
         #expect(notes.map(\.body) == ["mckay.clemens@gmail.com"])
+    }
+
+    /// The Fossil promotion (TestFlight build 11): Gmail put it in Promotions, so the Inbox never listed
+    /// it, yet it rang. Only what the Inbox lists rings now, so the alert always opens to it.
+    @Test func mailInAGmailTabDoesNotRing() {
+        var promotion = message("Tick Tock: Don't miss these prices", from: MailAddress(name: "Fossil", address: "fossil@email.fossil.com"))
+        promotion.outsideLabels = ["CATEGORY_PROMOTIONS"]
+        let primary = message("Kitchen drawings")
+        let after = mailbox([promotion, primary])
+        let notes = NewMailNote.notes(before: mailbox([]), after: after, details: true)
+        #expect(notes.map(\.id) == [primary.id])
+        let listed = after.conversations(in: .inbox).map(\.id)
+        #expect(notes.allSatisfy { listed.contains($0.conversationID) }, "Every alert opens to a conversation the Inbox shows")
+    }
+
+    @Test func alertsGroupByAccount() {
+        let other = OutsideAccountLabel(id: UUID(), provider: .gmail, address: "studio@gmail.com")
+        let notes = NewMailNote.notes(
+            before: mailbox([]), after: mailbox([message("One"), message("Two", account: other)]), details: true
+        )
+        #expect(Set(notes.map(\.account)) == [gmail.id, other.id])
     }
 
     @Test func aBurstIsCappedNewestFirst() {

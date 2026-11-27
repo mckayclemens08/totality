@@ -79,11 +79,39 @@ public struct NotificationTarget: Hashable, Codable, Sendable {
 }
 
 /// One alert, written on this phone from what a module fetched. The server never sees it.
+/// The word under every alert's title that says which part of Totality it's from (owner, 2026-11-26: a
+/// Gmail alert showed only a sender and a subject, and could have been anything).
+public enum NotificationWording {
+    public static func subtitle(for module: ModuleID) -> String {
+        switch module {
+        case .mail: "New email"
+        case .messages: "Message"
+        case .social: "Social"
+        case .calendar: "Calendar"
+        case .tasks: "Task"
+        case .photos: "Photos"
+        case .reader: "Reader"
+        case .weather: "Weather"
+        case .clock: "Clock"
+        case .contacts: "Contacts"
+        case .hiking: "Hiking"
+        case .web: "Web"
+        case .calls: "Call"
+        case .money: "Money"
+        case .player: "Player"
+        case .ai: "Assistant"
+        }
+    }
+}
+
 public struct AppNotification: Hashable, Sendable, Identifiable {
     /// Stable for the same event, so the same thing is never alerted twice.
     public let id: String
     public let kind: NotificationKind
     public let title: String
+    /// The line under the title that says what this is: "New email · Gmail", "Message". Nil uses the
+    /// module's own word, so no alert reaches the lock screen without saying where it's from.
+    public let subtitle: String?
     public let body: String
     /// Whether `body` comes from end-to-end encrypted content, which the Previews switch can hide.
     public let isPrivate: Bool
@@ -96,12 +124,13 @@ public struct AppNotification: Hashable, Sendable, Identifiable {
     public let date: Date
 
     public init(
-        id: String, kind: NotificationKind, title: String, body: String, isPrivate: Bool = false, thread: String,
-        target: NotificationTarget, actions: [NotificationAction] = [], fromCloseFriend: Bool = false, date: Date
+        id: String, kind: NotificationKind, title: String, subtitle: String? = nil, body: String, isPrivate: Bool = false,
+        thread: String, target: NotificationTarget, actions: [NotificationAction] = [], fromCloseFriend: Bool = false, date: Date
     ) {
         self.id = id
         self.kind = kind
         self.title = title
+        self.subtitle = subtitle
         self.body = body
         self.isPrivate = isPrivate
         self.thread = thread

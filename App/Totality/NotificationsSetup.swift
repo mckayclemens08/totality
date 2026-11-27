@@ -84,8 +84,8 @@ final class MailNotifications: NotificationSource {
               let onWake = PushSetup.shared.onWake else { return [] }
         return await onWake().map { note in
             AppNotification(
-                id: "mail." + note.id.uuidString.lowercased(), kind: Self.newMail, title: note.title, body: note.body,
-                isPrivate: true, thread: note.conversationID.uuidString.lowercased(),
+                id: "mail." + note.id.uuidString.lowercased(), kind: Self.newMail, title: note.title, subtitle: note.subtitle,
+                body: note.body, isPrivate: true, thread: note.account.uuidString.lowercased(),
                 target: NotificationTarget(module: .mail, kind: "conversation", item: note.conversationID.uuidString),
                 actions: [.markRead], date: Date()
             )
