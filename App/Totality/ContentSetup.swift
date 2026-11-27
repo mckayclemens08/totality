@@ -10,6 +10,7 @@ import TotalityPhotos
 import TotalityReader
 import TotalityTasks
 import TotalityHiking
+import TotalityNews
 import TotalityWeather
 import TotalityWeb
 
@@ -94,7 +95,7 @@ enum ContentSetup {
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
         googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore, home: FileBlobStore,
         weather: FileBlobStore, weatherCache: FileBlobStore, clock: FileBlobStore, contacts: FileBlobStore,
-        hiking: FileBlobStore
+        hiking: FileBlobStore, news: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -119,7 +120,8 @@ enum ContentSetup {
             // Contacts' cards, one sealed blob each, which sync.
             try FileBlobStore(directory: base.appendingPathComponent("Contacts", isDirectory: true)),
             // Hikes, saved trails and the nearby list, sealed. Never synced in v1 (issue 240).
-            try FileBlobStore(directory: base.appendingPathComponent("Hiking", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Hiking", isDirectory: true)),
+            try FileBlobStore(directory: base.appendingPathComponent("News", isDirectory: true))
         )
     }
 
@@ -155,6 +157,7 @@ enum ContentSetup {
             SealedArea(store: stores.clock, purposes: ClockBook.sealedPurposes),
             SealedArea(store: stores.contacts, purposes: ContactVault.sealedPurposes),
             SealedArea(store: stores.hiking, purposes: HikeLog.sealedPurposes),
+            SealedArea(store: stores.news, purposes: NewsLibrary.sealedPurposes),
         ])
     }
 
@@ -172,7 +175,7 @@ enum ContentSetup {
     ) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, tasks: TasksModel, areas: [any SyncArea],
         registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook, weather: WeatherModel, clock: ClockModel,
-        contacts: ContactsModel, hiking: HikingModel
+        contacts: ContactsModel, hiking: HikingModel, news: NewsModel
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -221,6 +224,7 @@ enum ContentSetup {
         #else
         let hiking = HikingModel(log: hikeLog, location: nil)
         #endif
+        let news = NewsModel(library: NewsLibrary(store: stores.news, rootKey: rootKey))
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
@@ -249,6 +253,7 @@ enum ContentSetup {
                 changed: { @MainActor [weak contacts] in await contacts?.load() }
             ),
             HikingModule(log: hikeLog),
+            news,
         ], profiles: AccountSetup.profiles)
         contacts.profiles = AccountSetup.profiles
         contacts.taskMaker = registry.taskMaker
@@ -282,7 +287,8 @@ enum ContentSetup {
             weather,
             clock,
             contacts,
-            hiking
+            hiking,
+            news
         )
     }
 

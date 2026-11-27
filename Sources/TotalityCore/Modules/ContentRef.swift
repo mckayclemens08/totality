@@ -46,10 +46,12 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     /// One hike recorded in Hiking: its track and stats, sealed (issue 240). Kept on the iPhone only in v1,
     /// so no server row has this kind yet; the kind names the hike in a `ContentRef` when it's shared.
     case hike
+    /// A device-only reference to a publisher URL. It never enters the content_objects enum.
+    case newsArticle = "news_article"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {
-    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks, weather, clock, contacts, hiking
+    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks, weather, clock, contacts, hiking, news
 }
 
 /// Where an object's key lives, matching `content_objects.key_ref`.

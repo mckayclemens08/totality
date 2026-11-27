@@ -20,6 +20,7 @@ let package = Package(
         .library(name: "TotalityClock", targets: ["TotalityClock"]),
         .library(name: "TotalityContacts", targets: ["TotalityContacts"]),
         .library(name: "TotalityHiking", targets: ["TotalityHiking"]),
+        .library(name: "TotalityNews", targets: ["TotalityNews"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.9.1"),
@@ -53,6 +54,7 @@ let package = Package(
         .target(name: "TotalityClock", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityContacts", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityHiking", dependencies: ["TotalityCore", "TotalityUI"]),
+        .target(name: "TotalityNews", dependencies: ["TotalityCore", "TotalityUI"]),
         .testTarget(name: "TotalityCoreTests", dependencies: ["TotalityCore"]),
         .testTarget(name: "TotalityUITests", dependencies: ["TotalityUI"]),
         .testTarget(name: "TotalityReaderTests", dependencies: ["TotalityReader"]),
@@ -68,5 +70,6 @@ let package = Package(
         .testTarget(name: "TotalityClockTests", dependencies: ["TotalityClock"]),
         .testTarget(name: "TotalityContactsTests", dependencies: ["TotalityContacts"]),
         .testTarget(name: "TotalityHikingTests", dependencies: ["TotalityHiking"]),
+        .testTarget(name: "TotalityNewsTests", dependencies: ["TotalityNews"]),
     ]
 )

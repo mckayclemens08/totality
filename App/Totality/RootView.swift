@@ -12,6 +12,7 @@ import TotalitySocial
 import TotalityTasks
 import TotalityUI
 import TotalityHiking
+import TotalityNews
 import TotalityWeather
 import TotalityWeb
 
@@ -32,6 +33,7 @@ struct RootView: View {
     @State private var clock: ClockModel?
     @State private var contacts: ContactsModel?
     @State private var hiking: HikingModel?
+    @State private var news: NewsModel?
     /// A .gpx file opened in Totality, waiting for Hiking to be ready to take it.
     @State private var pendingGPX: URL?
     /// Shared task lists, over Messages' Matrix connection (step 6).
@@ -353,7 +355,7 @@ struct RootView: View {
             onRemove: { module in Task { await homeChoices.remove(module) } },
             onRestore: { module in Task { await homeChoices.restore(module) } }
         ) { module in
-            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock, .contacts, .hiking].contains(module) { prepareContent() }
+            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock, .contacts, .hiking, .news].contains(module) { prepareContent() }
             bringUp(module)
         } onSearch: {
             prepareContent()
@@ -411,6 +413,9 @@ struct RootView: View {
             } else {
                 contentMessage { open = nil }
             }
+        case .news:
+            if let news { NewsHomeView(model: news, onClose: { open = nil }, onOpen: show) }
+            else { contentMessage { open = nil } }
         case .hiking:
             if let hiking {
                 HikingHomeView(model: hiking) { open = nil }
@@ -543,6 +548,9 @@ struct RootView: View {
         case .contacts:
             guard let contacts, contacts.phase == .ready else { return nil }
             return AnyView(ContactsHomeTile(model: contacts, size: size) { bringUp(.contacts) })
+        case .news:
+            guard let news else { return nil }
+            return AnyView(NewsHomeTile(model: news, size: size))
         case .hiking:
             guard let hiking, hiking.phase == .ready else { return nil }
             return AnyView(HikingHomeTile(model: hiking, size: size) { bringUp(.hiking) })
@@ -656,6 +664,7 @@ struct RootView: View {
             refreshers[.contacts] = content.contacts.refresher
             connectContacts(content.contacts, registry: content.registry)
             hiking = content.hiking
+            news = content.news
             // A hike shared from Hiking opens Social's composer with it. Nothing posts until Post is pressed.
             content.hiking.onShare = { draft in shareToSocial(draft) }
             sharedLists = makeSharedLists(directory: content.registry.profiles)
@@ -733,7 +742,8 @@ struct RootView: View {
         async let clock: Void = self.clock?.load() ?? ()
         async let contacts: Void = self.contacts?.load() ?? ()
         async let hiking: Void = self.hiking?.load() ?? ()
-        _ = await (reader, calendar, tasks, weather, clock, contacts, hiking)
+        async let news: Void = self.news?.load() ?? ()
+        _ = await (reader, calendar, tasks, weather, clock, contacts, hiking, news)
     }
 
     /// So the Mail tile has something to show before Mail is opened. A new mailbox model (another account,
@@ -861,6 +871,8 @@ struct RootView: View {
         await contacts?.stopForKeyChange()
         contacts = nil
         messages.people.lookup = nil
+        await news?.close()
+        news = nil
         await hiking?.stopForKeyChange()
         hiking = nil
         reader = nil
@@ -1077,6 +1089,15 @@ struct RootView: View {
     /// A ref opens in its own module: the Reader's items, and Contacts' cards.
     private func show(_ ref: ContentRef) {
         switch ref.module {
+        case .news:
+            guard let provider = registry?.handler(for: ref) as? any ArticleLinkProvider,
+                  let currentNews = news else { return }
+            Task {
+                guard let url = await provider.articleURL(for: ref), news === currentNews, let web else { return }
+                web.newTab(isPrivate: true)
+                web.open(url)
+                bringUp(.web)
+            }
         case .social:
             if social == nil { social = makeSocial() }
             social?.requestedPost = ref.id
@@ -1147,6 +1168,10 @@ struct RootView: View {
         case .weather: weather?.requestedPlace = UUID(uuidString: hit.itemID)
         case .contacts: contacts?.requestedCard = UUID(uuidString: hit.itemID)
         case .hiking: hiking?.requestedItem = hit.itemID
+        case .news:
+            guard let id = UUID(uuidString: hit.itemID) else { return }
+            show(ContentRef(module: .news, kind: .newsArticle, id: id, keyRef: .plain, preview: .init(title: hit.title)))
+            return
         case .social:
             if social == nil { social = makeSocial() }
             social?.requestedPost = UUID(uuidString: hit.itemID)

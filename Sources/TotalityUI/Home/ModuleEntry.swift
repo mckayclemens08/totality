@@ -53,5 +53,7 @@ public struct ModuleEntry: Identifiable, Sendable, Equatable {
               summary: "Your own address book, end-to-end encrypted.", keeps: "Your contacts"),
         .init(id: .hiking, name: "Hiking", systemImage: "figure.hiking",
               summary: "Trails nearby, and hikes recorded on this iPhone.", keeps: "Your hikes"),
+        .init(id: .news, name: "News", systemImage: "newspaper",
+              summary: "Headlines, topics, and your reading list.", keeps: "Your feeds and saved articles"),
     ]
 }

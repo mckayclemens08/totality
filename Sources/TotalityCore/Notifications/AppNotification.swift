@@ -95,6 +95,7 @@ public enum NotificationWording {
         case .clock: "Clock"
         case .contacts: "Contacts"
         case .hiking: "Hiking"
+        case .news: "News"
         case .web: "Web"
         case .calls: "Call"
         case .money: "Money"

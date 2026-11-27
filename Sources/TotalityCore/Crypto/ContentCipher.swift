@@ -82,6 +82,7 @@ public enum KeyPurpose: String, Sendable, Hashable {
     case hikeCache = "hike-cache"
     /// The names of the groups saved trails are sorted into, sealed on the iPhone and never synced.
     case hikeGroups = "hike-groups"
+    case news = "news-device"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.
