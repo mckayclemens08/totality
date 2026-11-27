@@ -10,6 +10,8 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
     public nonisolated let kinds: Set<ContentKind> = [.newsArticle]
     private(set) var record = NewsRecord()
     private(set) var discovered: [NewsArticle] = []
+    private(set) var topStories: [NewsArticle] = []
+    private(set) var loadingTopStories = false
     private(set) var loading = false
     private(set) var discovering = false
     private(set) var discoveryLoaded = false
@@ -18,6 +20,7 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
     private let library: NewsLibrary
     private let network: any NewsFetching
     private var lastRefresh: Date?
+    private var lastTopStoriesRequest: Date?
     private var active = true
 
     public convenience init(library: NewsLibrary) {
@@ -43,6 +46,7 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
         active = false
         record = NewsRecord(sources: [])
         discovered = []
+        topStories = []
         await library.close()
     }
 
@@ -92,6 +96,20 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
         return updates
     }
 
+    func refreshTopStories(force: Bool = false) async {
+        guard active, !loadingTopStories, !discovering,
+              force || lastTopStoriesRequest.map({ Date().timeIntervalSince($0) >= 900 }) != false else { return }
+        lastTopStoriesRequest = Date()
+        loadingTopStories = true
+        defer { loadingTopStories = false }
+        do {
+            let stories = try await network.discover("")
+            if active && !Task.isCancelled { topStories = Array(Self.unique(stories).prefix(4)) }
+        } catch {
+            // Publishers' feeds remain readable when the discovery service is unavailable.
+        }
+    }
+
     func discover(_ topic: String) async {
         guard active, !discovering else { return }
         discovering = true
@@ -109,33 +127,29 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
         }
     }
 
-    func add(_ string: String) async -> Bool {
-        guard let url = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)), NewsNetwork.allows(url),
-              let host = url.host else {
-            notice = "Enter an HTTPS RSS or Atom address."
-            return false
-        }
-        guard NewsNetwork.allowsFeed(url) else {
-            notice = "This feed provider isn’t available in News."
-            return false
-        }
-        let source = NewsSource.defaults.first { $0.url == url } ?? NewsSource(name: host, url: url)
-        do {
-            let articles = try await network.feed(source)
-            guard active, !Task.isCancelled else { return false }
-            let result = try await library.update { record in
-                guard !record.sources.contains(where: { $0.url == url }) else { return }
+    func follow(_ source: NewsSource) async {
+        guard NewsSource.catalog.contains(source) else { return }
+        await change { record in
+            if !record.sources.contains(where: { $0.url == source.url }) {
                 record.sources.append(source)
-                record.latest = Self.unique(articles + record.latest)
             }
-            guard active else { return false }
-            record = result
-            notice = nil
-            return true
-        } catch {
-            if active { notice = "That feed couldn’t be opened. Check its address and try again." }
-            return false
         }
+        guard active, record.sources.contains(where: { $0.url == source.url }) else { return }
+        do {
+            let headlines = try await network.feed(source)
+            guard active, !Task.isCancelled else { return }
+            await change { record in
+                guard record.sources.contains(where: { $0.url == source.url }) else { return }
+                record.latest = Self.unique(headlines + record.latest)
+            }
+        } catch {
+            if active, !Task.isCancelled { notice = "You’re following " + source.name + ". Its headlines couldn’t load yet." }
+        }
+    }
+
+    func source(for article: NewsArticle) -> NewsSource? {
+        guard let feedURL = article.feedURL else { return nil }
+        return (record.sources + NewsSource.catalog).first { $0.url == feedURL }
     }
 
     func remove(_ source: NewsSource) async {
@@ -159,7 +173,7 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
         guard active else { return }
         do {
             let result = try await library.update(update)
-            if active { record = result }
+            if active { record = result; notice = nil }
         } catch {
             if active { notice = "Your News changes couldn’t be saved." }
         }
@@ -183,7 +197,12 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
         return articles.first(where: { reference($0).id == ref.id })?.url
     }
 
-    private var articles: [NewsArticle] { record.saved + record.latest + discovered }
+    var todayStories: [NewsArticle] {
+        var seen = Set<URL>()
+        return (topStories + record.latest).filter { seen.insert($0.url).inserted }
+    }
+
+    private var articles: [NewsArticle] { record.saved + todayStories + discovered }
 
     public func search(_ query: String) async throws -> [SearchHit] {
         let terms = SearchText.terms(in: query)

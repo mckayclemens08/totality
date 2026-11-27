@@ -74,10 +74,51 @@ private actor TestNewsNetwork: NewsFetching {
                             date: Date(timeIntervalSince1970: 1_750_000_000), feedURL: source.url)]
     }
 
-    func discover(_ topic: String) async throws -> [NewsArticle] { [] }
+    func discover(_ topic: String) async throws -> [NewsArticle] {
+        if failed { throw NewsError.rateLimited }
+        let headline = topic.isEmpty ? "Artemis II mission" : "Idaho weather alerts"
+        let address = topic.isEmpty ? "https://www.nasa.gov/mission/artemis-ii/" : "https://www.weather.gov/boi/"
+        return [NewsArticle(title: headline, summary: "", source: "GDELT", url: URL(string: address)!, date: nil)]
+    }
 }
 
 extension NewsTests {
+    @MainActor
+    @Test func followsAndUnfollowsAPublisherByName() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try FileBlobStore(directory: directory)
+        let key = try ContentRootKey.generate()
+        let library = NewsLibrary(store: store, rootKey: key)
+        let model = NewsModel(library: library, network: TestNewsNetwork())
+        let publisher = try #require(NewsSource.catalog.first { !NewsSource.defaults.contains($0) })
+        await model.load()
+        #expect(!model.record.sources.contains(publisher))
+        await model.follow(publisher)
+        #expect(try await library.read().sources.contains(publisher))
+        await model.remove(publisher)
+        #expect(try await !library.read().sources.contains(publisher))
+    }
+
+    @MainActor
+    @Test func topStoriesStaySeparateFromTopicSearch() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try FileBlobStore(directory: directory)
+        let key = try ContentRootKey.generate()
+        let network = TestNewsNetwork()
+        let model = NewsModel(library: NewsLibrary(store: store, rootKey: key), network: network)
+        await model.refreshAhead()
+        await model.refreshTopStories()
+        #expect(model.todayStories.map(\.title) == ["Artemis II mission"])
+        await model.discover("Idaho weather")
+        #expect(model.discovered.map(\.title) == ["Idaho weather alerts"])
+        #expect(model.todayStories.map(\.title) == ["Artemis II mission"])
+        await network.fail()
+        await model.refreshTopStories(force: true)
+        #expect(model.todayStories.map(\.title) == ["Artemis II mission"])
+    }
+
     @MainActor
     @Test func refreshKeepsUsableHeadlinesAndRoutesSearchResults() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

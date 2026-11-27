@@ -10,6 +10,11 @@ struct NewsSource: Codable, Hashable, Identifiable, Sendable {
         NewsSource(name: "USGS Earthquakes", url: URL(string: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.atom")!),
         NewsSource(name: "Idaho Weather Alerts", url: URL(string: "https://api.weather.gov/alerts/active?area=ID")!),
     ]
+
+    static let catalog = defaults + [
+        NewsSource(name: "Federal Reserve", url: URL(string: "https://www.federalreserve.gov/feeds/press_all.xml")!),
+        NewsSource(name: "U.S. Census Bureau", url: URL(string: "https://www.census.gov/content/census/en/newsroom/press-releases.xml")!),
+    ]
 }
 
 struct NewsArticle: Codable, Hashable, Identifiable, Sendable {
