@@ -48,6 +48,22 @@ struct RootView: View {
     /// Quick add from the Tasks tile, over the home page.
     @State private var quickAddingTask = false
     @State private var messages: MessagesModel
+    #if os(iOS) && canImport(MatrixRustSDK) && canImport(WebRTC)
+    @State private var voiceCalls = VoiceCalls()
+
+    private var voiceChats: [ChatSummary] {
+        messages.chats.filter { !$0.isRequest && !$0.isGroup && $0.otherPerson != nil }
+    }
+
+    private func dialVoiceChat(_ id: String) {
+        guard let chat = voiceChats.first(where: { $0.id == id }) else { return }
+        Task { await voiceCalls.dial(chat) }
+    }
+
+    private var voiceService: MatrixMessagesService? {
+        messages.connectedService as? MatrixMessagesService
+    }
+    #endif
     // The real mailbox, for whoever owns this device's key. `mailWiring` holds that account's vault.
     @State private var mail: MailAccountModel
     @State private var mailWiring: MailWiring
@@ -161,6 +177,13 @@ struct RootView: View {
     /// `body` is split in two so the compiler can type-check each half in reasonable time.
     var body: some View {
         launchAndSignIn
+        #if os(iOS) && canImport(MatrixRustSDK) && canImport(WebRTC)
+        .environment(\.startVoiceCall, voiceService == nil ? nil : dialVoiceChat)
+        .task(id: VoiceWatchKey(service: voiceService.map(ObjectIdentifier.init), rooms: Set(voiceChats.map(\.id)))) {
+            await voiceCalls.watch(voiceService, chats: voiceChats)
+        }
+        .modifier(VoiceCallPresentation(calls: voiceCalls, showingCalls: open == .calls))
+        #endif
         // Every minute while Totality is in front, the modules fetch what's new, so opening one never waits.
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
@@ -346,9 +369,13 @@ struct RootView: View {
         connectSync()
         // All local & network warm-ups race together under `LaunchView.limit` so nothing hangs launch.
         var jobs: [@MainActor () async -> Void] = []
+        var needsMessages = !homeChoices.removed.contains(.messages)
+        #if os(iOS) && canImport(MatrixRustSDK) && canImport(WebRTC)
+        needsMessages = needsMessages || !homeChoices.removed.contains(.calls)
+        #endif
         jobs.append { await openContentForHome(loadPhotos: false) }
         jobs.append { await syncHomeLayoutFromAccount() }
-        if !homeChoices.removed.contains(.messages) { jobs.append { await messages.connect() } }
+        if needsMessages { jobs.append { await messages.connect() } }
         jobs.append { await warmMailForHome() }
         jobs.append { await openSocialForHome() }
         if photos.phase == .loading { jobs.append { await photos.load() } }
@@ -533,6 +560,10 @@ struct RootView: View {
             MailHomeView(model: mail.current, onClose: { open = nil }, onOpenLink: openInWeb)
                 .id(ObjectIdentifier(mail.current))
                 .task(id: ObjectIdentifier(mail.current)) { mail.current.people = registry?.people }
+        #if os(iOS) && canImport(MatrixRustSDK) && canImport(WebRTC)
+        case .calls:
+            VoiceCallsHome(calls: voiceCalls, chats: voiceChats, ready: voiceService != nil) { open = nil }
+        #endif
         case .messages:
             MessagesHomeView(model: messages, onClose: { open = nil }, onOpenAccount: { showingAccount = true })
         case .photos:
@@ -1067,6 +1098,9 @@ struct RootView: View {
             if reader?.shared != nil, let registry { reader?.shared = makeSharedDocs(directory: registry.profiles) }
             if open == .social { open = nil }
             Task {
+                #if os(iOS) && canImport(MatrixRustSDK) && canImport(WebRTC)
+                await voiceCalls.watch(nil, chats: [])
+                #endif
                 await messages.checkAccount()
                 // The last account's reminders stop ringing here. They come back when it signs in again.
                 await SystemTaskReminders.shared.replace(with: [], places: [])
@@ -1392,3 +1426,10 @@ private struct AskTotalityTarget: Identifiable {
     let id = UUID()
     let context: AIAskContext?
 }
+
+#if os(iOS) && canImport(MatrixRustSDK) && canImport(WebRTC)
+private struct VoiceWatchKey: Equatable {
+    let service: ObjectIdentifier?
+    let rooms: Set<String>
+}
+#endif

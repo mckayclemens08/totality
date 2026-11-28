@@ -40,7 +40,7 @@ public struct ModuleEntry: Identifiable, Sendable, Equatable {
         .init(id: .money, name: "Money", systemImage: "dollarsign.circle",
               summary: "Your accounts and spending, read-only.", keeps: "Your accounts"),
         .init(id: .calls, name: "Calls", systemImage: "phone",
-              summary: "Voice and video calls.", keeps: "Your call history"),
+              summary: "One-to-one voice calls.", keeps: "Your private conversations"),
         .init(id: .social, name: "Social", systemImage: "person.2",
               summary: "Posts from people you follow.", keeps: "Your posts"),
         .init(id: .web, name: "Web", systemImage: "globe",

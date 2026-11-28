@@ -238,6 +238,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
         switch like.kind {
         case .message(let message):
             switch message.msgType {
+            case .other(let type, _) where type == "app.totality.voice.v1": return nil
             case .image: return "Photo"
             case .video: return "Video"
             case .audio: return "Audio"
