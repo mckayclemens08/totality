@@ -48,10 +48,12 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     case hike
     /// Sealed Music library catalog, playlists, and OpenSubsonic server metadata.
     case musicCatalog = "music_catalog"
+    /// A device-only reference to a publisher URL. It never enters the content_objects enum.
+    case newsArticle = "news_article"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {
-    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks, weather, clock, contacts, hiking
+    case reader, calendar, mail, player, photos, money, ai, messages, calls, social, web, tasks, weather, clock, contacts, hiking, news
 }
 
 /// Where an object's key lives, matching `content_objects.key_ref`.

@@ -93,6 +93,7 @@ public enum KeyPurpose: String, Sendable, Hashable {
     case musicArt = "music-art"
     /// Local offline music cache index.
     case musicCache = "music-cache"
+    case news = "news-device"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.

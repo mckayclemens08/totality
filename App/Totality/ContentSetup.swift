@@ -12,6 +12,7 @@ import TotalityPhotos
 import TotalityReader
 import TotalityTasks
 import TotalityHiking
+import TotalityNews
 import TotalityWeather
 import TotalityWeb
 
@@ -102,7 +103,7 @@ enum ContentSetup {
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
         googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore, home: FileBlobStore,
         weather: FileBlobStore, weatherCache: FileBlobStore, clock: FileBlobStore, contacts: FileBlobStore,
-        hiking: FileBlobStore, ai: FileBlobStore, music: FileBlobStore
+        hiking: FileBlobStore, ai: FileBlobStore, music: FileBlobStore, news: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -131,7 +132,8 @@ enum ContentSetup {
             // Ask Totality grants, activity log and local memory, sealed on device (issue 252).
             try FileBlobStore(directory: base.appendingPathComponent("AI", isDirectory: true)),
             // Music catalog, playlists, and chunk-sealed uploaded tracks & cover art.
-            try FileBlobStore(directory: base.appendingPathComponent("Music", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Music", isDirectory: true)),
+            try FileBlobStore(directory: base.appendingPathComponent("News", isDirectory: true))
         )
     }
 
@@ -169,6 +171,7 @@ enum ContentSetup {
             SealedArea(store: stores.hiking, purposes: HikeLog.sealedPurposes),
             SealedArea(store: stores.ai, purposes: AIVault.sealedPurposes),
             SealedArea(files: stores.music, purposes: MusicVault.sealedPurposes, chunked: MusicVault.chunkedPurposes),
+            SealedArea(store: stores.news, purposes: NewsLibrary.sealedPurposes),
         ])
     }
 
@@ -186,7 +189,7 @@ enum ContentSetup {
     ) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, tasks: TasksModel, areas: [any SyncArea],
         registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook, weather: WeatherModel, clock: ClockModel,
-        contacts: ContactsModel, hiking: HikingModel, ai: AIModel, music: MusicModel
+        contacts: ContactsModel, hiking: HikingModel, ai: AIModel, music: MusicModel, news: NewsModel
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -238,6 +241,7 @@ enum ContentSetup {
         #else
         let hiking = HikingModel(log: hikeLog, location: nil)
         #endif
+<<<<<<< HEAD
         let aiVault = AIVault(store: stores.ai, rootKey: rootKey)
         let modelsDirectory = try base().appendingPathComponent("Models", isDirectory: true)
         let ai = AIModel(vault: aiVault, modelStore: LocalOpenModelStore.live(directory: modelsDirectory))
@@ -257,6 +261,7 @@ enum ContentSetup {
             providers: musicProviders,
             audioFocus: audioFocus
         )
+        let news = NewsModel(library: NewsLibrary(store: stores.news, rootKey: rootKey))
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
@@ -287,6 +292,7 @@ enum ContentSetup {
             HikingModule(log: hikeLog),
             AIModule(),
             MusicModule(vault: musicVault, refresh: { await refresh(.player) }),
+            news,
         ], profiles: AccountSetup.profiles)
         contacts.profiles = AccountSetup.profiles
         contacts.taskMaker = registry.taskMaker
@@ -322,7 +328,8 @@ enum ContentSetup {
             contacts,
             hiking,
             ai,
-            music
+            music,
+            news
         )
     }
 
