@@ -73,6 +73,7 @@ public struct ContactsHomeView: View {
                 HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
             Spacer(minLength: 0)
+            AskTotalityButton(context: AIAskContext(id: "contacts.home", module: .contacts, title: "Contacts"))
             if model.phase == .ready, !model.isEmpty {
                 HeaderButton("Search contacts", systemImage: "magnifyingglass") { showsSearch = true }
                 HeaderMenu("More", systemImage: "ellipsis") {

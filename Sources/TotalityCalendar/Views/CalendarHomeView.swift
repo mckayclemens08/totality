@@ -103,6 +103,7 @@ public struct CalendarHomeView: View {
                 HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
             Spacer(minLength: 0)
+            AskTotalityButton(context: AIAskContext(id: "calendar.home", module: .calendar, title: "Calendar"))
             if model.phase == .ready {
                 if !model.isShowingToday {
                     HeaderPill("Today") {

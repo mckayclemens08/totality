@@ -166,6 +166,15 @@ struct TaskRows: View {
             // A long press opens this menu, and holding and moving drags instead, as everywhere on iOS.
             .contextMenu {
                 if let selection, !selection.isOn {
+                    AskTotalityMenuButton(context: AIAskContext(
+                        id: task.id.uuidString,
+                        module: .tasks,
+                        title: task.title,
+                        detail: task.deadline.map { "Due \($0.month)/\($0.day)" }
+                            ?? task.when.map { "\($0.month)/\($0.day)" }
+                            ?? "Open",
+                        body: task.notes
+                    ))
                     Button("Select several", systemImage: "checkmark.circle") {
                         withMotion(Motion.snappy) { selection.start(with: task.id) }
                     }

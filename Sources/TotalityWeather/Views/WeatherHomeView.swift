@@ -64,6 +64,7 @@ public struct WeatherHomeView: View {
                 HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
             Spacer(minLength: 0)
+            AskTotalityButton(context: AIAskContext(id: "weather.home", module: .weather, title: "Weather"))
             if model.phase == .ready {
                 HeaderButton("Map", systemImage: "map") { showsMap = true }
                 HeaderButton("Weather settings", systemImage: "slider.horizontal.3") { showsSettings = true }

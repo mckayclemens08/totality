@@ -123,4 +123,62 @@ import TotalityCore
     let since = now.addingTimeInterval(-60)
     #expect(MessagesNotifications.notes(chats: [chat], requests: [], since: since).count == 1)
     #expect(MessagesNotifications.notes(chats: [chat], requests: [], since: since, muted: [chat.id]).isEmpty)
+    // Broadcast channels (isGroup + isChannel) also ring when a post arrives after cursor.
+    let channel = ChatSummary(
+        id: "!ch:usetotality.com", title: "Updates", lastMessage: "New hike", lastActivity: now, unread: 1,
+        isGroup: true, lastSender: "@carter:usetotality.com", isChannel: true
+    )
+    let notes = MessagesNotifications.notes(chats: [channel], requests: [], since: since)
+    #expect(notes.count == 1)
+    #expect(notes[0].title == "carter in Updates")
+}
+
+private final class CursorTestService: MessagesService, @unchecked Sendable {
+    let account = "a"
+    let userID = "@a:usetotality.com"
+    private let lock = NSLock()
+    private var onChats: (@Sendable ([ChatSummary]) -> Void)?
+    func observeChats(_ onChange: @escaping @Sendable ([ChatSummary]) -> Void) async throws {
+        lock.withLock { onChats = onChange }
+        onChange([])
+    }
+    func observeConnection(_ onChange: @escaping @Sendable (Connection) -> Void) { onChange(.online) }
+    func push(_ chats: [ChatSummary]) { lock.withLock { onChats }?(chats) }
+    func accept(_ chat: String) async throws {}
+    func decline(_ chat: String) async throws {}
+    func block(_ chat: String) async throws {}
+    func startChat(with username: String) async throws -> String { "" }
+    func openChat(_ chat: String) async throws -> any ChatChannel { fatalError() }
+    func startGroup(with usernames: [String], name: String?, photo: GroupPhoto?) async throws -> String { "" }
+    func groupPhoto(_ location: String) async throws -> Data { Data() }
+    func block(person: String, leaving chat: String?) async throws {}
+    func blocked() async throws -> [String] { [] }
+    func unblock(_ person: String) async throws {}
+    func leave(_ chat: String) async throws {}
+    func startChannel(name: String, admins: [String]) async throws -> String { "" }
+    func invite(_ usernames: [String], toChannel chat: String) async throws {}
+    func settleKeys(recoverySecret: String?) async -> MessageKeys { .backedUp }
+    func stop() async {}
+}
+
+@MainActor @Test func primingCursorPreventsSwallowingFirstPushNotification() async {
+    let suite = UserDefaults(suiteName: "chat-info-prime-\(UUID().uuidString)")!
+    let t0 = Date(timeIntervalSince1970: 1_795_000_000)
+    let t1 = t0.addingTimeInterval(30)
+    final class ClockBox: @unchecked Sendable { var now = Date() }
+    let box = ClockBox()
+    box.now = t0
+    let service = CursorTestService()
+    let model = MessagesModel(account: { "a" }, connector: { _ in service })
+    await model.connect()
+    let source = MessagesNotifications(model: model, defaults: suite, clock: { box.now })
+    source.primeCursorIfNeeded()
+    box.now = t1
+    service.push([ChatSummary(
+        id: "!dm:usetotality.com", title: "Carter", lastMessage: "Hey!", lastActivity: t1, unread: 1,
+        isGroup: false, lastSender: "@carter:usetotality.com"
+    )])
+    let alerts = await source.newNotifications()
+    #expect(alerts.count == 1)
+    #expect(alerts[0].title == "Carter")
 }

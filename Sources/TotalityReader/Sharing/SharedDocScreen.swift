@@ -42,11 +42,11 @@ struct SharedDocScreen: View {
                     Menu {
                         Button("People", systemImage: "person.2") { showsPeople = true }
                         if let doc, doc.isComplete {
-                            Button("Keep a private copy", systemImage: "doc.on.doc") {
+                            Button("Save to my Reader", systemImage: "doc.badge.plus") {
                                 Task {
                                     await flushAndSave()
                                     if await model.keepPrivateCopy(title: doc.title, text: doc.text) != nil {
-                                        shared.notice = "A private copy is at the top of your Reader."
+                                        shared.notice = "Saved to the top of your Reader."
                                     }
                                 }
                             }
@@ -107,28 +107,11 @@ struct SharedDocScreen: View {
                 detail: "Its owner may have stopped sharing it, or removed you."
             )
         } else if let doc, !doc.isComplete {
-            VStack(spacing: Space.s3) {
-                ReaderMessage(
-                    systemImage: "hourglass",
-                    title: "Waiting for a copy",
-                    detail: shared.isOwner(room)
-                        ? "This device can't open the doc it shared yet, so it asked the people in it for a copy. It opens when one of them next has Totality open."
-                        : "You joined after this doc was written, so this device asked the people in it for a copy. It opens when one of them next has Totality open."
-                )
-                if let copy = model.privateCopy(of: doc) {
-                    // The private copy it was shared from is still in Recently Deleted: bring it back.
-                    Button("Restore your copy") {
-                        Task {
-                            await model.restore(copy.item)
-                            shared.notice = "\(copy.item.displayTitle) is back in your Reader."
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .font(Typeface.callout)
-                    .foregroundStyle(theme.accent.color)
-                    .padding(.bottom, Space.s6)
-                }
-            }
+            ReaderMessage(
+                systemImage: "hourglass",
+                title: "Waiting for doc",
+                detail: "You joined after this doc was shared. It opens when an editor next has Totality open."
+            )
         } else if canEdit {
             VStack(alignment: .leading, spacing: Space.s2) {
                 TextField("Title", text: $title)

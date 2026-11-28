@@ -22,6 +22,8 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
     private var roomListResult: RoomListEntriesWithDynamicAdaptersResult?
     private var rooms: [Room] = []
     private var summaryRound = 0
+    private var pusherDeviceKey: String?
+    private var isOnline = false
 
     private init(account: String, client: Client, sync: SyncService) throws {
         self.account = account
@@ -60,6 +62,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
             await sync.start()
             let service = try MatrixMessagesService(account: account, client: client, sync: sync)
             latest = service
+            await service.ensureEncryptedPushRules()
             if let device = await MainActor.run(body: { PushSetup.device }) { await service.setPusher(device: device) }
             return service
         } catch {
@@ -74,11 +77,41 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
     /// Registers this phone with the homeserver as a pusher (issue 232), so a new message or Friends post
     /// wakes it through `server/push`. `event_id_only` keeps message text out of the note.
     func setPusher(device: Data) async {
-        try? await client.setPusher(
-            identifiers: PusherIdentifiers(pushkey: PushClient.hex(device), appId: "app.totality.ios"),
-            kind: .http(data: HttpPusherData(url: Self.pushGateway, format: .eventIdOnly, defaultPayload: nil)),
-            appDisplayName: "Totality", deviceDisplayName: Self.deviceName, profileTag: nil, lang: "en", append: false
-        )
+        let hex = PushClient.hex(device)
+        if lock.withLock({ pusherDeviceKey == hex }) { return }
+        do {
+            try await client.setPusher(
+                identifiers: PusherIdentifiers(pushkey: hex, appId: "app.totality.ios"),
+                kind: .http(data: HttpPusherData(url: Self.pushGateway, format: .eventIdOnly, defaultPayload: nil)),
+                appDisplayName: "Totality", deviceDisplayName: Self.deviceName, profileTag: nil, lang: "en", append: false
+            )
+            lock.withLock { pusherDeviceKey = hex }
+        } catch {
+            lock.withLock { pusherDeviceKey = nil }
+        }
+    }
+
+    /// Ensures encrypted DMs, groups, channels, and invites notify so Tuwunel calls the push gateway.
+    private func ensureEncryptedPushRules() async {
+        let notifications = await client.getNotificationSettings()
+        if await notifications.getDefaultRoomNotificationMode(isEncrypted: true, isOneToOne: true) != .allMessages {
+            try? await notifications.setDefaultRoomNotificationMode(isEncrypted: true, isOneToOne: true, mode: .allMessages)
+        }
+        if await notifications.getDefaultRoomNotificationMode(isEncrypted: true, isOneToOne: false) != .allMessages {
+            try? await notifications.setDefaultRoomNotificationMode(isEncrypted: true, isOneToOne: false, mode: .allMessages)
+        }
+        if (try? await notifications.isInviteForMeEnabled()) == false {
+            try? await notifications.setInviteForMeEnabled(enabled: true)
+        }
+    }
+
+    func wakeSync() async {
+        let online = lock.withLock { isOnline }
+        if !online { await sync.start() }
+        if lock.withLock({ pusherDeviceKey == nil }),
+           let device = await MainActor.run(body: { PushSetup.device }) {
+            await setPusher(device: device)
+        }
     }
 
     func stop() async {
@@ -94,14 +127,25 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
 
     func observeConnection(_ onChange: @escaping @Sendable (Connection) -> Void) {
         let client = client
-        let handle = sync.state(listener: SyncStateListener { state in
+        let handle = sync.state(listener: SyncStateListener { [weak self] state in
             switch state {
             case .running:
+                self?.lock.withLock { self?.isOnline = true }
                 onChange(.online)
                 // A queue that hit an error while offline stays paused until it's switched back on.
-                Task { await client.enableAllSendQueues(enable: true) }
-            case .offline, .error: onChange(.offline)
-            case .idle, .terminated: onChange(.connecting)
+                Task {
+                    await client.enableAllSendQueues(enable: true)
+                    if let self, self.lock.withLock({ self.pusherDeviceKey == nil }),
+                       let device = await MainActor.run(body: { PushSetup.device }) {
+                        await self.setPusher(device: device)
+                    }
+                }
+            case .offline, .error:
+                self?.lock.withLock { self?.isOnline = false }
+                onChange(.offline)
+            case .idle, .terminated:
+                self?.lock.withLock { self?.isOnline = false }
+                onChange(.connecting)
             }
         })
         lock.withLock { handles.append(handle) }
@@ -273,6 +317,7 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
 
     func settleKeys(recoverySecret secret: String?) async -> MessageKeys {
         let encryption = client.encryption()
+        await encryption.waitForE2eeInitializationTasks()
         var state = encryption.recoveryState()
         for _ in 0..<50 where state == .unknown {
             try? await Task.sleep(for: .milliseconds(200))
@@ -300,8 +345,15 @@ final class MatrixMessagesService: MessagesService, @unchecked Sendable {
                 // Another device set it up: opening it brings the keys here and verifies this device.
                 do {
                     try await encryption.recover(recoveryKey: secret)
+                } catch let error as RecoveryError {
+                    switch error {
+                    case .Client:
+                        return .failed("Messages couldn't open its key backup right now. It'll try again next time.")
+                    case .SecretStorage, .Import, .BackupExistsOnServer:
+                        return .doesntOpen
+                    }
                 } catch {
-                    return .doesntOpen
+                    return .failed("Messages couldn't open its key backup right now. It'll try again next time.")
                 }
             case .unknown:
                 return .failed("Messages couldn't check its key backup. It'll try again next time.")

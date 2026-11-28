@@ -153,6 +153,7 @@ public struct HikingHomeView: View {
                 HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
             }
             Spacer(minLength: 0)
+            AskTotalityButton(context: AIAskContext(id: "hiking.home", module: .hiking, title: "Hiking"))
             if model.phase == .ready {
                 HeaderButton("Statistics", systemImage: "chart.bar.fill") { showsStatistics = true }
                 if model.recording != nil {

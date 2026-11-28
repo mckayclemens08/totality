@@ -27,6 +27,9 @@ final class FakeSocialWorld: @unchecked Sendable {
     var oldFiles: [String: Data] = [:]
     /// Set to make removals fail, as if the server were unreachable.
     var removalsFail = false
+    /// Set to make `stories()` fail, or omit `me`'s newest own story on refetch (simulating replica/sync lag).
+    var storiesFail = false
+    var omitLatestOwnStory = false
     /// Public stories, and who opened any story (public or encrypted) by its ID.
     var stories: [UUID: SocialStory] = [:]
     var storyViews: [UUID: Set<String>] = [:]
@@ -299,11 +302,18 @@ struct FakeSocial: SocialServer {
 
     // As `social_stories` and friends do: public only, the author's own folder on the story shelf, no keys.
     func stories() async throws -> [SocialStory] {
-        world.lock.withLock {
+        try world.lock.withLock {
+            if world.storiesFail { throw SocialError.refused("Stories temporarily unavailable.") }
             let followed = Set(world.follows.filter { $0[0] == me }.map { $0[1] })
-            return world.stories.values.filter { $0.author == me || followed.contains($0.author) }
-                .map { var s = $0; s.viewed = world.storyViews[s.id]?.contains(me) ?? false; return s }
-                .sorted { $0.date < $1.date }
+            let latestOwn = world.omitLatestOwnStory
+                ? world.stories.values.filter { $0.author == me }.max(by: { $0.date < $1.date })?.id
+                : nil
+            return world.stories.values.filter { story in
+                if story.id == latestOwn { return false }
+                return story.author == me || followed.contains(story.author)
+            }
+            .map { var s = $0; s.viewed = world.storyViews[s.id]?.contains(me) ?? false; return s }
+            .sorted { $0.date < $1.date }
         }
     }
 

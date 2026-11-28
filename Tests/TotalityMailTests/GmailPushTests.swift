@@ -57,15 +57,16 @@ private func defaults() -> UserDefaults {
         #expect(notes.map(\.body) == ["mckay.clemens@gmail.com"])
     }
 
-    /// The Fossil promotion (TestFlight build 11): Gmail put it in Promotions, so the Inbox never listed
-    /// it, yet it rang. Only what the Inbox lists rings now, so the alert always opens to it.
-    @Test func mailInAGmailTabDoesNotRing() {
+    /// Everything in the Inbox rings, including Gmail's Promotions, Social and Updates tabs (owner, 2026-11-26).
+    @Test func mailInAGmailTabStillRings() {
         var promotion = message("Tick Tock: Don't miss these prices", from: MailAddress(name: "Fossil", address: "fossil@email.fossil.com"))
         promotion.outsideLabels = ["CATEGORY_PROMOTIONS"]
+        var social = message("Maya tagged you in a photo", from: MailAddress(name: "Instagram", address: "no-reply@mail.instagram.com"))
+        social.outsideLabels = ["CATEGORY_SOCIAL"]
         let primary = message("Kitchen drawings")
-        let after = mailbox([promotion, primary])
+        let after = mailbox([promotion, social, primary])
         let notes = NewMailNote.notes(before: mailbox([]), after: after, details: true)
-        #expect(notes.map(\.id) == [primary.id])
+        #expect(Set(notes.map(\.id)) == [primary.id, social.id, promotion.id])
         let listed = after.conversations(in: .inbox).map(\.id)
         #expect(notes.allSatisfy { listed.contains($0.conversationID) }, "Every alert opens to a conversation the Inbox shows")
     }

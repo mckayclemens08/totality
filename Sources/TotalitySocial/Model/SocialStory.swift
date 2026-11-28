@@ -117,14 +117,16 @@ public struct StoryRing: Identifiable, Hashable, Sendable {
     /// then those you've seen.
     public static func rings(_ stories: [SocialStory], me: String?, now: Date = Date()) -> [StoryRing] {
         let live = stories.filter { $0.isLive(at: now) }
-        let byAuthor = Dictionary(grouping: live, by: \.author)
-        let rings = byAuthor.map { author, list in
+        let meKey = me?.lowercased()
+        let byAuthor = Dictionary(grouping: live, by: { $0.author.lowercased() })
+        let rings = byAuthor.map { _, list in
             let sorted = list.sorted { $0.date < $1.date }
+            let author = sorted.last?.author ?? list[0].author
             return StoryRing(author: author, name: sorted.last?.displayName ?? author, stories: sorted)
         }
         return rings.sorted { a, b in
-            if a.author == me { return b.author != me }
-            if b.author == me { return false }
+            if a.author.lowercased() == meKey { return b.author.lowercased() != meKey }
+            if b.author.lowercased() == meKey { return false }
             if a.allViewed != b.allViewed { return !a.allViewed }
             return (a.stories.last?.date ?? .distantPast) > (b.stories.last?.date ?? .distantPast)
         }

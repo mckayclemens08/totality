@@ -158,6 +158,11 @@ public final class MessagesModel {
         if mine == generation { keys = result }
     }
 
+    /// Ensures the sync service is running when woken in the background by a push notification.
+    public func wakeSync() async {
+        await service?.wakeSync()
+    }
+
     /// Stops this account's connection once someone else, or no one, is signed in, so a signed-out
     /// account's chats don't keep syncing or showing.
     public func checkAccount() async {

@@ -169,9 +169,8 @@ public struct NewMailNote: Equatable, Sendable {
         "New email \u{00B7} \(provider.name)"
     }
 
-    /// Unread Gmail mail that the Inbox lists in `after` but wasn't in `before`, newest first. Only what
-    /// the Inbox lists: mail Gmail sorted into Promotions, Social or Updates sits in that tab, so an alert
-    /// for it would open to an Inbox without it (owner, 2026-11-26). With `details` off, each just says
+    /// Unread Gmail mail that the Inbox lists in `after` but wasn't in `before`, newest first. Includes
+    /// all Inbox mail (Primary, Promotions, Social, Updates). With `details` off, each just says
     /// "New email" and which account.
     public static func notes(before: Mailbox, after: Mailbox, details: Bool, most: Int = 5) -> [NewMailNote] {
         let known = Set(before.messages.map(\.id))

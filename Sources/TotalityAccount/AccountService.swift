@@ -51,6 +51,14 @@ public protocol AccountService: Sendable {
     /// Makes sure this account has its Matrix address, so other people can find and message it before it
     /// ever opens Messages. Safe to repeat. Returns the username the Matrix server set up, from its answer.
     func setUpMessagesAccount() async throws -> String
+    /// Reads and saves the sign-in-linked Home grid layout per device kind (no recovery key needed).
+    func fetchHomeLayout(deviceKind: String) async throws -> SyncedHomeLayout?
+    func saveHomeLayout(_ layout: SyncedHomeLayout, deviceKind: String) async throws
+}
+
+public extension AccountService {
+    func fetchHomeLayout(deviceKind: String) async throws -> SyncedHomeLayout? { nil }
+    func saveHomeLayout(_ layout: SyncedHomeLayout, deviceKind: String) async throws {}
 }
 
 public enum SignOutResult: Equatable, Sendable {
@@ -185,6 +193,75 @@ public struct SupabaseAccountService: AccountService {
             if jpeg != nil, let previous { _ = try? await photos.remove(paths: [previous]) }
             return try key.map(photoURL)
         }
+    }
+
+    public func fetchHomeLayout(deviceKind: String) async throws -> SyncedHomeLayout? {
+        guard let owner = client.auth.currentSession?.user.id else { return nil }
+        do {
+            let rows: [HomeLayoutRow] = try await client.from("account_home_layouts")
+                .select("layout_json, updated_at")
+                .eq("owner_id", value: owner.uuidString.lowercased())
+                .eq("device_kind", value: deviceKind)
+                .limit(1)
+                .execute()
+                .value
+            guard let row = rows.first else { return nil }
+            let stamp = Self.parseISO8601(row.updated_at) ?? row.layout_json.updatedAt ?? Date()
+            return SyncedHomeLayout(
+                tiles: row.layout_json.tiles,
+                choices: row.layout_json.choices ?? HomeChoices(),
+                updatedAt: stamp
+            )
+        } catch {
+            // Live servers without 20261129000001_account_home_layout.sql fall back silently to local layout.
+            return nil
+        }
+    }
+
+    public func saveHomeLayout(_ layout: SyncedHomeLayout, deviceKind: String) async throws {
+        guard client.auth.currentSession?.user.id != nil else { return }
+        let params = SaveHomeLayoutParams(
+            p_device_kind: deviceKind,
+            p_layout: LayoutPayload(tiles: layout.tiles, choices: layout.choices, updatedAt: layout.updatedAt),
+            p_updated_at: Self.formatISO8601(layout.updatedAt)
+        )
+        do {
+            _ = try await client.rpc("save_home_layout", params: params).execute()
+        } catch {
+            // Safe no-op when the live database doesn't yet have the migration.
+        }
+    }
+
+    private struct LayoutPayload: Codable, Sendable {
+        let tiles: [SyncedHomeLayout.Tile]
+        let choices: HomeChoices?
+        let updatedAt: Date?
+    }
+
+    private struct HomeLayoutRow: Decodable, Sendable {
+        let layout_json: LayoutPayload
+        let updated_at: String
+    }
+
+    private struct SaveHomeLayoutParams: Encodable, Sendable {
+        let p_device_kind: String
+        let p_layout: LayoutPayload
+        let p_updated_at: String
+    }
+
+    private static func formatISO8601(_ date: Date) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.string(from: date)
+    }
+
+    private static func parseISO8601(_ value: String) -> Date? {
+        let withFrac = ISO8601DateFormatter()
+        withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFrac.date(from: value) { return d }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: value)
     }
 
     public func webPageIsPublished() async throws -> Bool {

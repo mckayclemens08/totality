@@ -1,4 +1,5 @@
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// Which actions make sense where. Anything sitting in Trash or Spam goes back rather than further.
@@ -65,6 +66,18 @@ struct MailActionButtons: View {
         let place = model.place
         let anyUnread = conversations.contains(where: \.isUnread)
         let anyStarred = conversations.contains(where: \.isStarred)
+        if conversations.count == 1, let conversation = conversations.first, !conversation.isUnreadable {
+            let from = conversation.sender(me: model.mailbox.address)
+            AskTotalityMenuButton(context: AIAskContext(
+                id: conversation.id.uuidString,
+                module: .mail,
+                title: conversation.subject,
+                detail: from.displayName,
+                body: conversation.latest.preview,
+                date: conversation.latest.date,
+                metadata: ["sender": from.address]
+            ))
+        }
         if model.canAddToTasks, conversations.count == 1, let conversation = conversations.first, !conversation.isUnreadable {
             Button("Add to Tasks", systemImage: "checkmark.circle") {
                 Task { await model.addToTasks(conversation, waiting: false) }

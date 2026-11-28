@@ -66,7 +66,8 @@ struct StoryRowView: View {
     var body: some View {
         let theme = Theme.current
         let rings = model.storyRings
-        let mine = model.me.flatMap { me in rings.first { $0.author == me } }
+        let meKey = model.me?.lowercased()
+        let mine = meKey.flatMap { key in rings.first { $0.author.lowercased() == key } }
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: Space.s3) {
                 VStack(spacing: Space.s1) {
@@ -92,7 +93,7 @@ struct StoryRowView: View {
                     Text("Your story").font(Typeface.micro).foregroundStyle(theme.textSecondary.color).lineLimit(1)
                 }
                 .frame(width: Space.s8)
-                ForEach(rings.filter { $0.author != model.me }) { ring in
+                ForEach(rings.filter { $0.author.lowercased() != meKey }) { ring in
                     Button { onOpen(ring.author) } label: {
                         VStack(spacing: Space.s1) {
                             StoryFace(photo: model.photos[ring.author], name: ring.name, ring: ring, diameter: Space.s7 + Space.s1)

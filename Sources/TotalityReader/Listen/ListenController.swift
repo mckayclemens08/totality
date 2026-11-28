@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TotalityCore
 
 public struct ListenTrack: Identifiable, Sendable, Equatable {
     public let id: UUID
@@ -51,6 +52,14 @@ public final class ListenController {
 
     /// Called with the offset to resume from whenever that changes.
     public var onPosition: ((UUID, Int) -> Void)?
+    /// Shared audio-focus coordinator so playing Music cleanly pauses Listen and vice-versa.
+    public weak var audioFocus: AudioTransportCoordinator? {
+        didSet {
+            audioFocus?.registerPauseHandler(for: .reader) { [weak self] in
+                self?.pauseFromCoordinator()
+            }
+        }
+    }
 
     private let engine: any SpeechEngine
     private var restartOnResume = false
@@ -112,6 +121,14 @@ public final class ListenController {
         opening = nil
         current = track
         sentence = track.script.index(at: track.startOffset)
+        audioFocus?.claimFocus(for: .reader, summary: NowPlayingSummary(
+            module: .reader,
+            title: track.title,
+            subtitle: "Listen",
+            badge: .readerListen,
+            isPlaying: true,
+            progress: progress
+        ))
         speakCurrent()
     }
 
@@ -166,6 +183,12 @@ public final class ListenController {
         sentence = 0
         isPaused = false
         restartOnResume = false
+        audioFocus?.releaseFocus(for: .reader)
+    }
+
+    private func pauseFromCoordinator() {
+        guard current != nil, !isPaused else { return }
+        togglePause()
     }
 
     /// Drops an item that no longer exists, so its text does not stay in memory or keep playing.

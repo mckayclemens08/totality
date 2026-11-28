@@ -10,7 +10,7 @@ public final class MessagesNotifications: NotificationSource {
     public static let request = NotificationKind(module: .messages, key: "request", name: "Message requests", detail: "A first message from someone new")
 
     /// How long a wake waits for the first sync to bring the newest messages in.
-    static let settle: Duration = .seconds(6)
+    static let settle: Duration = .seconds(10)
 
     public let module = ModuleID.messages
     public let kinds = [message, request]
@@ -27,12 +27,18 @@ public final class MessagesNotifications: NotificationSource {
         self.clock = clock
     }
 
+    /// Initializes the notification cursor on foreground startup so the first background push doesn't
+    /// get dropped setting the baseline.
+    public func primeCursorIfNeeded() {
+        if cursor.date == nil { cursor.date = clock() }
+    }
+
     public func newNotifications() async -> [AppNotification] {
         guard let since = cursor.date else {
             cursor.date = clock()
             return []
         }
-        if model.phase != .ready { await model.connect() }
+        if model.phase != .ready { await model.connect() } else { await model.wakeSync() }
         guard model.phase == .ready else { return [] }
         // The sync that just started may take a moment to bring in what woke the phone.
         let deadline = ContinuousClock.now + Self.settle

@@ -45,6 +45,16 @@ public final class AccountModel {
     public private(set) var isChangingWebPage = false
     /// Why the last change to the web page didn't happen, if it didn't.
     public private(set) var webPageProblem: String?
+    /// Sign-in-linked Home grid layout for this device kind, loaded straight after sign-in without recovery key.
+    public private(set) var syncedHomeLayout: SyncedHomeLayout?
+
+    public static var currentDeviceKind: String {
+        #if os(iOS)
+        "iphone"
+        #else
+        "mac"
+        #endif
+    }
 
     /// Nil when this build has nothing to back up with.
     public let backup: BackupModel?
@@ -93,6 +103,20 @@ public final class AccountModel {
         let username = await service.currentUsername()
         guard phase == .loading else { return }
         phase = username.map { .signedIn(username: $0) } ?? .signedOut
+    }
+
+    /// Re-checks the saved session when a previously signed-in device couldn't read it on first try
+    /// (for example if the Keychain wasn't ready yet at launch). Never overrides an active sign-in or
+    /// forces the sign-in screen back.
+    public func restoreIfNeeded() async {
+        if phase == .loading {
+            await restore()
+            return
+        }
+        guard phase == .signedOut, hasSignedInHere else { return }
+        if let username = await service.currentUsername(), phase == .signedOut {
+            phase = .signedIn(username: username)
+        }
     }
 
     public func load() async {
@@ -268,6 +292,25 @@ public final class AccountModel {
         profileFailed = false
         webPage = nil
         webPageProblem = nil
+        syncedHomeLayout = nil
+    }
+
+    /// Reads the sign-in-linked Home layout from the account server (no recovery key needed).
+    public func loadHomeLayout(deviceKind: String = AccountModel.currentDeviceKind) async {
+        let requestedFor = phase
+        guard case .signedIn = requestedFor else { return }
+        if let remote = try? await service.fetchHomeLayout(deviceKind: deviceKind), phase == requestedFor {
+            syncedHomeLayout = remote
+        }
+    }
+
+    /// Saves the sign-in-linked Home layout to the account server for future devices on sign-in.
+    public func saveHomeLayout(_ layout: SyncedHomeLayout, deviceKind: String = AccountModel.currentDeviceKind) async {
+        guard case .signedIn = phase else { return }
+        if syncedHomeLayout == nil || layout.updatedAt >= (syncedHomeLayout?.updatedAt ?? .distantPast) {
+            syncedHomeLayout = layout
+        }
+        try? await service.saveHomeLayout(layout, deviceKind: deviceKind)
     }
 
     private static func cleaned(_ text: String) -> String? {
@@ -295,6 +338,7 @@ public final class AccountModel {
         await registerDevice()
         await loadProfile()
         await loadWebPage()
+        await loadHomeLayout()
         await setUpMessagesIfNeeded()
     }
 

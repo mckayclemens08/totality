@@ -171,6 +171,15 @@ public final class HomeChoicesModel {
         book = nil
     }
 
+    /// Merges choices restored at sign-in into this device's choices, keeping whichever timestamp is newer per module.
+    public func applySynced(_ remote: HomeChoices) async {
+        let merged = HomeChoices.merged(remote, choices)
+        if merged != choices {
+            choices = merged
+            await keep()
+        }
+    }
+
     /// Reads the record again, after a sync may have brought another device's choices.
     public func reload() async {
         guard let book else { return }
@@ -188,6 +197,30 @@ public final class HomeChoicesModel {
     private func save() {
         guard let data = try? JSONEncoder().encode(Cached(choices: choices, owner: owner)) else { return }
         defaults.set(data, forKey: Self.cacheKey)
+    }
+}
+
+/// Sign-in-linked Home grid layout per device kind (module names, tile sizes, and hidden module timestamps —
+/// never personal content), so a new device restores Home right after sign-in without waiting for the recovery key.
+public struct SyncedHomeLayout: Codable, Equatable, Sendable {
+    public struct Tile: Codable, Equatable, Sendable {
+        public let module: String
+        public let size: String
+
+        public init(module: String, size: String) {
+            self.module = module
+            self.size = size
+        }
+    }
+
+    public var tiles: [Tile]
+    public var choices: HomeChoices
+    public var updatedAt: Date
+
+    public init(tiles: [Tile], choices: HomeChoices = HomeChoices(), updatedAt: Date = Date()) {
+        self.tiles = tiles
+        self.choices = choices
+        self.updatedAt = updatedAt
     }
 }
 

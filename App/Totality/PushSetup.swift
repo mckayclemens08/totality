@@ -36,13 +36,20 @@ final class PushSetup {
     /// Asks Apple for this phone's push token. iOS answers through the app delegate. Every signed-in phone
     /// registers, for Messages and Social as well as Gmail.
     func start() {
-        guard AccountSetup.searchToken != nil else { return }
+        guard let signIn = AccountSetup.searchToken else { return }
         UIApplication.shared.registerForRemoteNotifications()
+        if let device = Self.device {
+            let push = PushClient(token: signIn)
+            Task { try? await push.register(device: device, sandbox: PushClient.isSandbox) }
+            #if canImport(MatrixRustSDK)
+            Task { await MatrixMessagesService.latest?.setPusher(device: device) }
+            #endif
+        }
     }
 
     func registered(_ device: Data) {
-        guard let signIn = AccountSetup.searchToken else { return }
         Self.device = device
+        guard let signIn = AccountSetup.searchToken else { return }
         let push = PushClient(token: signIn)
         Task { try? await push.register(device: device, sandbox: PushClient.isSandbox) }
         #if canImport(MatrixRustSDK)

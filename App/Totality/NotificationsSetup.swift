@@ -16,7 +16,9 @@ enum NotificationsSetup {
     static func connect(messages: MessagesModel, mail: MailAccountModel) {
         let hub = NotificationHub.shared
         hub.isInFront = { UIApplication.shared.applicationState == .active }
-        hub.register(MessagesNotifications(model: messages))
+        let messagesSource = MessagesNotifications(model: messages)
+        messagesSource.primeCursorIfNeeded()
+        hub.register(messagesSource)
         hub.register(MailNotifications(mail: mail))
         AppRefresh.shared.extras["notifications"] = { await NotificationHub.shared.collect() }
         Task { await hub.askPermission() }

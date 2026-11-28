@@ -128,4 +128,20 @@ import Testing
         await model.restore()
         #expect(model.phase == .signedIn(username: "owner"))
     }
+
+    @Test("A previously signed-in device recovers when the saved session becomes readable later")
+    func restoreRecoversSignedInSession() async {
+        let marks = freshMarks()
+        let first = AccountModel(service: FakeAccountService(username: "owner"), marks: marks)
+        await first.restore()
+        #expect(first.hasSignedInHere)
+
+        let service = FakeAccountService()
+        let next = AccountModel(service: service, marks: marks)
+        await next.restore()
+        #expect(next.phase == .signedOut)
+        await service.setUsername("owner")
+        await next.restoreIfNeeded()
+        #expect(next.phase == .signedIn(username: "owner"))
+    }
 }

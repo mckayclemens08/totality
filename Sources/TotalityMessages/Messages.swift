@@ -277,7 +277,12 @@ public protocol MessagesService: AnyObject, Sendable {
     /// Backs up message keys under the secret from the recovery key, or opens the backup with it, which
     /// also verifies this device. Nil when this device doesn't have the recovery key. Never resets.
     func settleKeys(recoverySecret: String?) async -> MessageKeys
+    func wakeSync() async
     func stop() async
+}
+
+public extension MessagesService {
+    func wakeSync() async {}
 }
 
 /// One open conversation.

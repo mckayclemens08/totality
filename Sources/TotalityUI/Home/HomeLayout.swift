@@ -106,6 +106,19 @@ public struct HomeLayout: Equatable, Sendable {
         return (try? encoder.encode(stored)) ?? Data()
     }
 
+    public static func syncedTiles(from saved: Data) -> [SyncedHomeLayout.Tile] {
+        guard let stored = try? JSONDecoder().decode(Stored.self, from: saved) else { return [] }
+        return stored.tiles.map { SyncedHomeLayout.Tile(module: $0.module, size: $0.size) }
+    }
+
+    public static func savedData(from tiles: [SyncedHomeLayout.Tile]) -> Data? {
+        guard !tiles.isEmpty else { return nil }
+        let stored = Stored(tiles: tiles.map { .init(module: $0.module, size: $0.size) }, hero: nil)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return try? encoder.encode(stored)
+    }
+
     private mutating func fit(to modules: [ModuleID]) {
         tiles.removeAll { !modules.contains($0.id) }
         tiles += modules.filter { id in !tiles.contains { $0.id == id } }.map { HomeTile(id: $0, size: .small) }

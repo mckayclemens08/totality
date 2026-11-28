@@ -332,8 +332,8 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         func subjects(_ place: MailPlace) -> Set<String> {
             Set(mailbox.conversations(in: place).flatMap(\.messages).map(\.subject))
         }
-        // The Inbox is Primary, as in Gmail.
-        #expect(subjects(.folder(.inbox)) == ["Kitchen drawings"])
+        // Inbox shows every Inbox email (Promotions, Social, Updates included); each tab shows only its own.
+        #expect(subjects(.folder(.inbox)) == ["Kitchen drawings", "Maya tagged you in a photo", "Your order has shipped"])
         #expect(subjects(.outside(added.id, "CATEGORY_SOCIAL")) == ["Maya tagged you in a photo"])
         #expect(subjects(.outside(added.id, "CATEGORY_UPDATES")) == ["Your order has shipped"])
         // Under a label but out of the Inbox: archived, and in its label.
@@ -344,10 +344,10 @@ final class ICloudInbox: OutsideWireMaker, @unchecked Sendable {
         #expect(places.account.address == "mckay.clemens@gmail.com")
         #expect(places.labels.map(\.name) == ["Social", "Updates", "Productivity", "Receipts"])
         #expect(mailbox.name(of: .outside(added.id, "Label_7")) == "Productivity")
-        // Moved to Social at Gmail later: the next open moves it here, without downloading it again.
+        // Moved to Social at Gmail later: stays in Inbox and joins the Social tab, without downloading it again.
         fake.labelsOf["18f3a2b4c5d6e7f8"] = ["CATEGORY_SOCIAL"]
         let after = try #require(await store.downloadOutside { _ in }).mailbox
-        #expect(after.conversations(in: .folder(.inbox)).isEmpty)
+        #expect(after.conversations(in: .folder(.inbox)).count == 3)
         #expect(after.conversations(in: .outside(added.id, "CATEGORY_SOCIAL")).count == 2)
         #expect(fake.fetched.count == 4)
     }

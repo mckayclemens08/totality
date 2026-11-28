@@ -15,6 +15,7 @@ public struct HomeView: View {
     private let removed: Set<ModuleID>
     private let onRemove: (ModuleID) -> Void
     private let onRestore: (ModuleID) -> Void
+    private let onLayoutChanged: ((Data) -> Void)?
     // Module names and sizes, never content.
     @AppStorage("home.layout") private var savedLayout = Data()
     @State private var isEditing = false
@@ -30,6 +31,7 @@ public struct HomeView: View {
         removed: Set<ModuleID> = [],
         onRemove: @escaping (ModuleID) -> Void = { _ in },
         onRestore: @escaping (ModuleID) -> Void = { _ in },
+        onLayoutChanged: ((Data) -> Void)? = nil,
         onOpen: @escaping (ModuleID) -> Void,
         onSearch: @escaping () -> Void = {},
         onAccount: (() -> Void)? = nil
@@ -38,6 +40,7 @@ public struct HomeView: View {
         self.removed = removed
         self.onRemove = onRemove
         self.onRestore = onRestore
+        self.onLayoutChanged = onLayoutChanged
         self.modules = modules
         self.glances = glances
         self.bigTile = bigTile
@@ -99,6 +102,12 @@ public struct HomeView: View {
             }
         }
         .onChange(of: takenOff.isEmpty) { if takenOff.isEmpty { adding = false } }
+        .onChange(of: isEditing) { wasEditing, editing in
+            if wasEditing, !editing, !savedLayout.isEmpty { onLayoutChanged?(savedLayout) }
+        }
+        .onChange(of: savedLayout) { _, updated in
+            if !isEditing, !updated.isEmpty { onLayoutChanged?(updated) }
+        }
     }
 
     /// Today's date and a greeting, or while editing, how editing works.

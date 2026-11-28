@@ -1,4 +1,5 @@
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// Mail's front screen. A narrow window, which is every iPhone, shows one thing at a time. A wide one
@@ -210,6 +211,7 @@ public struct MailHomeView: View {
                     HeaderButton("Mailboxes", systemImage: "tray.2.fill") { showingFolders = true }
                 }
                 Spacer(minLength: 0)
+                AskTotalityButton(context: AIAskContext(id: "mail.home", module: .mail, title: model.placeName))
                 if ready {
                     if model.isSelecting {
                         HeaderPill("Done", isProminent: true) { model.endSelecting() }

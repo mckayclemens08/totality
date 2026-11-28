@@ -22,9 +22,15 @@ extension SocialModel {
         let publicOnes = (try? await server.stories()) ?? stories.filter { $0.audience == .everyone }
         let opened = openedStories()
         let now = Date()
-        stories = (publicOnes + privateStories).filter { $0.isLive(at: now) }.map { story in
+        let fetched = publicOnes + privateStories
+        let fetchedIDs = Set(fetched.map(\.id))
+        pendingStories = pendingStories.filter { id, story in
+            !fetchedIDs.contains(id) && now.timeIntervalSince(story.date) < 120 && story.isLive(at: now)
+        }
+        let combined = fetched + pendingStories.values
+        stories = combined.filter { $0.isLive(at: now) }.map { story in
             var story = story
-            if opened[story.id] != nil || story.author == me { story.viewed = true }
+            if opened[story.id] != nil || story.author.lowercased() == me?.lowercased() { story.viewed = true }
             return story
         }
     }
@@ -51,15 +57,36 @@ extension SocialModel {
                 throw SocialError.refused(problem)
             }
             let background = kind == .text ? (background ?? .accent) : nil
+            let author: String
+            if let me {
+                author = me
+            } else {
+                author = (try? await server.me()) ?? ""
+                if !author.isEmpty { self.me = author }
+            }
             switch audience {
             case .everyone:
-                _ = try await server.postStory(kind: kind, text: clean, background: background, media: uploaded)
+                let id = try await server.postStory(kind: kind, text: clean, background: background, media: uploaded)
+                if !author.isEmpty {
+                    pendingStories[id] = SocialStory(
+                        id: id, author: author, audience: .everyone, kind: kind, text: clean,
+                        background: background, media: uploaded, date: Date(), viewed: true
+                    )
+                }
                 await loadStories()
             case .friends, .closeFriends:
                 guard let privatePosts else { throw SocialError.failed(privateReason ?? "") }
                 if audience == .friends { try await privatePosts.setMembers(Set(try await server.friends()), of: .friends) }
-                _ = try await privatePosts.publishStory(audience, kind: kind, text: clean, background: background, media: uploaded)
+                let id = try await privatePosts.publishStory(audience, kind: kind, text: clean, background: background, media: uploaded)
+                if !author.isEmpty {
+                    let room = privatePosts.timelines.values.first { $0.owner == author && $0.audience == audience }?.room
+                    pendingStories[id] = SocialStory(
+                        id: id, author: author, audience: audience, kind: kind, text: clean,
+                        background: background, media: uploaded, date: Date(), room: room, viewed: true
+                    )
+                }
                 try? await loadFollowing()
+                await loadStories()
             }
             return true
         } catch {
@@ -77,6 +104,7 @@ extension SocialModel {
             await removeMedia(story.media)
             stories.removeAll { $0.id == story.id }
             privateStories.removeAll { $0.id == story.id }
+            pendingStories[story.id] = nil
         } catch {
             notice = Self.message(error)
         }

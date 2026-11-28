@@ -1,4 +1,5 @@
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// The Clock (issue 204): World, Alarms, Timers and Stopwatch, as the approved mockup draws them.
@@ -69,6 +70,7 @@ public struct ClockHomeView: View {
                     HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
                 }
                 Spacer(minLength: 0)
+                AskTotalityButton(context: AIAskContext(id: "clock.home", module: .clock, title: "Clock"))
             }
             .frame(minHeight: Metric.headerButton)
             ScreenTitle("Clock")

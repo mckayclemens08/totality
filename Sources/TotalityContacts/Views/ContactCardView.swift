@@ -72,6 +72,17 @@ struct ContactCardView: View {
 
     private func menu(_ card: ContactCard) -> some View {
         Menu {
+            AskTotalityMenuButton(context: AIAskContext(
+                id: card.id.uuidString,
+                module: .contacts,
+                title: card.name,
+                detail: [card.company, card.emails.first?.value, card.phones.first?.value]
+                    .compactMap { $0 }
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " · "),
+                body: card.notes
+            ))
             Button(card.isFavourite ? "Remove from Favourites" : "Add to Favourites", systemImage: card.isFavourite ? "star.slash" : "star") {
                 Task { await model.toggleFavourite(card) }
             }

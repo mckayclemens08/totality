@@ -20,6 +20,8 @@ let package = Package(
         .library(name: "TotalityClock", targets: ["TotalityClock"]),
         .library(name: "TotalityContacts", targets: ["TotalityContacts"]),
         .library(name: "TotalityHiking", targets: ["TotalityHiking"]),
+        .library(name: "TotalityAI", targets: ["TotalityAI"]),
+        .library(name: "TotalityMusic", targets: ["TotalityMusic"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.9.1"),
@@ -27,6 +29,11 @@ let package = Package(
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.18.0"),
     ],
     targets: [
+        .binaryTarget(
+            name: "llama",
+            url: "https://github.com/ggml-org/llama.cpp/releases/download/b8851/llama-b8851-xcframework.zip",
+            checksum: "f5eb26820b9890ae026aee4963cd4f43af1c567d39534012f2685601a59c2519"
+        ),
         .target(name: "TotalityCore", dependencies: [
             .product(name: "Sodium", package: "swift-sodium"),
         ]),
@@ -53,6 +60,8 @@ let package = Package(
         .target(name: "TotalityClock", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityContacts", dependencies: ["TotalityCore", "TotalityUI"]),
         .target(name: "TotalityHiking", dependencies: ["TotalityCore", "TotalityUI"]),
+        .target(name: "TotalityAI", dependencies: ["TotalityCore", "TotalityUI", "llama"]),
+        .target(name: "TotalityMusic", dependencies: ["TotalityCore", "TotalityUI"]),
         .testTarget(name: "TotalityCoreTests", dependencies: ["TotalityCore"]),
         .testTarget(name: "TotalityUITests", dependencies: ["TotalityUI"]),
         .testTarget(name: "TotalityReaderTests", dependencies: ["TotalityReader"]),
@@ -68,5 +77,7 @@ let package = Package(
         .testTarget(name: "TotalityClockTests", dependencies: ["TotalityClock"]),
         .testTarget(name: "TotalityContactsTests", dependencies: ["TotalityContacts"]),
         .testTarget(name: "TotalityHikingTests", dependencies: ["TotalityHiking"]),
+        .testTarget(name: "TotalityAITests", dependencies: ["TotalityAI"]),
+        .testTarget(name: "TotalityMusicTests", dependencies: ["TotalityMusic"]),
     ]
 )

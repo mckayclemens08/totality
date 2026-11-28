@@ -115,12 +115,13 @@ struct ModuleTests {
         #expect(ContentKind.readerPlaces.rawValue == "reader_places")
         #expect(ContentKind.task.rawValue == "task")
         #expect(ContentKind.taskList.rawValue == "task_list")
-        #expect(ContentKind.allCases.count == 26)
+        #expect(ContentKind.allCases.count == 27)
         #expect(ContentKind.homeLayout.rawValue == "home_layout")
         #expect(ContentKind.weatherPlaces.rawValue == "weather_places")
         #expect(ContentKind.clockItems.rawValue == "clock_items")
         #expect(ContentKind.contact.rawValue == "contact")
         #expect(ContentKind.hike.rawValue == "hike")
+        #expect(ContentKind.musicCatalog.rawValue == "music_catalog")
     }
 
     @Test func contentRefSurvivesEncoding() throws {

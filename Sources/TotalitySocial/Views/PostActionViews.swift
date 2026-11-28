@@ -83,6 +83,14 @@ struct PostMoreMenu: View {
 
     var body: some View {
         Menu {
+            AskTotalityMenuButton(context: AIAskContext(
+                id: post.id.uuidString,
+                module: .social,
+                title: post.headline,
+                detail: "@\(post.author)",
+                body: post.body,
+                date: post.date
+            ))
             if model.taskMaker != nil {
                 Button("Add to Tasks", systemImage: "checklist") { taskDraft = model.taskDraft(post) }
             }

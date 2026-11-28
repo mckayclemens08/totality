@@ -1,4 +1,5 @@
 import SwiftUI
+import TotalityCore
 import TotalityUI
 
 /// The browser: one box at the top for an address or a search, the page, and its controls.
@@ -211,6 +212,25 @@ public struct WebHomeView: View {
         .background(theme.bg.color)
     }
 
+    private var currentAskContext: AIAskContext {
+        if let page, let url = page.url {
+            return pageAskContext(page, url: url)
+        }
+        return AIAskContext(id: "web.home", module: .web, title: "Web")
+    }
+
+    private func pageAskContext(_ page: WebPage, url: URL) -> AIAskContext {
+        let cleaned = page.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = cleaned.isEmpty ? (url.host() ?? url.absoluteString) : cleaned
+        return AIAskContext(
+            id: url.absoluteString,
+            module: .web,
+            title: title,
+            detail: url.absoluteString,
+            metadata: ["url": url.absoluteString]
+        )
+    }
+
     private static let prompt = "Search or enter address"
 
     private var addressBar: some View {
@@ -279,6 +299,7 @@ public struct WebHomeView: View {
                 }
             }
             .raisedField()
+            AskTotalityButton(context: currentAskContext)
         }
         .padding(.horizontal, Space.s3)
         .padding(.vertical, Space.s2)
@@ -387,6 +408,7 @@ public struct WebHomeView: View {
                 Task { await model.addBookmark(title: page.title, url: url) }
             }
         }
+        AskTotalityMenuButton(context: pageAskContext(page, url: url))
         if model.taskMaker != nil, !model.current.isPrivate {
             Button("Add to Tasks", systemImage: "checkmark.circle") {
                 Task { await model.addPageToTasks(title: page.title, url: url) }

@@ -423,10 +423,12 @@ export class PushGate {
     this.quiet = new Map()
     // Names each account poked in the last minute: `{ at, count }`. Memory only.
     this.pokes = new Map()
+    // Non-identifying counts only (no tokens, room IDs, or usernames) since the container has logging off.
+    this.matrixStats = { received: 0, woken: 0, rejected: 0, apnsSent: 0, apnsFailed: 0 }
   }
 
   async respond({ method, path, headers = {}, body }) {
-    if (path === '/push/health') return method === 'GET' ? json(200, { ok: true, sending: Boolean(this.apns), gmail: Boolean(this.gmail) }) : empty(405)
+    if (path === '/push/health') return method === 'GET' ? json(200, { ok: true, sending: Boolean(this.apns), gmail: Boolean(this.gmail), matrix: { ...this.matrixStats } }) : empty(405)
     if (path === MATRIX_NOTIFY) return method === 'POST' ? this.matrix(body) : empty(405)
     if (!ROUTES.includes(path)) return empty(404)
     if (method !== 'POST') return empty(405)
@@ -519,6 +521,7 @@ export class PushGate {
     const request = await jsonBody(body, 16_384)
     const devices = request?.notification?.devices
     if (!Array.isArray(devices) || devices.length > MATRIX_DEVICES) return empty(400)
+    this.matrixStats.received += devices.length
     const rejected = []
     const waking = []
     for (const entry of devices) {
@@ -527,9 +530,11 @@ export class PushGate {
       const device = MATRIX_APP_IDS.includes(entry?.app_id) && DEVICE.test(token) ? await this.store.device(token) : null
       if (!device) {
         rejected.push(token)
+        this.matrixStats.rejected += 1
         continue
       }
-      waking.push(this.coalesce(`d:${token}`, () => this.wakeDevices([device])))
+      this.matrixStats.woken += 1
+      waking.push(this.coalesce(`d:${token}`, () => this.wakeDevices([device], true)))
     }
     this.waking = Promise.all(waking).catch(() => 0)
     return json(200, { rejected })
@@ -574,14 +579,23 @@ export class PushGate {
     return this.wakeDevices(devices)
   }
 
-  async wakeDevices(devices) {
+  async wakeDevices(devices, isMatrix = false) {
     if (!this.apns) return 0
     let sent = 0
+    let sandboxChanged = false
     for (const device of devices) {
+      const before = device.sandbox
       const result = await this.apns.wake(device)
-      if (result === 'sent') sent += 1
+      if (device.sandbox !== before) sandboxChanged = true
+      if (result === 'sent') {
+        sent += 1
+        if (isMatrix) this.matrixStats.apnsSent += 1
+      } else if (isMatrix) {
+        this.matrixStats.apnsFailed += 1
+      }
       if (result === 'gone') await this.store.forget(device.token)
     }
+    if (sandboxChanged) await this.store.save()
     return sent
   }
 }

@@ -22,8 +22,9 @@ public enum MailPlace: Hashable, Sendable {
 
     func lists(_ message: MailMessage) -> Bool {
         switch self {
-        // Gmail's Inbox is its Primary tab: mail in its other tabs shows there instead.
-        case .folder(.inbox): message.marks.folder == .inbox && !message.isInOtherTab
+        // Inbox shows all Inbox mail, including Gmail's Promotions, Social and Updates tabs.
+        // Each category tab (.outside) still shows only its own category.
+        case .folder(.inbox): message.marks.folder == .inbox
         case .folder(let folder): message.marks.folder == folder
         case .starred: message.marks.isStarred
         case .outside(let account, let label):

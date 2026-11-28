@@ -1,11 +1,13 @@
 import Foundation
 import TotalityAccount
+import TotalityAI
 import TotalityCalendar
 import TotalityClock
 import TotalityContacts
 import TotalityCore
 import TotalityMail
 import TotalityMessages
+import TotalityMusic
 import TotalityPhotos
 import TotalityReader
 import TotalityTasks
@@ -84,7 +86,13 @@ enum ContentSetup {
     /// left under the names from before accounts had their own (an older build may have written some).
     nonisolated static func forgetSecrets() {
         guard let account = SignedInAccount.shared.id else { return }
-        for service in [GoogleAccounts.service, OutsideSecrets.service] {
+        for service in [
+            GoogleAccounts.service,
+            OutsideSecrets.service,
+            OpenSubsonicClient.service,
+            MusicProviderManager.spotifyService,
+            MusicProviderManager.ytMusicService,
+        ] {
             let store = KeychainKeyStore(service: service)
             for name in AccountKeyStore.toForget(in: (try? store.names()) ?? [], account: account) { try? store.delete(name) }
         }
@@ -94,7 +102,7 @@ enum ContentSetup {
         reader: FileBlobStore, calendar: FileBlobStore, web: FileBlobStore, mail: FileBlobStore, photos: FileBlobStore,
         googleCalendar: FileBlobStore, googleDrive: FileBlobStore, tasks: FileBlobStore, home: FileBlobStore,
         weather: FileBlobStore, weatherCache: FileBlobStore, clock: FileBlobStore, contacts: FileBlobStore,
-        hiking: FileBlobStore
+        hiking: FileBlobStore, ai: FileBlobStore, music: FileBlobStore
     ) {
         let base = try base()
         return (
@@ -119,7 +127,11 @@ enum ContentSetup {
             // Contacts' cards, one sealed blob each, which sync.
             try FileBlobStore(directory: base.appendingPathComponent("Contacts", isDirectory: true)),
             // Hikes, saved trails and the nearby list, sealed. Never synced in v1 (issue 240).
-            try FileBlobStore(directory: base.appendingPathComponent("Hiking", isDirectory: true))
+            try FileBlobStore(directory: base.appendingPathComponent("Hiking", isDirectory: true)),
+            // Ask Totality grants, activity log and local memory, sealed on device (issue 252).
+            try FileBlobStore(directory: base.appendingPathComponent("AI", isDirectory: true)),
+            // Music catalog, playlists, and chunk-sealed uploaded tracks & cover art.
+            try FileBlobStore(directory: base.appendingPathComponent("Music", isDirectory: true))
         )
     }
 
@@ -155,6 +167,8 @@ enum ContentSetup {
             SealedArea(store: stores.clock, purposes: ClockBook.sealedPurposes),
             SealedArea(store: stores.contacts, purposes: ContactVault.sealedPurposes),
             SealedArea(store: stores.hiking, purposes: HikeLog.sealedPurposes),
+            SealedArea(store: stores.ai, purposes: AIVault.sealedPurposes),
+            SealedArea(files: stores.music, purposes: MusicVault.sealedPurposes, chunked: MusicVault.chunkedPurposes),
         ])
     }
 
@@ -172,7 +186,7 @@ enum ContentSetup {
     ) throws -> (
         reader: ReaderModel, calendar: CalendarModel, web: WebModel, tasks: TasksModel, areas: [any SyncArea],
         registry: ModuleRegistry, mail: MailContent, photos: PhotosContent, home: HomeChoicesBook, weather: WeatherModel, clock: ClockModel,
-        contacts: ContactsModel, hiking: HikingModel
+        contacts: ContactsModel, hiking: HikingModel, ai: AIModel, music: MusicModel
     ) {
         let stores = try stores()
         let rootKey = try keyRing().current()
@@ -183,8 +197,11 @@ enum ContentSetup {
         let taskVault = TaskVault(store: stores.tasks, rootKey: rootKey)
         let devices = SystemCalendarSource()
         let google = GoogleCalendars(accounts: googleAccounts(), store: stores.googleCalendar, rootKey: rootKey)
+        let audioFocus = AudioTransportCoordinator()
         let home = HomeChoicesBook(store: stores.home, rootKey: rootKey)
-        let reader = ReaderModel(vault: readerVault, listen: ListenController(engine: ListenVoices()))
+        let listen = ListenController(engine: ListenVoices())
+        listen.audioFocus = audioFocus
+        let reader = ReaderModel(vault: readerVault, listen: listen)
         // Read when an import asks, since sign-in may come after the Reader opens.
         reader.storageLeft = {
             guard let usage = await MainActor.run(body: { AccountSetup.storageUsage }) else { return nil }
@@ -221,6 +238,25 @@ enum ContentSetup {
         #else
         let hiking = HikingModel(log: hikeLog, location: nil)
         #endif
+        let aiVault = AIVault(store: stores.ai, rootKey: rootKey)
+        let modelsDirectory = try base().appendingPathComponent("Models", isDirectory: true)
+        let ai = AIModel(vault: aiVault, modelStore: LocalOpenModelStore.live(directory: modelsDirectory))
+        let musicVault = MusicVault(store: stores.music, rootKey: rootKey, cacheDirectory: try? sharedCaches())
+        let subsonicKeys = try? keys(KeychainKeyStore(service: OpenSubsonicClient.service))
+        let spotifyKeys = try? keys(KeychainKeyStore(service: MusicProviderManager.spotifyService))
+        let ytMusicKeys = try? keys(KeychainKeyStore(service: MusicProviderManager.ytMusicService))
+        let musicProviders = MusicProviderManager(
+            spotifyClientID: Bundle.main.object(forInfoDictionaryKey: "TotalitySpotifyClientID") as? String,
+            googleClientID: Bundle.main.object(forInfoDictionaryKey: "TotalityGoogleClientID") as? String,
+            spotifyStore: spotifyKeys,
+            ytMusicStore: ytMusicKeys
+        )
+        let music = MusicModel(
+            vault: musicVault,
+            subsonic: OpenSubsonicClient(keyStore: subsonicKeys),
+            providers: musicProviders,
+            audioFocus: audioFocus
+        )
         let registry = try ModuleRegistry(handlers: [
             ReaderModule(vault: readerVault, refresh: { await refresh(.reader) }),
             CalendarModule(
@@ -249,6 +285,8 @@ enum ContentSetup {
                 changed: { @MainActor [weak contacts] in await contacts?.load() }
             ),
             HikingModule(log: hikeLog),
+            AIModule(),
+            MusicModule(vault: musicVault, refresh: { await refresh(.player) }),
         ], profiles: AccountSetup.profiles)
         contacts.profiles = AccountSetup.profiles
         contacts.taskMaker = registry.taskMaker
@@ -274,7 +312,7 @@ enum ContentSetup {
             tasks,
             // The Drive record syncs whether or not this build can sign in to Google, so links made on
             // another device aren't lost here.
-            [readerVault, calendarVault, webVault, drive, places, taskVault, home, weatherBook, clockBook, contactVault],
+            [readerVault, calendarVault, webVault, drive, places, taskVault, home, weatherBook, clockBook, contactVault, musicVault],
             registry,
             MailContent(rootKey: rootKey, store: stores.mail),
             PhotosContent(rootKey: rootKey, store: stores.photos),
@@ -282,7 +320,9 @@ enum ContentSetup {
             weather,
             clock,
             contacts,
-            hiking
+            hiking,
+            ai,
+            music
         )
     }
 

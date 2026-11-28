@@ -115,13 +115,9 @@ final class MatrixTaskRooms: SharedRooms {
                 invite: names.isEmpty ? nil : names.map(Self.userID), powerLevelContentOverride: levels
             ))
             let arrived = try await MatrixWait.until(attempts: 50) { (try? service.client.getRoom(roomId: id)) != nil }
-            guard arrived, let room = try service.client.getRoom(roomId: id) else {
+            guard arrived, try service.client.getRoom(roomId: id) != nil else {
                 throw SharedRoomError.failed("The new list didn't arrive from the server. Try again.")
             }
-            // The SDK knows the room as soon as the server answers, but its state, power levels included,
-            // only comes with the next sync, and changing who's in it fails until then. Wait for it here so
-            // the caller can. A slow sync isn't an error yet: the room exists, and `invite` waits again.
-            _ = try await Self.powerLevelsArrived(in: room)
             return id
         } catch {
             throw Self.translate(error)
@@ -178,10 +174,26 @@ final class MatrixTaskRooms: SharedRooms {
         do {
             let room = try await room(id)
             guard try await Self.powerLevelsArrived(in: room) else { throw Self.settingsNotHere }
-            var updates = [UserPowerLevelUpdate(userId: Self.userID(username), powerLevel: Int64(role.rawValue))]
-            // Handing over: one change, so the room always has exactly one owner.
-            if role == .owner { updates.append(UserPowerLevelUpdate(userId: service.userID, powerLevel: Int64(SharedRole.editor.rawValue))) }
-            try await room.updatePowerLevelsForUsers(updates: updates)
+            let info = try await room.roomInfo()
+            let (_, unlimited) = try await Self.members(of: room)
+            // Room version 12 creators hold infinite power outside `m.room.power_levels.users`, and the
+            // server refuses updates naming them (M_INVALID_PARAM). Never include any creator in `updates`.
+            let creators = Set((info.creators ?? []) + unlimited.map(Self.userID))
+            let target = Self.userID(username)
+            if creators.contains(target), role != .owner {
+                throw SharedRoomError.failed("The original creator stays an owner unless they leave.")
+            }
+            var updates: [UserPowerLevelUpdate] = []
+            if !creators.contains(target) {
+                updates.append(UserPowerLevelUpdate(userId: target, powerLevel: Int64(role.rawValue)))
+            }
+            // Non-creators handing over step down to editor in the same change.
+            if role == .owner, !creators.contains(service.userID) {
+                updates.append(UserPowerLevelUpdate(userId: service.userID, powerLevel: Int64(SharedRole.editor.rawValue)))
+            }
+            if !updates.isEmpty {
+                try await room.updatePowerLevelsForUsers(updates: updates)
+            }
         } catch {
             throw Self.translate(error)
         }
@@ -216,6 +228,8 @@ final class MatrixTaskRooms: SharedRooms {
         guard room.membership() == .joined else { throw SharedRoomError.notAllowed }
         guard await room.isEncrypted() else { throw SharedRoomError.notEncrypted }
         do {
+            let matrixService = try await service()
+            await matrixService.client.encryption().waitForE2eeInitializationTasks()
             let info = try await room.roomInfo()
             let timeline = try await room.timeline()
             let items = TimelineItems()
@@ -225,8 +239,11 @@ final class MatrixTaskRooms: SharedRooms {
             for _ in 0..<40 where !reachedStart {
                 reachedStart = try await timeline.paginateBackwards(numEvents: 200)
             }
-            // The listener hears the last pages a moment after paginating returns.
+            // Give the listener a brief moment to settle initial diffs and any in-flight decryption.
             try? await Task.sleep(for: .milliseconds(150))
+            for _ in 0..<10 where Self.hasUnreadable(items.snapshot()) {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
             var events: [SharedRoomEvent] = []
             let (members, unlimited) = try await Self.members(of: room)
             // The room's creators, or, before the SDK has its create event, whoever holds unlimited power,
@@ -286,15 +303,24 @@ final class MatrixTaskRooms: SharedRooms {
     }
 
     func post(_ body: String, to id: String) async throws {
+        let service = try await service()
         let room = try await room(id)
         // A post goes only into an encrypted room, so the label stays true.
         guard await room.isEncrypted() else { throw SharedRoomError.notEncrypted }
+        await service.client.encryption().waitForE2eeInitializationTasks()
         let content: [String: String] = ["msgtype": marker.messageType, "body": body]
         let json = String(decoding: try JSONSerialization.data(withJSONObject: content), as: UTF8.self)
         do {
             _ = try await room.sendRaw(eventType: "m.room.message", content: json)
         } catch {
             throw Self.translate(error)
+        }
+    }
+
+    private static func hasUnreadable(_ items: [TimelineItem]) -> Bool {
+        items.contains { item in
+            guard case .msgLike(let like) = item.asEvent()?.content, case .unableToDecrypt = like.kind else { return false }
+            return true
         }
     }
 

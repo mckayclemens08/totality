@@ -390,6 +390,8 @@ describe('the Matrix push gateway', () => {
     assert.deepEqual(JSON.parse(answer.body).rejected, [phone(9), phone(1)])
     assert.deepEqual(sent.map((s) => [s.token, s.host]), [[phone(1), 'api.sandbox.push.apple.com']])
     assert.deepEqual(JSON.parse(sent[0].body), JSON.parse(WAKE))
+    const health = JSON.parse((await call(gate, '/push/health', { method: 'GET', token: null })).body)
+    assert.deepEqual(health.matrix, { received: 3, woken: 1, rejected: 2, apnsSent: 1, apnsFailed: 0 })
   })
 
   test('keeps nothing from the note', async () => {

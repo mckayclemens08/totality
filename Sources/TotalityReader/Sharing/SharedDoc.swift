@@ -138,10 +138,43 @@ public struct SharedDocState: Sendable, Equatable, Identifiable {
             && a.editors.mapValues(\.0) == b.editors.mapValues(\.0) && a.lastChange == b.lastChange
     }
 
-    public static func build(room: String, history: SharedRoomHistory) -> SharedDocState {
+    public static func build(room: String, history: SharedRoomHistory, seed: SharedDocState? = nil) -> SharedDocState {
         var state = SharedDocState(room: room, isEncrypted: history.isEncrypted)
         for event in history.events { state.apply(event) }
         state.members = history.members
+        if !state.isComplete, !state.isClosed, let seed {
+            var live = seed
+            live.members = history.members
+            live.unreadable = state.unreadable
+            live.refused = state.refused
+            for event in history.events { live.apply(event) }
+            return live
+        }
+        return state
+    }
+
+    /// Creates an immediately editable local state for a newly shared doc so the sharer's device never
+    /// depends on reading its own initial posts back from the room.
+    public static func seeded(
+        room: String, docID: UUID, title: String, blocks: [SharedBlock], owner: String,
+        invitees: [String: SharedRole], date: Date = Date(), isEncrypted: Bool = true
+    ) -> SharedDocState {
+        var state = SharedDocState(room: room, isEncrypted: isEncrypted)
+        state.docID = docID
+        state.title = String(title.prefix(SharedDocPost.titleLimit))
+        state.titleRev = 1
+        state.blocks = Dictionary(uniqueKeysWithValues: blocks.map { ($0.id, $0) })
+        state.roles = [owner: SharedRole.owner.rawValue]
+        var list = [SharedRoomMember(username: owner, role: .owner)]
+        for (person, role) in invitees.sorted(by: { $0.key < $1.key }) {
+            let effective = role == .owner ? .editor : role
+            state.roles[person] = effective.rawValue
+            list.append(SharedRoomMember(username: person, role: effective, isInvited: true))
+        }
+        state.members = list
+        state.isComplete = true
+        state.started = date
+        state.lastChange = date
         return state
     }
 

@@ -2,11 +2,8 @@ import Foundation
 import TotalityCore
 
 extension ReaderModel {
-    /// Shares a doc (issue 228): its text goes into a new end-to-end encrypted room, then the private copy
-    /// moves to Recently Deleted, so there's one copy everyone edits. Returns the room.
-    ///
-    /// The private copy moves only once this device can open the shared one. Until then it stays, so a
-    /// doc that didn't come back from the room is never lost.
+    /// Shares a doc (issue 228): puts it into a new end-to-end encrypted room so everyone collaborates
+    /// live in one shared doc, and moves the solo note to Recently Deleted. Returns the room.
     public func share(_ item: ReaderItem, with people: [String: SharedRole]) async -> String? {
         guard let shared, item.kind == .note else { return nil }
         let opened: (item: ReaderItem, text: String)
@@ -16,8 +13,13 @@ extension ReaderModel {
             notice = "\(item.displayTitle) couldn't be opened to share."
             return nil
         }
-        guard let room = await shared.share(title: opened.item.title, text: opened.text, with: people) else { return nil }
-        guard shared.doc(room)?.isComplete == true else { return room }
+        guard let room = await shared.share(title: opened.item.title, text: opened.text, with: people) else {
+            if let message = shared.notice {
+                notice = message
+                shared.notice = nil
+            }
+            return nil
+        }
         SharedFrom.remember(opened.item.id, for: room, in: sharedFrom)
         await delete(opened.item)
         return room

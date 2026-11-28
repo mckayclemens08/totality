@@ -137,6 +137,7 @@ public struct PhotosHomeView: View {
                     HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
                 }
                 Spacer(minLength: 0)
+                AskTotalityButton(context: AIAskContext(id: "photos.home", module: .photos, title: "Photos"))
                 if ready {
                     if model.canImportFromGoogle {
                         HeaderButton("Add from Google Photos", systemImage: "square.and.arrow.down.on.square.fill") { showingGoogle = true }

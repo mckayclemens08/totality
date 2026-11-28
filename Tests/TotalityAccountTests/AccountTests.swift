@@ -53,6 +53,7 @@ actor FakeAccountService: AccountService {
     }
 
     init(username: String? = nil) { self.username = username }
+    func setUsername(_ value: String?) { username = value }
     func fail(signIn: AccountError? = nil, signUp: AccountError? = nil, device: AccountError? = nil, signOut: AccountError? = nil) {
         signInError = signIn
         signUpError = signUp
@@ -103,6 +104,16 @@ actor FakeAccountService: AccountService {
         if let pageError { throw pageError }
         pageChanges.append(published)
         pagePublished = published
+    }
+    var homeLayouts: [String: SyncedHomeLayout] = [:]
+    func setRemoteHomeLayout(_ layout: SyncedHomeLayout?, deviceKind: String = "iphone") {
+        homeLayouts[deviceKind] = layout
+    }
+    func fetchHomeLayout(deviceKind: String) async throws -> SyncedHomeLayout? {
+        homeLayouts[deviceKind]
+    }
+    func saveHomeLayout(_ layout: SyncedHomeLayout, deviceKind: String) async throws {
+        homeLayouts[deviceKind] = layout
     }
     func lookUpProfile(_ username: Username) async throws -> PublicProfile? {
         if let profileError { throw profileError }
@@ -747,4 +758,29 @@ enum Picture {
     #expect(!AvatarKey.isOwned("8b3c1f0e-2d4a-4c6b-9e8f-0a1b2c3d4e5f/x/\(file)", by: owner))
     #expect(!AvatarKey.isOwned("https://example.com/\(file)", by: owner))
     #expect(!AvatarKey.isOwned("", by: owner))
+}
+
+@Suite @MainActor struct SignInHomeLayoutTests {
+    @Test func signingInLoadsHomeLayoutWithoutRecoveryKeyAndSignOutClearsIt() async throws {
+        let suite = UserDefaults(suiteName: "home-layout-test-\(UUID().uuidString)")!
+        let service = FakeAccountService()
+        let saved = SyncedHomeLayout(
+            tiles: [.init(module: "tasks", size: "l"), .init(module: "reader", size: "s")],
+            updatedAt: Date(timeIntervalSince1970: 1_764_250_000)
+        )
+        await service.setRemoteHomeLayout(saved, deviceKind: AccountModel.currentDeviceKind)
+        let model = AccountModel(service: service, marks: suite)
+        await model.signIn(username: "alice", password: "correct horse battery staple")
+        #expect(model.syncedHomeLayout == saved)
+
+        let updated = SyncedHomeLayout(
+            tiles: [.init(module: "mail", size: "m")],
+            updatedAt: Date(timeIntervalSince1970: 1_764_250_500)
+        )
+        await model.saveHomeLayout(updated, deviceKind: AccountModel.currentDeviceKind)
+        #expect(try await service.fetchHomeLayout(deviceKind: AccountModel.currentDeviceKind) == updated)
+
+        await model.signOut()
+        #expect(model.syncedHomeLayout == nil)
+    }
 }

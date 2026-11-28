@@ -95,10 +95,8 @@ struct SharedDocCopyTwoUserTests {
         let room = try #require(await owner.share(title: "Moab trip plan", text: "Leave Friday.", with: ["carter": .editor]))
         await friend.refresh()
         await friend.accept(friend.invites[0])
-        // The first posts went before Carter was invited, so he can't open them, but the copy sent after
-        // the invite he can. The owner's device does nothing more.
+        // Invited at room creation so Matrix shares the room key from the very first post.
         let doc = try #require(friend.doc(room))
-        #expect(doc.unreadable > 0)
         #expect(doc.isComplete)
         #expect(doc.text == "Leave Friday.")
         #expect(doc.waitingForCopy.isEmpty)
@@ -118,13 +116,13 @@ struct SharedDocCopyTwoUserTests {
         _ = friend
     }
 
-    @Test func thePrivateCopyStaysWhenThisDeviceCantOpenTheSharedOne() async throws {
+    @Test func aHandleOnlyShareIsLiveImmediatelyEvenWhenOwnPostsLag() async throws {
         let rooms = server.device(for: "mckay")
-        _ = server.device(for: "carter")
+        let review = model("applereview2")
         let shared = SharedDocsModel(rooms: rooms)
         shared.confirmPause = .zero
-        shared.confirmAttempts = 3
-        // Its own posts never come back to this device.
+        shared.confirmAttempts = 1
+        // Own posts never come back in room history, yet the owner's device is collaborative and live immediately.
         server.ownPostLag = 100
         let reader = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
         reader.sharedFrom = try #require(UserDefaults(suiteName: "SharedDocCopy-\(UUID())"))
@@ -132,15 +130,25 @@ struct SharedDocCopyTwoUserTests {
         await reader.load()
         let item = try #require(await reader.newNote())
         #expect(await reader.saveNote(item.id, title: "Moab trip plan", body: "Leave Friday."))
-        await shared.refresh()
-        let room = try #require(await reader.share(item, with: ["carter": .editor]))
-        #expect(shared.doc(room)?.isComplete == false)
-        #expect(reader.library.items.contains { $0.id == item.id })
-        #expect(reader.trash.isEmpty)
-        #expect(shared.notice?.contains("private copy stays") == true)
+        let typed = SharedDocsModel.handle("@applereview2")
+        let room = try #require(await reader.share(item, with: [typed: .editor]))
+        let doc = try #require(shared.doc(room))
+        #expect(doc.isComplete)
+        #expect(doc.text == "Leave Friday.")
+        #expect(shared.isOwner(room))
+        #expect(shared.canEdit(room))
+        #expect(shared.notice == nil)
+        // Invitee still receives the doc on acceptance, and edits from them merge onto the seeded state.
+        await review.refresh()
+        await review.accept(try #require(review.invites.first))
+        #expect(review.doc(room)?.isComplete == true)
+        _ = await review.save(room, base: review.doc(room)!.visibleBlocks, text: "Leave Saturday.")
+        await shared.reload(room)
+        #expect(shared.doc(room)?.isComplete == true)
+        #expect(shared.doc(room)?.text == "Leave Saturday.")
     }
 
-    @Test func aReadableShareMovesThePrivateCopyAndCanFindItAgain() async throws {
+    @Test func aReadableShareMovesThePrivateDocAndCanFindItAgain() async throws {
         _ = server.device(for: "carter")
         let shared = model("mckay")
         let reader = ReaderModel(vault: try newVault(), listen: ListenController(engine: FakeSpeechEngine()))
@@ -153,8 +161,24 @@ struct SharedDocCopyTwoUserTests {
         let room = try #require(await reader.share(item, with: ["carter": .editor]))
         #expect(shared.doc(room)?.isComplete == true)
         #expect(reader.trash.map(\.item.id) == [item.id])
-        // Found again by what this device noted, so the waiting screen can offer it back.
         #expect(reader.privateCopy(of: try #require(shared.doc(room)))?.item.id == item.id)
+    }
+
+    @Test func handingOverOwnershipOnRoomVersion12Works() async throws {
+        let owner = model("mckay")
+        let friend = model("carter")
+        await owner.refresh()
+        let room = try #require(await owner.share(title: "Plan", text: "One", with: ["carter": .editor]))
+        await friend.refresh()
+        await friend.accept(try #require(friend.invites.first))
+        await owner.setRole(.owner, for: "carter", in: room)
+        #expect(owner.notice == nil)
+        await friend.reload(room)
+        #expect(friend.isOwner(room))
+        #expect(await owner.handOverAndLeave(room, to: "carter"))
+        await friend.reload(room)
+        #expect(friend.doc(room)?.owner?.username == "carter")
+        #expect(friend.isOwner(room))
     }
 
     @Test func aCopySharedBeforeTheFixIsFoundByWhenItWasShared() async throws {

@@ -170,6 +170,7 @@ struct ReaderFolderView: View {
                     HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
                 }
                 Spacer(minLength: 0)
+                AskTotalityButton(context: AIAskContext(id: "reader.home", module: .reader, title: "Reader"))
                 HeaderMenu("Sort and view", systemImage: "arrow.up.arrow.down") { sortChoices }
                 HeaderButton(searching ? "Close search" : "Search the Reader", systemImage: searching ? "xmark" : "magnifyingglass") {
                     withMotion(Motion.snappy) {

@@ -9,7 +9,7 @@ A new contract is recorded here before it is implemented.
 | Reader | Player | Listen plays through the shared player | **changed, see below** |
 | Calendar | Reader | an event may attach a Reader item through `ContentProvider` | built |
 | Calendar | Calls | an event may attach a call ref | not built |
-| AI | Reader, Calendar, Money | read `ContentRef` lists under a grant | not built |
+| AI | Reader, Calendar, Mail, Tasks, Weather, Messages, Contacts, Hiking | read granted module summaries and propose actions through `AISourceBridge`; outbound actions always stop for per-action approval | built |
 | Social | Messages | social DMs are Messages threads | not built |
 | Calendar | Tasks | each day's events for Upcoming, through `AgendaProvider` | built |
 | Home | Tasks | search, refresh, the big tile with working tick boxes | built |
@@ -888,3 +888,12 @@ Spec: issue 240.
 - **Sources:** trails from OpenStreetMap through the public Overpass API, sent a location rounded to 2 decimals, and only when Nearby opens or is pulled. Heights come from Open-Meteo's elevation API, sent only the trail's own points. Recorded heights come from the iPhone's GPS. The map is Apple MapKit. No map tiles are prefetched.
 - **Contract `PostDraft`** (in `TotalityCore`): a title, body, optional JPEG and the source `ContentRef`. Hiking hands one to the app through `HikingModel.onShare`. The app sets `SocialModel.draft` and `homeRequest = .compose`, and Social's composer opens filled in. Nothing posts until the person presses Post.
 - `HikingModule` is a `ModuleSearcher` over saved hikes and trails, on the device.
+
+## Ask Totality (AI)
+
+Spec: issue 252, plus `next-up.md` line 38 (local 3–4B 4-bit open model ~2 GB, works without Apple Intelligence). Mockup: `AI agent mockup.html`.
+
+- **Isolation:** `TotalityAI` imports only `TotalityCore` and `TotalityUI`. It never imports Calendar, Mail, Tasks, Reader, Weather, Messages, Contacts, or Hiking.
+- **Data & privacy:** `AIVault` seals grants (`ai-grants`), the activity log (`ai-activity`), and on-device memory/conversation (`ai-memory`) with the content root key in `AI/` under `SealedArea`. All 8 module grants start turned off (`read = false`, `propose = false`). Everything runs locally on the iPhone and nothing leaves the device.
+- **Safety gate:** Send, post, pay, and delete actions ALWAYS require per-action approval (`Needs your OK`) before running, regardless of grant toggles. Passwords, keys, and account settings are never exposed to AI.
+- **App bridge (`AISourceBridge`):** `App/Totality/AppAIToolBridge.swift` satisfies `AISourceBridge` in the app, reading only modules whose grant has `read == true` and executing approved proposals only when triggered by explicit user confirmation.

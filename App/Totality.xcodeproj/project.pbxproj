@@ -24,6 +24,8 @@
 		A1B2C3D400000000000000E0 /* TotalityClock in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000E1 /* TotalityClock */; };
 		A1B2C3D400000000000000E2 /* TotalityContacts in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000E3 /* TotalityContacts */; };
 		A1B2C3D400000000000000F0 /* TotalityHiking in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000F1 /* TotalityHiking */; };
+		A1B2C3D400000000000000F2 /* TotalityAI in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000F3 /* TotalityAI */; };
+		A1B2C3D400000000000000F4 /* TotalityMusic in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D400000000000000F5 /* TotalityMusic */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -71,6 +73,8 @@
 				A1B2C3D400000000000000E0 /* TotalityClock in Frameworks */,
 				A1B2C3D400000000000000E2 /* TotalityContacts in Frameworks */,
 				A1B2C3D400000000000000F0 /* TotalityHiking in Frameworks */,
+				A1B2C3D400000000000000F2 /* TotalityAI in Frameworks */,
+				A1B2C3D400000000000000F4 /* TotalityMusic in Frameworks */,
 				A1B2C3D4000000000000001A /* TotalityAccount in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -134,6 +138,8 @@
 				A1B2C3D400000000000000E1 /* TotalityClock */,
 				A1B2C3D400000000000000E3 /* TotalityContacts */,
 				A1B2C3D400000000000000F1 /* TotalityHiking */,
+				A1B2C3D400000000000000F3 /* TotalityAI */,
+				A1B2C3D400000000000000F5 /* TotalityMusic */,
 				A1B2C3D40000000000000019 /* TotalityAccount */,
 			);
 			productName = Totality;
@@ -423,6 +429,14 @@
 		A1B2C3D400000000000000F1 /* TotalityHiking */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TotalityHiking;
+		};
+		A1B2C3D400000000000000F3 /* TotalityAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TotalityAI;
+		};
+		A1B2C3D400000000000000F5 /* TotalityMusic */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TotalityMusic;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

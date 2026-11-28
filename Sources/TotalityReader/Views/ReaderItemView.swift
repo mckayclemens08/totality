@@ -20,6 +20,7 @@ struct ReaderItemView: View {
     @AppStorage(Self.readAlongKey) private var readAlong = false
     @AppStorage(BookPage.plainTextKey) private var plainText = false
     @AppStorage(BookPage.scrollKey) private var scrolls = false
+    @Environment(\.askTotality) private var askTotality
 
     private var isBook: Bool { item.kind == .file && BookPage.opens(item.mime) }
 
@@ -47,6 +48,19 @@ struct ReaderItemView: View {
         }
         .addToTasksSheet(Bindable(model).taskDraft, maker: model.taskMaker) { made in model.notice = made.line }
         .toolbar {
+            if let askTotality {
+                ToolbarItem(placement: .primaryAction) {
+                    ToolbarIcon("Ask Totality", systemImage: "sparkles") {
+                        askTotality(AIAskContext(
+                            id: item.id.uuidString,
+                            module: .reader,
+                            title: item.displayTitle,
+                            detail: item.typeName,
+                            date: item.updatedAt
+                        ))
+                    }
+                }
+            }
             if model.taskMaker != nil {
                 ToolbarItem(placement: .secondaryAction) {
                     Button("Add to Tasks", systemImage: "checkmark.circle") { model.addToTasks(item, quote: nil) }

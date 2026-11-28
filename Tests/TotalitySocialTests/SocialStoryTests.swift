@@ -206,4 +206,31 @@ import TotalityCore
                                      story("cal", 100, viewed: false), story("old", 90_000, viewed: false)], me: "me", now: now)
         #expect(rings.map(\.author) == ["me", "cal", "ben", "ana"])
     }
+
+    @Test func postingASecondStoryShowsImmediatelyEvenWhenRefetchLags() async throws {
+        let maya = device("maya"), jonah = device("jonah")
+        await friends(maya, jonah)
+        await maya.load()
+        #expect(await maya.postStory(.everyone, kind: .text, text: "First story", background: .accent, attachments: []))
+        let before = maya.ring(for: "maya")?.stories.count ?? 0
+        #expect(before == 1)
+        // Simulate server stories() failing or lagging right after posting a 2nd public story.
+        world.storiesFail = true
+        #expect(await maya.postStory(.everyone, kind: .text, text: "Second story", background: .sage, attachments: []))
+        let after = maya.ring(for: "maya")?.stories ?? []
+        #expect(after.count == 2)
+        #expect(after.map(\.text) == ["First story", "Second story"])
+        // And a 3rd friends-only story also appears immediately even when refetch lags behind the newest own story.
+        world.storiesFail = false
+        world.omitLatestOwnStory = true
+        #expect(await maya.postStory(.friends, kind: .text, text: "Third story", background: .sage, attachments: []))
+        let three = maya.ring(for: "maya")?.stories ?? []
+        #expect(three.count == 3)
+        #expect(three.map(\.text) == ["First story", "Second story", "Third story"])
+        // And a 4th everyone story also shows immediately when `stories()` omits the newest own story.
+        #expect(await maya.postStory(.everyone, kind: .text, text: "Fourth story", background: .accent, attachments: []))
+        let four = maya.ring(for: "maya")?.stories ?? []
+        #expect(four.count == 4)
+        #expect(Set(four.map(\.text)) == ["First story", "Second story", "Third story", "Fourth story"])
+    }
 }

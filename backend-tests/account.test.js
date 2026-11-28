@@ -247,3 +247,30 @@ describe('retired handles', () => {
     await addAccount('admin_fan')
   })
 })
+
+describe('sign-in home layouts', () => {
+  test('owners save and load their own layout per device kind, newer timestamp wins', async () => {
+    const [user1, user2] = await pair()
+    const first = { tiles: [{ module: 'tasks', size: 'large' }], updatedAt: '2026-11-27T10:00:00Z' }
+    await as(db, user1, (q) => q(
+      `select public.save_home_layout('iphone', $1::jsonb, $2::timestamptz)`, [JSON.stringify(first), first.updatedAt]
+    ))
+    const older = { tiles: [{ module: 'reader', size: 'small' }], updatedAt: '2026-11-27T09:00:00Z' }
+    await as(db, user1, (q) => q(
+      `select public.save_home_layout('iphone', $1::jsonb, $2::timestamptz)`, [JSON.stringify(older), older.updatedAt]
+    ))
+    const ownRows = await as(db, user1, (q) => q(
+      `select device_kind, layout_json from public.account_home_layouts`
+    ))
+    assert.equal(ownRows.length, 1)
+    assert.equal(ownRows[0].device_kind, 'iphone')
+    assert.deepEqual(ownRows[0].layout_json.tiles, [{ module: 'tasks', size: 'large' }])
+
+    // Another user cannot see user1's layout or overwrite it, and anon is refused.
+    assert.equal((await as(db, user2, (q) => q(`select id from public.account_home_layouts`))).length, 0)
+    await assert.rejects(as(db, user2, (q) => q(
+      `insert into public.account_home_layouts (owner_id, device_kind, layout_json) values ($1, 'iphone', '{}'::jsonb)`, [user1.id]
+    )), /row-level security/)
+    await assert.rejects(as(db, null, (q) => q(`select public.save_home_layout('iphone', '{}'::jsonb, now())`)), /permission denied/)
+  })
+})

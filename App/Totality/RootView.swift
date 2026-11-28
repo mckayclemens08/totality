@@ -1,11 +1,14 @@
+import os
 import SwiftUI
 import TotalityAccount
+import TotalityAI
 import TotalityCalendar
 import TotalityClock
 import TotalityContacts
 import TotalityCore
 import TotalityMail
 import TotalityMessages
+import TotalityMusic
 import TotalityPhotos
 import TotalityReader
 import TotalitySocial
@@ -32,6 +35,8 @@ struct RootView: View {
     @State private var clock: ClockModel?
     @State private var contacts: ContactsModel?
     @State private var hiking: HikingModel?
+    @State private var ai: AIModel?
+    @State private var music: MusicModel?
     /// A .gpx file opened in Totality, waiting for Hiking to be ready to take it.
     @State private var pendingGPX: URL?
     /// Shared task lists, over Messages' Matrix connection (step 6).
@@ -69,12 +74,17 @@ struct RootView: View {
     @State private var showingSearch = false
     /// Someone's profile, opened from their link.
     @State private var linkedProfile: LinkedProfile?
+    /// Ask Totality sheet triggered from inside a module (or focused on one item).
+    @State private var askTarget: AskTotalityTarget?
     // What the home page's button chose, until the app restarts or the default changes.
     @Environment(\.scenePhase) private var scenePhase
     /// The branded screen while the session is restored and each module opens what it has saved.
     @State private var launching = true
-    /// Counts each launch screen, so a time limit left from an earlier one can't end a later one.
+    /// Counts each launch screen, so a later launch overrides an earlier one.
     @State private var launchTurn = 0
+    /// Incremented when a sign-in-linked layout arrives from the server so Home reloads immediately.
+    @State private var homeLayoutRevision = 0
+    private static let launchLog = Logger(subsystem: "app.totality.client", category: "launch")
 
     init() {
         let keys = DeviceContentKeys()
@@ -122,25 +132,20 @@ struct RootView: View {
             // sign-in and the content key can't be read. Opening then would find nobody here and leave
             // Home empty, so launch waits for the unlock (owner, 2026-11-26).
             await ProtectedDataGate.system.waitUntilAvailable()
-            // Reads the saved session only, so Home or the sign-in page can be chosen at once.
-            await account?.restore()
+            await account?.restoreIfNeeded()
             await launch()
             await refreshAhead()
             await account?.sync?.syncNow()
-        }
-        // However slow a module is, the launch screen goes after `LaunchView.limit`.
-        .task(id: launchTurn) {
-            // Counted from the unlock: nobody is looking at a locked phone's launch screen.
-            await ProtectedDataGate.system.waitUntilAvailable()
-            try? await Task.sleep(for: LaunchView.limit)
-            guard !Task.isCancelled else { return }
-            endLaunch()
         }
         // Signing in on the sign-in page opens Home already filled in, as launching does. Signing in from
         // the Account sheet is followed when the sheet closes.
         .onChange(of: isSignedIn) { wasSignedIn, signedIn in
             guard signedIn, !wasSignedIn, !showingAccount, !launching else { return }
             Task { await openAfterSignIn() }
+        }
+        .onChange(of: account?.syncedHomeLayout) { _, remote in
+            guard let remote else { return }
+            Task { await applySyncedHomeLayout(remote) }
         }
         // Signing out brings the sign-in page back, with nothing of the account left open over it.
         .onChange(of: account?.showsSignInPage) {
@@ -186,9 +191,11 @@ struct RootView: View {
             if !showingAccount {
                 Task {
                     await followAccount()
+                    if needsHomeAgain { await warmUp() }
                     await messages.checkAccount()
                     // The recovery key may have just been set up or entered.
                     await messages.settleKeys()
+                    await account?.sync?.syncNow()
                 }
             }
         }
@@ -196,9 +203,11 @@ struct RootView: View {
             switch scenePhase {
             case .active:
                 Task {
+                    await account?.restoreIfNeeded()
                     // Home is never left empty: content that couldn't open before opens now.
                     if needsHomeAgain { await warmUp() }
                     await refreshAhead()
+                    await syncHomeLayoutFromAccount()
                     await account?.sync?.syncNow()
                     // An account whose Matrix address couldn't be made at sign-up gets another try.
                     await account?.setUpMessagesIfNeeded()
@@ -217,9 +226,12 @@ struct RootView: View {
         .onChange(of: open) {
             guard open == nil else { return }
             Task {
+                await account?.restoreIfNeeded()
                 await followAccount()
                 await openContentForHome()
+                if social == nil { await openSocialForHome() }
                 await account?.sync?.syncNow()
+                logLaunchState("closedModule")
             }
         }
         #if os(iOS)
@@ -255,10 +267,21 @@ struct RootView: View {
         if let username = ProfileLink.username(in: url) { linkedProfile = LinkedProfile(username: username) }
     }
 
-    /// Signed in, done launching, and still no content open: something stopped it opening, such as a
-    /// locked phone, so coming to the front tries again, as opening a module would.
+    /// Signed in, done launching, and still missing open content: something stopped it opening, such as
+    /// a locked phone or interrupted load, so coming to the front tries again, as closing a module would.
     private var needsHomeAgain: Bool {
-        isSignedIn && !launching && reader == nil && !contentKeys.isMoving && ProtectedDataGate.system.canRead
+        isSignedIn && !launching && (reader == nil || hasUnloadedHomeContent) && !contentKeys.isMoving && ProtectedDataGate.system.canRead
+    }
+
+    private var hasUnloadedHomeContent: Bool {
+        reader?.phase == .loading
+            || calendar?.phase == .loading
+            || tasks?.phase == .loading
+            || weather?.phase == .loading
+            || clock?.phase == .loading
+            || contacts?.phase == .loading
+            || hiking?.phase == .loading
+            || (social == nil && !homeChoices.removed.contains(.social))
     }
 
     private var isSignedIn: Bool {
@@ -266,15 +289,23 @@ struct RootView: View {
     }
 
     /// Shows the launch screen while the signed-in account's space opens and each module reads what it
-    /// has saved on this device, so Home's tiles are filled in when it appears (owner, 2026-11-25). What's
-    /// new from the network follows in the background. Nobody waits longer than `LaunchView.limit`.
+    /// has saved on this device, so Home's tiles are filled in when it appears (owner, 2026-11-25). Network
+    /// tiles wait up to `LaunchView.limit`, while sign-in and local saved content always finish first.
     private func launch(after first: () async -> Void = {}) async {
         launchTurn += 1
         let turn = launchTurn
         launching = true
+        await ProtectedDataGate.system.waitUntilAvailable()
         await first()
-        // Signed out this is quick: each module finds no account and opens nothing.
-        await warmUp()
+        // Never hold the launch screen past `LaunchView.limit`, even if account setup or a module stalls.
+        await FirstContent.wait(
+            for: [{
+                await account?.restoreIfNeeded()
+                // Signed out this is quick: each module finds no account and opens nothing.
+                await warmUp()
+            }],
+            cap: LaunchView.limit
+        )
         if turn == launchTurn { endLaunch() }
     }
 
@@ -296,6 +327,7 @@ struct RootView: View {
             }
         }
         await refreshAhead()
+        await account?.sync?.syncNow()
     }
 
     private func endLaunch() {
@@ -303,22 +335,44 @@ struct RootView: View {
         withMotion(Motion.smooth) { launching = false }
     }
 
-    /// Opens each module from its cache. Network fetches start here but aren't waited for.
+    /// Opens each module from its cache, then waits up to `LaunchView.limit` for network tiles.
     private func warmUp() async {
-        // Before anything opens, so it opens in the signed-in account's own space.
-        await followAccount()
-        await account?.backup?.settleDevice()
+        // Prepare the signed-in account's space immediately without serializing module loads ahead of the cap.
+        await followAccount(loadPhotos: false, loadContent: false)
+        guard isSignedIn else {
+            logLaunchState("warmUp.signedOut")
+            return
+        }
         connectSync()
-        // So the Messages tile shows who's written without opening Messages first. Not while it's off Home.
-        // Each tile's first content is waited for, up to the launch cap, so Home opens filled in (owner,
-        // 2026-11-26). Mail shows what's saved at once and checks behind it; Messages and Social read the network.
+        // All local & network warm-ups race together under `LaunchView.limit` so nothing hangs launch.
         var jobs: [@MainActor () async -> Void] = []
+        jobs.append { await openContentForHome(loadPhotos: false) }
+        jobs.append { await syncHomeLayoutFromAccount() }
         if !homeChoices.removed.contains(.messages) { jobs.append { await messages.connect() } }
-        jobs.append { await openContentForHome() }
-        // Content may have opened already, so openContentForHome stopped early; Mail's tile still needs its check.
         jobs.append { await warmMailForHome() }
         jobs.append { await openSocialForHome() }
+        if photos.phase == .loading { jobs.append { await photos.load() } }
         await FirstContent.wait(for: jobs, cap: LaunchView.limit)
+        logLaunchState("warmUp.done")
+    }
+
+    private func logLaunchState(_ stage: String) {
+        let accountPhase = switch account?.phase {
+        case .loading: "loading"
+        case .signedOut: "signedOut"
+        case .signedIn: "signedIn"
+        case nil: "nil"
+        }
+        let problem = contentProblem.map { "\($0)" } ?? "none"
+        let hasReader = reader != nil
+        let hasFollowed = followedAccount != nil
+        let hasSocial = social != nil
+        let mailReady = mail.current.phase == .ready
+        let messagesReady = messages.phase == .ready
+        let photosReady = photos.phase == .ready
+        Self.launchLog.notice(
+            "\(stage, privacy: .public): account=\(accountPhase, privacy: .public) followed=\(hasFollowed, privacy: .public) reader=\(hasReader, privacy: .public) problem=\(problem, privacy: .public) social=\(hasSocial, privacy: .public) mailReady=\(mailReady, privacy: .public) messagesReady=\(messagesReady, privacy: .public) photosReady=\(photosReady, privacy: .public)"
+        )
     }
 
     /// Home, with the open module over it. On iPhone the module slides up as a cover and Home stays
@@ -350,10 +404,23 @@ struct RootView: View {
         HomeView(
             glances: glances, bigTile: bigTile, lineLink: lineLink,
             removed: homeChoices.removed,
-            onRemove: { module in Task { await homeChoices.remove(module) } },
-            onRestore: { module in Task { await homeChoices.restore(module) } }
+            onRemove: { module in
+                Task {
+                    await homeChoices.remove(module)
+                    await pushLocalHomeLayout()
+                }
+            },
+            onRestore: { module in
+                Task {
+                    await homeChoices.restore(module)
+                    await pushLocalHomeLayout()
+                }
+            },
+            onLayoutChanged: { data in
+                Task { await pushLocalHomeLayout(data) }
+            }
         ) { module in
-            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock, .contacts, .hiking].contains(module) { prepareContent() }
+            if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock, .contacts, .hiking, .ai, .player].contains(module) { prepareContent() }
             bringUp(module)
         } onSearch: {
             prepareContent()
@@ -363,7 +430,40 @@ struct RootView: View {
         }
         // Home's layout is the signed-in account's own, and a new account's Home starts fresh.
         .defaultAppStorage(accountDefaults)
-        .id(followedAccount)
+        .id("\(followedAccount ?? "")-\(homeLayoutRevision)")
+    }
+
+    private static let homeLayoutStampKey = "home.layoutUpdatedAt"
+
+    private func syncHomeLayoutFromAccount() async {
+        guard isSignedIn else { return }
+        await account?.loadHomeLayout()
+        if let remote = account?.syncedHomeLayout {
+            await applySyncedHomeLayout(remote)
+        } else if accountDefaults.data(forKey: "home.layout") != nil || !homeChoices.removed.isEmpty {
+            await pushLocalHomeLayout()
+        }
+    }
+
+    private func applySyncedHomeLayout(_ remote: SyncedHomeLayout) async {
+        let localData = accountDefaults.data(forKey: "home.layout")
+        let localStamp = accountDefaults.object(forKey: Self.homeLayoutStampKey) as? Date
+        let shouldApplyTiles = localData == nil || (localStamp.map { remote.updatedAt > $0 } ?? true)
+        if shouldApplyTiles, let data = HomeLayout.savedData(from: remote.tiles), data != localData {
+            accountDefaults.set(data, forKey: "home.layout")
+            accountDefaults.set(remote.updatedAt, forKey: Self.homeLayoutStampKey)
+            homeLayoutRevision += 1
+        }
+        await homeChoices.applySynced(remote.choices)
+    }
+
+    private func pushLocalHomeLayout(_ layoutData: Data? = nil) async {
+        guard isSignedIn else { return }
+        let now = Date()
+        accountDefaults.set(now, forKey: Self.homeLayoutStampKey)
+        let data = layoutData ?? accountDefaults.data(forKey: "home.layout") ?? Data()
+        let tiles = HomeLayout.syncedTiles(from: data)
+        await account?.saveHomeLayout(SyncedHomeLayout(tiles: tiles, choices: homeChoices.choices, updatedAt: now))
     }
 
     @ViewBuilder
@@ -414,6 +514,18 @@ struct RootView: View {
         case .hiking:
             if let hiking {
                 HikingHomeView(model: hiking) { open = nil }
+            } else {
+                contentMessage { open = nil }
+            }
+        case .ai:
+            if let ai {
+                AIHomeView(model: ai) { open = nil }
+            } else {
+                contentMessage { open = nil }
+            }
+        case .player:
+            if let music {
+                MusicHomeView(model: music) { open = nil }
             } else {
                 contentMessage { open = nil }
             }
@@ -491,6 +603,17 @@ struct RootView: View {
                     contentMessage { showingSearch = false }
                 }
             }
+            .sheet(item: Binding(get: { isTop ? askTarget : nil }, set: { askTarget = $0 })) { target in
+                if let ai {
+                    AIHomeView(model: ai, about: target.context.map(AIContextItem.init)) { askTarget = nil }
+                } else {
+                    contentMessage { askTarget = nil }
+                }
+            }
+            .environment(\.askTotality, AskTotalityAction { context in
+                if reader == nil { prepareContent() }
+                askTarget = AskTotalityTarget(context: context)
+            })
     }
 
     /// Opens what search asked for, now its sheet is down. A cover can't come up while a sheet leaves.
@@ -512,6 +635,8 @@ struct RootView: View {
         glances[.clock] = clock?.glance
         glances[.contacts] = contacts?.glance
         glances[.hiking] = hiking?.glance
+        glances[.ai] = ai?.glance
+        glances[.player] = music?.glance
         glances[.social] = social?.glance
         glances[.mail] = mail.current.glance
         glances[.messages] = messages.glance
@@ -546,6 +671,12 @@ struct RootView: View {
         case .hiking:
             guard let hiking, hiking.phase == .ready else { return nil }
             return AnyView(HikingHomeTile(model: hiking, size: size) { bringUp(.hiking) })
+        case .ai:
+            guard let ai, ai.phase == .ready || ai.phase == .thinking else { return nil }
+            return AnyView(AIHomeTile(model: ai, size: size) { bringUp(.ai) })
+        case .player:
+            guard let music, music.phase == .ready else { return nil }
+            return AnyView(MusicHomeTile(model: music, size: size) { bringUp(.player) })
         case .mail:
             guard mail.current.phase == .ready else { return nil }
             return AnyView(MailHomeTile(model: mail.current, size: size) { bringUp(.mail) })
@@ -634,7 +765,7 @@ struct RootView: View {
         )
     }
 
-    private func prepareContent() {
+    private func prepareContent(tellOwner: Bool = true) {
         guard reader == nil else { return }
         guard !contentKeys.isMoving else {
             contentProblem = .keyUnavailable
@@ -658,6 +789,13 @@ struct RootView: View {
             hiking = content.hiking
             // A hike shared from Hiking opens Social's composer with it. Nothing posts until Post is pressed.
             content.hiking.onShare = { draft in shareToSocial(draft) }
+            content.ai.bridge = AppAIToolBridge(
+                calendar: content.calendar, mail: mail, tasks: content.tasks, reader: content.reader,
+                weather: content.weather, messages: messages, contacts: content.contacts, hiking: content.hiking,
+                music: content.music
+            )
+            ai = content.ai
+            music = content.music
             sharedLists = makeSharedLists(directory: content.registry.profiles)
             content.reader.shared = makeSharedDocs(directory: content.registry.profiles)
             // Shared docs answer asks for a copy on the refresh beat, at launch, on coming back and in
@@ -708,7 +846,8 @@ struct RootView: View {
             syncAreas = content.areas
             Task { await homeChoices.open(content.home) }
             refreshRecoveryLabels()
-            Task { await tellWhoIsHere() }
+            contentProblem = nil
+            if tellOwner { Task { await tellWhoIsHere() } }
         } catch is ContentSetup.SignedOut {
             contentProblem = .signedOut
         } catch KeyStoreError.keyMissing {
@@ -720,20 +859,30 @@ struct RootView: View {
 
     /// The tiles show live content, so it opens with the home page. This has to come after the device
     /// is settled, and it follows the same rules as opening a module.
-    private func openContentForHome() async {
-        guard reader == nil else { return }
-        prepareContent()
-        // Who's here first, so Mail opens its own mailbox straight away, without waiting on the others.
-        await tellWhoIsHere()
+    private func openContentForHome(loadPhotos: Bool = true) async {
+        if reader == nil { prepareContent(tellOwner: false) }
+        guard reader != nil else { return }
+        let needsReader = reader?.phase == .loading
+        let needsCalendar = calendar?.phase == .loading
+        let needsTasks = tasks?.phase == .loading
+        let needsWeather = weather?.phase == .loading
+        let needsClock = clock?.phase == .loading
+        let needsContacts = contacts?.phase == .loading
+        let needsHiking = hiking?.phase == .loading
+        let needsAI = ai?.phase == .idle
+        let needsMusic = music?.phase == .idle
+        async let ownerReady: Void = tellWhoIsHere(loadPhotos: loadPhotos)
+        async let readerLoad: Void = { @MainActor in if needsReader { await reader?.load() } }()
+        async let calendarLoad: Void = { @MainActor in if needsCalendar { await calendar?.load() } }()
+        async let tasksLoad: Void = { @MainActor in if needsTasks { await tasks?.load() } }()
+        async let weatherLoad: Void = { @MainActor in if needsWeather { await weather?.load() } }()
+        async let clockLoad: Void = { @MainActor in if needsClock { await clock?.load() } }()
+        async let contactsLoad: Void = { @MainActor in if needsContacts { await contacts?.load() } }()
+        async let hikingLoad: Void = { @MainActor in if needsHiking { await hiking?.load() } }()
+        async let aiLoad: Void = { @MainActor in if needsAI { await ai?.load() } }()
+        async let musicLoad: Void = { @MainActor in if needsMusic { await music?.load() } }()
+        _ = await (ownerReady, readerLoad, calendarLoad, tasksLoad, weatherLoad, clockLoad, contactsLoad, hikingLoad, aiLoad, musicLoad)
         await warmMailForHome(waitForCheck: false)
-        async let reader: Void = self.reader?.load() ?? ()
-        async let calendar: Void = self.calendar?.load() ?? ()
-        async let tasks: Void = self.tasks?.load() ?? ()
-        async let weather: Void = self.weather?.load() ?? ()
-        async let clock: Void = self.clock?.load() ?? ()
-        async let contacts: Void = self.contacts?.load() ?? ()
-        async let hiking: Void = self.hiking?.load() ?? ()
-        _ = await (reader, calendar, tasks, weather, clock, contacts, hiking)
     }
 
     /// So the Mail tile has something to show before Mail is opened. A new mailbox model (another account,
@@ -754,7 +903,7 @@ struct RootView: View {
     }
 
     /// Web keeps things only for the key's owner, and Mail shows only the owner's mailbox.
-    private func tellWhoIsHere() async {
+    private func tellWhoIsHere(loadPhotos: Bool = true) async {
         photosTurn += 1
         let turn = photosTurn
         let owner = await account?.backup?.deviceOwner()
@@ -771,7 +920,7 @@ struct RootView: View {
             model.taskMaker = registry?.taskMaker
             model.googleAccounts = ContentSetup.googleAccounts()
             photos = model
-            await model.load()
+            if loadPhotos { await model.load() }
         } else if turn == photosTurn, photos.account != photosWiring.library?.account
                     || (photosWiring.library == nil && photos.phase != .unavailable(title: photosReason().title, detail: photosReason().detail)) {
             // The model on screen must always be the current library's, or none.
@@ -780,7 +929,7 @@ struct RootView: View {
             model.taskMaker = registry?.taskMaker
             model.googleAccounts = ContentSetup.googleAccounts()
             photos = model
-            await model.load()
+            if loadPhotos { await model.load() }
         }
         await web?.use(account: owner)
     }
@@ -863,6 +1012,10 @@ struct RootView: View {
         messages.people.lookup = nil
         await hiking?.stopForKeyChange()
         hiking = nil
+        await ai?.close()
+        ai = nil
+        await music?.close()
+        music = nil
         reader = nil
         AppRefresh.shared.extras["sharedDocs"] = nil
         calendar = nil
@@ -887,7 +1040,7 @@ struct RootView: View {
 
     /// Opens the signed-in account's own space, after anyone else's has closed. Each account on this
     /// device sees only its own notes, calendar, tasks and Home; signed out, the modules ask to sign in.
-    private func followAccount() async {
+    private func followAccount(loadPhotos: Bool = true, loadContent: Bool = true) async {
         let now = await AccountSetup.accountID?()
         guard now != followedAccount || (now != nil && SignedInAccount.shared.id == nil) else { return }
         if reader != nil || registry != nil {
@@ -900,7 +1053,8 @@ struct RootView: View {
         accountDefaults = ContentSetup.defaults()
         guard now != nil else { return }
         await account?.backup?.settleDevice()
-        await openContentForHome()
+        if reader == nil { prepareContent(tellOwner: false) }
+        if loadContent { await openContentForHome(loadPhotos: loadPhotos) }
     }
 
     /// Signing out, or in as someone else, leaves nothing of the last account's behind: Social and shared
@@ -1006,7 +1160,9 @@ struct RootView: View {
             await weather?.reload()
             await clock?.reload()
             await contacts?.load()
+            await ai?.load()
             // Marks from another device, so Mail is already up to date when it's opened.
+            await mail.current.showStored()
             if mail.current.phase == .ready { await mail.current.refresh() }
         }
         backup.onJoined = {
@@ -1147,6 +1303,7 @@ struct RootView: View {
         case .weather: weather?.requestedPlace = UUID(uuidString: hit.itemID)
         case .contacts: contacts?.requestedCard = UUID(uuidString: hit.itemID)
         case .hiking: hiking?.requestedItem = hit.itemID
+        case .player: music?.requestedItemID = hit.itemID
         case .social:
             if social == nil { social = makeSocial() }
             social?.requestedPost = UUID(uuidString: hit.itemID)
@@ -1229,4 +1386,9 @@ private struct LinkedProfile: Identifiable {
 /// The open module, as a cover's item.
 private struct OpenModule: Identifiable {
     let id: ModuleID
+}
+
+private struct AskTotalityTarget: Identifiable {
+    let id = UUID()
+    let context: AIAskContext?
 }

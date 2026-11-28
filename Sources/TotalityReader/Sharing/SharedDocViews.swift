@@ -106,7 +106,7 @@ struct SharedDocsView: View {
                 ForEach(shared.docs) { doc in
                     NavigationLink(value: ReaderRoute.sharedDoc(doc.room)) {
                         VStack(alignment: .leading, spacing: Space.s1) {
-                            Text(doc.isComplete ? doc.displayTitle : "Waiting for a copy")
+                            Text(doc.isComplete ? doc.displayTitle : "Waiting for doc")
                                 .font(Typeface.headline)
                                 .foregroundStyle(theme.textPrimary.color)
                             Text(shared.detail(of: doc))
@@ -270,7 +270,7 @@ struct ShareDocSheet: View {
             Text("Can edit: write and change the doc. Can view: read it.")
                 .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
             if case .item = target {
-                Text("Your private copy moves to Recently Deleted, where you can restore it, so there's one copy everyone writes in. Images in your Reader don't travel with the doc yet.")
+                Text("Everyone you share with writes together in this live doc. Images in your Reader don't travel with it yet.")
                     .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -346,6 +346,9 @@ struct SharedPeopleSheet: View {
                             Menu(member.role.name) {
                                 Button("Can edit") { Task { await shared.setRole(.editor, for: member.username, in: room) } }
                                 Button("Can view") { Task { await shared.setRole(.viewer, for: member.username, in: room) } }
+                                if !member.isInvited, member.role.canEdit {
+                                    Button("Make owner") { Task { await shared.setRole(.owner, for: member.username, in: room) } }
+                                }
                                 Button("Remove", role: .destructive) { removing = member.username }
                             }
                             .font(Typeface.callout)
@@ -361,7 +364,7 @@ struct SharedPeopleSheet: View {
                 HeaderPill("Invite someone", systemImage: "person.badge.plus") { onInvite() }
                 Button("Stop sharing for everyone", role: .destructive) { confirmStop = true }
                     .font(Typeface.callout)
-                Text("It leaves everyone's Reader, and a private copy stays in yours.")
+                Text("It leaves everyone else's Reader, and stays private in yours.")
                     .font(Typeface.caption).foregroundStyle(theme.textSecondary.color)
             } else {
                 Text("Only \(doc?.owner.map { shared.name(of: $0.username) } ?? "the owner"), the owner, can change who it's shared with.")
@@ -384,7 +387,7 @@ struct SharedPeopleSheet: View {
         }
         .confirmationDialog("Leave \(doc?.displayTitle ?? "this doc")?", isPresented: $confirmLeave, titleVisibility: .visible) {
             Button("Leave", role: .destructive) { Task { if await shared.leave(room) { onDone(); onGone() } } }
-            Button("Keep a private copy and leave") {
+            Button("Save to my Reader and leave") {
                 Task {
                     if let doc { await model.keepPrivateCopy(title: doc.title, text: doc.text) }
                     if await shared.leave(room) { onDone(); onGone() }
@@ -396,7 +399,7 @@ struct SharedPeopleSheet: View {
         .confirmationDialog("Stop sharing \(doc?.displayTitle ?? "this doc")?", isPresented: $confirmStop, titleVisibility: .visible) {
             Button("Stop sharing", role: .destructive) {
                 Task {
-                    // The copy is made first, so a failure part way can never lose the doc.
+                    // Saved to Reader first, so a failure part way can never lose the doc.
                     guard let doc, doc.isComplete, await model.keepPrivateCopy(title: doc.title, text: doc.text) != nil else { return }
                     if await shared.stopSharing(room) != nil {
                         onDone()
@@ -405,7 +408,7 @@ struct SharedPeopleSheet: View {
                 }
             }
         } message: {
-            Text("It leaves everyone's Reader, and a private copy goes back into yours. What people already saw stays on their devices.")
+            Text("It leaves everyone else's Reader, and stays private in yours. What people already saw stays on their devices.")
         }
     }
 }

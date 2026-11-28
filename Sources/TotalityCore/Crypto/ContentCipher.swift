@@ -82,6 +82,17 @@ public enum KeyPurpose: String, Sendable, Hashable {
     case hikeCache = "hike-cache"
     /// The names of the groups saved trails are sorted into, sealed on the iPhone and never synced.
     case hikeGroups = "hike-groups"
+    case aiGrants = "ai-grants"
+    case aiActivity = "ai-activity"
+    case aiMemory = "ai-memory"
+    /// Music library catalog & unified playlists (issue / phase 1 player).
+    case musicCatalog = "music-catalog"
+    /// Uploaded audio files sealed client-side in chunks before upload.
+    case musicAudio = "music-audio"
+    /// Re-encoded cover artwork for Music tracks, sealed under its own key purpose.
+    case musicArt = "music-art"
+    /// Local offline music cache index.
+    case musicCache = "music-cache"
 }
 
 /// The root of a user's private content. Lives on devices and in the key backup, never on a server.

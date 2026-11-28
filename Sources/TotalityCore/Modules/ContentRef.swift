@@ -46,6 +46,8 @@ public enum ContentKind: String, Codable, Sendable, CaseIterable {
     /// One hike recorded in Hiking: its track and stats, sealed (issue 240). Kept on the iPhone only in v1,
     /// so no server row has this kind yet; the kind names the hike in a `ContentRef` when it's shared.
     case hike
+    /// Sealed Music library catalog, playlists, and OpenSubsonic server metadata.
+    case musicCatalog = "music_catalog"
 }
 
 public enum ModuleID: String, Codable, Sendable, CaseIterable {

@@ -100,8 +100,8 @@ public struct SocialHomeView: View {
 
     func openStories(_ author: String) {
         let rings = model.storyRings
-        guard rings.contains(where: { $0.author == author }) else { return }
-        watching = StoryWatch(rings: rings, author: author)
+        guard let ring = rings.first(where: { $0.author.lowercased() == author.lowercased() }) else { return }
+        watching = StoryWatch(rings: rings, author: ring.author)
     }
 
     /// One screen back. The hidden navigation bar turns off the system's own swipe, so this replaces it.
@@ -141,8 +141,7 @@ public struct SocialHomeView: View {
                 FeedTab(title: feed.name, isSelected: model.feed == feed) { model.feed = feed }
             }
             Spacer(minLength: 0)
-            // Search and your profile moved to the bottom bar; this keeps the feed names centred.
-            Color.clear.frame(width: Metric.headerButton, height: Metric.headerButton)
+            AskTotalityButton(context: AIAskContext(id: "social.home", module: .social, title: "Social"))
         }
         .padding(.horizontal, Space.s4)
         .padding(.top, Space.s2)

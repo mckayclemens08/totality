@@ -73,6 +73,11 @@ These fail review, full stop. There is no "just for now" version of any of them.
    - **It stores** a keyed hash of the address mapped to that person's push tokens, never the address
      in plain text, and it logs nothing.
    - The notification text is built on the phone, so the server never sees it either.
+   A fourth exception, for sign-in-linked Home page layout, which the owner agreed on 2026-11-27
+   ("option 1"): `public.account_home_layouts` stores each account's Home tile order, tile sizes,
+   and hidden-module names per device kind (`iphone` / `mac`) unencrypted under strict owner-only RLS
+   so a new device restores your Home grid right after username/password sign-in without waiting for
+   the recovery key. It never holds notes, subjects, messages, or other module content.
    Nothing else gets these exceptions.
 
 ## Definition of done (every module)

@@ -125,9 +125,17 @@ final class FakeRooms: SharedRooms {
 
     func setRole(_ role: SharedRole, for username: String, in id: String) async throws {
         try requireOwner(id)
+        let r = try room(id)
+        if server.roomVersion12, username == r.creator, role != .owner {
+            throw SharedRoomError.failed("The original creator stays an owner unless they leave.")
+        }
         changeLevels(id) { levels in
-            levels[username] = role.rawValue
-            if role == .owner { levels[self.me] = SharedRole.editor.rawValue }
+            if !(server.roomVersion12 && username == r.creator) {
+                levels[username] = role.rawValue
+            }
+            if role == .owner, !(server.roomVersion12 && self.me == r.creator) {
+                levels[self.me] = SharedRole.editor.rawValue
+            }
         }
     }
 

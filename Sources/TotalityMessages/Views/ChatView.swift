@@ -41,6 +41,7 @@ struct ChatView: View {
     var onOpenAccount: (() -> Void)? = nil
     /// Goes back to the list, after leaving the chat or blocking the person in it.
     let onGone: () -> Void
+    @Environment(\.askTotality) private var askTotality
     @FocusState private var writing: Bool
     @State private var playing: ChatMessage?
     /// A message being added to Tasks (step 4).
@@ -301,6 +302,18 @@ struct ChatView: View {
             },
             onDelete: { deleting = message },
             onAddToTasks: messages.taskMaker == nil || message.kind == .deleted ? nil : { taskDraft = draft(for: message) },
+            onAskTotality: askTotality == nil || message.kind == .deleted ? nil : {
+                let who = message.isOwn ? "You" : people.name(ofMatrixID: message.sender)
+                let when = message.time.formatted(date: .abbreviated, time: .shortened)
+                askTotality?(AIAskContext(
+                    id: "\(model.chatID):\(message.id)",
+                    module: .messages,
+                    title: model.title,
+                    detail: "\(who) · \(when)",
+                    body: message.copyableText ?? "",
+                    date: message.time
+                ))
+            },
             keys: messages.keys,
             onRestore: onOpenAccount
         )
@@ -673,6 +686,7 @@ struct Bubble: View {
     let onReply: () -> Void
     let onDelete: () -> Void
     var onAddToTasks: (() -> Void)? = nil
+    var onAskTotality: (() -> Void)? = nil
     /// Whether this account's message keys are backed up here, which decides what a locked message offers.
     var keys: MessageKeys = .checking
     var onRestore: (() -> Void)? = nil
@@ -787,6 +801,9 @@ struct Bubble: View {
                 }
             }
             .controlGroupStyle(.compactMenu)
+        }
+        if let onAskTotality {
+            Button("Ask Totality", systemImage: "sparkles", action: onAskTotality)
         }
         if let onAddToTasks {
             Button("Add to Tasks", systemImage: "checkmark.circle", action: onAddToTasks)

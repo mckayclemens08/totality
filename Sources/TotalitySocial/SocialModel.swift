@@ -46,7 +46,7 @@ public final class SocialModel {
     }
     /// Counts each tap on a #tag, so the screen showing can leave whatever is open and go to that tag's posts.
     public private(set) var tagRequests = 0
-    public private(set) var me: String?
+    public internal(set) var me: String?
     /// A short note after something didn't go through, shown over the screen.
     public var notice: String?
     /// Whether Friends and Close-friends posts can be read and made right now, and why not.
@@ -108,6 +108,8 @@ public final class SocialModel {
     /// Live stories: public ones from the server and encrypted ones from the rooms, each marked viewed or not.
     public internal(set) var stories: [SocialStory] = []
     var privateStories: [SocialStory] = []
+    /// Stories just published from this device whose server/Matrix refetch hasn't returned them yet.
+    var pendingStories: [UUID: SocialStory] = [:]
     /// Videos opened for playing, written to this app's own caches, a few at a time (`VideoFiles`).
     @ObservationIgnored let videoFiles = VideoFiles()
     /// What For You has put on screen and hasn't told the server about yet.
@@ -175,6 +177,7 @@ public final class SocialModel {
         videoFiles.clear()
         stories = []
         privateStories = []
+        pendingStories = [:]
         me = nil
         forYou = []
         following = []
@@ -230,7 +233,7 @@ public final class SocialModel {
         let timelines = try await privatePosts.refresh(following: followingSet)
         // Matrix may not have synced its rooms yet, so none come back. That isn't "no posts": the last good
         // Friends posts stay until rooms say otherwise, or Home's tile would empty a minute after it filled.
-        if timelines.isEmpty, !privateFeed.isEmpty { return }
+        if timelines.isEmpty, (!privateFeed.isEmpty || !privateStories.isEmpty) { return }
         privateFeed = timelines.flatMap(\.posts)
         privateStories = timelines.flatMap(\.stories)
         friends = Set(try await server.friends())

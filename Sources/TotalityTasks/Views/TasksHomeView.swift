@@ -268,6 +268,7 @@ public struct TasksHomeView: View {
                     HeaderButton("Home", systemImage: "circle.hexagongrid.fill", action: onClose)
                 }
                 Spacer(minLength: 0)
+                AskTotalityButton(context: AIAskContext(id: "tasks.home", module: .tasks, title: bucket.name))
                 if ready, bucket == .today, !showsLists {
                     HeaderMenu("Today options", systemImage: "ellipsis") {
                         Toggle("Split into morning, afternoon and evening", isOn: $splitToday)

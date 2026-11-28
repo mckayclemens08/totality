@@ -222,6 +222,7 @@ public struct MessagesHomeView: View {
                     settingsMenu
                 }
                 Spacer(minLength: 0)
+                AskTotalityButton(context: AIAskContext(id: "messages.home", module: .messages, title: "Messages"))
                 if ready {
                     #if os(iOS)
                     if CameraPicker.isAvailable && !model.chats.isEmpty {
