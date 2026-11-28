@@ -62,11 +62,11 @@ public struct NewsHomeView: View {
             HStack(spacing: Space.s2) {
                 headerTitle
                 Spacer(minLength: 0)
-                if section == .today { headerActions }
+                headerActions
             }
             VStack(alignment: .leading, spacing: Space.s2) {
                 headerTitle
-                if section == .today { headerActions }
+                headerActions
             }
         }
     }
@@ -83,9 +83,12 @@ public struct NewsHomeView: View {
 
     private var headerActions: some View {
         HStack(spacing: Space.s2) {
-            HeaderButton("Search", systemImage: "magnifyingglass") { section = .search }
-            HeaderButton("Saved", systemImage: "bookmark") { section = .saved }
-            HeaderButton("Following", systemImage: "list.bullet") { section = .following }
+            if section == .today {
+                HeaderButton("Search", systemImage: "magnifyingglass") { section = .search }
+                HeaderButton("Saved", systemImage: "bookmark") { section = .saved }
+                HeaderButton("Following", systemImage: "list.bullet") { section = .following }
+            }
+            AskTotalityButton(context: AIAskContext(id: "news.home", module: .news, title: "News"))
         }
     }
 
@@ -257,6 +260,14 @@ public struct NewsHomeView: View {
         }
         .itemCard()
         .contextMenu {
+            AskTotalityMenuButton(context: AIAskContext(
+                id: "news.\(article.url.absoluteString)",
+                module: .news,
+                title: article.title,
+                detail: article.source,
+                body: article.summary,
+                date: article.date
+            ))
             if let source = model.source(for: article) {
                 let followed = model.record.sources.contains { $0.url == source.url }
                 Button(followed ? "Unfollow " + source.name : "Follow " + source.name) {

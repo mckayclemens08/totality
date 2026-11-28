@@ -4,6 +4,7 @@ import AudioToolbox
 import SwiftUI
 @preconcurrency import MatrixRustSDK
 @preconcurrency import WebRTC
+import TotalityCore
 import TotalityMessages
 import TotalityUI
 
@@ -407,6 +408,8 @@ struct VoiceCallsHome: View {
                 HStack {
                     HeaderButton("Back", systemImage: "chevron.left", action: close)
                     ScreenTitle("Calls")
+                    Spacer()
+                    AskTotalityButton(context: AIAskContext(id: "calls.home", module: .calls, title: "Calls"))
                 }
                 if let notice = calls.notice { Text(notice).font(Typeface.callout) }
                 if !ready || chats.isEmpty {
