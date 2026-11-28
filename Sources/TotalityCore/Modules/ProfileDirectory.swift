@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -107,12 +108,34 @@ public enum SafeAvatar {
         let edge = min(scaled.width, scaled.height)
         let square = CGRect(x: (scaled.width - edge) / 2, y: (scaled.height - edge) / 2, width: edge, height: edge)
         guard let cropped = scaled.cropping(to: square) else { return nil }
+        let srgbImage = normalizedSRGB(cropped) ?? cropped
 
         // Only the pixels go into the new file: no metadata from the original survives.
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(output, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
-        CGImageDestinationAddImage(destination, cropped, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
+        CGImageDestinationAddImage(destination, srgbImage, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
         return CGImageDestinationFinalize(destination) ? output as Data : nil
+    }
+
+    /// Re-renders into an opaque 8-bit sRGB bitmap so wide-gamut / HDR / alpha-channel sources never
+    /// invert or tint when encoded to JPEG without an ICC profile.
+    private static func normalizedSRGB(_ image: CGImage) -> CGImage? {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: side,
+                  height: side,
+                  bitsPerComponent: 8,
+                  bytesPerRow: side * 4,
+                  space: space,
+                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+              )
+        else { return nil }
+        context.interpolationQuality = .high
+        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        return context.makeImage()
     }
 
     /// The type the first bytes prove, which is the only one trusted.

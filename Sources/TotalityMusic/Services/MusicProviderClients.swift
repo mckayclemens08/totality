@@ -46,10 +46,44 @@ public struct MusicProviderManager: Sendable {
     public static let spotifyRedirectURI = "totality://music-spotify-callback"
     public static let youtubeRedirectURI = "totality://music-youtube-callback"
 
-    public let spotifyClientID: String?
+    public let builtInSpotifyClientID: String?
     public let googleClientID: String?
     private let spotifyStore: (any KeyStore)?
     private let ytMusicStore: (any KeyStore)?
+
+    public var spotifyClientID: String? {
+        if let builtInSpotifyClientID { return builtInSpotifyClientID }
+        guard let data = try? spotifyStore?.load("spotify.client_id"),
+              let saved = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !saved.isEmpty
+        else { return nil }
+        return saved
+    }
+
+    public func saveSpotifyClientID(_ id: String) throws {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            try spotifyStore?.delete("spotify.client_id")
+            return
+        }
+        try spotifyStore?.save(Data(trimmed.utf8), as: "spotify.client_id")
+    }
+
+    public var youTubeCallbackScheme: String {
+        let suffix = ".apps.googleusercontent.com"
+        if let googleClientID, googleClientID.hasSuffix(suffix) {
+            return "com.googleusercontent.apps." + googleClientID.dropLast(suffix.count)
+        }
+        return Self.callbackScheme
+    }
+
+    public var resolvedYouTubeRedirectURI: String {
+        let suffix = ".apps.googleusercontent.com"
+        if let googleClientID, googleClientID.hasSuffix(suffix) {
+            return youTubeCallbackScheme + ":/oauth2redirect"
+        }
+        return Self.youtubeRedirectURI
+    }
 
     public init(
         spotifyClientID: String? = nil,
@@ -57,8 +91,10 @@ public struct MusicProviderManager: Sendable {
         spotifyStore: (any KeyStore)? = nil,
         ytMusicStore: (any KeyStore)? = nil
     ) {
-        self.spotifyClientID = spotifyClientID?.isEmpty == true ? nil : spotifyClientID
-        self.googleClientID = googleClientID?.isEmpty == true ? nil : googleClientID
+        let trimmedSpotify = spotifyClientID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedGoogle = googleClientID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.builtInSpotifyClientID = trimmedSpotify?.isEmpty == true ? nil : trimmedSpotify
+        self.googleClientID = trimmedGoogle?.isEmpty == true ? nil : trimmedGoogle
         self.spotifyStore = spotifyStore
         self.ytMusicStore = ytMusicStore
     }
@@ -81,7 +117,7 @@ public struct MusicProviderManager: Sendable {
                 isConnected: spotifyToken != nil,
                 accountLabel: spotifyToken?.accountLabel ?? "",
                 scopesDescription: "user-library-read · playlist-read-private",
-                note: spotifyClientID == nil ? "Set TotalitySpotifyClientID in Info.plist to enable OAuth sign-in." : nil
+                note: spotifyClientID == nil ? "Requires your free Spotify app Client ID (redirect: \(Self.spotifyRedirectURI))." : nil
             ),
             StreamingConnectionStatus(
                 provider: .youTubeMusic,
@@ -211,7 +247,7 @@ public struct MusicProviderManager: Sendable {
         var comps = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
         comps.queryItems = [
             URLQueryItem(name: "client_id", value: googleClientID),
-            URLQueryItem(name: "redirect_uri", value: Self.youtubeRedirectURI),
+            URLQueryItem(name: "redirect_uri", value: resolvedYouTubeRedirectURI),
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "scope", value: "openid https://www.googleapis.com/auth/youtube.readonly"),
             URLQueryItem(name: "code_challenge", value: pkce.challenge),
@@ -233,7 +269,7 @@ public struct MusicProviderManager: Sendable {
             URLQueryItem(name: "client_id", value: googleClientID),
             URLQueryItem(name: "grant_type", value: "authorization_code"),
             URLQueryItem(name: "code", value: code),
-            URLQueryItem(name: "redirect_uri", value: Self.youtubeRedirectURI),
+            URLQueryItem(name: "redirect_uri", value: resolvedYouTubeRedirectURI),
             URLQueryItem(name: "code_verifier", value: verifier),
         ]
         req.httpBody = body.percentEncodedQuery?.data(using: .utf8)

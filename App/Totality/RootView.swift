@@ -260,12 +260,15 @@ struct RootView: View {
             }
         }
         #if os(iOS)
-        // A tap on an alert asks for its module; the module was already told which item (issue 232).
-        .onChange(of: NotificationHub.shared.requestedModule, initial: true) { _, module in
-            guard let module else { return }
-            NotificationHub.shared.requestedModule = nil
-            if module == .social, social == nil { social = makeSocial() }
-            bringUp(module)
+        // A tap on an alert asks for its module; wait until Launch and sign-in settle before presenting over Home.
+        .onChange(of: NotificationHub.shared.requestedModule, initial: true) { _, _ in
+            openRequestedNotificationIfReady()
+        }
+        .onChange(of: launching) { _, _ in
+            openRequestedNotificationIfReady()
+        }
+        .onChange(of: account?.showsSignInPage) { _, _ in
+            openRequestedNotificationIfReady()
         }
         #endif
         #if os(iOS)
@@ -785,6 +788,19 @@ struct RootView: View {
         hiking.pendingImport = url
         bringUp(.hiking)
     }
+
+    #if os(iOS)
+    private func openRequestedNotificationIfReady() {
+        guard !launching, account?.showsSignInPage != true,
+              let module = NotificationHub.shared.requestedModule else { return }
+        NotificationHub.shared.requestedModule = nil
+        if [.reader, .calendar, .web, .mail, .photos, .tasks, .weather, .clock, .contacts, .hiking, .ai, .player, .news].contains(module) {
+            prepareContent()
+        }
+        if module == .social, social == nil { social = makeSocial() }
+        bringUp(module)
+    }
+    #endif
 
     private func bringUp(_ module: ModuleID) {
         recentModule = module

@@ -2,6 +2,7 @@
 import SwiftUI
 import TotalityCore
 import TotalityMail
+import TotalityTasks
 import UIKit
 import UserNotifications
 
@@ -78,6 +79,15 @@ final class PushSetup {
 
 /// The parts of instant sync iOS hands to an app delegate.
 final class PushAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        SystemTaskReminders.shared.start()
+        NotificationHub.shared.start()
+        return true
+    }
+
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         MainActor.assumeIsolated { PushSetup.shared.registered(deviceToken) }
     }

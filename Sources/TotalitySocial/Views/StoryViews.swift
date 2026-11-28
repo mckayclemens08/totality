@@ -80,11 +80,14 @@ struct StoryRowView: View {
                     .buttonStyle(SoftPress())
                     .overlay(alignment: .bottomTrailing) {
                         Button(action: onNew) {
-                            Image(systemName: "plus").font(Typeface.micro.weight(.bold)).foregroundStyle(theme.accentOn.color)
-                                .frame(width: Space.s5, height: Space.s5)
+                            Image(systemName: "plus")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(theme.accentOn.color)
+                                .frame(width: 18, height: 18)
                                 .background(theme.accent.color, in: Circle())
-                                // A full-size target, so a second story is never one missed tap away from opening your first.
-                                .padding(Space.s2)
+                                .overlay { Circle().strokeBorder(theme.bg.color, lineWidth: 2) }
+                                .frame(width: Metric.headerButton, height: Metric.headerButton, alignment: .bottomTrailing)
+                                .offset(x: 2, y: 2)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(SoftPress())
@@ -270,7 +273,10 @@ struct StoryViewer: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .photo:
                 Rectangle().fill(theme.surface.color)
-                if let photo = story.photo { PostPhoto(model: model, item: photo, side: 1600, fit: true) }
+                if let photo = story.photo {
+                    PostPhoto(model: model, item: photo, side: 1600, fit: true)
+                        .id(story.id)
+                }
             case .video:
                 Rectangle().fill(theme.surface.color)
                 if let video = story.video {

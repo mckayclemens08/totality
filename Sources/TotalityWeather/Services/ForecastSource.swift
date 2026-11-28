@@ -10,6 +10,31 @@ public protocol ForecastSource: Sendable {
     func forecast(at coordinate: Coordinate) async throws -> Forecast
 }
 
+/// Tries the primary forecast source first (e.g. Apple WeatherKit) and automatically falls back
+/// to the backup source (e.g. Open-Meteo) when the primary service refuses or fails non-offline.
+public struct FallbackForecastSource: ForecastSource {
+    public let primary: any ForecastSource
+    public let fallback: any ForecastSource
+
+    public var name: String { primary.name }
+    public var attributionURL: URL { primary.attributionURL }
+
+    public init(primary: any ForecastSource, fallback: any ForecastSource) {
+        self.primary = primary
+        self.fallback = fallback
+    }
+
+    public func forecast(at coordinate: Coordinate) async throws -> Forecast {
+        do {
+            return try await primary.forecast(at: coordinate)
+        } catch let error as WeatherError where error == .offline {
+            throw error
+        } catch {
+            return try await fallback.forecast(at: coordinate)
+        }
+    }
+}
+
 /// Finds a city by name, for adding a place.
 public protocol PlaceSearcher: Sendable {
     func places(matching query: String) async throws -> [WeatherPlace]

@@ -41,6 +41,7 @@ struct NewsArticle: Codable, Hashable, Identifiable, Sendable {
     var id: URL { url }
     var feedURL: URL? = nil
     var throughGDELT: Bool? = nil
+    var imageURL: URL? = nil
 }
 
 enum NewsError: Error {
@@ -103,33 +104,78 @@ struct NewsNetwork: NewsFetching {
             if let articles = try? await publicPublisherFeed(source) { return articles }
             let stories = try await discover("(domainis:" + domain + " OR domainis:www." + domain + ")")
             return stories.filter { NewsSource.publisher($0.url.absoluteString)?.url == publisher.url }.map {
-                NewsArticle(title: $0.title, summary: "", source: source.name, url: $0.url, date: $0.date, feedURL: source.url, throughGDELT: true)
+                NewsArticle(title: $0.title, summary: "", source: source.name, url: $0.url, date: $0.date, feedURL: source.url, throughGDELT: true, imageURL: $0.imageURL)
             }
         }
         let data = try await download(source.url, accept: "application/atom+xml, application/rss+xml, application/xml, text/xml")
         return try NewsXML.read(data, source: source)
     }
 
+    private static let knownRSSFeeds: [String: URL] = [
+        "nytimes.com": URL(string: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml")!,
+        "bbc.com": URL(string: "https://feeds.bbci.co.uk/news/rss.xml")!,
+        "bbc.co.uk": URL(string: "https://feeds.bbci.co.uk/news/rss.xml")!,
+        "npr.org": URL(string: "https://feeds.npr.org/1001/rss.xml")!,
+        "theguardian.com": URL(string: "https://www.theguardian.com/world/rss")!,
+        "arstechnica.com": URL(string: "https://feeds.arstechnica.com/arstechnica/index")!,
+        "theverge.com": URL(string: "https://www.theverge.com/rss/index.xml")!,
+        "propublica.org": URL(string: "https://www.propublica.org/feeds/propublica/main")!,
+        "reuters.com": URL(string: "https://www.reuters.com/rssFeed/worldNews")!,
+        "apnews.com": URL(string: "https://apnews.com/index.rss")!,
+    ]
+
+    static func isSamePublisherSite(_ candidate: URL, as publisher: NewsSource) -> Bool {
+        guard let candidateHost = candidate.host?.lowercased(),
+              let baseHost = publisher.url.host?.lowercased() else { return false }
+        let normalizedCandidate = candidateHost.hasPrefix("www.") ? String(candidateHost.dropFirst(4)) : candidateHost
+        let normalizedBase = baseHost.hasPrefix("www.") ? String(baseHost.dropFirst(4)) : baseHost
+        return normalizedCandidate == normalizedBase || normalizedCandidate.hasSuffix("." + normalizedBase)
+            || (normalizedBase == "bbc.com" && normalizedCandidate.hasSuffix(".bbci.co.uk"))
+    }
+
     private func publicPublisherFeed(_ publisher: NewsSource) async throws -> [NewsArticle] {
-        let page = try await download(publisher.url, accept: "text/html")
-        let html = String(decoding: page, as: UTF8.self)
-        let pattern = try NSRegularExpression(pattern: #"<link\b[^>]*>"#, options: .caseInsensitive)
-        let links = pattern.matches(in: html, range: NSRange(html.startIndex..., in: html))
-        for link in links {
-            guard let range = Range(link.range, in: html) else { continue }
-            let tag = String(html[range])
-            guard tag.range(of: #"application/(rss|atom)\+xml"#, options: [.regularExpression, .caseInsensitive]) != nil,
-                  let href = tag.range(of: #"(?i)\bhref\s*=\s*['"][^'"]+['"]"#, options: .regularExpression),
-                  let quote = tag[href].firstIndex(where: { $0.asciiValue == 34 || $0.asciiValue == 39 })
-            else { continue }
-            let relative = String(tag[tag.index(after: quote)..<tag.index(before: href.upperBound)])
-                .replacingOccurrences(of: "&amp;", with: "&")
-            guard let url = URL(string: relative, relativeTo: publisher.url)?.absoluteURL,
-                  NewsSource.publisher(url.absoluteString)?.url == publisher.url else { continue }
-            let data = try await download(url, accept: "application/atom+xml, application/rss+xml, application/xml")
-            // Keep the publisher as the stable follow identifier and show links and titles only.
-            return try NewsXML.read(data, source: NewsSource(name: publisher.name, url: url)).map {
-                NewsArticle(title: $0.title, summary: "", source: publisher.name, url: $0.url, date: $0.date, feedURL: publisher.url)
+        let baseHost = publisher.url.host?.lowercased() ?? ""
+        if let known = Self.knownRSSFeeds[baseHost],
+           let data = try? await download(known, accept: "application/atom+xml, application/rss+xml, application/xml, text/xml"),
+           let articles = try? NewsXML.read(data, source: NewsSource(name: publisher.name, url: known)),
+           !articles.isEmpty {
+            return articles.map {
+                NewsArticle(title: $0.title, summary: "", source: publisher.name, url: $0.url, date: $0.date, feedURL: publisher.url, imageURL: $0.imageURL)
+            }
+        }
+        if let page = try? await download(publisher.url, accept: "text/html") {
+            let html = String(decoding: page, as: UTF8.self)
+            let pattern = try NSRegularExpression(pattern: #"<link\b[^>]*>"#, options: .caseInsensitive)
+            let links = pattern.matches(in: html, range: NSRange(html.startIndex..., in: html))
+            for link in links {
+                guard let range = Range(link.range, in: html) else { continue }
+                let tag = String(html[range])
+                guard tag.range(of: #"application/(rss|atom)\+xml"#, options: [.regularExpression, .caseInsensitive]) != nil,
+                      let href = tag.range(of: #"(?i)\bhref\s*=\s*['"][^'"]+['"]"#, options: .regularExpression),
+                      let quote = tag[href].firstIndex(where: { $0.asciiValue == 34 || $0.asciiValue == 39 })
+                else { continue }
+                let relative = String(tag[tag.index(after: quote)..<tag.index(before: href.upperBound)])
+                    .replacingOccurrences(of: "&amp;", with: "&")
+                guard let url = URL(string: relative, relativeTo: publisher.url)?.absoluteURL,
+                      Self.isSamePublisherSite(url, as: publisher) else { continue }
+                if let data = try? await download(url, accept: "application/atom+xml, application/rss+xml, application/xml, text/xml"),
+                   let articles = try? NewsXML.read(data, source: NewsSource(name: publisher.name, url: url)),
+                   !articles.isEmpty {
+                    // Keep the publisher as the stable follow identifier and show links, titles, and thumbnails.
+                    return articles.map {
+                        NewsArticle(title: $0.title, summary: "", source: publisher.name, url: $0.url, date: $0.date, feedURL: publisher.url, imageURL: $0.imageURL)
+                    }
+                }
+            }
+        }
+        for path in ["/rss", "/rss.xml", "/feed", "/feed.xml", "/atom.xml"] {
+            if let fallbackURL = URL(string: path, relativeTo: publisher.url)?.absoluteURL,
+               let data = try? await download(fallbackURL, accept: "application/atom+xml, application/rss+xml, application/xml, text/xml"),
+               let articles = try? NewsXML.read(data, source: NewsSource(name: publisher.name, url: fallbackURL)),
+               !articles.isEmpty {
+                return articles.map {
+                    NewsArticle(title: $0.title, summary: "", source: publisher.name, url: $0.url, date: $0.date, feedURL: publisher.url, imageURL: $0.imageURL)
+                }
             }
         }
         throw NewsError.invalidFeed
@@ -144,8 +190,15 @@ struct NewsNetwork: NewsFetching {
             URLQueryItem(name: "timespan", value: "3d"),
             URLQueryItem(name: "format", value: "json"),
         ]
-        let data = try await download(url.url!, accept: "application/json")
-        return try Self.discoveryArticles(data)
+        let endpoint = url.url!
+        do {
+            let data = try await download(endpoint, accept: "application/json")
+            return try Self.discoveryArticles(data)
+        } catch NewsError.rateLimited {
+            try await Task.sleep(for: .milliseconds(1200))
+            let data = try await download(endpoint, accept: "application/json")
+            return try Self.discoveryArticles(data)
+        }
     }
 
     func publishers(matching query: String) async throws -> [NewsSource] {
@@ -198,6 +251,7 @@ struct NewsNetwork: NewsFetching {
                 let url: URL
                 let domain: String?
                 let seendate: String?
+                let socialimage: String?
             }
             let articles: [Article]?
         }
@@ -208,8 +262,9 @@ struct NewsNetwork: NewsFetching {
         format.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         return (response.articles ?? []).compactMap { item in
             guard Self.allows(item.url), !item.title.isEmpty else { return nil }
+            let imageURL = item.socialimage.flatMap(URL.init(string:)).flatMap { Self.allows($0) ? $0 : nil }
             return NewsArticle(title: String(item.title.prefix(500)), summary: "", source: item.domain ?? item.url.host ?? "GDELT",
-                               url: item.url, date: item.seendate.flatMap(format.date(from:)), throughGDELT: true)
+                               url: item.url, date: item.seendate.flatMap(format.date(from:)), throughGDELT: true, imageURL: imageURL)
         }
     }
 }

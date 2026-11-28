@@ -138,4 +138,21 @@ struct NotificationHubTests {
         let (hub, _, _) = hub()
         #expect(hub.kinds.map(\.id) == ["social.like", "social.friendsPost", "tasks.reminder", "calendar.reminder"])
     }
+
+    @Test func coldLaunchTargetDeliversWhenSourceRegisters() async {
+        let defaults = UserDefaults(suiteName: "hub.cold." + UUID().uuidString)!
+        let hub = NotificationHub(store: NotificationSettingsStore(defaults: defaults), seen: SeenAlerts(defaults: defaults), poster: FakePoster())
+        let target = NotificationTarget(module: .messages, kind: "chat", item: "!room:usetotality.com")
+        await hub.respond(to: target, action: nil, text: nil)
+        #expect(hub.requestedModule == .messages)
+
+        let source = FakeSource()
+        let socialTarget = NotificationTarget(module: .social, kind: "post", item: "p9")
+        let socialHub = NotificationHub(store: NotificationSettingsStore(defaults: defaults), seen: SeenAlerts(defaults: defaults), poster: FakePoster())
+        await socialHub.respond(to: socialTarget, action: nil, text: nil)
+        #expect(socialHub.requestedModule == .social)
+        #expect(source.opened == nil)
+        socialHub.register(source)
+        #expect(source.opened == socialTarget)
+    }
 }

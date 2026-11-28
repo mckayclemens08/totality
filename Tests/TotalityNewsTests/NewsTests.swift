@@ -179,7 +179,27 @@ extension NewsTests {
         await network.fail()
         await model.refresh()
         #expect(try await model.search("Artemis").count == 1)
+        await model.discover("Artemis")
+        #expect(model.discovered.map(\.title) == ["NASA’s Artemis II mission"])
+        #expect(model.discoveryNotice != nil)
         await model.close()
         #expect(await handler.articleURL(for: ref) == nil)
+    }
+
+    @Test func extractsImagesAndMatchesPublisherSubdomains() throws {
+        let source = NewsSource.defaults[0]
+        let rss = #"<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><item><title>Image story</title><link>https://www.nasa.gov/mission/artemis-ii/</link><media:content url="https://www.nasa.gov/wp-content/uploads/artemis.jpg" medium="image"/></item></channel></rss>"#
+        let parsed = try #require(NewsXML.read(Data(rss.utf8), source: source).first)
+        #expect(parsed.imageURL?.absoluteString == "https://www.nasa.gov/wp-content/uploads/artemis.jpg")
+
+        let gdelt = #"{"articles":[{"title":"With photo","url":"https://www.nytimes.com/2026/11/27/us/story.html","domain":"nytimes.com","seendate":"20261127T120000Z","socialimage":"https://static01.nyt.com/images/photo.jpg"}]}"#
+        let discovered = try #require(NewsNetwork.discoveryArticles(Data(gdelt.utf8)).first)
+        #expect(discovered.imageURL?.absoluteString == "https://static01.nyt.com/images/photo.jpg")
+
+        let nyt = try #require(NewsSource.publisher("https://nytimes.com"))
+        let bbc = try #require(NewsSource.publisher("https://bbc.com"))
+        #expect(NewsNetwork.isSamePublisherSite(URL(string: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml")!, as: nyt))
+        #expect(NewsNetwork.isSamePublisherSite(URL(string: "https://feeds.bbci.co.uk/news/rss.xml")!, as: bbc))
+        #expect(!NewsNetwork.isSamePublisherSite(URL(string: "https://example.com/feed.xml")!, as: nyt))
     }
 }

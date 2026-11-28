@@ -9,16 +9,21 @@ import TotalityUI
 final class MediaLoad {
     enum State: Equatable { case loading, ready(Data), failed(String) }
     private(set) var state: State = .loading
+    private(set) var loadedPath: String?
 
     func load(_ item: PostMedia, from model: SocialModel) async {
-        if case .ready = state { return }
+        if loadedPath == item.path, case .ready = state { return }
+        loadedPath = item.path
         state = .loading
         do { state = .ready(try await model.mediaData(item)) } catch {
             state = .failed((error as? SocialError)?.message ?? "This didn't load.")
         }
     }
 
-    func retry() { state = .loading }
+    func retry() {
+        loadedPath = nil
+        state = .loading
+    }
 }
 
 enum PhotoDecode {
@@ -62,7 +67,11 @@ struct PostPhoto: View {
             }
         }
         .clipped()
-        .task(id: load.state == .loading) { if load.state == .loading { await load.load(item, from: model) } }
+        .task(id: "\(item.path)-\(load.state == .loading)") {
+            if load.loadedPath != item.path || load.state == .loading {
+                await load.load(item, from: model)
+            }
+        }
     }
 
     private func failure(_ message: String) -> some View {

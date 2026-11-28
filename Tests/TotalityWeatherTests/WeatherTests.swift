@@ -381,4 +381,21 @@ import TotalityCore
         await model.remove(lisbon.id)
         #expect(model.places.map(\.name) == ["Provo"])
     }
+
+    @Test func fallbackSourceHandlesFailureAndPreservesOffline() async throws {
+        let primary = FakeSource(forecast: sampleForecast())
+        let fallback = FakeSource(forecast: sampleForecast())
+        let combined = FallbackForecastSource(primary: primary, fallback: fallback)
+
+        primary.failure = .failed
+        let recovered = try await combined.forecast(at: provo.coordinate)
+        #expect(recovered.source == fallback.name)
+        #expect(fallback.asked.count == 1)
+
+        primary.failure = .offline
+        await #expect(throws: WeatherError.offline) {
+            _ = try await combined.forecast(at: provo.coordinate)
+        }
+        #expect(fallback.asked.count == 1)
+    }
 }

@@ -17,6 +17,8 @@ public final class MessagesPeople {
         /// Nil when they have no profile this account can see.
         let profile: PublicProfile?
         let fetched: Date
+        /// Set once avatars have been normalized through the sRGB `SafeAvatar` pipeline.
+        var srgb: Bool? = nil
     }
 
     /// Set by the app from the `ModuleRegistry`. Without it, everyone shows as their handle.
@@ -88,10 +90,11 @@ public final class MessagesPeople {
         fetching.formUnion(todo)
         defer { fetching.subtract(todo) }
         let file = self.file
-        // Photos already here, by file name: one whose name hasn't changed isn't downloaded again.
+        // Photos already here, by file name: one whose name hasn't changed isn't downloaded again
+        // once normalized in sRGB. Legacy entries re-fetch once to replace shifted-color caches.
         var photos: [String: Data] = [:]
-        for case let profile? in entries.values.map(\.profile) {
-            if let key = profile.photoKey, let photo = profile.photo { photos[key] = photo }
+        for entry in entries.values where entry.srgb == true {
+            if let profile = entry.profile, let key = profile.photoKey, let photo = profile.photo { photos[key] = photo }
         }
         do {
             let found = try await directory.profiles(of: todo.sorted(), photos: photos)
@@ -99,7 +102,7 @@ public final class MessagesPeople {
             guard self.file == file else { return }
             let fetched = now()
             for handle in todo {
-                entries[handle] = Entry(profile: found[handle].flatMap { $0.username == handle ? $0 : nil }, fetched: fetched)
+                entries[handle] = Entry(profile: found[handle].flatMap { $0.username == handle ? $0 : nil }, fetched: fetched, srgb: true)
                 failed.remove(handle)
             }
         } catch {
@@ -128,7 +131,8 @@ public final class MessagesPeople {
                 profile: entry.profile.map {
                     PublicProfile(username: $0.username, displayName: $0.displayName, bio: $0.bio, photo: photo, photoKey: photo == nil ? nil : $0.photoKey)
                 },
-                fetched: entry.fetched
+                fetched: entry.fetched,
+                srgb: entry.srgb
             )
         }
     }

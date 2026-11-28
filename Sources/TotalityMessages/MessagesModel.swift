@@ -57,6 +57,8 @@ public final class MessagesModel {
     private let defaults: UserDefaults
     /// Bumped on every connect, so a slow old connection can't write into a newer one's lists.
     private(set) var generation = 0
+    @ObservationIgnored private var connectingTask: Task<Void, Never>?
+    @ObservationIgnored private var connectingAccount: String?
 
     public init(
         account: @escaping @Sendable () async -> String?,
@@ -113,18 +115,37 @@ public final class MessagesModel {
         }
         let current = await account()
         if let service, service.account == current, phase == .ready { return }
+        if let connectingTask, connectingAccount == current {
+            await connectingTask.value
+            return
+        }
+        connectingTask?.cancel()
         await disconnect()
         guard let current else {
             phase = .failed(MessagesError.notSignedIn.message)
             return
         }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performConnect(account: current, connector: connector)
+        }
+        connectingAccount = current
+        connectingTask = task
+        await task.value
+        if connectingAccount == current {
+            connectingTask = nil
+            connectingAccount = nil
+        }
+    }
+
+    private func performConnect(account current: String, connector: MessagesConnector) async {
         generation += 1
         let mine = generation
         phase = .loading
         VideoFiles.emptyFolder()
         do {
             let service = try await connector(current)
-            guard mine == generation else { return await service.stop() }
+            guard !Task.isCancelled, mine == generation else { return await service.stop() }
             self.service = service
             people.open(file: peopleFile(current))
             service.observeConnection { [weak self] state in
@@ -139,13 +160,13 @@ public final class MessagesModel {
                     self.show(all)
                 }
             }
-            if mine == generation {
+            if !Task.isCancelled, mine == generation {
                 phase = .ready
                 await settleKeys()
                 await loadPrivacy()
             }
         } catch {
-            if mine == generation { phase = .failed(Self.describe(error)) }
+            if !Task.isCancelled, mine == generation { phase = .failed(Self.describe(error)) }
         }
     }
 
@@ -172,6 +193,9 @@ public final class MessagesModel {
 
     /// Stops syncing and forgets the lists. The stores stay on the device for next time.
     public func disconnect() async {
+        connectingTask?.cancel()
+        connectingTask = nil
+        connectingAccount = nil
         generation += 1
         keys = .checking
         chats = []

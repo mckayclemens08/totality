@@ -216,5 +216,21 @@ struct MusicTests {
         let statuses = providers.connectionStatuses(appleAuthorized: false)
         #expect(statuses.count == 3)
         #expect(statuses.allSatisfy { !$0.isConnected })
+
+        let savedOnly = MusicProviderManager(
+            spotifyClientID: nil,
+            googleClientID: "973899545310-example.apps.googleusercontent.com",
+            spotifyStore: keyStore,
+            ytMusicStore: keyStore
+        )
+        #expect(savedOnly.spotifyClientID == nil)
+        try savedOnly.saveSpotifyClientID("  sp-saved-123  ")
+        #expect(savedOnly.spotifyClientID == "sp-saved-123")
+        #expect(savedOnly.youTubeCallbackScheme == "com.googleusercontent.apps.973899545310-example")
+        #expect(savedOnly.resolvedYouTubeRedirectURI == "com.googleusercontent.apps.973899545310-example:/oauth2redirect")
+        let ytGoogleURL = try savedOnly.youTubeAuthURL(pkce: pkce)
+        #expect(ytGoogleURL.absoluteString.contains("oauth2redirect"))
+        try savedOnly.saveSpotifyClientID("")
+        #expect(savedOnly.spotifyClientID == nil)
     }
 }

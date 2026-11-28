@@ -47,7 +47,14 @@ public struct PersonFace: View {
     }
 
     static func image(from data: Data?) -> CGImage? {
-        guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        guard let data else { return nil }
+        #if canImport(UIKit)
+        if let cg = UIImage(data: data)?.cgImage { return cg }
+        #elseif canImport(AppKit)
+        if let ns = NSImage(data: data),
+           let cg = ns.cgImage(forProposedRect: nil, context: nil, hints: nil) { return cg }
+        #endif
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 }

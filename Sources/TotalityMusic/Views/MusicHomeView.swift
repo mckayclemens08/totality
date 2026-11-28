@@ -19,6 +19,7 @@ public struct MusicHomeView: View {
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
     @State private var showingImporter = false
     @State private var showingAddServer = false
+    @State private var showingSpotifySetup = false
     @State private var showingNewPlaylist = false
     @State private var newPlaylistName = ""
     @State private var pendingTrackForPlaylist: MusicTrack?
@@ -72,6 +73,12 @@ public struct MusicHomeView: View {
             }
             .sheet(isPresented: $showingAddServer) {
                 AddOpenSubsonicSheet(model: model) { showingAddServer = false }
+            }
+            .sheet(isPresented: $showingSpotifySetup) {
+                SpotifySetupSheet(model: model) { shouldLaunch in
+                    showingSpotifySetup = false
+                    if shouldLaunch { startSpotifyOAuth() }
+                }
             }
             .sheet(isPresented: $showingNowPlaying) {
                 NowPlayingSheet(model: model) { showingNowPlaying = false }
@@ -475,7 +482,11 @@ public struct MusicHomeView: View {
                     }
                 } else {
                     HeaderPill("Connect Spotify", isProminent: true) {
-                        startSpotifyOAuth()
+                        if model.providers.spotifyClientID == nil {
+                            showingSpotifySetup = true
+                        } else {
+                            startSpotifyOAuth()
+                        }
                     }
                 }
             }
@@ -500,20 +511,25 @@ public struct MusicHomeView: View {
     }
 
     private func startSpotifyOAuth() {
-        startOAuth(makeURL: model.providers.spotifyAuthURL) { code, verifier in
+        guard model.providers.spotifyClientID != nil else {
+            showingSpotifySetup = true
+            return
+        }
+        startOAuth(callbackScheme: MusicProviderManager.callbackScheme, makeURL: model.providers.spotifyAuthURL) { code, verifier in
             _ = try await model.providers.exchangeSpotifyCode(code, verifier: verifier)
             await model.syncSpotify()
         }
     }
 
     private func startYouTubeOAuth() {
-        startOAuth(makeURL: model.providers.youTubeAuthURL) { code, verifier in
+        startOAuth(callbackScheme: model.providers.youTubeCallbackScheme, makeURL: model.providers.youTubeAuthURL) { code, verifier in
             _ = try await model.providers.exchangeYouTubeCode(code, verifier: verifier)
             await model.syncYouTubeMusic()
         }
     }
 
     private func startOAuth(
+        callbackScheme: String,
         makeURL: (MusicProviderManager.PKCEChallenge) throws -> URL,
         onExchange: @escaping @MainActor (String, String) async throws -> Void
     ) {
@@ -525,7 +541,7 @@ public struct MusicHomeView: View {
                 do {
                     let callbackURL = try await webAuthenticationSession.authenticate(
                         using: authURL,
-                        callbackURLScheme: MusicProviderManager.callbackScheme
+                        callbackURLScheme: callbackScheme
                     )
                     guard let code = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?
                         .queryItems?.first(where: { $0.name == "code" })?.value else { return }
@@ -599,6 +615,85 @@ public struct MusicHomeView: View {
 }
 
 // MARK: - Supporting Sheets
+
+private struct SpotifySetupSheet: View {
+    @Bindable var model: MusicModel
+    let onFinish: (Bool) -> Void
+    @State private var clientID = ""
+    @State private var copiedRedirect = false
+
+    var body: some View {
+        let theme = Theme.current
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.s4) {
+                    Text("Spotify requires a free Developer App Client ID so playback & library tokens stay directly between your iPhone and Spotify.")
+                        .font(Typeface.body)
+                        .foregroundStyle(theme.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("1. In developer.spotify.com/dashboard, add Redirect URI:")
+                            .font(Typeface.callout.weight(.semibold))
+                            .foregroundStyle(theme.textPrimary.color)
+                        HStack {
+                            Text(MusicProviderManager.spotifyRedirectURI)
+                                .font(Typeface.caption.monospaced())
+                                .foregroundStyle(theme.textPrimary.color)
+                                .textSelection(.enabled)
+                            Spacer(minLength: 0)
+                            HeaderPill(copiedRedirect ? "Copied" : "Copy") {
+                                #if canImport(UIKit)
+                                UIPasteboard.general.string = MusicProviderManager.spotifyRedirectURI
+                                #elseif canImport(AppKit)
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(MusicProviderManager.spotifyRedirectURI, forType: .string)
+                                #endif
+                                copiedRedirect = true
+                            }
+                        }
+                    }
+                    .itemCard()
+
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        Text("2. Paste your Spotify Client ID (saved in Keychain):")
+                            .font(Typeface.callout.weight(.semibold))
+                            .foregroundStyle(theme.textPrimary.color)
+                        TextField("e.g. 1a2b3c4d5e6f...", text: $clientID)
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                            .raisedField(.line)
+                    }
+                    .itemCard()
+
+                    HeaderPill("Save & Connect Spotify", isProminent: true, expands: true) {
+                        do {
+                            try model.providers.saveSpotifyClientID(clientID)
+                            onFinish(true)
+                        } catch {
+                            model.notice = error.localizedDescription
+                            onFinish(false)
+                        }
+                    }
+                    .disabled(clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(Space.s4)
+            }
+            .background(theme.bg.color)
+            .navigationTitle("Connect Spotify")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onFinish(false) }
+                }
+            }
+        }
+    }
+}
 
 private struct AddOpenSubsonicSheet: View {
     @Bindable var model: MusicModel

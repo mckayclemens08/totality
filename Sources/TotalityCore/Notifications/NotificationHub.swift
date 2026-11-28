@@ -43,6 +43,9 @@ public final class NotificationHub: NSObject {
     @ObservationIgnored private let seen: SeenAlerts
     @ObservationIgnored private var poster: (any AlertPoster)?
     @ObservationIgnored private var collecting: Task<Int, Never>?
+    @ObservationIgnored private var pendingTargets: [ModuleID: NotificationTarget] = [:]
+    @ObservationIgnored private var pendingActions: [(NotificationTarget, NotificationAction, String?)] = []
+    @ObservationIgnored private var started = false
     @ObservationIgnored private let clock: @Sendable () -> Date
 
     public init(
@@ -67,6 +70,19 @@ public final class NotificationHub: NSObject {
     /// A module joins, replacing any adapter it had before (a new account, say).
     public func register(_ source: any NotificationSource) {
         sources[source.module] = source
+        if let target = pendingTargets.removeValue(forKey: source.module) {
+            source.prepareToOpen(target)
+        }
+        let queued = pendingActions.filter { $0.0.module == source.module }
+        if !queued.isEmpty {
+            pendingActions.removeAll { $0.0.module == source.module }
+            Task { @MainActor in
+                for (target, action, text) in queued {
+                    await source.perform(action, on: target, text: text)
+                }
+                await updateBadge()
+            }
+        }
     }
 
     public func unregister(_ module: ModuleID) {
@@ -118,14 +134,20 @@ public final class NotificationHub: NSObject {
     /// A tap or a button on one of the hub's alerts.
     public func respond(to target: NotificationTarget, action: NotificationAction?, text: String?) async {
         guard let source = sources[target.module] else {
-            // Content hasn't opened yet: at least bring the module up once it has.
-            if action == nil { requestedModule = target.module }
+            // Content hasn't opened yet: remember the target so the module opens straight to it once registered.
+            if let action {
+                pendingActions.append((target, action, text))
+            } else {
+                pendingTargets[target.module] = target
+                requestedModule = target.module
+            }
             return
         }
         if let action {
             await source.perform(action, on: target, text: text)
             await updateBadge()
         } else {
+            pendingTargets[target.module] = nil
             source.prepareToOpen(target)
             requestedModule = target.module
         }
@@ -139,6 +161,8 @@ public final class NotificationHub: NSObject {
         let center = UNUserNotificationCenter.current()
         if fallback == nil, let current = center.delegate, !(current is NotificationHub) { fallback = current }
         center.delegate = self
+        guard !started else { return }
+        started = true
         Task {
             let existing = await center.notificationCategories()
             let ours = Set(PlannedAlert.categories.map(Self.category))
@@ -170,35 +194,65 @@ public final class NotificationHub: NSObject {
     }
 }
 
+private final class NotificationCenterBox: @unchecked Sendable {
+    let center: UNUserNotificationCenter
+    let request: UNNotificationRequest
+    init(_ center: UNUserNotificationCenter, _ request: UNNotificationRequest) {
+        self.center = center
+        self.request = request
+    }
+}
+
 extension NotificationHub: UNUserNotificationCenterDelegate {
     nonisolated public func userNotificationCenter(
-        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void
+    ) {
         // Tasks' reminders, the only others, show the same way.
-        [.banner, .list, .sound]
+        completionHandler([.banner, .list, .sound])
     }
 
-    nonisolated public func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    nonisolated public func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping @Sendable () -> Void
+    ) {
         let content = response.notification.request.content
         guard content.categoryIdentifier.hasPrefix("totality."), let target = NotificationTarget(userInfo: content.userInfo) else {
-            forward(center, response)
+            let selector = #selector(UNUserNotificationCenterDelegate.userNotificationCenter(_:didReceive:withCompletionHandler:))
+            if let fallback, fallback.responds(to: selector) {
+                fallback.userNotificationCenter?(center, didReceive: response, withCompletionHandler: completionHandler)
+            } else {
+                completionHandler()
+            }
             return
         }
         let identifier = response.notification.request.identifier
         var action = NotificationAction(identifier: response.actionIdentifier)
         if action == .snoozeTen {
             // Done right here: the words are already in the alert, so it works with Calendar still sealed.
-            let again = Self.snoozed(response.notification.request, minutes: AlertOffset.snoozeMinutes)
-            try? await center.add(again)
-            center.removeDeliveredNotifications(withIdentifiers: [identifier])
+            let box = NotificationCenterBox(center, response.notification.request)
+            Task { @MainActor in
+                let again = Self.snoozed(box.request, minutes: AlertOffset.snoozeMinutes)
+                try? await box.center.add(again)
+                box.center.removeDeliveredNotifications(withIdentifiers: [identifier])
+                completionHandler()
+            }
             return
         }
         // The Open button is a tap that was asked for by name.
         if action == .open { action = nil }
+        let resolvedAction = action
         let text = (response as? UNTextInputNotificationResponse)?.userText
-        await respond(to: target, action: action, text: text)
-        // A button finished the job, so the alert leaves the lock screen.
-        if action != nil { center.removeDeliveredNotifications(withIdentifiers: [identifier]) }
+        Task { @MainActor in
+            await self.respond(to: target, action: resolvedAction, text: text)
+            // A button finished the job, so the alert leaves the lock screen.
+            if resolvedAction != nil {
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [identifier])
+            }
+            completionHandler()
+        }
     }
 }
 

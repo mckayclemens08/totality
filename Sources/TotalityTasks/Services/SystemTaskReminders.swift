@@ -202,34 +202,50 @@ public final class SystemTaskReminders: NSObject, TaskReminderScheduling, @unche
 
 extension SystemTaskReminders: UNUserNotificationCenterDelegate {
     public func userNotificationCenter(
-        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping @Sendable (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
     }
 
-    public func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    public func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping @Sendable () -> Void
+    ) {
         let info = response.notification.request.content
         guard info.categoryIdentifier == ReminderAction.category,
               let raw = info.userInfo["task"] as? String, let taskID = UUID(uuidString: raw)
-        else { return }
-        let now = Date()
-        let action: ReminderAction
-        if response.actionIdentifier == ReminderAction.completeID {
-            // Nagging stops the moment it's ticked off, before Tasks has even opened.
-            await Self.clear(taskID)
-            action = ReminderAction(taskID: taskID, kind: .complete, at: now)
-        } else if let snooze = ReminderAction.Snooze(rawValue: response.actionIdentifier) {
-            let until = snooze.until(from: now, in: .autoupdatingCurrent)
-            await Self.clear(taskID)
-            try? await center.add(Self.request(
-                id: TaskReminderPlanner.notificationID(taskID, until), taskID: taskID, title: info.title, body: info.body, at: until
-            ))
-            action = ReminderAction(taskID: taskID, kind: .snooze(until: until), at: now)
-        } else {
+        else {
+            completionHandler()
             return
         }
-        ReminderActionQueue.shared.add(action)
-        if let handle = await MainActor.run(body: { onAction }) { await handle(action) }
+        let actionIdentifier = response.actionIdentifier
+        let title = info.title
+        let body = info.body
+        Task {
+            let now = Date()
+            let action: ReminderAction
+            if actionIdentifier == ReminderAction.completeID {
+                // Nagging stops the moment it's ticked off, before Tasks has even opened.
+                await Self.clear(taskID)
+                action = ReminderAction(taskID: taskID, kind: .complete, at: now)
+            } else if let snooze = ReminderAction.Snooze(rawValue: actionIdentifier) {
+                let until = snooze.until(from: now, in: .autoupdatingCurrent)
+                await Self.clear(taskID)
+                try? await UNUserNotificationCenter.current().add(Self.request(
+                    id: TaskReminderPlanner.notificationID(taskID, until), taskID: taskID, title: title, body: body, at: until
+                ))
+                action = ReminderAction(taskID: taskID, kind: .snooze(until: until), at: now)
+            } else {
+                await MainActor.run { completionHandler() }
+                return
+            }
+            ReminderActionQueue.shared.add(action)
+            if let handle = await MainActor.run(body: { onAction }) { await handle(action) }
+            await MainActor.run { completionHandler() }
+        }
     }
 }
 

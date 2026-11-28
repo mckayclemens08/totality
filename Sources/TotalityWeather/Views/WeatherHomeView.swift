@@ -268,7 +268,12 @@ public struct WeatherHomeView: View {
             HStack(spacing: Space.s1) {
                 Text(forecast.source == "Apple Weather" ? "\u{F8FF} Weather" : "Weather data by \(forecast.source)")
                 Text("·")
-                Button("Data sources") { openURL(model.service.source.attributionURL) }
+                Button("Data sources") {
+                    let url = forecast.source == OpenMeteoSource.sourceName
+                        ? OpenMeteoSource().attributionURL
+                        : model.service.source.attributionURL
+                    openURL(url)
+                }
                     .underline()
                     .buttonStyle(.plain)
                 if forecast.air != nil || !forecast.alerts.isEmpty {

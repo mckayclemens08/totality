@@ -338,7 +338,7 @@ enum ContentSetup {
         let source: any ForecastSource
         #if canImport(WeatherKit)
         if (Bundle.main.object(forInfoDictionaryKey: "TotalityWeatherKit") as? Bool) == true {
-            source = WeatherKitSource()
+            source = FallbackForecastSource(primary: WeatherKitSource(), fallback: OpenMeteoSource())
         } else {
             source = OpenMeteoSource()
         }

@@ -5,6 +5,7 @@ final class NewsXML: NSObject, XMLParserDelegate {
     private let source: NewsSource
     private var path: [String] = []
     private var fields: [String: String] = [:]
+    private var imageURL: URL?
     private var entries: [NewsArticle] = []
     private var isFeed = false
     private var entryDepth: Int?
@@ -29,11 +30,38 @@ final class NewsXML: NSObject, XMLParserDelegate {
         if path.count == 1 { isFeed = ["rss", "feed", "RDF"].contains(name) }
         if entryDepth == nil, (name == "item" || name == "entry"), path.count <= 3 {
             fields = [:]
+            imageURL = nil
             entryDepth = path.count
         }
-        if let depth = entryDepth, path.count == depth + 1, name == "link",
+        guard let depth = entryDepth, path.count > depth else { return }
+        if path.count == depth + 1, name == "link",
            attributes["rel"] == nil || attributes["rel"] == "alternate", let href = attributes["href"] {
             fields["link"] = href
+        }
+        let qName = qualifiedName?.lowercased() ?? name.lowercased()
+        if imageURL == nil {
+            if qName == "media:content" || qName == "media:thumbnail" || name == "content" || name == "thumbnail",
+               let raw = attributes["url"],
+               let candidate = URL(string: raw, relativeTo: source.url)?.absoluteURL,
+               NewsNetwork.allows(candidate) {
+                let medium = attributes["medium"]?.lowercased()
+                let mime = attributes["type"]?.lowercased() ?? ""
+                if medium == nil || medium == "image" || mime.isEmpty || mime.hasPrefix("image/") {
+                    imageURL = candidate
+                }
+            } else if name == "enclosure",
+                      let raw = attributes["url"],
+                      let mime = attributes["type"]?.lowercased(),
+                      mime.hasPrefix("image/"),
+                      let candidate = URL(string: raw, relativeTo: source.url)?.absoluteURL,
+                      NewsNetwork.allows(candidate) {
+                imageURL = candidate
+            } else if qName == "itunes:image" || (name == "image" && attributes["href"] != nil),
+                      let raw = attributes["href"],
+                      let candidate = URL(string: raw, relativeTo: source.url)?.absoluteURL,
+                      NewsNetwork.allows(candidate) {
+                imageURL = candidate
+            }
         }
     }
 
@@ -49,8 +77,8 @@ final class NewsXML: NSObject, XMLParserDelegate {
     private func append(_ string: String) {
         guard let depth = entryDepth, path.count > depth else { return }
         let name = path[depth]
-        guard ["link", "title", "summary", "description", "pubDate", "published", "updated", "date"].contains(name),
-              fields[name, default: ""].count < 8_000 else { return }
+        guard ["link", "title", "summary", "description", "encoded", "content", "pubDate", "published", "updated", "date"].contains(name),
+              fields[name, default: ""].count < 16_000 else { return }
         fields[name, default: ""].append(contentsOf: string.prefix(8_000))
     }
 
@@ -65,7 +93,20 @@ final class NewsXML: NSObject, XMLParserDelegate {
         guard !title.isEmpty else { return }
         let summary = Self.text(fields["summary"] ?? fields["description"] ?? "", limit: 800)
         let rawDate = fields["published"] ?? fields["pubDate"] ?? fields["updated"] ?? fields["date"]
-        entries.append(NewsArticle(title: title, summary: summary, source: source.name, url: url, date: rawDate.flatMap(Self.date), feedURL: source.url))
+        let resolvedImage = imageURL
+            ?? Self.firstHTMLImage(in: fields["encoded"] ?? fields["content"] ?? fields["description"] ?? fields["summary"] ?? "", base: url)
+        entries.append(NewsArticle(title: title, summary: summary, source: source.name, url: url, date: rawDate.flatMap(Self.date), feedURL: source.url, imageURL: resolvedImage))
+    }
+
+    private static func firstHTMLImage(in html: String, base: URL) -> URL? {
+        guard !html.isEmpty,
+              let regex = try? NSRegularExpression(pattern: #"<img\b[^>]*\bsrc\s*=\s*['"]([^'"]+)['"]"#, options: .caseInsensitive),
+              let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+              let range = Range(match.range(at: 1), in: html)
+        else { return nil }
+        let raw = String(html[range]).replacingOccurrences(of: "&amp;", with: "&")
+        guard let url = URL(string: raw, relativeTo: base)?.absoluteURL, NewsNetwork.allows(url) else { return nil }
+        return url
     }
 
     private static func text(_ input: String, limit: Int) -> String {

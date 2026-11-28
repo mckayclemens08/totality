@@ -298,7 +298,8 @@ struct SocialProfileView: View {
             // Three even columns, number above label. A private account's lists are only for it and its
             // approved followers; others see the same numbers without the tap.
             let canOpen = isMe || !profile.isClosed
-            let canEditBackground = isMe && profile.backgroundKey != nil && model.backgroundStore != nil
+            let hasBackground = profile.backgroundKey != nil
+            let canEditBackground = isMe && hasBackground && model.backgroundStore != nil
             HStack(spacing: canEditBackground ? Space.s2 : 0) {
                 stat(model.postCount(profile), Self.label(model.postCount(profile), "post", "posts"))
                 stat(profile.followers, Self.label(profile.followers, "follower", "followers"), canOpen: canOpen) {
@@ -325,6 +326,9 @@ struct SocialProfileView: View {
                 if isMe {
                     HeaderPill("Close friends · \(model.closeFriends.count)", systemImage: "star.circle", expands: expands) { editingCloseFriends = true }
                         .disabled(model.privateReason != nil)
+                    if model.backgroundStore != nil, profile.backgroundKey == nil {
+                        HeaderPill("Background", systemImage: "photo.on.rectangle") { editingBackground = true }
+                    }
                     if model.settings.privateAccount {
                         HeaderPill("Requests · \(model.followRequests.count)", systemImage: "person.crop.circle.badge.questionmark", expands: expands) { showingRequests = true }
                     }
@@ -377,18 +381,24 @@ struct SocialProfileView: View {
     }
 
     private func avatar(_ profile: SocialProfile) -> some View {
-        StoryFace(photo: model.photos[username], name: profile.name, ring: model.ring(for: username),
+        let theme = Theme.current
+        return StoryFace(photo: model.photos[username], name: profile.name, ring: model.ring(for: username),
                   diameter: Space.s8 + Space.s4, overPhoto: profile.backgroundKey != nil)
             .onTapGesture { if model.ring(for: username) != nil { model.requestedStories = username } }
             .overlay(alignment: .bottomTrailing) {
                 if isMe {
                     Button { model.requestsStoryComposer = true } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(Typeface.headline)
-                            .foregroundStyle(Theme.current.accent.color)
-                            .background(Theme.current.surface.color, in: Circle())
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(theme.accentOn.color)
+                            .frame(width: 22, height: 22)
+                            .background(theme.accent.color, in: Circle())
+                            .overlay {
+                                Circle().strokeBorder(profile.backgroundKey == nil ? theme.bg.color : theme.surface.color, lineWidth: 2.5)
+                            }
                             .frame(width: Metric.headerButton, height: Metric.headerButton, alignment: .bottomTrailing)
-                            .contentShape(Rectangle())
+                            .offset(x: -2, y: -2)
+                            .contentShape(Circle())
                     }
                     .buttonStyle(SoftPress())
                     .accessibilityLabel("Add to your story")

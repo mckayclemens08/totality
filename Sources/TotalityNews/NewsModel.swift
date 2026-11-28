@@ -118,19 +118,46 @@ public final class NewsModel: ModuleSearcher, ModuleRefresher, ArticleLinkProvid
 
     func discover(_ topic: String) async {
         guard active, !discovering else { return }
+        let query = String(topic.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
         discovering = true
         discoveryNotice = nil
         defer { discovering = false }
+        let localMatches = matchingLocalArticles(for: query)
         do {
-            let articles = try await network.discover(String(topic.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)))
+            let articles = try await network.discover(query)
             guard active, !Task.isCancelled else { return }
-            discovered = Self.unique(articles)
+            discovered = Self.unique(articles + localMatches)
             discoveryLoaded = true
         } catch NewsError.rateLimited {
-            if active { discoveryNotice = "GDELT is busy. Wait a moment, then search again." }
+            if active {
+                if !localMatches.isEmpty {
+                    discovered = localMatches
+                    discoveryLoaded = true
+                    discoveryNotice = "Showing matching stories from your library — GDELT is busy right now."
+                } else {
+                    discoveryNotice = "GDELT is busy. Wait a moment, then search again."
+                }
+            }
         } catch {
-            if active, !Task.isCancelled { discoveryNotice = "GDELT couldn’t load this topic. Try again." }
+            if active, !Task.isCancelled {
+                if !localMatches.isEmpty {
+                    discovered = localMatches
+                    discoveryLoaded = true
+                    discoveryNotice = "Showing matching stories from your library."
+                } else {
+                    discoveryNotice = "GDELT couldn’t load this topic. Try again."
+                }
+            }
         }
+    }
+
+    private func matchingLocalArticles(for query: String) -> [NewsArticle] {
+        let terms = SearchText.terms(in: query)
+        guard !terms.isEmpty else { return [] }
+        return Self.unique((record.latest + record.saved + topStories).filter { article in
+            let haystack = "\(article.title) \(article.source) \(article.summary)"
+            return terms.allSatisfy { SearchText.find($0, in: haystack) != nil }
+        })
     }
 
     func clearPublisherSearch() {

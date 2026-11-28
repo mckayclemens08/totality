@@ -89,6 +89,8 @@ public struct AIHomeView: View {
                 .font(Typeface.title)
                 .foregroundStyle(theme.textPrimary.color)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .allowsTightening(true)
             Spacer(minLength: 0)
             HeaderButton("Activity log", systemImage: "clock.arrow.circlepath") { showingActivity = true }
             HeaderButton("Access", systemImage: "hand.raised") { showingAccess = true }
@@ -262,26 +264,51 @@ public struct AIHomeView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if proposal.status == .pending {
-                HStack(spacing: Space.s2) {
-                    HeaderPill(proposal.kind.requiresExplicitSendWarning ? "Approve and send" : "Approve", isProminent: true) {
-                        let overrideBody = isEditing ? editedBody : nil
-                        editingProposalID = nil
-                        Task { await model.approve(messageID: messageID, editedBody: overrideBody) }
-                    }
-                    HeaderPill(isEditing ? "Cancel edit" : "Edit") {
-                        if isEditing {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Space.s2) {
+                        HeaderPill(proposal.kind.requiresExplicitSendWarning ? "Approve and send" : "Approve", isProminent: true) {
+                            let overrideBody = isEditing ? editedBody : nil
                             editingProposalID = nil
-                        } else {
-                            editedBody = proposal.body
-                            editingProposalID = messageID
+                            Task { await model.approve(messageID: messageID, editedBody: overrideBody) }
+                        }
+                        HeaderPill(isEditing ? "Cancel edit" : "Edit") {
+                            if isEditing {
+                                editingProposalID = nil
+                            } else {
+                                editedBody = proposal.body
+                                editingProposalID = messageID
+                            }
+                        }
+                        Button("Not now") {
+                            editingProposalID = nil
+                            Task { await model.decline(messageID: messageID) }
+                        }
+                        .font(Typeface.callout)
+                        .foregroundStyle(theme.textSecondary.color)
+                    }
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        HeaderPill(proposal.kind.requiresExplicitSendWarning ? "Approve and send" : "Approve", isProminent: true, expands: true) {
+                            let overrideBody = isEditing ? editedBody : nil
+                            editingProposalID = nil
+                            Task { await model.approve(messageID: messageID, editedBody: overrideBody) }
+                        }
+                        HStack(spacing: Space.s2) {
+                            HeaderPill(isEditing ? "Cancel edit" : "Edit") {
+                                if isEditing {
+                                    editingProposalID = nil
+                                } else {
+                                    editedBody = proposal.body
+                                    editingProposalID = messageID
+                                }
+                            }
+                            Button("Not now") {
+                                editingProposalID = nil
+                                Task { await model.decline(messageID: messageID) }
+                            }
+                            .font(Typeface.callout)
+                            .foregroundStyle(theme.textSecondary.color)
                         }
                     }
-                    Button("Not now") {
-                        editingProposalID = nil
-                        Task { await model.decline(messageID: messageID) }
-                    }
-                    .font(Typeface.callout)
-                    .foregroundStyle(theme.textSecondary.color)
                 }
             }
         }
@@ -362,11 +389,19 @@ public struct AIHomeView: View {
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: Space.s2) {
-                    HeaderPill("Retry download", isProminent: true) {
-                        Task { await model.downloadLocalModel() }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Space.s2) {
+                        HeaderPill("Retry download", isProminent: true) {
+                            Task { await model.downloadLocalModel() }
+                        }
+                        HeaderPill("Model details") { showingModel = true }
                     }
-                    HeaderPill("Model details") { showingModel = true }
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        HeaderPill("Retry download", isProminent: true, expands: true) {
+                            Task { await model.downloadLocalModel() }
+                        }
+                        HeaderPill("Model details", expands: true) { showingModel = true }
+                    }
                 }
             default:
                 Text("Running in quick-summary mode")
@@ -376,11 +411,19 @@ public struct AIHomeView: View {
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: Space.s2) {
-                    HeaderPill("Download model (~1.0 GB)", isProminent: true) {
-                        Task { await model.downloadLocalModel() }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Space.s2) {
+                        HeaderPill("Download model (~1.0 GB)", isProminent: true) {
+                            Task { await model.downloadLocalModel() }
+                        }
+                        HeaderPill("Model details") { showingModel = true }
                     }
-                    HeaderPill("Model details") { showingModel = true }
+                    VStack(alignment: .leading, spacing: Space.s2) {
+                        HeaderPill("Download model (~1.0 GB)", isProminent: true, expands: true) {
+                            Task { await model.downloadLocalModel() }
+                        }
+                        HeaderPill("Model details", expands: true) { showingModel = true }
+                    }
                 }
             }
         }
