@@ -36,10 +36,17 @@ const SUPABASE_STUB = `
     id uuid primary key default gen_random_uuid(),
     bucket_id text references storage.buckets(id),
     name text not null,
-    owner uuid
+    owner uuid,
+    owner_id text default auth.uid()::text
   );
   alter table storage.objects enable row level security;
   grant select, insert, update, delete on storage.objects to anon, authenticated, service_role;
+  create function storage.allow_only_operation(operation text) returns boolean language sql stable as $$
+    select coalesce(current_setting('storage.test_operation', true) = operation, false)
+  $$;
+  create function storage.allow_any_operation(operations text[]) returns boolean language sql stable as $$
+    select coalesce(current_setting('storage.test_operation', true) = any(operations), false)
+  $$;
   create function storage.foldername(name text) returns text[] language sql immutable as $$
     select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1]
   $$;

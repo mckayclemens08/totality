@@ -241,7 +241,6 @@ enum ContentSetup {
         #else
         let hiking = HikingModel(log: hikeLog, location: nil)
         #endif
-<<<<<<< HEAD
         let aiVault = AIVault(store: stores.ai, rootKey: rootKey)
         let modelsDirectory = try base().appendingPathComponent("Models", isDirectory: true)
         let ai = AIModel(vault: aiVault, modelStore: LocalOpenModelStore.live(directory: modelsDirectory))

@@ -203,7 +203,7 @@ describe('contact requests', () => {
                              'browser_set_matrix_device', 'claim_handle', 'export_my_data',
                              'message_my_reach', 'message_reach', 'message_request_answer', 'message_request_send',
                              'message_requests_accepted', 'message_requests_incoming', 'message_set_reach', 'my_browsers',
-                             'redeem_invite', 'remove_browser', 'request_contact', 'save_home_layout', 'social_activity', 'social_approve_follower',
+                             'redeem_invite', 'remove_browser', 'request_contact', 'save_home_layout', 'set_profile_background', 'social_activity', 'social_approve_follower',
                              'social_comments_of', 'social_follow', 'social_follow_requests', 'social_following_feed',
                              'social_for_you', 'social_friends', 'social_mark_seen', 'social_my_settings',
                              'social_people', 'social_post', 'social_posts_by', 'social_profile',

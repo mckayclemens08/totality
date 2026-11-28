@@ -784,3 +784,20 @@ enum Picture {
         #expect(model.syncedHomeLayout == nil)
     }
 }
+
+@Suite struct ProfileBackgroundPhotoTests {
+    @Test("The saved crop is a small 4:3 JPEG with its location and camera details removed")
+    func preparesBackground() throws {
+        let original = try Picture.jpeg(width: 1200, height: 800, withMetadata: true)
+        let decoded = try #require(ProfileBackgroundPhoto.decode(original))
+        let position = CGPoint(x: 0.25, y: 0.75)
+        let prepared = try #require(ProfileBackgroundPhoto.prepare(decoded, position: position, zoom: 1.5))
+        let properties = try Picture.properties(of: prepared)
+        #expect(properties[kCGImagePropertyPixelWidth] as? Int == 1600)
+        #expect(properties[kCGImagePropertyPixelHeight] as? Int == 1200)
+        #expect(properties[kCGImagePropertyGPSDictionary] == nil)
+        #expect((properties[kCGImagePropertyExifDictionary] as? [CFString: Any])?[kCGImagePropertyExifDateTimeOriginal] == nil)
+        #expect(prepared.count <= ProfileBackgroundPhoto.targetBytes)
+        #expect(ProfileBackgroundPhoto.decode(Data("Wasatch trail guide".utf8)) == nil)
+    }
+}

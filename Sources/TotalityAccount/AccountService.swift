@@ -67,7 +67,7 @@ public enum SignOutResult: Equatable, Sendable {
     case serverNotReached
 }
 
-public struct SupabaseAccountService: AccountService {
+public struct SupabaseAccountService: AccountService, ProfileBackgroundStore {
     let client: SupabaseClient
     private let deviceStore: any KeyStore
 
@@ -264,6 +264,50 @@ public struct SupabaseAccountService: AccountService {
         return plain.date(from: value)
     }
 
+    public func ownBackgroundKey() async throws -> String? {
+        try await mapErrors {
+            let owner = try await client.auth.session.user.id
+            return try await profileRow(of: owner)?.background_key
+        }
+    }
+
+    public func backgroundPhoto(_ key: String) async throws -> Data {
+        try await mapErrors {
+            let data = try await backgrounds.download(path: key)
+            guard data.count <= ProfileBackgroundPhoto.outputLimit else { throw AccountError.failed }
+            return data
+        }
+    }
+
+    public func updateBackground(_ jpeg: Data?, replacing previous: String?) async throws -> String? {
+        try await mapErrors {
+            let owner = try await client.auth.session.user.id.uuidString.lowercased()
+            var next: String?
+            if let jpeg {
+                guard jpeg.count <= ProfileBackgroundPhoto.outputLimit else { throw AccountError.failed }
+                let path = "\(owner)/\(UUID().uuidString.lowercased()).jpg"
+                _ = try await backgrounds.upload(path, data: jpeg, options: FileOptions(cacheControl: "0", contentType: "image/jpeg"))
+                next = path
+            }
+            let params: [String: AnyJSON] = [
+                "p_previous": previous.map(AnyJSON.string) ?? .null,
+                "p_next": next.map(AnyJSON.string) ?? .null,
+            ]
+            do {
+                let changed: Bool = try await client.rpc("set_profile_background", params: params).execute().value
+                guard changed else { throw AccountError.failed }
+            } catch {
+                // Storage refuses deletion if the swap actually succeeded before the connection failed.
+                if let next { _ = try? await backgrounds.remove(paths: [next]) }
+                throw error
+            }
+            if let previous { _ = try? await backgrounds.remove(paths: [previous]) }
+            return next
+        }
+    }
+
+    private var backgrounds: StorageFileApi { client.storage.from("profile-backgrounds") }
+
     public func webPageIsPublished() async throws -> Bool {
         try await mapErrors { try await askProfileServer("mine", method: "GET") }
     }
@@ -352,7 +396,7 @@ public struct SupabaseAccountService: AccountService {
 
     private func profileRow(of owner: UUID) async throws -> ProfileRow? {
         let rows: [ProfileRow] = try await client.from("profiles")
-            .select("handle, display_name, bio, avatar_key, links")
+            .select("handle, display_name, bio, avatar_key, links, background_key")
             .eq("id", value: owner.uuidString)
             .execute()
             .value
@@ -360,7 +404,7 @@ public struct SupabaseAccountService: AccountService {
     }
 
     private func profile(from row: ProfileRow) throws -> Profile {
-        Profile(username: row.handle, displayName: row.display_name, bio: row.bio, avatarURL: try row.avatar_key.map(photoURL), links: ProfileLinks.safe(row.links).map(\.absoluteString))
+        Profile(username: row.handle, displayName: row.display_name, bio: row.bio, avatarURL: try row.avatar_key.map(photoURL), links: ProfileLinks.safe(row.links).map(\.absoluteString), backgroundKey: row.background_key)
     }
 
     private struct ProfileRow: Decodable {
@@ -369,6 +413,7 @@ public struct SupabaseAccountService: AccountService {
         let bio: String?
         let avatar_key: String?
         let links: [String]?
+        let background_key: String?
     }
 
     private struct Registered: Decodable {

@@ -186,6 +186,7 @@ public struct SocialProfile: Hashable, Sendable {
     public var canMessage = true
     /// Their https links, as the server stored them. Checked again by `ProfileLinks.safe` before showing.
     public var links: [String] = []
+    public var backgroundKey: String?
 
     public init(
         username: String, displayName: String?, bio: String?, photoKey: String? = nil, posts: Int = 0,

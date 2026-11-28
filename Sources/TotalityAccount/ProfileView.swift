@@ -141,6 +141,8 @@ struct EditProfileView: View {
         }
     }
 
+    @State private var editingBackground = false
+
     var body: some View {
         let theme = Theme.current
         ScrollView {
@@ -169,6 +171,9 @@ struct EditProfileView: View {
                     .font(Typeface.caption)
                     .foregroundStyle(theme.textSecondary.color)
                     .frame(maxWidth: .infinity, alignment: .trailing)
+                if model.backgroundStore != nil {
+                    HeaderPill("Background · Public", systemImage: "photo.on.rectangle") { editingBackground = true }
+                }
                 linkFields(theme)
                 AccountDetail(text: "Your name, photo, bio, and links are public and aren't encrypted.")
                 AccountButton(title: "Save", isWorking: model.isWorking) {
@@ -187,6 +192,14 @@ struct EditProfileView: View {
         .scrollDismissesKeyboard(.interactively)
         .background(theme.bg.color)
         .navigationTitle("Edit profile")
+        .sheet(isPresented: $editingBackground) {
+            if let store = model.backgroundStore {
+                ProfileBackgroundEditor(store: store, key: model.profile?.backgroundKey,
+                                        name: model.profile?.displayName ?? model.profile?.username ?? "Profile") {
+                    model.didChangeBackground($0)
+                }
+            }
+        }
         .onAppear { model.notice = nil }
         .photoChooser(isPresented: $choosingPhoto) { media in
             if case .photo(let picture, _)? = media.first {

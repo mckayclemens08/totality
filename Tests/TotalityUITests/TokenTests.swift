@@ -68,6 +68,18 @@ struct TokenTests {
         #expect(luminance(Theme.graphite.textPrimary) > luminance(Theme.graphite.bg))
     }
 
+    @Test("Profile text meets AA over a white photo")
+    func profileBackgroundContrast() {
+        func gray(_ value: Double) -> ColorToken {
+            let channel = UInt32((value * 255).rounded())
+            return ColorToken(channel * 0x010101)
+        }
+        let background = 1 - ProfileBackgroundStyle.scrim.opacity
+        let ink = ProfileBackgroundStyle.secondaryInk.opacity
+        #expect(contrast(ProfileBackgroundStyle.ink, gray(background)) >= 4.5)
+        #expect(contrast(gray(ink + background * (1 - ink)), gray(background)) >= 4.5)
+    }
+
     @Test("The choice is kept on the device and read back")
     func choiceIsKept() throws {
         let defaults = try #require(UserDefaults(suiteName: "TokenTests.theme"))
