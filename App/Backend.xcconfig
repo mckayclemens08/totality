@@ -16,6 +16,6 @@ TOTALITY_GOOGLE_CLIENT_ID = 973899545310-9lefpoa9mm5sdel8kpf6mte6n6r6rg1f.apps.g
 // It's a name, not a secret. Empty keeps instant sync off.
 TOTALITY_GMAIL_PUSH_TOPIC = projects/turnkey-point-514103-d9/topics/gmail-push
 
-// Optional Spotify OAuth client ID for Music (PKCE, redirect totality://music-spotify-callback).
-// When empty, the user can still enter their own Spotify app Client ID inside Music.
-TOTALITY_SPOTIFY_CLIENT_ID =
+// Spotify OAuth client ID for Music (PKCE, redirect totality://music-spotify-callback; public by design).
+// Empty falls back to user-supplied Client ID in Music.
+TOTALITY_SPOTIFY_CLIENT_ID = b0887be217c24b81b701f483d2a075a7
