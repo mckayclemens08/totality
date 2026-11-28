@@ -1,5 +1,5 @@
 {
-  "originHash" : "58158a1771481d3264e10fa62f40c74bd04e2ff51dbf50fd41a67700f71c30f5",
+  "originHash" : "c60bebd04f86b6b9645b54fa6fb16ee73750c40ed3357e355658d52d7b75d6a7",
   "pins" : [
     {
       "identity" : "fluidaudio",
@@ -89,6 +89,15 @@
       "state" : {
         "revision" : "4f9164a0a2c9a6a7ff53a2833d54a5c79c957342",
         "version" : "0.9.1"
+      }
+    },
+    {
+      "identity" : "webrtc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/stasel/WebRTC.git",
+      "state" : {
+        "revision" : "d8f47164ab8180dd3a44f625d1774085c1bbd682",
+        "version" : "139.0.0"
       }
     },
     {

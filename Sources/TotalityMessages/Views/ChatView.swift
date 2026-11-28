@@ -41,6 +41,7 @@ struct ChatView: View {
     var onOpenAccount: (() -> Void)? = nil
     /// Goes back to the list, after leaving the chat or blocking the person in it.
     let onGone: () -> Void
+    @Environment(\.startVoiceCall) private var startVoiceCall
     @FocusState private var writing: Bool
     @State private var playing: ChatMessage?
     /// A message being added to Tasks (step 4).
@@ -352,6 +353,12 @@ struct ChatView: View {
     }
 
     @ToolbarContentBuilder private var chatMenu: some ToolbarContent {
+        if let startVoiceCall, !model.isGroup, model.otherPerson != nil, model.extraPeople.isEmpty {
+            ToolbarItem(placement: .primaryAction) {
+                Button { startVoiceCall(model.chatID) } label: { Image(systemName: "phone") }
+                    .accessibilityLabel("Voice call")
+            }
+        }
         if let access = model.channelAccess, access.canInvite {
             ToolbarItem(placement: .primaryAction) {
                 Button { invitingToChannel = true } label: { Image(systemName: "person.badge.plus") }
